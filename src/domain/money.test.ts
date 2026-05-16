@@ -1,0 +1,202 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  applyTransactionToPot,
+  calculatePaycheckAmount,
+  createNextPayPeriod,
+  getPotBalanceAfterTransactionRemoval,
+  getAllocationBalance,
+  getRecurringPaymentsDue,
+  getUncoveredRecurringPence,
+} from './money'
+import type { Pot, PotAllocation, RecurringPayment, Transaction } from '../types/models'
+
+describe('paycheck calculations', () => {
+  it('calculates income from hours worked and hourly rate in pence', () => {
+    expect(calculatePaycheckAmount({ hoursWorked: 72.5, hourlyRatePence: 1250 })).toBe(90625)
+  })
+
+  it('uses actual received amount when it is provided', () => {
+    expect(
+      calculatePaycheckAmount({
+        hoursWorked: 72.5,
+        hourlyRatePence: 1250,
+        actualAmountPence: 88000,
+      }),
+    ).toBe(88000)
+  })
+})
+
+describe('pay period planning', () => {
+  const payments: RecurringPayment[] = [
+    {
+      id: 'rent',
+      name: 'Rent',
+      amountPence: 70000,
+      dueDay: 1,
+      frequency: 'monthly',
+      potId: 'bills',
+      priority: 'essential',
+      active: true,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    },
+    {
+      id: 'phone',
+      name: 'Phone',
+      amountPence: 2200,
+      dueDay: 23,
+      frequency: 'monthly',
+      potId: 'subs',
+      priority: 'important',
+      active: true,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    },
+    {
+      id: 'archived',
+      name: 'Old subscription',
+      amountPence: 999,
+      dueDay: 21,
+      frequency: 'monthly',
+      potId: 'subs',
+      priority: 'optional',
+      active: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    },
+  ]
+
+  it('finds recurring payments due inside the current pay period only', () => {
+    const due = getRecurringPaymentsDue(payments, '2026-05-16', '2026-05-30')
+
+    expect(due.map((payment) => payment.id)).toEqual(['phone'])
+  })
+
+  it('creates weekly, biweekly, and monthly pay periods from a payday', () => {
+    expect(createNextPayPeriod('2026-05-16', 'weekly')).toMatchObject({
+      startDate: '2026-05-16',
+      endDate: '2026-05-22',
+      nextPayday: '2026-05-23',
+    })
+    expect(createNextPayPeriod('2026-05-16', 'biweekly')).toMatchObject({
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      nextPayday: '2026-05-30',
+    })
+    expect(createNextPayPeriod('2026-05-16', 'monthly')).toMatchObject({
+      startDate: '2026-05-16',
+      endDate: '2026-06-15',
+      nextPayday: '2026-06-16',
+    })
+  })
+})
+
+describe('pot balances', () => {
+  const pot: Pot = {
+    id: 'food',
+    name: 'Food',
+    type: 'spending',
+    balancePence: 2200,
+    targetPence: null,
+    color: '#16a34a',
+    archived: false,
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+  }
+
+  it('carries over pot balance when allocation is added', () => {
+    expect(applyTransactionToPot(pot, 16000, 'allocation').balancePence).toBe(18200)
+  })
+
+  it('allows spending to reduce a pot below zero so overspending is visible', () => {
+    expect(applyTransactionToPot(pot, 4000, 'spending').balancePence).toBe(-1800)
+  })
+
+  it('restores a pot balance when a manual spending transaction is deleted', () => {
+    const transaction: Transaction = {
+      id: 'spend',
+      potId: 'food',
+      amountPence: 4820,
+      type: 'spending',
+      date: '2026-05-16',
+      note: 'Groceries',
+      createdAt: '2026-05-16T00:00:00.000Z',
+      updatedAt: '2026-05-16T00:00:00.000Z',
+    }
+
+    expect(getPotBalanceAfterTransactionRemoval({ ...pot, balancePence: 11180 }, transaction)).toBe(16000)
+  })
+
+  it('subtracts reserved money when an allocation transaction is deleted', () => {
+    const transaction: Transaction = {
+      id: 'allocation',
+      potId: 'food',
+      amountPence: 5600,
+      type: 'allocation',
+      date: '2026-05-16',
+      note: 'Insurance reserve',
+      createdAt: '2026-05-16T00:00:00.000Z',
+      updatedAt: '2026-05-16T00:00:00.000Z',
+    }
+
+    expect(getPotBalanceAfterTransactionRemoval({ ...pot, balancePence: 15600 }, transaction)).toBe(10000)
+  })
+
+  it('calculates remaining allocation money and warns when allocations exceed income', () => {
+    expect(
+      getAllocationBalance({
+        incomePence: 95000,
+        reservedPence: 31000,
+        allocationPence: 72000,
+      }),
+    ).toEqual({
+      availableAfterReservedPence: 64000,
+      remainingPence: -8000,
+      isOverAllocated: true,
+    })
+  })
+
+  it('detects recurring bills that were added after the active paycheck plan', () => {
+    const duePayments: RecurringPayment[] = [
+      {
+        id: 'insurance',
+        name: 'Insurance',
+        amountPence: 5600,
+        dueDay: 20,
+        frequency: 'monthly',
+        potId: 'bills',
+        priority: 'essential',
+        active: true,
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+      {
+        id: 'phone',
+        name: 'Phone',
+        amountPence: 2200,
+        dueDay: 23,
+        frequency: 'monthly',
+        potId: 'bills',
+        priority: 'essential',
+        active: true,
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+    ]
+    const allocations: PotAllocation[] = [
+      {
+        id: 'allocation-phone',
+        payPeriodId: 'period',
+        potId: 'bills',
+        amountPence: 2200,
+        source: 'recurring',
+        recurringPaymentId: 'phone',
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+    ]
+
+    expect(getUncoveredRecurringPence(duePayments, allocations)).toBe(5600)
+  })
+})

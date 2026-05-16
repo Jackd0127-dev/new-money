@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -18,11 +18,23 @@ export function SpendingPage({
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(toIsoDate(new Date()))
   const [note, setNote] = useState('')
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
 
   async function submitTransaction() {
     const amountPence = parsePoundsToPence(amount)
 
     if (!potId || amountPence <= 0) {
+      return
+    }
+
+    if (editingTransactionId) {
+      await actions.updateTransaction(editingTransactionId, {
+        potId,
+        amountPence,
+        date,
+        note: note.trim() || 'Manual spend',
+      })
+      resetForm()
       return
     }
 
@@ -34,13 +46,37 @@ export function SpendingPage({
       note: note.trim() || 'Manual spend',
       payPeriodId: latestPeriod?.id ?? null,
     })
+    resetForm()
+  }
+
+  function startEditingTransaction(transactionId: string) {
+    const transaction = snapshot.transactions.find((candidate) => candidate.id === transactionId)
+
+    if (!transaction) {
+      return
+    }
+
+    setEditingTransactionId(transaction.id)
+    setPotId(transaction.potId)
+    setAmount((transaction.amountPence / 100).toFixed(2))
+    setDate(transaction.date)
+    setNote(transaction.note)
+  }
+
+  function resetForm() {
+    setEditingTransactionId(null)
+    setPotId(activePots[0]?.id ?? '')
     setAmount('')
+    setDate(toIsoDate(new Date()))
     setNote('')
   }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
-      <Panel title="Quick spend" description="Choose the pot the money came from.">
+      <Panel
+        title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
+        description="Choose the pot the money came from."
+      >
         <div className="space-y-4">
           <Field label="Pot">
             <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
@@ -60,7 +96,14 @@ export function SpendingPage({
           <Field label="Note">
             <TextInput value={note} onChange={(event) => setNote(event.target.value)} placeholder="Groceries" />
           </Field>
-          <Button onClick={submitTransaction}>Log spending</Button>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={submitTransaction}>{editingTransactionId ? 'Save spending' : 'Log spending'}</Button>
+            {editingTransactionId && (
+              <Button variant="secondary" onClick={resetForm}>
+                Cancel
+              </Button>
+            )}
+          </div>
         </div>
       </Panel>
 
@@ -80,6 +123,13 @@ export function SpendingPage({
                   </div>
                   <div className="flex items-center gap-3">
                     <p className="text-sm font-semibold text-red-700">-{formatPence(transaction.amountPence)}</p>
+                    <Button
+                      variant="secondary"
+                      onClick={() => startEditingTransaction(transaction.id)}
+                      aria-label={`Edit ${transaction.note}`}
+                    >
+                      <PenLine size={16} />
+                    </Button>
                     <Button
                       variant="danger"
                       onClick={() => {

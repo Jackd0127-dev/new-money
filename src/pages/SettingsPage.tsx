@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CheckCircle2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -14,12 +15,14 @@ export function SettingsPage({
 }) {
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
+  const [saved, setSaved] = useState(false)
 
   async function saveSettings() {
     await actions.updateSettings({
       hourlyRatePence: parsePoundsToPence(hourlyRate),
       payFrequency,
     })
+    setSaved(true)
   }
 
   async function resetData() {
@@ -38,17 +41,38 @@ export function SettingsPage({
             <TextInput value={snapshot.settings.currency} disabled />
           </Field>
           <Field label="Hourly rate">
-            <TextInput inputMode="decimal" value={hourlyRate} onChange={(event) => setHourlyRate(event.target.value)} />
+            <TextInput
+              inputMode="decimal"
+              value={hourlyRate}
+              onChange={(event) => {
+                setHourlyRate(event.target.value)
+                setSaved(false)
+              }}
+            />
           </Field>
           <Field label="Pay frequency">
-            <SelectInput value={payFrequency} onChange={(event) => setPayFrequency(event.target.value as PayFrequency)}>
+            <SelectInput
+              value={payFrequency}
+              onChange={(event) => {
+                setPayFrequency(event.target.value as PayFrequency)
+                setSaved(false)
+              }}
+            >
               <option value="weekly">Weekly</option>
               <option value="biweekly">Biweekly</option>
               <option value="monthly">Monthly</option>
               <option value="custom">Custom</option>
             </SelectInput>
           </Field>
-          <Button onClick={saveSettings}>Save settings</Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={saveSettings}>Save settings</Button>
+            {saved && (
+              <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
+                <CheckCircle2 size={18} />
+                Settings saved
+              </span>
+            )}
+          </div>
         </div>
       </Panel>
 

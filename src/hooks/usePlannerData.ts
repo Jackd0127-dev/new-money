@@ -11,12 +11,16 @@ import {
   getPlannerSnapshot,
   resetPlannerData,
   toggleRecurringPayment,
+  updateRecurringPayment,
   updateSettings,
+  updateTransaction,
   type PaycheckPlanInput,
   type PlannerSnapshot,
   type PotInput,
   type RecurringPaymentInput,
+  type RecurringPaymentUpdateInput,
   type TransactionInput,
+  type TransactionUpdateInput,
 } from '../storage/repository'
 import type { RecurringPayment } from '../types/models'
 
@@ -26,9 +30,11 @@ export interface PlannerActions {
   addPot: typeof addPot
   archivePot: typeof archivePot
   addRecurringPayment: typeof addRecurringPayment
+  updateRecurringPayment: typeof updateRecurringPayment
   toggleRecurringPayment: typeof toggleRecurringPayment
   deleteRecurringPayment: typeof deleteRecurringPayment
   addTransaction: typeof addTransaction
+  updateTransaction: typeof updateTransaction
   deleteTransaction: typeof deleteTransaction
   createPaycheckPlan: typeof createPaycheckPlan
   resetPlannerData: typeof resetPlannerData
@@ -64,9 +70,11 @@ export function usePlannerData() {
       addPot: withRefresh(addPot, refresh),
       archivePot: withRefresh(archivePot, refresh),
       addRecurringPayment: withRefresh(addRecurringPayment, refresh),
+      updateRecurringPayment: withRefresh(updateRecurringPayment, refresh),
       toggleRecurringPayment: withRefresh(toggleRecurringPayment, refresh),
       deleteRecurringPayment: withRefresh(deleteRecurringPayment, refresh),
       addTransaction: withRefresh(addTransaction, refresh),
+      updateTransaction: withRefresh(updateTransaction, refresh),
       deleteTransaction: withRefresh(deleteTransaction, refresh),
       createPaycheckPlan: withRefresh(createPaycheckPlan, refresh),
       resetPlannerData: withRefresh(resetPlannerData, refresh),
@@ -92,4 +100,13 @@ function withRefresh<Args extends unknown[]>(
   }
 }
 
-export type { PaycheckPlanInput, PlannerSnapshot, PotInput, RecurringPayment, RecurringPaymentInput, TransactionInput }
+export type {
+  PaycheckPlanInput,
+  PlannerSnapshot,
+  PotInput,
+  RecurringPayment,
+  RecurringPaymentInput,
+  RecurringPaymentUpdateInput,
+  TransactionInput,
+  TransactionUpdateInput,
+}

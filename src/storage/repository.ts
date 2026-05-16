@@ -33,6 +33,7 @@ export interface PlannerSnapshot {
 
 export interface PaycheckPlanInput {
   payday: string
+  payFrequency?: Settings['payFrequency']
   hoursWorked: number
   hourlyRatePence: number
   actualAmountPence: number | null
@@ -55,11 +56,20 @@ export interface RecurringPaymentInput {
   priority: RecurringPriority
 }
 
+export type RecurringPaymentUpdateInput = RecurringPaymentInput
+
 export interface TransactionInput {
   potId: string
   payPeriodId?: string | null
   amountPence: number
   type: TransactionType
+  date: string
+  note: string
+}
+
+export interface TransactionUpdateInput {
+  potId: string
+  amountPence: number
   date: string
   note: string
 }
@@ -142,6 +152,30 @@ export async function addRecurringPayment(input: RecurringPaymentInput): Promise
   })
 }
 
+export async function updateRecurringPayment(
+  paymentId: string,
+  input: RecurringPaymentUpdateInput,
+): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', [db.recurringPayments, db.payPeriods, db.potAllocations, db.pots], async () => {
+    const current = await db.recurringPayments.get(paymentId)
+
+    if (!current) {
+      return
+    }
+
+    const nextPayment: RecurringPayment = {
+      ...current,
+      ...input,
+      updatedAt: timestamp,
+    }
+
+    await db.recurringPayments.put(nextPayment)
+    await reconcileRecurringPaymentForActivePeriod(nextPayment, timestamp)
+  })
+}
+
 export async function toggleRecurringPayment(payment: RecurringPayment): Promise<void> {
   await db.recurringPayments.update(payment.id, {
     active: !payment.active,
@@ -201,6 +235,54 @@ export async function addTransaction(input: TransactionInput): Promise<void> {
   })
 }
 
+export async function updateTransaction(
+  transactionId: string,
+  input: TransactionUpdateInput,
+): Promise<void> {
+  const timestamp = nowIso()
+  const amountPence = Math.abs(input.amountPence)
+
+  await db.transaction('rw', db.transactions, db.pots, async () => {
+    const current = await db.transactions.get(transactionId)
+
+    if (!current) {
+      return
+    }
+
+    const oldPot = await db.pots.get(current.potId)
+    let samePotAfterRemovalBalance: number | null = null
+
+    if (oldPot) {
+      samePotAfterRemovalBalance = getPotBalanceAfterTransactionRemoval(oldPot, current)
+      await db.pots.update(oldPot.id, {
+        balancePence: samePotAfterRemovalBalance,
+        updatedAt: timestamp,
+      })
+    }
+
+    const nextPot =
+      input.potId === current.potId && oldPot && samePotAfterRemovalBalance !== null
+        ? { ...oldPot, balancePence: samePotAfterRemovalBalance }
+        : await db.pots.get(input.potId)
+
+    if (nextPot) {
+      const delta = current.type === 'spending' ? -amountPence : amountPence
+      await db.pots.update(nextPot.id, {
+        balancePence: nextPot.balancePence + delta,
+        updatedAt: timestamp,
+      })
+    }
+
+    await db.transactions.update(current.id, {
+      potId: input.potId,
+      amountPence,
+      date: input.date,
+      note: input.note,
+      updatedAt: timestamp,
+    })
+  })
+}
+
 export async function deleteTransaction(transactionId: string): Promise<void> {
   await db.transaction('rw', db.transactions, db.pots, async () => {
     const transaction = await db.transactions.get(transactionId)
@@ -224,7 +306,7 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
 
 export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void> {
   const settings = (await db.settings.get('default')) ?? defaultSettings
-  const periodDates = createNextPayPeriod(input.payday, settings.payFrequency)
+  const periodDates = createNextPayPeriod(input.payday, input.payFrequency ?? settings.payFrequency)
   const timestamp = nowIso()
   const payPeriodId = crypto.randomUUID()
   const calculatedAmountPence = calculatePaycheckAmount({
@@ -409,4 +491,97 @@ async function reserveNewRecurringPaymentForActivePeriod(
       updatedAt: timestamp,
     })
   }
+}
+
+async function reconcileRecurringPaymentForActivePeriod(
+  payment: RecurringPayment,
+  timestamp: string,
+): Promise<void> {
+  const latestPeriod = await db.payPeriods.orderBy('payday').last()
+
+  if (!latestPeriod || latestPeriod.status === 'closed') {
+    return
+  }
+
+  const activePeriodAllocations = await db.potAllocations
+    .where('payPeriodId')
+    .equals(latestPeriod.id)
+    .toArray()
+  const existingAllocations = activePeriodAllocations.filter(
+    (allocation) => allocation.recurringPaymentId === payment.id,
+  )
+  const [existingAllocation, ...duplicateAllocations] = existingAllocations
+  const isDue = getRecurringPaymentsDue([payment], latestPeriod.startDate, latestPeriod.endDate).length > 0
+
+  for (const allocation of duplicateAllocations) {
+    await removeAllocationFromPot(allocation, timestamp)
+    await db.potAllocations.delete(allocation.id)
+  }
+
+  if (!isDue) {
+    if (existingAllocation) {
+      await removeAllocationFromPot(existingAllocation, timestamp)
+      await db.potAllocations.delete(existingAllocation.id)
+    }
+
+    return
+  }
+
+  if (!existingAllocation) {
+    await db.potAllocations.add({
+      id: crypto.randomUUID(),
+      payPeriodId: latestPeriod.id,
+      potId: payment.potId,
+      amountPence: payment.amountPence,
+      source: 'recurring',
+      recurringPaymentId: payment.id,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    await addAllocationToPot(payment.potId, payment.amountPence, timestamp)
+    return
+  }
+
+  if (existingAllocation.potId !== payment.potId) {
+    await removeAllocationFromPot(existingAllocation, timestamp)
+    await addAllocationToPot(payment.potId, payment.amountPence, timestamp)
+  } else {
+    await addAllocationToPot(
+      existingAllocation.potId,
+      payment.amountPence - existingAllocation.amountPence,
+      timestamp,
+    )
+  }
+
+  await db.potAllocations.update(existingAllocation.id, {
+    potId: payment.potId,
+    amountPence: payment.amountPence,
+    source: 'recurring',
+    recurringPaymentId: payment.id,
+    updatedAt: timestamp,
+  })
+}
+
+async function removeAllocationFromPot(
+  allocation: Pick<PotAllocation, 'potId' | 'amountPence'>,
+  timestamp: string,
+): Promise<void> {
+  await addAllocationToPot(allocation.potId, -allocation.amountPence, timestamp)
+}
+
+async function addAllocationToPot(
+  potId: string,
+  amountPence: number,
+  timestamp: string,
+): Promise<void> {
+  const pot = await db.pots.get(potId)
+
+  if (!pot) {
+    return
+  }
+
+  await db.pots.update(pot.id, {
+    balancePence: pot.balancePence + amountPence,
+    updatedAt: timestamp,
+  })
 }

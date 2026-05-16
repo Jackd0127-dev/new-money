@@ -15,7 +15,7 @@ export function Panel({
   className?: string
 }) {
   return (
-    <section className={clsx('rounded-lg border border-slate-200 bg-white p-5 shadow-sm', className)}>
+    <section aria-label={title} className={clsx('rounded-lg border border-slate-200 bg-white p-5 shadow-sm', className)}>
       {(title || description || action) && (
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>

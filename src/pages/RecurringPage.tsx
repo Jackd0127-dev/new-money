@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -20,12 +20,26 @@ export function RecurringPage({
   const [frequency, setFrequency] = useState<RecurringFrequency>('monthly')
   const [priority, setPriority] = useState<RecurringPriority>('essential')
   const [potId, setPotId] = useState(activePots[0]?.id ?? '')
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
 
   async function submitPayment() {
     const amountPence = parsePoundsToPence(amount)
     const dueDayNumber = Number.parseInt(dueDay, 10)
 
     if (!name.trim() || !potId || amountPence <= 0 || dueDayNumber < 1 || dueDayNumber > 31) {
+      return
+    }
+
+    if (editingPaymentId) {
+      await actions.updateRecurringPayment(editingPaymentId, {
+        name: name.trim(),
+        amountPence,
+        dueDay: dueDayNumber,
+        frequency,
+        potId,
+        priority,
+      })
+      resetForm()
       return
     }
 
@@ -37,14 +51,39 @@ export function RecurringPage({
       potId,
       priority,
     })
+    resetForm()
+  }
+
+  function startEditingPayment(paymentId: string) {
+    const payment = snapshot.recurringPayments.find((candidate) => candidate.id === paymentId)
+
+    if (!payment) {
+      return
+    }
+
+    setEditingPaymentId(payment.id)
+    setName(payment.name)
+    setAmount((payment.amountPence / 100).toFixed(2))
+    setDueDay(String(payment.dueDay ?? 1))
+    setFrequency(payment.frequency)
+    setPriority(payment.priority)
+    setPotId(payment.potId)
+  }
+
+  function resetForm() {
+    setEditingPaymentId(null)
     setName('')
     setAmount('')
+    setDueDay('1')
+    setFrequency('monthly')
+    setPriority('essential')
+    setPotId(activePots[0]?.id ?? '')
   }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
       <Panel
-        title="Add recurring payment"
+        title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
         description="Bills reserve during the pay period that contains their due day."
       >
         <div className="space-y-4">
@@ -83,7 +122,16 @@ export function RecurringPage({
               <option value="optional">Optional</option>
             </SelectInput>
           </Field>
-          <Button onClick={submitPayment}>Add recurring payment</Button>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={submitPayment}>
+              {editingPaymentId ? 'Save recurring payment' : 'Add recurring payment'}
+            </Button>
+            {editingPaymentId && (
+              <Button variant="secondary" onClick={resetForm}>
+                Cancel
+              </Button>
+            )}
+          </div>
         </div>
       </Panel>
 
@@ -108,6 +156,13 @@ export function RecurringPage({
                     <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
                     <Button variant="secondary" onClick={() => actions.toggleRecurringPayment(payment)}>
                       {payment.active ? 'Pause' : 'Resume'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => startEditingPayment(payment.id)}
+                      aria-label={`Edit ${payment.name}`}
+                    >
+                      <PenLine size={16} />
                     </Button>
                     <Button
                       variant="danger"

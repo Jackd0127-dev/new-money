@@ -13,6 +13,7 @@ import {
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
+import type { PayFrequency } from '../types/models'
 
 export function PaydayWizardPage({
   snapshot,
@@ -24,12 +25,13 @@ export function PaydayWizardPage({
   const [payday, setPayday] = useState(toIsoDate(new Date()))
   const [hoursWorked, setHoursWorked] = useState('72')
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
+  const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
   const [actualReceived, setActualReceived] = useState('')
   const [allocations, setAllocations] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState(false)
 
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
-  const period = createNextPayPeriod(payday, snapshot.settings.payFrequency)
+  const period = createNextPayPeriod(payday, payFrequency)
   const hours = Number.parseFloat(hoursWorked) || 0
   const hourlyRatePence = parsePoundsToPence(hourlyRate)
   const actualAmountPence = actualReceived ? parsePoundsToPence(actualReceived) : null
@@ -65,6 +67,7 @@ export function PaydayWizardPage({
 
     await actions.createPaycheckPlan({
       payday,
+      payFrequency,
       hoursWorked: hours,
       hourlyRatePence,
       actualAmountPence,
@@ -87,7 +90,12 @@ export function PaydayWizardPage({
             <TextInput type="date" value={payday} onChange={(event) => setPayday(event.target.value)} />
           </Field>
           <Field label="Pay frequency">
-            <TextInput value={snapshot.settings.payFrequency} disabled />
+            <SelectInput value={payFrequency} onChange={(event) => setPayFrequency(event.target.value as PayFrequency)}>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Biweekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="custom">Custom</option>
+            </SelectInput>
           </Field>
           <Field label="Hours worked">
             <TextInput inputMode="decimal" value={hoursWorked} onChange={(event) => setHoursWorked(event.target.value)} />
@@ -160,9 +168,9 @@ export function PaydayWizardPage({
           <Button disabled={!canSubmit} onClick={submitPlan}>
             Confirm paycheck plan
           </Button>
-          <SelectInput className="max-w-52" value={snapshot.settings.payFrequency} disabled>
-            <option>{snapshot.settings.payFrequency}</option>
-          </SelectInput>
+          <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium capitalize text-slate-700">
+            {payFrequency} plan
+          </span>
           {saved && (
             <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
               <CheckCircle2 size={18} />

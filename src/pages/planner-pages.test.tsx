@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import { DashboardPage } from './DashboardPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
@@ -47,6 +48,26 @@ describe('payday wizard', () => {
 })
 
 describe('spending page', () => {
+  it('uses quick amount buttons for faster manual spending entry', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<SpendingPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: '£10.00' }))
+    await user.type(screen.getByLabelText('Note'), 'Coffee')
+    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+
+    expect(actions.addTransaction).toHaveBeenCalledWith({
+      amountPence: 1000,
+      date: '2026-05-18',
+      note: 'Coffee',
+      payPeriodId: null,
+      potId: 'pot-bills',
+      type: 'spending',
+    })
+  })
+
   it('edits an existing manual spending entry', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -87,6 +108,45 @@ describe('spending page', () => {
 })
 
 describe('recurring page', () => {
+  it('shows a dated recurring calendar', () => {
+    const snapshot = createSnapshot({
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 23,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          incomePence: 90000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByRole('region', { name: 'Recurring calendar' })).toBeInTheDocument()
+    expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
+    expect(screen.getByText(/23 May/)).toBeInTheDocument()
+    expect(screen.getByText('Before payday')).toBeInTheDocument()
+  })
+
   it('edits an existing recurring payment', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -125,6 +185,45 @@ describe('recurring page', () => {
       potId: 'pot-bills',
       priority: 'important',
     })
+  })
+})
+
+describe('dashboard page', () => {
+  it('shows budget insights from current spending', () => {
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          incomePence: 90000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-food',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 1250,
+          type: 'spending',
+          date: '2026-05-18',
+          note: 'Lunch',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} onViewChange={vi.fn()} />)
+
+    expect(screen.getByRole('region', { name: 'Budget insights' })).toBeInTheDocument()
+    expect(screen.getByText('Spent this period')).toBeInTheDocument()
+    expect(screen.getByText('£12.50')).toBeInTheDocument()
   })
 })
 

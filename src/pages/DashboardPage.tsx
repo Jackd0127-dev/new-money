@@ -13,13 +13,16 @@ import {
 import {
   formatPence,
   getDailySafeToSpendPence,
+  getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getSpendablePence,
   getTotalPence,
   getUncoveredRecurringPence,
+  addIsoDays,
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
+import { BudgetInsights } from '../components/BudgetInsights'
 import { PotRows } from '../components/PotRows'
 import { Button, MoneyMetric, Panel } from '../components/ui'
 import type { ViewKey } from '../types/navigation'
@@ -46,6 +49,9 @@ export function DashboardPage({
         latestPeriod.endDate,
       )
     : []
+  const upcomingOccurrences = latestPeriod
+    ? getRecurringPaymentOccurrences(snapshot.recurringPayments, today, latestPeriod.endDate)
+    : getRecurringPaymentOccurrences(snapshot.recurringPayments, today, addIsoDays(today, 30))
   const reservedPence = getTotalPence(upcomingPayments)
   const allocatedPence = getTotalPence(periodAllocations)
   const unreservedPence = getUncoveredRecurringPence(upcomingPayments, periodAllocations)
@@ -123,16 +129,21 @@ export function DashboardPage({
           )}
         </Panel>
 
-        <Panel title="Upcoming bills" description="Reserved before spending money is shown.">
+        <Panel title="Upcoming bills" description="Due dates before the next payday stay visible here.">
           <div className="space-y-3">
-            {upcomingPayments.length > 0 ? (
-              upcomingPayments.map((payment) => (
-                <div key={payment.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3">
+            {upcomingOccurrences.length > 0 ? (
+              upcomingOccurrences.slice(0, 6).map((occurrence) => (
+                <div
+                  key={`${occurrence.payment.id}-${occurrence.dueDate}`}
+                  className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3"
+                >
                   <div>
-                    <p className="text-sm font-semibold text-slate-950">{payment.name}</p>
-                    <p className="text-xs text-slate-500">Due day {payment.dueDay}</p>
+                    <p className="text-sm font-semibold text-slate-950">{occurrence.payment.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {formatShortDate(occurrence.dueDate)} · {occurrence.payment.frequency}
+                    </p>
                   </div>
-                  <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
+                  <p className="text-sm font-semibold text-slate-950">{formatPence(occurrence.amountPence)}</p>
                 </div>
               ))
             ) : (
@@ -143,6 +154,8 @@ export function DashboardPage({
           </div>
         </Panel>
       </div>
+
+      <BudgetInsights snapshot={snapshot} chartWidth={chartWidth} />
 
       <div className="grid gap-6 xl:grid-cols-[0.6fr_1.4fr]">
         <Panel title="Pot balances">
@@ -180,6 +193,13 @@ export function DashboardPage({
       </div>
     </div>
   )
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(`${value}T00:00:00.000Z`))
 }
 
 function useDashboardChartWidth() {

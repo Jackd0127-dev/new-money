@@ -89,7 +89,14 @@ export function AppShell({
               <h1 className="text-xl font-semibold text-slate-950">Paycheck control panel</h1>
               <p className="hidden text-sm text-slate-500 sm:block">Plan pay, reserve bills, spend from pots.</p>
             </div>
-            <Button onClick={() => onViewChange('payday')}>New paycheck</Button>
+            <div className="flex shrink-0 gap-2">
+              <Button variant="secondary" onClick={() => onViewChange('spending')}>
+                <WalletCards size={18} />
+                <span className="hidden sm:inline">Log spend</span>
+                <span className="sm:hidden">Spend</span>
+              </Button>
+              <Button onClick={() => onViewChange('payday')}>New paycheck</Button>
+            </div>
           </div>
           <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
             {navItems.map((item) => {

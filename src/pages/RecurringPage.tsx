@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
+import { RecurringCalendar } from '../components/RecurringCalendar'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
 import type { RecurringFrequency, RecurringPriority } from '../types/models'
@@ -81,11 +82,12 @@ export function RecurringPage({
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
-      <Panel
-        title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
-        description="Bills reserve during the pay period that contains their due day."
-      >
+    <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
+        <Panel
+          title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
+          description="Bills reserve during the pay period that contains their due day."
+        >
         <div className="space-y-4">
           <Field label="Name">
             <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Phone bill" />
@@ -133,9 +135,9 @@ export function RecurringPage({
             )}
           </div>
         </div>
-      </Panel>
+        </Panel>
 
-      <Panel title="Recurring payments" description="Inactive payments are ignored by payday planning.">
+        <Panel title="Recurring payments" description="Inactive payments are ignored by payday planning.">
         <div className="space-y-3">
           {snapshot.recurringPayments.length > 0 ? (
             snapshot.recurringPayments.map((payment) => {
@@ -183,7 +185,10 @@ export function RecurringPage({
             <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No recurring payments yet.</p>
           )}
         </div>
-      </Panel>
+        </Panel>
+      </div>
+
+      <RecurringCalendar snapshot={snapshot} />
     </div>
   )
 }

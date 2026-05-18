@@ -6,6 +6,7 @@ import {
   createNextPayPeriod,
   getPotBalanceAfterTransactionRemoval,
   getAllocationBalance,
+  getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
 } from './money'
@@ -71,6 +72,64 @@ describe('pay period planning', () => {
     const due = getRecurringPaymentsDue(payments, '2026-05-16', '2026-05-30')
 
     expect(due.map((payment) => payment.id)).toEqual(['phone'])
+  })
+
+  it('builds dated recurring payment occurrences for calendar views', () => {
+    const due = getRecurringPaymentOccurrences(payments, '2026-05-16', '2026-06-02')
+
+    expect(due.map((occurrence) => `${occurrence.payment.id}:${occurrence.dueDate}`)).toEqual([
+      'phone:2026-05-23',
+      'rent:2026-06-01',
+    ])
+  })
+
+  it('supports weekly recurring payments in calendar views', () => {
+    const due = getRecurringPaymentOccurrences(
+      [
+        {
+          id: 'travel-card',
+          name: 'Travel card',
+          amountPence: 1200,
+          dueDay: 18,
+          frequency: 'weekly',
+          potId: 'transport',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      '2026-05-16',
+      '2026-05-30',
+    )
+
+    expect(due.map((occurrence) => occurrence.dueDate)).toEqual([
+      '2026-05-18',
+      '2026-05-25',
+    ])
+  })
+
+  it('anchors yearly recurring payments to their creation month', () => {
+    const due = getRecurringPaymentOccurrences(
+      [
+        {
+          id: 'insurance',
+          name: 'Insurance',
+          amountPence: 12000,
+          dueDay: 23,
+          frequency: 'yearly',
+          potId: 'bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      '2026-05-16',
+      '2026-07-30',
+    )
+
+    expect(due.map((occurrence) => occurrence.dueDate)).toEqual(['2026-05-23'])
   })
 
   it('creates weekly, biweekly, and monthly pay periods from a payday', () => {

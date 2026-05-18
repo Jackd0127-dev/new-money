@@ -33,6 +33,12 @@ export interface NextPayPeriod {
   nextPayday: string
 }
 
+export interface RecurringPaymentOccurrence {
+  payment: RecurringPayment
+  dueDate: string
+  amountPence: number
+}
+
 export function calculatePaycheckAmount({
   hoursWorked,
   hourlyRatePence,
@@ -107,13 +113,47 @@ export function getRecurringPaymentsDue(
   startDate: string,
   endDate: string,
 ): RecurringPayment[] {
+  const seenPaymentIds = new Set<string>()
+
+  return getRecurringPaymentOccurrences(payments, startDate, endDate)
+    .filter((occurrence) => {
+      if (seenPaymentIds.has(occurrence.payment.id)) {
+        return false
+      }
+
+      seenPaymentIds.add(occurrence.payment.id)
+      return true
+    })
+    .map((occurrence) => occurrence.payment)
+    .sort((a, b) => getPriorityRank(a.priority) - getPriorityRank(b.priority))
+}
+
+export function getRecurringPaymentOccurrences(
+  payments: RecurringPayment[],
+  startDate: string,
+  endDate: string,
+): RecurringPaymentOccurrence[] {
   const start = parseDate(startDate)
   const end = parseDate(endDate)
 
   return payments
     .filter((payment) => payment.active)
-    .filter((payment) => recurringPaymentHasDueDate(payment, start, end))
-    .sort((a, b) => getPriorityRank(a.priority) - getPriorityRank(b.priority))
+    .flatMap((payment) =>
+      getRecurringPaymentDueDates(payment, start, end).map((dueDate) => ({
+        payment,
+        dueDate: toIsoDate(dueDate),
+        amountPence: payment.amountPence,
+      })),
+    )
+    .sort((a, b) => {
+      const dateSort = a.dueDate.localeCompare(b.dueDate)
+
+      if (dateSort !== 0) {
+        return dateSort
+      }
+
+      return getPriorityRank(a.payment.priority) - getPriorityRank(b.payment.priority)
+    })
 }
 
 export function getTotalPence(items: Array<{ amountPence: number }>): number {
@@ -206,20 +246,32 @@ export function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-function recurringPaymentHasDueDate(payment: RecurringPayment, start: Date, end: Date): boolean {
+export function addIsoDays(date: string, days: number): string {
+  return toIsoDate(addDays(parseDate(date), days))
+}
+
+function getRecurringPaymentDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
   if (payment.dueDate) {
-    return isBetweenInclusive(parseDate(payment.dueDate), start, end)
+    return getAnchoredRecurringDates(payment, start, end)
   }
 
-  if (payment.frequency === 'monthly' && payment.dueDay) {
-    return getMonthlyDueDates(payment.dueDay, start, end).length > 0
+  if (!payment.dueDay) {
+    return []
   }
 
-  if (payment.frequency === 'yearly' && payment.dueDay) {
-    return getMonthlyDueDates(payment.dueDay, start, end).length > 0
+  if (payment.frequency === 'weekly') {
+    return getIntervalDueDates(payment.dueDay, start, end, 7)
   }
 
-  return false
+  if (payment.frequency === 'biweekly') {
+    return getIntervalDueDates(payment.dueDay, start, end, 14)
+  }
+
+  if (payment.frequency === 'yearly') {
+    return getYearlyDueDates(payment, start, end)
+  }
+
+  return getMonthlyDueDates(payment.dueDay, start, end)
 }
 
 function getMonthlyDueDates(dueDay: number, start: Date, end: Date): Date[] {
@@ -238,6 +290,76 @@ function getMonthlyDueDates(dueDay: number, start: Date, end: Date): Date[] {
   }
 
   return dueDates
+}
+
+function getYearlyDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
+  const dueDates: Date[] = []
+  const anchor = parseDate(payment.createdAt.slice(0, 10))
+
+  for (let year = start.getUTCFullYear(); year <= end.getUTCFullYear(); year += 1) {
+    const lastDay = new Date(Date.UTC(year, anchor.getUTCMonth() + 1, 0)).getUTCDate()
+    const date = new Date(Date.UTC(year, anchor.getUTCMonth(), Math.min(payment.dueDay ?? 1, lastDay)))
+
+    if (isBetweenInclusive(date, start, end)) {
+      dueDates.push(date)
+    }
+  }
+
+  return dueDates
+}
+
+function getIntervalDueDates(dueDay: number, start: Date, end: Date, intervalDays: number): Date[] {
+  const dueDates: Date[] = []
+  const boundedDueDay = Math.min(Math.max(1, dueDay), 28)
+  const anchor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), boundedDueDay))
+  let cursor = anchor
+
+  while (cursor > start) {
+    cursor = addDays(cursor, -intervalDays)
+  }
+
+  while (cursor <= end) {
+    if (isBetweenInclusive(cursor, start, end)) {
+      dueDates.push(cursor)
+    }
+
+    cursor = addDays(cursor, intervalDays)
+  }
+
+  return dueDates
+}
+
+function getAnchoredRecurringDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
+  const anchor = parseDate(payment.dueDate!)
+  const dueDates: Date[] = []
+  let cursor = anchor
+
+  while (cursor < start) {
+    cursor = getNextRecurringDate(cursor, payment.frequency)
+  }
+
+  while (cursor <= end) {
+    dueDates.push(cursor)
+    cursor = getNextRecurringDate(cursor, payment.frequency)
+  }
+
+  return dueDates
+}
+
+function getNextRecurringDate(date: Date, frequency: RecurringPayment['frequency']): Date {
+  if (frequency === 'weekly') {
+    return addDays(date, 7)
+  }
+
+  if (frequency === 'biweekly') {
+    return addDays(date, 14)
+  }
+
+  if (frequency === 'yearly') {
+    return new Date(Date.UTC(date.getUTCFullYear() + 1, date.getUTCMonth(), date.getUTCDate()))
+  }
+
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()))
 }
 
 function parseDate(value: string): Date {

@@ -5,6 +5,8 @@ import { formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
 
+const quickAmounts = ['3.00', '5.00', '10.00', '20.00', '50.00']
+
 export function SpendingPage({
   snapshot,
   actions,
@@ -19,9 +21,19 @@ export function SpendingPage({
   const [date, setDate] = useState(toIsoDate(new Date()))
   const [note, setNote] = useState('')
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
+  const selectedPot = activePots.find((pot) => pot.id === potId)
+  const recentNotes = Array.from(
+    new Set(
+      snapshot.transactions
+        .map((transaction) => transaction.note.trim())
+        .filter((candidate) => candidate && candidate !== 'Manual spend'),
+    ),
+  ).slice(0, 4)
+  const parsedAmountPence = parsePoundsToPence(amount)
+  const canSubmitSpend = Boolean(potId) && parsedAmountPence > 0
 
   async function submitTransaction() {
-    const amountPence = parsePoundsToPence(amount)
+    const amountPence = parsedAmountPence
 
     if (!potId || amountPence <= 0) {
       return
@@ -78,6 +90,21 @@ export function SpendingPage({
         description="Choose the pot the money came from."
       >
         <div className="space-y-4">
+          <Field label="Amount">
+            <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="12.50" />
+          </Field>
+          <div className="flex flex-wrap gap-2" aria-label="Quick amounts">
+            {quickAmounts.map((quickAmount) => (
+              <button
+                key={quickAmount}
+                type="button"
+                onClick={() => setAmount(quickAmount)}
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                {formatPence(parsePoundsToPence(quickAmount))}
+              </button>
+            ))}
+          </div>
           <Field label="Pot">
             <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
               {activePots.map((pot) => (
@@ -87,22 +114,54 @@ export function SpendingPage({
               ))}
             </SelectInput>
           </Field>
-          <Field label="Amount">
-            <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="12.50" />
-          </Field>
           <Field label="Date">
-            <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              <Button variant="secondary" onClick={() => setDate(toIsoDate(new Date()))}>
+                Today
+              </Button>
+            </div>
           </Field>
           <Field label="Note">
             <TextInput value={note} onChange={(event) => setNote(event.target.value)} placeholder="Groceries" />
           </Field>
+          {recentNotes.length > 0 && (
+            <div className="flex flex-wrap gap-2" aria-label="Recent spending suggestions">
+              {recentNotes.map((recentNote) => (
+                <button
+                  key={recentNote}
+                  type="button"
+                  onClick={() => setNote(recentNote)}
+                  className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
+                >
+                  {recentNote}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-3">
-            <Button onClick={submitTransaction}>{editingTransactionId ? 'Save spending' : 'Log spending'}</Button>
+            <Button onClick={submitTransaction} disabled={!canSubmitSpend}>
+              {editingTransactionId ? 'Save spending' : 'Log spending'}
+            </Button>
             {editingTransactionId && (
               <Button variant="secondary" onClick={resetForm}>
                 Cancel
               </Button>
             )}
+          </div>
+          <div className="sticky bottom-3 z-10 rounded-lg border border-slate-200 bg-white p-3 shadow-lg xl:hidden">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-950">
+                  {parsedAmountPence > 0 ? formatPence(parsedAmountPence) : 'No amount'} ·{' '}
+                  {selectedPot?.name ?? 'Choose pot'}
+                </p>
+                <p className="text-xs text-slate-500">{date}</p>
+              </div>
+              <Button onClick={submitTransaction} disabled={!canSubmitSpend}>
+                {editingTransactionId ? 'Save' : 'Add'}
+              </Button>
+            </div>
           </div>
         </div>
       </Panel>

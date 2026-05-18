@@ -77,7 +77,7 @@ export function AppShell({
             Local-first
           </div>
           <p className="mt-2 text-xs leading-5 text-slate-500">
-            Data stays in this browser for v1. Firebase can use the same model later.
+            Data stays local first. Sign in from Settings when you want Firebase sync across devices.
           </p>
         </div>
       </aside>

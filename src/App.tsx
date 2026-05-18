@@ -8,12 +8,20 @@ import { PotsPage } from './pages/PotsPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SpendingPage } from './pages/SpendingPage'
+import { useCloudSync } from './hooks/useCloudSync'
+import { useFirebaseAuth } from './hooks/useFirebaseAuth'
 import { usePlannerData } from './hooks/usePlannerData'
 import type { ViewKey } from './types/navigation'
 
 function App() {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const { snapshot, isLoading, error, actions } = usePlannerData()
+  const auth = useFirebaseAuth()
+  const sync = useCloudSync({
+    user: auth.user,
+    snapshot,
+    refresh: actions.refresh,
+  })
 
   if (isLoading) {
     return (
@@ -44,7 +52,7 @@ function App() {
     spending: <SpendingPage snapshot={snapshot} actions={actions} />,
     recurring: <RecurringPage snapshot={snapshot} actions={actions} />,
     history: <HistoryPage snapshot={snapshot} />,
-    settings: <SettingsPage snapshot={snapshot} actions={actions} />,
+    settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} sync={sync} />,
   }
 
   return (

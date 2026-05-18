@@ -419,6 +419,40 @@ export async function resetPlannerData(): Promise<void> {
   )
 }
 
+export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise<void> {
+  await db.transaction(
+    'rw',
+    [
+      db.settings,
+      db.pots,
+      db.recurringPayments,
+      db.payPeriods,
+      db.paychecks,
+      db.potAllocations,
+      db.transactions,
+    ],
+    async () => {
+      await Promise.all([
+        db.settings.clear(),
+        db.pots.clear(),
+        db.recurringPayments.clear(),
+        db.payPeriods.clear(),
+        db.paychecks.clear(),
+        db.potAllocations.clear(),
+        db.transactions.clear(),
+      ])
+
+      await db.settings.put(snapshot.settings ?? defaultSettings)
+      await putAll(db.pots, snapshot.pots)
+      await putAll(db.recurringPayments, snapshot.recurringPayments)
+      await putAll(db.payPeriods, snapshot.payPeriods)
+      await putAll(db.paychecks, snapshot.paychecks)
+      await putAll(db.potAllocations, snapshot.potAllocations)
+      await putAll(db.transactions, snapshot.transactions)
+    },
+  )
+}
+
 async function ensureSeedData(): Promise<void> {
   const settings = await db.settings.get('default')
   const potCount = await db.pots.count()
@@ -444,6 +478,15 @@ async function seedDefaults(): Promise<void> {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+async function putAll<T extends { id: string }>(
+  table: { bulkPut: (items: T[]) => Promise<unknown> },
+  items: T[],
+): Promise<void> {
+  if (items.length > 0) {
+    await table.bulkPut(items)
+  }
 }
 
 async function reserveNewRecurringPaymentForActivePeriod(

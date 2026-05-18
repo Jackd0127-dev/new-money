@@ -2,16 +2,23 @@ import { useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
+import { CloudSyncPanel } from '../components/CloudSyncPanel'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
+import type { CloudSyncController } from '../hooks/useCloudSync'
+import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
 import type { PayFrequency } from '../types/models'
 
 export function SettingsPage({
   snapshot,
   actions,
+  auth,
+  sync,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  auth?: FirebaseAuthController
+  sync?: CloudSyncController
 }) {
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
@@ -26,7 +33,11 @@ export function SettingsPage({
   }
 
   async function resetData() {
-    const confirmed = window.confirm('Reset all local planner data in this browser?')
+    const confirmed = window.confirm(
+      auth?.user
+        ? 'Reset planner data in this browser? Because cloud sync is signed in, the reset can sync to your cloud copy too.'
+        : 'Reset all local planner data in this browser?',
+    )
 
     if (confirmed) {
       await actions.resetPlannerData()
@@ -76,7 +87,9 @@ export function SettingsPage({
         </div>
       </Panel>
 
-      <Panel title="Local data" description="V1 stores data privately in this browser using IndexedDB.">
+      {auth && sync && <CloudSyncPanel auth={auth} sync={sync} />}
+
+      <Panel title="Local data" description="Data is stored in this browser first, with optional Firebase sync.">
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pots</p>
@@ -96,7 +109,8 @@ export function SettingsPage({
         <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-semibold text-amber-900">Reset path</p>
           <p className="mt-1 text-sm leading-6 text-amber-800">
-            This clears local data and restores starter pots. It does not affect any external account because v1 has no backend.
+            This clears this browser and restores starter pots. If cloud sync is signed in, the reset can also
+            sync to your cloud copy.
           </p>
           <Button className="mt-4" variant="danger" onClick={resetData}>
             Reset local data

@@ -6,11 +6,12 @@ import {
   createNextPayPeriod,
   getPotBalanceAfterTransactionRemoval,
   getAllocationBalance,
+  getDebtSummary,
   getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
 } from './money'
-import type { Pot, PotAllocation, RecurringPayment, Transaction } from '../types/models'
+import type { Debt, DebtPayment, Pot, PotAllocation, RecurringPayment, Transaction } from '../types/models'
 
 describe('paycheck calculations', () => {
   it('calculates income from hours worked and hourly rate in pence', () => {
@@ -257,5 +258,61 @@ describe('pot balances', () => {
     ]
 
     expect(getUncoveredRecurringPence(duePayments, allocations)).toBe(5600)
+  })
+})
+
+describe('debt tracking', () => {
+  const debts: Debt[] = [
+    {
+      id: 'debt-card',
+      name: 'Credit card',
+      lender: 'Bank',
+      originalAmountPence: 120000,
+      currentBalancePence: 85000,
+      minimumPaymentPence: 5000,
+      dueDate: '2026-05-20',
+      interestRateApr: 19.9,
+      note: 'Main card',
+      status: 'active',
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    },
+    {
+      id: 'debt-loan',
+      name: 'Old loan',
+      lender: 'Finance Co',
+      originalAmountPence: 50000,
+      currentBalancePence: 0,
+      minimumPaymentPence: 0,
+      dueDate: '2026-05-10',
+      interestRateApr: null,
+      note: '',
+      status: 'paid',
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    },
+  ]
+  const payments: DebtPayment[] = [
+    {
+      id: 'payment-1',
+      debtId: 'debt-card',
+      amountPence: 35000,
+      date: '2026-05-12',
+      note: 'First chunk',
+      createdAt: '2026-05-12T00:00:00.000Z',
+      updatedAt: '2026-05-12T00:00:00.000Z',
+    },
+  ]
+
+  it('summarises active debt balances, progress, and upcoming minimum payments', () => {
+    expect(getDebtSummary(debts, payments, '2026-05-18')).toEqual({
+      activeDebtCount: 1,
+      overdueDebtCount: 0,
+      totalCurrentBalancePence: 85000,
+      totalOriginalAmountPence: 120000,
+      totalPaidPence: 35000,
+      minimumDueNext30DaysPence: 5000,
+      progressPercent: 29,
+    })
   })
 })

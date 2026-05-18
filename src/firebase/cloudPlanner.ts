@@ -61,6 +61,8 @@ export function hasMeaningfulPlannerData(snapshot: PlannerSnapshot): boolean {
     snapshot.paychecks.length > 0 ||
     snapshot.potAllocations.length > 0 ||
     snapshot.transactions.length > 0 ||
+    snapshot.debts.length > 0 ||
+    snapshot.debtPayments.length > 0 ||
     snapshot.pots.some((pot) => pot.balancePence !== 0 || pot.archived)
   )
 }
@@ -87,6 +89,8 @@ function normalizePlannerSnapshot(snapshot: Partial<PlannerSnapshot>): PlannerSn
     paychecks: snapshot.paychecks ?? [],
     potAllocations: snapshot.potAllocations ?? [],
     transactions: snapshot.transactions ?? [],
+    debts: snapshot.debts ?? [],
+    debtPayments: snapshot.debtPayments ?? [],
   }
 }
 

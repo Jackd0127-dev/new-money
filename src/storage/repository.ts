@@ -7,6 +7,9 @@ import {
   getUncoveredRecurringPence,
 } from '../domain/money'
 import type {
+  Debt,
+  DebtPayment,
+  DebtStatus,
   PayPeriod,
   Paycheck,
   Pot,
@@ -29,6 +32,8 @@ export interface PlannerSnapshot {
   paychecks: Paycheck[]
   potAllocations: PotAllocation[]
   transactions: Transaction[]
+  debts: Debt[]
+  debtPayments: DebtPayment[]
 }
 
 export interface PaycheckPlanInput {
@@ -74,10 +79,41 @@ export interface TransactionUpdateInput {
   note: string
 }
 
+export interface DebtInput {
+  name: string
+  lender: string
+  currentBalancePence: number
+  minimumPaymentPence: number
+  dueDate: string
+  interestRateApr: number | null
+  note: string
+}
+
+export type DebtUpdateInput = DebtInput & {
+  status: DebtStatus
+}
+
+export interface DebtPaymentInput {
+  debtId: string
+  amountPence: number
+  date: string
+  note: string
+}
+
 export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   await ensureSeedData()
 
-  const [settings, pots, recurringPayments, payPeriods, paychecks, potAllocations, transactions] =
+  const [
+    settings,
+    pots,
+    recurringPayments,
+    payPeriods,
+    paychecks,
+    potAllocations,
+    transactions,
+    debts,
+    debtPayments,
+  ] =
     await Promise.all([
       db.settings.get('default'),
       db.pots.toArray(),
@@ -86,6 +122,8 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
       db.paychecks.toArray(),
       db.potAllocations.toArray(),
       db.transactions.orderBy('date').reverse().toArray(),
+      db.debts.orderBy('dueDate').toArray(),
+      db.debtPayments.orderBy('date').reverse().toArray(),
     ])
 
   return {
@@ -96,6 +134,8 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     paychecks,
     potAllocations,
     transactions,
+    debts,
+    debtPayments,
   }
 }
 
@@ -304,6 +344,122 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
   })
 }
 
+export async function addDebt(input: DebtInput): Promise<void> {
+  const timestamp = nowIso()
+  const currentBalancePence = Math.max(0, input.currentBalancePence)
+
+  await db.debts.add({
+    id: crypto.randomUUID(),
+    name: input.name.trim(),
+    lender: input.lender.trim(),
+    originalAmountPence: currentBalancePence,
+    currentBalancePence,
+    minimumPaymentPence: Math.max(0, input.minimumPaymentPence),
+    dueDate: input.dueDate,
+    interestRateApr: input.interestRateApr,
+    note: input.note.trim(),
+    status: currentBalancePence > 0 ? 'active' : 'paid',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function updateDebt(debtId: string, input: DebtUpdateInput): Promise<void> {
+  const current = await db.debts.get(debtId)
+
+  if (!current) {
+    return
+  }
+
+  const currentBalancePence = Math.max(0, input.currentBalancePence)
+  const status = currentBalancePence <= 0 ? 'paid' : input.status
+
+  await db.debts.update(debtId, {
+    name: input.name.trim(),
+    lender: input.lender.trim(),
+    originalAmountPence: Math.max(current.originalAmountPence, currentBalancePence),
+    currentBalancePence,
+    minimumPaymentPence: Math.max(0, input.minimumPaymentPence),
+    dueDate: input.dueDate,
+    interestRateApr: input.interestRateApr,
+    note: input.note.trim(),
+    status,
+    updatedAt: nowIso(),
+  })
+}
+
+export async function deleteDebt(debtId: string): Promise<void> {
+  await db.transaction('rw', db.debts, db.debtPayments, async () => {
+    await db.debtPayments.where('debtId').equals(debtId).delete()
+    await db.debts.delete(debtId)
+  })
+}
+
+export async function addDebtPayment(input: DebtPaymentInput): Promise<void> {
+  const timestamp = nowIso()
+  const amountPence = Math.abs(input.amountPence)
+
+  if (amountPence <= 0) {
+    return
+  }
+
+  await db.transaction('rw', db.debts, db.debtPayments, async () => {
+    const debt = await db.debts.get(input.debtId)
+
+    if (!debt || debt.currentBalancePence <= 0) {
+      return
+    }
+
+    const appliedAmountPence = Math.min(amountPence, debt.currentBalancePence)
+    const nextBalancePence = debt.currentBalancePence - appliedAmountPence
+
+    await db.debtPayments.add({
+      id: crypto.randomUUID(),
+      debtId: input.debtId,
+      amountPence: appliedAmountPence,
+      date: input.date,
+      note: input.note.trim(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+
+    await db.debts.update(debt.id, {
+      currentBalancePence: nextBalancePence,
+      status: nextBalancePence > 0 ? 'active' : 'paid',
+      updatedAt: timestamp,
+    })
+  })
+}
+
+export async function deleteDebtPayment(paymentId: string): Promise<void> {
+  await db.transaction('rw', db.debts, db.debtPayments, async () => {
+    const payment = await db.debtPayments.get(paymentId)
+
+    if (!payment) {
+      return
+    }
+
+    await db.debtPayments.delete(payment.id)
+
+    const debt = await db.debts.get(payment.debtId)
+
+    if (!debt) {
+      return
+    }
+
+    const restoredBalancePence = Math.min(
+      debt.originalAmountPence,
+      debt.currentBalancePence + payment.amountPence,
+    )
+
+    await db.debts.update(debt.id, {
+      currentBalancePence: restoredBalancePence,
+      status: restoredBalancePence > 0 ? 'active' : 'paid',
+      updatedAt: nowIso(),
+    })
+  })
+}
+
 export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void> {
   const settings = (await db.settings.get('default')) ?? defaultSettings
   const periodDates = createNextPayPeriod(input.payday, input.payFrequency ?? settings.payFrequency)
@@ -403,6 +559,8 @@ export async function resetPlannerData(): Promise<void> {
       db.paychecks,
       db.potAllocations,
       db.transactions,
+      db.debts,
+      db.debtPayments,
     ],
     async () => {
       await Promise.all([
@@ -413,6 +571,8 @@ export async function resetPlannerData(): Promise<void> {
         db.paychecks.clear(),
         db.potAllocations.clear(),
         db.transactions.clear(),
+        db.debts.clear(),
+        db.debtPayments.clear(),
       ])
       await seedDefaults()
     },
@@ -430,6 +590,8 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       db.paychecks,
       db.potAllocations,
       db.transactions,
+      db.debts,
+      db.debtPayments,
     ],
     async () => {
       await Promise.all([
@@ -440,6 +602,8 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
         db.paychecks.clear(),
         db.potAllocations.clear(),
         db.transactions.clear(),
+        db.debts.clear(),
+        db.debtPayments.clear(),
       ])
 
       await db.settings.put(snapshot.settings ?? defaultSettings)
@@ -449,6 +613,8 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       await putAll(db.paychecks, snapshot.paychecks)
       await putAll(db.potAllocations, snapshot.potAllocations)
       await putAll(db.transactions, snapshot.transactions)
+      await putAll(db.debts, snapshot.debts)
+      await putAll(db.debtPayments, snapshot.debtPayments)
     },
   )
 }

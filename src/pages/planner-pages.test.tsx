@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
+import { DebtsPage } from './DebtsPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
@@ -11,6 +12,8 @@ import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { RecurringPayment, Transaction } from '../types/models'
 
 type TestActions = PlannerActions & {
+  addDebt: ReturnType<typeof vi.fn>
+  addDebtPayment: ReturnType<typeof vi.fn>
   updateRecurringPayment: ReturnType<typeof vi.fn>
   updateTransaction: ReturnType<typeof vi.fn>
 }
@@ -227,6 +230,72 @@ describe('dashboard page', () => {
   })
 })
 
+describe('debts page', () => {
+  it('records a debt payment against the selected debt', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Credit card',
+          lender: 'Bank',
+          originalAmountPence: 120000,
+          currentBalancePence: 85000,
+          minimumPaymentPence: 5000,
+          dueDate: '2026-05-20',
+          interestRateApr: 19.9,
+          note: 'Main card',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DebtsPage snapshot={snapshot} actions={actions} />)
+
+    const paymentPanel = screen.getByRole('region', { name: 'Record debt payment' })
+    await user.selectOptions(within(paymentPanel).getByLabelText('Debt'), 'debt-card')
+    await user.type(within(paymentPanel).getByLabelText('Payment amount'), '25.00')
+    await user.type(within(paymentPanel).getByLabelText('Payment note'), 'Extra payment')
+    await user.click(within(paymentPanel).getByRole('button', { name: 'Record payment' }))
+
+    expect(actions.addDebtPayment).toHaveBeenCalledWith({
+      amountPence: 2500,
+      date: '2026-05-18',
+      debtId: 'debt-card',
+      note: 'Extra payment',
+    })
+  })
+
+  it('creates a new debt with amount, due date, lender, and minimum payment', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<DebtsPage snapshot={createSnapshot()} actions={actions} />)
+
+    const debtPanel = screen.getByRole('region', { name: 'Add debt' })
+    await user.type(within(debtPanel).getByLabelText('Debt name'), 'Car finance')
+    await user.type(within(debtPanel).getByLabelText('Lender'), 'Finance Co')
+    await user.type(within(debtPanel).getByLabelText('Current balance'), '4000')
+    await user.type(within(debtPanel).getByLabelText('Minimum payment'), '120')
+    await user.clear(within(debtPanel).getByLabelText('Due date'))
+    await user.type(within(debtPanel).getByLabelText('Due date'), '2026-06-01')
+    await user.click(within(debtPanel).getByRole('button', { name: 'Add debt' }))
+
+    expect(actions.addDebt).toHaveBeenCalledWith({
+      currentBalancePence: 400000,
+      dueDate: '2026-06-01',
+      interestRateApr: null,
+      lender: 'Finance Co',
+      minimumPaymentPence: 12000,
+      name: 'Car finance',
+      note: '',
+    })
+  })
+})
+
 function createActions(): TestActions {
   return {
     refresh: vi.fn(async () => {}),
@@ -240,6 +309,11 @@ function createActions(): TestActions {
     addTransaction: vi.fn(async () => {}),
     updateTransaction: vi.fn(async () => {}),
     deleteTransaction: vi.fn(async () => {}),
+    addDebt: vi.fn(async () => {}),
+    updateDebt: vi.fn(async () => {}),
+    deleteDebt: vi.fn(async () => {}),
+    addDebtPayment: vi.fn(async () => {}),
+    deleteDebtPayment: vi.fn(async () => {}),
     createPaycheckPlan: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),
   }
@@ -289,6 +363,8 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
     paychecks: [],
     potAllocations: [],
     transactions: transactions ?? [],
+    debts: [],
+    debtPayments: [],
     ...overrides,
   }
 }

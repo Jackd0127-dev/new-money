@@ -10,6 +10,8 @@ export type PayPeriodStatus = 'planned' | 'active' | 'closed'
 
 export type TransactionType = 'spending' | 'allocation' | 'transfer' | 'adjustment'
 
+export type DebtStatus = 'active' | 'paid' | 'archived'
+
 export interface Timestamped {
   createdAt: string
   updatedAt: string
@@ -80,6 +82,27 @@ export interface Transaction extends Timestamped {
   payPeriodId?: string | null
   amountPence: number
   type: TransactionType
+  date: string
+  note: string
+}
+
+export interface Debt extends Timestamped {
+  id: string
+  name: string
+  lender: string
+  originalAmountPence: number
+  currentBalancePence: number
+  minimumPaymentPence: number
+  dueDate: string
+  interestRateApr: number | null
+  note: string
+  status: DebtStatus
+}
+
+export interface DebtPayment extends Timestamped {
+  id: string
+  debtId: string
+  amountPence: number
   date: string
   note: string
 }

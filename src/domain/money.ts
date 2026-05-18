@@ -1,4 +1,6 @@
 import type {
+  Debt,
+  DebtPayment,
   PayFrequency,
   Pot,
   PotAllocation,
@@ -37,6 +39,16 @@ export interface RecurringPaymentOccurrence {
   payment: RecurringPayment
   dueDate: string
   amountPence: number
+}
+
+export interface DebtSummary {
+  activeDebtCount: number
+  overdueDebtCount: number
+  totalCurrentBalancePence: number
+  totalOriginalAmountPence: number
+  totalPaidPence: number
+  minimumDueNext30DaysPence: number
+  progressPercent: number
 }
 
 export function calculatePaycheckAmount({
@@ -248,6 +260,46 @@ export function toIsoDate(date: Date): string {
 
 export function addIsoDays(date: string, days: number): string {
   return toIsoDate(addDays(parseDate(date), days))
+}
+
+export function getDebtSummary(
+  debts: Debt[],
+  payments: DebtPayment[],
+  today: string,
+): DebtSummary {
+  const activeDebts = debts.filter(
+    (debt) => debt.status === 'active' && debt.currentBalancePence > 0,
+  )
+  const totalOriginalAmountPence = activeDebts.reduce(
+    (total, debt) => total + debt.originalAmountPence,
+    0,
+  )
+  const totalCurrentBalancePence = activeDebts.reduce(
+    (total, debt) => total + debt.currentBalancePence,
+    0,
+  )
+  const activeDebtIds = new Set(activeDebts.map((debt) => debt.id))
+  const recordedPaymentPence = payments
+    .filter((payment) => activeDebtIds.has(payment.debtId))
+    .reduce((total, payment) => total + payment.amountPence, 0)
+  const balanceReductionPence = Math.max(0, totalOriginalAmountPence - totalCurrentBalancePence)
+  const totalPaidPence = Math.max(recordedPaymentPence, balanceReductionPence)
+  const next30Days = addIsoDays(today, 30)
+
+  return {
+    activeDebtCount: activeDebts.length,
+    overdueDebtCount: activeDebts.filter((debt) => debt.dueDate < today).length,
+    totalCurrentBalancePence,
+    totalOriginalAmountPence,
+    totalPaidPence,
+    minimumDueNext30DaysPence: activeDebts
+      .filter((debt) => debt.dueDate >= today && debt.dueDate <= next30Days)
+      .reduce((total, debt) => total + debt.minimumPaymentPence, 0),
+    progressPercent:
+      totalOriginalAmountPence > 0
+        ? Math.round((totalPaidPence / totalOriginalAmountPence) * 100)
+        : 0,
+  }
 }
 
 function getRecurringPaymentDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {

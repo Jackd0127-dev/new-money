@@ -95,5 +95,7 @@ function createSnapshot(): PlannerSnapshot {
     paychecks: [],
     potAllocations: [],
     transactions: [],
+    debts: [],
+    debtPayments: [],
   }
 }

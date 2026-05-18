@@ -3,6 +3,7 @@ export type ViewKey =
   | 'payday'
   | 'pots'
   | 'spending'
+  | 'debts'
   | 'recurring'
   | 'history'
   | 'settings'

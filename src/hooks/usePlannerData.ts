@@ -1,19 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
+  addDebt,
+  addDebtPayment,
   addPot,
   addRecurringPayment,
   addTransaction,
   archivePot,
   createPaycheckPlan,
+  deleteDebt,
+  deleteDebtPayment,
   deleteRecurringPayment,
   deleteTransaction,
   getPlannerSnapshot,
   resetPlannerData,
   toggleRecurringPayment,
+  updateDebt,
   updateRecurringPayment,
   updateSettings,
   updateTransaction,
+  type DebtInput,
+  type DebtPaymentInput,
+  type DebtUpdateInput,
   type PaycheckPlanInput,
   type PlannerSnapshot,
   type PotInput,
@@ -36,6 +44,11 @@ export interface PlannerActions {
   addTransaction: typeof addTransaction
   updateTransaction: typeof updateTransaction
   deleteTransaction: typeof deleteTransaction
+  addDebt: typeof addDebt
+  updateDebt: typeof updateDebt
+  deleteDebt: typeof deleteDebt
+  addDebtPayment: typeof addDebtPayment
+  deleteDebtPayment: typeof deleteDebtPayment
   createPaycheckPlan: typeof createPaycheckPlan
   resetPlannerData: typeof resetPlannerData
 }
@@ -76,6 +89,11 @@ export function usePlannerData() {
       addTransaction: withRefresh(addTransaction, refresh),
       updateTransaction: withRefresh(updateTransaction, refresh),
       deleteTransaction: withRefresh(deleteTransaction, refresh),
+      addDebt: withRefresh(addDebt, refresh),
+      updateDebt: withRefresh(updateDebt, refresh),
+      deleteDebt: withRefresh(deleteDebt, refresh),
+      addDebtPayment: withRefresh(addDebtPayment, refresh),
+      deleteDebtPayment: withRefresh(deleteDebtPayment, refresh),
       createPaycheckPlan: withRefresh(createPaycheckPlan, refresh),
       resetPlannerData: withRefresh(resetPlannerData, refresh),
     }),
@@ -101,6 +119,9 @@ function withRefresh<Args extends unknown[]>(
 }
 
 export type {
+  DebtInput,
+  DebtPaymentInput,
+  DebtUpdateInput,
   PaycheckPlanInput,
   PlannerSnapshot,
   PotInput,

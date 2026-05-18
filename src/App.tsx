@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 
 import { AppShell } from './components/AppShell'
 import { DashboardPage } from './pages/DashboardPage'
+import { DebtsPage } from './pages/DebtsPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { PaydayWizardPage } from './pages/PaydayWizardPage'
 import { PotsPage } from './pages/PotsPage'
@@ -50,6 +51,7 @@ function App() {
     payday: <PaydayWizardPage snapshot={snapshot} actions={actions} />,
     pots: <PotsPage snapshot={snapshot} actions={actions} />,
     spending: <SpendingPage snapshot={snapshot} actions={actions} />,
+    debts: <DebtsPage snapshot={snapshot} actions={actions} />,
     recurring: <RecurringPage snapshot={snapshot} actions={actions} />,
     history: <HistoryPage snapshot={snapshot} />,
     settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} sync={sync} />,

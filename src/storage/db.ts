@@ -1,6 +1,8 @@
 import Dexie, { type Table } from 'dexie'
 
 import type {
+  Debt,
+  DebtPayment,
   PayPeriod,
   Paycheck,
   Pot,
@@ -18,6 +20,8 @@ export class PlannerDatabase extends Dexie {
   paychecks!: Table<Paycheck, string>
   potAllocations!: Table<PotAllocation, string>
   transactions!: Table<Transaction, string>
+  debts!: Table<Debt, string>
+  debtPayments!: Table<DebtPayment, string>
 
   constructor() {
     super('privatePaycheckPlanner')
@@ -30,6 +34,18 @@ export class PlannerDatabase extends Dexie {
       paychecks: 'id, payPeriodId',
       potAllocations: 'id, payPeriodId, potId',
       transactions: 'id, potId, payPeriodId, date, type',
+    })
+
+    this.version(2).stores({
+      settings: 'id',
+      pots: 'id, type, archived',
+      recurringPayments: 'id, potId, active, frequency',
+      payPeriods: 'id, payday, status',
+      paychecks: 'id, payPeriodId',
+      potAllocations: 'id, payPeriodId, potId',
+      transactions: 'id, potId, payPeriodId, date, type',
+      debts: 'id, status, dueDate',
+      debtPayments: 'id, debtId, date',
     })
   }
 }

@@ -6,6 +6,7 @@ import { DashboardPage } from './DashboardPage'
 import { DebtsPage } from './DebtsPage'
 import { HistoryPage } from './HistoryPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
+import { PotsPage } from './PotsPage'
 import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
@@ -180,6 +181,94 @@ describe('spending page', () => {
       note: 'Dinner',
       potId: 'pot-food',
     })
+  })
+})
+
+describe('pots page', () => {
+  it('expands a pot to show spending, recurring payments, and allocations tied to it', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          incomePence: 90000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'pot-food',
+          amountPence: 7500,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'meal-kit',
+          name: 'Meal kit',
+          amountPence: 1800,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'pot-food',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-food',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 1250,
+          type: 'spending',
+          date: '2026-05-17',
+          note: 'Lunch',
+          createdAt: '2026-05-17T00:00:00.000Z',
+          updatedAt: '2026-05-17T00:00:00.000Z',
+        },
+        {
+          id: 'txn-bills',
+          potId: 'pot-bills',
+          payPeriodId: 'period-current',
+          amountPence: 8500,
+          type: 'spending',
+          date: '2026-05-18',
+          note: 'Direct debit',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.queryByText('Lunch')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'View Food activity' }))
+
+    const activity = screen.getByRole('region', { name: 'Food activity' })
+    expect(within(activity).getByText('Lunch')).toBeInTheDocument()
+    expect(within(activity).getByText('Spending · 2026-05-17')).toBeInTheDocument()
+    expect(within(activity).getByText('-£12.50')).toBeInTheDocument()
+    expect(within(activity).getByText('Paycheck allocation')).toBeInTheDocument()
+    expect(within(activity).getByText('Allocation · 2026-05-16')).toBeInTheDocument()
+    expect(within(activity).getByText('+£75.00')).toBeInTheDocument()
+    expect(within(activity).getByText('Meal kit')).toBeInTheDocument()
+    expect(within(activity).getByText('Recurring · monthly · day 20')).toBeInTheDocument()
+    expect(within(activity).queryByText('Direct debit')).not.toBeInTheDocument()
   })
 })
 

@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Archive } from 'lucide-react'
+import { Archive, ChevronDown } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
-import type { PotType } from '../types/models'
+import type { PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
 
@@ -19,6 +19,7 @@ export function PotsPage({
   const [type, setType] = useState<PotType>('spending')
   const [amount, setAmount] = useState('')
   const [color, setColor] = useState(colors[0])
+  const [openPotId, setOpenPotId] = useState<string | null>(null)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
 
   async function submitPot() {
@@ -77,28 +78,151 @@ export function PotsPage({
         </div>
       </Panel>
 
-      <Panel title="Pots" description="Reserved and savings pots are separated from everyday spendable money.">
+      <Panel title="Pots" description="Click a pot to see spending, recurring payments, and allocations tied to it.">
         <div className="grid gap-4 md:grid-cols-2">
-          {activePots.map((pot) => (
-            <div key={pot.id} className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="size-3 rounded-full" style={{ backgroundColor: pot.color }} />
-                    <h3 className="truncate text-sm font-semibold text-slate-950">{pot.name}</h3>
-                  </div>
-                  <p className="mt-1 text-xs capitalize text-slate-500">{pot.type}</p>
+          {activePots.map((pot) => {
+            const isOpen = openPotId === pot.id
+            const activityItems = getPotActivityItems(pot.id, snapshot)
+
+            return (
+              <div key={pot.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setOpenPotId(isOpen ? null : pot.id)}
+                    aria-expanded={isOpen}
+                    aria-label={`${isOpen ? 'Hide' : 'View'} ${pot.name} activity`}
+                    className="min-w-0 flex-1 rounded-md text-left outline-none transition hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-slate-100"
+                  >
+                    <div className="flex items-start justify-between gap-3 p-1">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="size-3 rounded-full" style={{ backgroundColor: pot.color }} />
+                          <h3 className="truncate text-sm font-semibold text-slate-950">{pot.name}</h3>
+                        </div>
+                        <p className="mt-1 text-xs capitalize text-slate-500">{pot.type}</p>
+                      </div>
+                      <ChevronDown
+                        size={18}
+                        className={`mt-0.5 shrink-0 text-slate-400 transition ${isOpen ? 'rotate-180' : ''}`}
+                      />
+                    </div>
+                    <p className="px-1 pb-1 pt-3 text-2xl font-semibold text-slate-950">{formatPence(pot.balancePence)}</p>
+                    {pot.targetPence && (
+                      <p className="px-1 pb-1 text-sm text-slate-500">Amount {formatPence(pot.targetPence)}</p>
+                    )}
+                  </button>
+                  <Button variant="ghost" onClick={() => actions.archivePot(pot.id)} aria-label={`Archive ${pot.name}`}>
+                    <Archive size={16} />
+                  </Button>
                 </div>
-                <Button variant="ghost" onClick={() => actions.archivePot(pot.id)} aria-label={`Archive ${pot.name}`}>
-                  <Archive size={16} />
-                </Button>
+
+                {isOpen && (
+                  <div role="region" aria-label={`${pot.name} activity`} className="mt-4 border-t border-slate-100 pt-4">
+                    {activityItems.length > 0 ? (
+                      <div className="space-y-2">
+                        {activityItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-50 px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-950">{item.title}</p>
+                              <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                            </div>
+                            <p
+                              className={`text-sm font-semibold ${
+                                item.amountPence < 0 ? 'text-red-700' : 'text-emerald-700'
+                              }`}
+                            >
+                              {formatSignedPence(item.amountPence)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+                        No activity recorded for this pot yet.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
-              <p className="mt-4 text-2xl font-semibold text-slate-950">{formatPence(pot.balancePence)}</p>
-              {pot.targetPence && <p className="mt-1 text-sm text-slate-500">Amount {formatPence(pot.targetPence)}</p>}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </Panel>
     </div>
   )
+}
+
+interface PotActivityItem {
+  id: string
+  title: string
+  detail: string
+  amountPence: number
+}
+
+function getPotActivityItems(potId: string, snapshot: PlannerSnapshot): PotActivityItem[] {
+  const transactions = snapshot.transactions
+    .filter((transaction) => transaction.potId === potId)
+    .map((transaction) => transactionToActivityItem(transaction))
+  const allocations = snapshot.potAllocations
+    .filter((allocation) => allocation.potId === potId)
+    .map((allocation) => allocationToActivityItem(allocation, snapshot))
+  const recurringPayments = snapshot.recurringPayments
+    .filter((payment) => payment.potId === potId)
+    .map((payment) => recurringPaymentToActivityItem(payment))
+
+  return [...transactions, ...allocations, ...recurringPayments]
+}
+
+function transactionToActivityItem(transaction: Transaction): PotActivityItem {
+  const isSpending = transaction.type === 'spending'
+
+  return {
+    id: `transaction-${transaction.id}`,
+    title: transaction.note,
+    detail: `${formatTransactionType(transaction.type)} · ${transaction.date}`,
+    amountPence: isSpending ? -transaction.amountPence : transaction.amountPence,
+  }
+}
+
+function allocationToActivityItem(allocation: PotAllocation, snapshot: PlannerSnapshot): PotActivityItem {
+  const period = snapshot.payPeriods.find((candidate) => candidate.id === allocation.payPeriodId)
+  const payment = allocation.recurringPaymentId
+    ? snapshot.recurringPayments.find((candidate) => candidate.id === allocation.recurringPaymentId)
+    : null
+
+  return {
+    id: `allocation-${allocation.id}`,
+    title: payment ? `Reserved for ${payment.name}` : 'Paycheck allocation',
+    detail: `Allocation · ${period?.payday ?? allocation.createdAt.slice(0, 10)}`,
+    amountPence: allocation.amountPence,
+  }
+}
+
+function recurringPaymentToActivityItem(payment: RecurringPayment): PotActivityItem {
+  return {
+    id: `recurring-${payment.id}`,
+    title: payment.name,
+    detail: `Recurring · ${payment.frequency} · day ${payment.dueDay ?? 'set date'}`,
+    amountPence: -payment.amountPence,
+  }
+}
+
+function formatTransactionType(type: Transaction['type']): string {
+  if (type === 'spending') {
+    return 'Spending'
+  }
+
+  return type.charAt(0).toUpperCase() + type.slice(1)
+}
+
+function formatSignedPence(amountPence: number): string {
+  if (amountPence > 0) {
+    return `+${formatPence(amountPence)}`
+  }
+
+  return formatPence(amountPence)
 }

@@ -51,6 +51,21 @@ export interface DebtSummary {
   progressPercent: number
 }
 
+interface PayPeriodMoneySummaryInput {
+  incomePence: number
+  duePayments: RecurringPayment[]
+  allocations: Array<Pick<PotAllocation, 'potId' | 'amountPence' | 'recurringPaymentId'>>
+}
+
+export interface PayPeriodMoneySummary {
+  payReceivedPence: number
+  allocatedPence: number
+  uncoveredRecurringPence: number
+  totalPaymentsDuePence: number
+  moneyLeftPence: number
+  isOverCommitted: boolean
+}
+
 export function calculatePaycheckAmount({
   hoursWorked,
   hourlyRatePence,
@@ -201,10 +216,12 @@ export function getUncoveredRecurringPence(
   }
 
   return payments.reduce((total, payment) => {
+    const directAvailablePence = directAllocationByPayment.get(payment.id) ?? 0
     const directCoveredPence = Math.min(
       payment.amountPence,
-      directAllocationByPayment.get(payment.id) ?? 0,
+      directAvailablePence,
     )
+    directAllocationByPayment.set(payment.id, directAvailablePence - directCoveredPence)
     const remainingPaymentPence = payment.amountPence - directCoveredPence
 
     if (remainingPaymentPence <= 0) {
@@ -217,6 +234,26 @@ export function getUncoveredRecurringPence(
 
     return total + remainingPaymentPence - coveredPence
   }, 0)
+}
+
+export function getPayPeriodMoneySummary({
+  incomePence,
+  duePayments,
+  allocations,
+}: PayPeriodMoneySummaryInput): PayPeriodMoneySummary {
+  const allocatedPence = getTotalPence(allocations)
+  const uncoveredRecurringPence = getUncoveredRecurringPence(duePayments, allocations)
+  const totalPaymentsDuePence = allocatedPence + uncoveredRecurringPence
+  const moneyLeftPence = incomePence - totalPaymentsDuePence
+
+  return {
+    payReceivedPence: incomePence,
+    allocatedPence,
+    uncoveredRecurringPence,
+    totalPaymentsDuePence,
+    moneyLeftPence,
+    isOverCommitted: moneyLeftPence < 0,
+  }
 }
 
 export function getDaysInclusive(startDate: string, endDate: string): number {

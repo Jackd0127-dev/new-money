@@ -7,6 +7,7 @@ import {
   getPotBalanceAfterTransactionRemoval,
   getAllocationBalance,
   getDebtSummary,
+  getPayPeriodMoneySummary,
   getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
@@ -258,6 +259,101 @@ describe('pot balances', () => {
     ]
 
     expect(getUncoveredRecurringPence(duePayments, allocations)).toBe(5600)
+  })
+
+  it('counts repeated recurring payment occurrences that are not fully reserved', () => {
+    const weeklyPayment: RecurringPayment = {
+      id: 'travel',
+      name: 'Travel card',
+      amountPence: 1200,
+      dueDay: 18,
+      frequency: 'weekly',
+      potId: 'transport',
+      priority: 'important',
+      active: true,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    }
+    const allocations: PotAllocation[] = [
+      {
+        id: 'allocation-travel',
+        payPeriodId: 'period',
+        potId: 'transport',
+        amountPence: 1200,
+        source: 'recurring',
+        recurringPaymentId: 'travel',
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+    ]
+
+    expect(getUncoveredRecurringPence([weeklyPayment, weeklyPayment], allocations)).toBe(1200)
+  })
+
+  it('summarises pay, payments due, and money left without double-counting reserved bills', () => {
+    const duePayments: RecurringPayment[] = [
+      {
+        id: 'applecare',
+        name: 'AppleCare',
+        amountPence: 1000,
+        dueDay: 19,
+        frequency: 'monthly',
+        potId: 'bills',
+        priority: 'important',
+        active: true,
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+      {
+        id: 'insurance',
+        name: 'Car Insurance',
+        amountPence: 8500,
+        dueDay: 1,
+        frequency: 'monthly',
+        potId: 'bills',
+        priority: 'essential',
+        active: true,
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+    ]
+    const allocations: PotAllocation[] = [
+      {
+        id: 'allocation-applecare',
+        payPeriodId: 'period',
+        potId: 'bills',
+        amountPence: 1000,
+        source: 'recurring',
+        recurringPaymentId: 'applecare',
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+      {
+        id: 'allocation-food',
+        payPeriodId: 'period',
+        potId: 'food',
+        amountPence: 15000,
+        source: 'manual',
+        recurringPaymentId: null,
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+    ]
+
+    expect(
+      getPayPeriodMoneySummary({
+        incomePence: 79800,
+        duePayments,
+        allocations,
+      }),
+    ).toEqual({
+      payReceivedPence: 79800,
+      allocatedPence: 16000,
+      uncoveredRecurringPence: 8500,
+      totalPaymentsDuePence: 24500,
+      moneyLeftPence: 55300,
+      isOverCommitted: false,
+    })
   })
 })
 

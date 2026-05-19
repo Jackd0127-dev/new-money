@@ -265,7 +265,120 @@ describe('recurring page', () => {
 })
 
 describe('dashboard page', () => {
-  it('shows budget insights from current spending', () => {
+  it('shows one clear pay summary with correct current period maths', () => {
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-22',
+          endDate: '2026-06-04',
+          payday: '2026-05-22',
+          nextPayday: '2026-06-05',
+          payFrequency: 'biweekly',
+          incomePence: 79800,
+          status: 'active',
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'applecare',
+          name: 'AppleCare',
+          amountPence: 1000,
+          dueDay: 19,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'insurance',
+          name: 'Car Insurance',
+          amountPence: 8500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 14000,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'optional',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-insurance',
+          payPeriodId: 'period-current',
+          potId: 'pot-bills',
+          amountPence: 8500,
+          source: 'recurring',
+          recurringPaymentId: 'insurance',
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'allocation-fuel',
+          payPeriodId: 'period-current',
+          potId: 'pot-bills',
+          amountPence: 14000,
+          source: 'recurring',
+          recurringPaymentId: 'fuel',
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'allocation-gym',
+          payPeriodId: 'period-current',
+          potId: 'pot-bills',
+          amountPence: 2500,
+          source: 'recurring',
+          recurringPaymentId: 'gym',
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} onViewChange={vi.fn()} />)
+
+    const currentPeriod = screen.getByRole('region', { name: 'Current pay period' })
+    expect(within(currentPeriod).getByText('Pay received')).toBeInTheDocument()
+    expect(within(currentPeriod).getByText('Total payments due')).toBeInTheDocument()
+    expect(within(currentPeriod).getByText('Money left')).toBeInTheDocument()
+    expect(within(currentPeriod).getByText('£798.00')).toBeInTheDocument()
+    expect(within(currentPeriod).getAllByText('£250.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getByText('£548.00')).toBeInTheDocument()
+    expect(screen.queryByText('Safe today')).not.toBeInTheDocument()
+    expect(screen.queryByText('Available after bills')).not.toBeInTheDocument()
+  })
+
+  it('keeps projection and daily average metrics off the simplified dashboard', () => {
     const snapshot = createSnapshot({
       payPeriods: [
         {
@@ -297,9 +410,9 @@ describe('dashboard page', () => {
 
     render(<DashboardPage snapshot={snapshot} onViewChange={vi.fn()} />)
 
-    expect(screen.getByRole('region', { name: 'Budget insights' })).toBeInTheDocument()
-    expect(screen.getByText('Spent this period')).toBeInTheDocument()
-    expect(screen.getByText('£12.50')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Budget insights' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Daily average')).not.toBeInTheDocument()
+    expect(screen.queryByText('Projected spend')).not.toBeInTheDocument()
   })
 })
 

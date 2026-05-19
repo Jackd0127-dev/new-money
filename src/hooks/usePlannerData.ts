@@ -10,6 +10,7 @@ import {
   createPaycheckPlan,
   deleteDebt,
   deleteDebtPayment,
+  deletePayPeriod,
   deleteRecurringPayment,
   deleteTransaction,
   getPlannerSnapshot,
@@ -50,6 +51,7 @@ export interface PlannerActions {
   addDebtPayment: typeof addDebtPayment
   deleteDebtPayment: typeof deleteDebtPayment
   createPaycheckPlan: typeof createPaycheckPlan
+  deletePayPeriod: typeof deletePayPeriod
   resetPlannerData: typeof resetPlannerData
 }
 
@@ -95,6 +97,7 @@ export function usePlannerData() {
       addDebtPayment: withRefresh(addDebtPayment, refresh),
       deleteDebtPayment: withRefresh(deleteDebtPayment, refresh),
       createPaycheckPlan: withRefresh(createPaycheckPlan, refresh),
+      deletePayPeriod: withRefresh(deletePayPeriod, refresh),
       resetPlannerData: withRefresh(resetPlannerData, refresh),
     }),
     [refresh],

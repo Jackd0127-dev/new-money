@@ -4,16 +4,19 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
 import { DebtsPage } from './DebtsPage'
+import { HistoryPage } from './HistoryPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
+import { toIsoDate } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { RecurringPayment, Transaction } from '../types/models'
 
 type TestActions = PlannerActions & {
   addDebt: ReturnType<typeof vi.fn>
   addDebtPayment: ReturnType<typeof vi.fn>
+  deletePayPeriod: ReturnType<typeof vi.fn>
   updateRecurringPayment: ReturnType<typeof vi.fn>
   updateTransaction: ReturnType<typeof vi.fn>
 }
@@ -30,10 +33,12 @@ describe('settings page', () => {
     await user.click(screen.getByRole('button', { name: 'Save settings' }))
 
     expect(actions.updateSettings).toHaveBeenCalledWith({
+      defaultHoursWorked: 72,
       hourlyRatePence: 1250,
       payFrequency: 'biweekly',
     })
     expect(screen.getByText('Settings saved')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
   })
 })
 
@@ -48,12 +53,80 @@ describe('payday wizard', () => {
 
     expect(screen.getByDisplayValue('2026-05-16 to 2026-06-15')).toBeInTheDocument()
   })
+
+  it('loads an existing payday plan so saving that date updates instead of creating a duplicate', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          payFrequency: 'biweekly',
+          incomePence: 120000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      paychecks: [
+        {
+          id: 'paycheck-current',
+          payPeriodId: 'period-current',
+          hoursWorked: 84.5,
+          hourlyRatePence: 1350,
+          calculatedAmountPence: 114075,
+          actualAmountPence: 120000,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'pot-food',
+          amountPence: 15000,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PaydayWizardPage snapshot={snapshot} actions={actions} />)
+
+    fireEvent.change(screen.getByLabelText('Payday'), { target: { value: '2026-05-16' } })
+
+    expect(screen.getByDisplayValue('84.5')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('13.50')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('1200.00')).toBeInTheDocument()
+    expect(screen.getByLabelText('Food')).toHaveValue('150.00')
+
+    await user.clear(screen.getByLabelText('Hours worked'))
+    await user.type(screen.getByLabelText('Hours worked'), '86')
+    await user.click(screen.getByRole('button', { name: 'Update paycheck plan' }))
+
+    expect(actions.createPaycheckPlan).toHaveBeenCalledWith({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 86,
+      hourlyRatePence: 1350,
+      actualAmountPence: 120000,
+      allocations: [{ potId: 'pot-food', amountPence: 15000 }],
+    })
+  })
 })
 
 describe('spending page', () => {
   it('uses quick amount buttons for faster manual spending entry', async () => {
     const user = userEvent.setup()
     const actions = createActions()
+    const today = toIsoDate(new Date())
 
     render(<SpendingPage snapshot={createSnapshot()} actions={actions} />)
 
@@ -63,7 +136,7 @@ describe('spending page', () => {
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 1000,
-      date: '2026-05-18',
+      date: today,
       note: 'Coffee',
       payPeriodId: null,
       potId: 'pot-bills',
@@ -230,10 +303,47 @@ describe('dashboard page', () => {
   })
 })
 
+describe('history page', () => {
+  it('deletes a paycheck plan from history after confirmation', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(
+      <HistoryPage
+        snapshot={createSnapshot({
+          payPeriods: [
+            {
+              id: 'period-current',
+              startDate: '2026-05-16',
+              endDate: '2026-05-29',
+              payday: '2026-05-16',
+              nextPayday: '2026-05-30',
+              incomePence: 90000,
+              status: 'active',
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={actions}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Delete paycheck plan for 2026-05-16' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete paycheck plan for 2026-05-16?')
+    expect(actions.deletePayPeriod).toHaveBeenCalledWith('period-current')
+
+    confirmSpy.mockRestore()
+  })
+})
+
 describe('debts page', () => {
   it('records a debt payment against the selected debt', async () => {
     const user = userEvent.setup()
     const actions = createActions()
+    const today = toIsoDate(new Date())
     const snapshot = createSnapshot({
       debts: [
         {
@@ -263,7 +373,7 @@ describe('debts page', () => {
 
     expect(actions.addDebtPayment).toHaveBeenCalledWith({
       amountPence: 2500,
-      date: '2026-05-18',
+      date: today,
       debtId: 'debt-card',
       note: 'Extra payment',
     })
@@ -315,6 +425,7 @@ function createActions(): TestActions {
     addDebtPayment: vi.fn(async () => {}),
     deleteDebtPayment: vi.fn(async () => {}),
     createPaycheckPlan: vi.fn(async () => {}),
+    deletePayPeriod: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),
   }
 }
@@ -331,6 +442,7 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
       payFrequency: 'biweekly',
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
+      defaultHoursWorked: 72,
       createdAt: timestamp,
       updatedAt: timestamp,
     },

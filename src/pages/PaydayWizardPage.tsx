@@ -13,7 +13,7 @@ import {
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
-import type { PayFrequency } from '../types/models'
+import type { PayFrequency, PayPeriod } from '../types/models'
 
 export function PaydayWizardPage({
   snapshot,
@@ -22,15 +22,17 @@ export function PaydayWizardPage({
   snapshot: PlannerSnapshot
   actions: PlannerActions
 }) {
-  const [payday, setPayday] = useState(toIsoDate(new Date()))
-  const [hoursWorked, setHoursWorked] = useState('72')
-  const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
-  const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
-  const [actualReceived, setActualReceived] = useState('')
-  const [allocations, setAllocations] = useState<Record<string, string>>({})
+  const initialDraft = getPaydayDraft(snapshot, snapshot.payPeriods[0]?.payday ?? toIsoDate(new Date()))
+  const [payday, setPayday] = useState(initialDraft.payday)
+  const [hoursWorked, setHoursWorked] = useState(initialDraft.hoursWorked)
+  const [hourlyRate, setHourlyRate] = useState(initialDraft.hourlyRate)
+  const [payFrequency, setPayFrequency] = useState<PayFrequency>(initialDraft.payFrequency)
+  const [actualReceived, setActualReceived] = useState(initialDraft.actualReceived)
+  const [allocations, setAllocations] = useState<Record<string, string>>(initialDraft.allocations)
   const [saved, setSaved] = useState(false)
 
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
+  const existingPeriod = snapshot.payPeriods.find((candidate) => candidate.payday === payday) ?? null
   const period = createNextPayPeriod(payday, payFrequency)
   const hours = Number.parseFloat(hoursWorked) || 0
   const hourlyRatePence = parsePoundsToPence(hourlyRate)
@@ -60,8 +62,20 @@ export function PaydayWizardPage({
   })
   const canSubmit = incomePence > 0 && !allocationBalance.isOverAllocated
 
+  function loadPayday(nextPayday: string) {
+    const draft = getPaydayDraft(snapshot, nextPayday)
+
+    setPayday(draft.payday)
+    setHoursWorked(draft.hoursWorked)
+    setHourlyRate(draft.hourlyRate)
+    setPayFrequency(draft.payFrequency)
+    setActualReceived(draft.actualReceived)
+    setAllocations(draft.allocations)
+    setSaved(false)
+  }
+
   async function submitPlan() {
-    if (!canSubmit) {
+    if (!canSubmit || saved) {
       return
     }
 
@@ -79,7 +93,6 @@ export function PaydayWizardPage({
         .filter((allocation) => allocation.amountPence > 0),
     })
     setSaved(true)
-    setAllocations({})
   }
 
   return (
@@ -87,10 +100,22 @@ export function PaydayWizardPage({
       <Panel title="Payday wizard" description="Enter pay, reserve bills, then manually assign the rest.">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Payday">
-            <TextInput type="date" value={payday} onChange={(event) => setPayday(event.target.value)} />
+            <TextInput
+              type="date"
+              value={payday}
+              onChange={(event) => {
+                loadPayday(event.target.value)
+              }}
+            />
           </Field>
           <Field label="Pay frequency">
-            <SelectInput value={payFrequency} onChange={(event) => setPayFrequency(event.target.value as PayFrequency)}>
+            <SelectInput
+              value={payFrequency}
+              onChange={(event) => {
+                setPayFrequency(event.target.value as PayFrequency)
+                setSaved(false)
+              }}
+            >
               <option value="weekly">Weekly</option>
               <option value="biweekly">Biweekly</option>
               <option value="monthly">Monthly</option>
@@ -98,17 +123,34 @@ export function PaydayWizardPage({
             </SelectInput>
           </Field>
           <Field label="Hours worked">
-            <TextInput inputMode="decimal" value={hoursWorked} onChange={(event) => setHoursWorked(event.target.value)} />
+            <TextInput
+              inputMode="decimal"
+              value={hoursWorked}
+              onChange={(event) => {
+                setHoursWorked(event.target.value)
+                setSaved(false)
+              }}
+            />
           </Field>
           <Field label="Hourly rate">
-            <TextInput inputMode="decimal" value={hourlyRate} onChange={(event) => setHourlyRate(event.target.value)} />
+            <TextInput
+              inputMode="decimal"
+              value={hourlyRate}
+              onChange={(event) => {
+                setHourlyRate(event.target.value)
+                setSaved(false)
+              }}
+            />
           </Field>
           <Field label="Actual received" hint="Optional. If payroll differs, this overrides the estimate.">
             <TextInput
               inputMode="decimal"
               placeholder="Leave blank"
               value={actualReceived}
-              onChange={(event) => setActualReceived(event.target.value)}
+              onChange={(event) => {
+                setActualReceived(event.target.value)
+                setSaved(false)
+              }}
             />
           </Field>
           <Field label="Pay period">
@@ -153,20 +195,21 @@ export function PaydayWizardPage({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={allocations[pot.id] ?? ''}
-                onChange={(event) =>
+                onChange={(event) => {
                   setAllocations((current) => ({
                     ...current,
                     [pot.id]: event.target.value,
                   }))
-                }
+                  setSaved(false)
+                }}
               />
             </Field>
           ))}
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button disabled={!canSubmit} onClick={submitPlan}>
-            Confirm paycheck plan
+          <Button disabled={!canSubmit || saved} onClick={submitPlan}>
+            {existingPeriod ? 'Update paycheck plan' : 'Confirm paycheck plan'}
           </Button>
           <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium capitalize text-slate-700">
             {payFrequency} plan
@@ -197,4 +240,60 @@ export function PaydayWizardPage({
       </Panel>
     </div>
   )
+}
+
+function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
+  const period = snapshot.payPeriods.find((candidate) => candidate.payday === payday)
+
+  if (!period) {
+    return {
+      payday,
+      hoursWorked: String(snapshot.settings.defaultHoursWorked),
+      hourlyRate: (snapshot.settings.hourlyRatePence / 100).toFixed(2),
+      payFrequency: snapshot.settings.payFrequency,
+      actualReceived: '',
+      allocations: {},
+    }
+  }
+
+  const paycheck = snapshot.paychecks.find((candidate) => candidate.payPeriodId === period.id)
+  const manualAllocations = snapshot.potAllocations.filter(
+    (allocation) => allocation.payPeriodId === period.id && allocation.source !== 'recurring',
+  )
+
+  return {
+    payday,
+    hoursWorked: paycheck ? String(paycheck.hoursWorked) : String(snapshot.settings.defaultHoursWorked),
+    hourlyRate: ((paycheck?.hourlyRatePence ?? snapshot.settings.hourlyRatePence) / 100).toFixed(2),
+    payFrequency: period.payFrequency ?? inferPayFrequency(period),
+    actualReceived:
+      paycheck?.actualAmountPence === null || paycheck?.actualAmountPence === undefined
+        ? ''
+        : (paycheck.actualAmountPence / 100).toFixed(2),
+    allocations: Object.fromEntries(
+      manualAllocations.map((allocation) => [
+        allocation.potId,
+        (allocation.amountPence / 100).toFixed(2),
+      ]),
+    ),
+  }
+}
+
+function inferPayFrequency(period: PayPeriod): PayFrequency {
+  const daysBetweenPaydays =
+    Math.round(
+      (new Date(`${period.nextPayday}T00:00:00.000Z`).getTime() -
+        new Date(`${period.payday}T00:00:00.000Z`).getTime()) /
+        (24 * 60 * 60 * 1000),
+    ) || 14
+
+  if (daysBetweenPaydays === 7) {
+    return 'weekly'
+  }
+
+  if (daysBetweenPaydays >= 28) {
+    return 'monthly'
+  }
+
+  return 'biweekly'
 }

@@ -8,6 +8,7 @@ export const defaultSettings: Settings = {
   payFrequency: 'biweekly',
   defaultPayPeriodDays: 14,
   hourlyRatePence: 1250,
+  defaultHoursWorked: 72,
   createdAt,
   updatedAt: createdAt,
 }

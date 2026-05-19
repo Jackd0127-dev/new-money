@@ -127,7 +127,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     ])
 
   return {
-    settings: settings ?? defaultSettings,
+    settings: normalizeSettings(settings),
     pots: pots.sort((a, b) => a.name.localeCompare(b.name)),
     recurringPayments: recurringPayments.sort((a, b) => a.name.localeCompare(b.name)),
     payPeriods,
@@ -139,8 +139,10 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   }
 }
 
-export async function updateSettings(updates: Partial<Pick<Settings, 'hourlyRatePence' | 'payFrequency'>>): Promise<void> {
-  const current = (await db.settings.get('default')) ?? defaultSettings
+export async function updateSettings(
+  updates: Partial<Pick<Settings, 'defaultHoursWorked' | 'hourlyRatePence' | 'payFrequency'>>,
+): Promise<void> {
+  const current = normalizeSettings(await db.settings.get('default'))
   await db.settings.put({
     ...current,
     ...updates,
@@ -461,10 +463,9 @@ export async function deleteDebtPayment(paymentId: string): Promise<void> {
 }
 
 export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void> {
-  const settings = (await db.settings.get('default')) ?? defaultSettings
+  const settings = normalizeSettings(await db.settings.get('default'))
   const periodDates = createNextPayPeriod(input.payday, input.payFrequency ?? settings.payFrequency)
   const timestamp = nowIso()
-  const payPeriodId = crypto.randomUUID()
   const calculatedAmountPence = calculatePaycheckAmount({
     hoursWorked: input.hoursWorked,
     hourlyRatePence: input.hourlyRatePence,
@@ -477,8 +478,19 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
 
   await db.transaction(
     'rw',
-    [db.payPeriods, db.paychecks, db.potAllocations, db.pots, db.recurringPayments],
+    [
+      db.settings,
+      db.payPeriods,
+      db.paychecks,
+      db.potAllocations,
+      db.pots,
+      db.recurringPayments,
+      db.transactions,
+    ],
     async () => {
+      const matchingPeriods = await db.payPeriods.where('payday').equals(input.payday).toArray()
+      const [existingPeriod, ...duplicatePeriods] = matchingPeriods
+      const payPeriodId = existingPeriod?.id ?? crypto.randomUUID()
       const recurringPayments = await db.recurringPayments.toArray()
       const duePayments = getRecurringPaymentsDue(
         recurringPayments,
@@ -500,28 +512,74 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
         (allocation) => allocation.amountPence > 0,
       )
 
-      await db.payPeriods.add({
-        id: payPeriodId,
-        payday: input.payday,
-        incomePence,
-        status: 'active',
-        startDate: periodDates.startDate,
-        endDate: periodDates.endDate,
-        nextPayday: periodDates.nextPayday,
-        createdAt: timestamp,
+      await db.settings.put({
+        ...settings,
+        payFrequency: input.payFrequency ?? settings.payFrequency,
+        hourlyRatePence: input.hourlyRatePence,
+        defaultHoursWorked: input.hoursWorked,
         updatedAt: timestamp,
       })
 
-      await db.paychecks.add({
-        id: crypto.randomUUID(),
-        payPeriodId,
-        hoursWorked: input.hoursWorked,
-        hourlyRatePence: input.hourlyRatePence,
-        calculatedAmountPence,
-        actualAmountPence: input.actualAmountPence,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      })
+      for (const duplicatePeriod of duplicatePeriods) {
+        await deletePayPeriodRecords(duplicatePeriod.id, timestamp)
+      }
+
+      if (existingPeriod) {
+        await deletePayPeriodAllocations(existingPeriod.id, timestamp)
+        await db.payPeriods.put({
+          ...existingPeriod,
+          payday: input.payday,
+          incomePence,
+          status: 'active',
+          startDate: periodDates.startDate,
+          endDate: periodDates.endDate,
+          nextPayday: periodDates.nextPayday,
+          payFrequency: input.payFrequency ?? settings.payFrequency,
+          updatedAt: timestamp,
+        })
+      } else {
+        await db.payPeriods.add({
+          id: payPeriodId,
+          payday: input.payday,
+          incomePence,
+          status: 'active',
+          startDate: periodDates.startDate,
+          endDate: periodDates.endDate,
+          nextPayday: periodDates.nextPayday,
+          payFrequency: input.payFrequency ?? settings.payFrequency,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+      }
+
+      const existingPaychecks = await db.paychecks.where('payPeriodId').equals(payPeriodId).toArray()
+      const [existingPaycheck, ...duplicatePaychecks] = existingPaychecks
+
+      for (const duplicatePaycheck of duplicatePaychecks) {
+        await db.paychecks.delete(duplicatePaycheck.id)
+      }
+
+      if (existingPaycheck) {
+        await db.paychecks.put({
+          ...existingPaycheck,
+          hoursWorked: input.hoursWorked,
+          hourlyRatePence: input.hourlyRatePence,
+          calculatedAmountPence,
+          actualAmountPence: input.actualAmountPence,
+          updatedAt: timestamp,
+        })
+      } else {
+        await db.paychecks.add({
+          id: crypto.randomUUID(),
+          payPeriodId,
+          hoursWorked: input.hoursWorked,
+          hourlyRatePence: input.hourlyRatePence,
+          calculatedAmountPence,
+          actualAmountPence: input.actualAmountPence,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+      }
 
       for (const allocation of allAllocations) {
         await db.potAllocations.add({
@@ -544,6 +602,16 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
           })
         }
       }
+    },
+  )
+}
+
+export async function deletePayPeriod(payPeriodId: string): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.payPeriods, db.paychecks, db.potAllocations, db.pots, db.transactions],
+    async () => {
+      await deletePayPeriodRecords(payPeriodId, nowIso())
     },
   )
 }
@@ -606,7 +674,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
         db.debtPayments.clear(),
       ])
 
-      await db.settings.put(snapshot.settings ?? defaultSettings)
+      await db.settings.put(normalizeSettings(snapshot.settings))
       await putAll(db.pots, snapshot.pots)
       await putAll(db.recurringPayments, snapshot.recurringPayments)
       await putAll(db.payPeriods, snapshot.payPeriods)
@@ -644,6 +712,14 @@ async function seedDefaults(): Promise<void> {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function normalizeSettings(settings?: Settings): Settings {
+  return {
+    ...defaultSettings,
+    ...settings,
+    defaultHoursWorked: settings?.defaultHoursWorked ?? defaultSettings.defaultHoursWorked,
+  }
 }
 
 async function putAll<T extends { id: string }>(
@@ -769,6 +845,31 @@ async function reconcileRecurringPaymentForActivePeriod(
     recurringPaymentId: payment.id,
     updatedAt: timestamp,
   })
+}
+
+async function deletePayPeriodRecords(payPeriodId: string, timestamp: string): Promise<void> {
+  await deletePayPeriodAllocations(payPeriodId, timestamp)
+
+  const paychecks = await db.paychecks.where('payPeriodId').equals(payPeriodId).toArray()
+
+  for (const paycheck of paychecks) {
+    await db.paychecks.delete(paycheck.id)
+  }
+
+  await db.transactions.where('payPeriodId').equals(payPeriodId).modify({
+    payPeriodId: null,
+    updatedAt: timestamp,
+  })
+  await db.payPeriods.delete(payPeriodId)
+}
+
+async function deletePayPeriodAllocations(payPeriodId: string, timestamp: string): Promise<void> {
+  const allocations = await db.potAllocations.where('payPeriodId').equals(payPeriodId).toArray()
+
+  for (const allocation of allocations) {
+    await removeAllocationFromPot(allocation, timestamp)
+    await db.potAllocations.delete(allocation.id)
+  }
 }
 
 async function removeAllocationFromPot(

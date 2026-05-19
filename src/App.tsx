@@ -53,7 +53,7 @@ function App() {
     spending: <SpendingPage snapshot={snapshot} actions={actions} />,
     debts: <DebtsPage snapshot={snapshot} actions={actions} />,
     recurring: <RecurringPage snapshot={snapshot} actions={actions} />,
-    history: <HistoryPage snapshot={snapshot} />,
+    history: <HistoryPage snapshot={snapshot} actions={actions} />,
     settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} sync={sync} />,
   }
 

@@ -21,11 +21,13 @@ export function SettingsPage({
   sync?: CloudSyncController
 }) {
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
+  const [defaultHoursWorked, setDefaultHoursWorked] = useState(String(snapshot.settings.defaultHoursWorked))
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
   const [saved, setSaved] = useState(false)
 
   async function saveSettings() {
     await actions.updateSettings({
+      defaultHoursWorked: Number.parseFloat(defaultHoursWorked) || 0,
       hourlyRatePence: parsePoundsToPence(hourlyRate),
       payFrequency,
     })
@@ -61,6 +63,16 @@ export function SettingsPage({
               }}
             />
           </Field>
+          <Field label="Default hours worked">
+            <TextInput
+              inputMode="decimal"
+              value={defaultHoursWorked}
+              onChange={(event) => {
+                setDefaultHoursWorked(event.target.value)
+                setSaved(false)
+              }}
+            />
+          </Field>
           <Field label="Pay frequency">
             <SelectInput
               value={payFrequency}
@@ -76,7 +88,9 @@ export function SettingsPage({
             </SelectInput>
           </Field>
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={saveSettings}>Save settings</Button>
+            <Button onClick={saveSettings} disabled={saved}>
+              Save settings
+            </Button>
             {saved && (
               <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
                 <CheckCircle2 size={18} />

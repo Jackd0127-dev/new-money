@@ -63,6 +63,7 @@ function createSnapshot(): PlannerSnapshot {
       payFrequency: 'biweekly',
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
+      defaultHoursWorked: 72,
       createdAt: timestamp,
       updatedAt: timestamp,
     },

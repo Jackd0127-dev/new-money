@@ -82,7 +82,11 @@ function requireFirestore() {
 
 function normalizePlannerSnapshot(snapshot: Partial<PlannerSnapshot>): PlannerSnapshot {
   return {
-    settings: snapshot.settings ?? defaultSettings,
+    settings: {
+      ...defaultSettings,
+      ...snapshot.settings,
+      defaultHoursWorked: snapshot.settings?.defaultHoursWorked ?? defaultSettings.defaultHoursWorked,
+    },
     pots: snapshot.pots ?? [],
     recurringPayments: snapshot.recurringPayments ?? [],
     payPeriods: snapshot.payPeriods ?? [],

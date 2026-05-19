@@ -24,6 +24,7 @@ export interface Settings extends Timestamped {
   payFrequency: PayFrequency
   defaultPayPeriodDays: number
   hourlyRatePence: number
+  defaultHoursWorked: number
 }
 
 export interface Pot extends Timestamped {
@@ -54,6 +55,7 @@ export interface PayPeriod extends Timestamped {
   endDate: string
   payday: string
   nextPayday: string
+  payFrequency?: PayFrequency
   incomePence: number
   status: PayPeriodStatus
 }

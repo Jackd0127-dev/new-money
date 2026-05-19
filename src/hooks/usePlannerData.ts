@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
+  addCreditCard,
+  addCreditCardRepayment,
+  addCustomPayment,
+  addDailyBrief,
   addDebt,
   addDebtPayment,
   addPot,
   addRecurringPayment,
   addTransaction,
+  archiveCreditCard,
   archivePot,
   createPaycheckPlan,
   deleteDebt,
   deleteDebtPayment,
+  deleteCreditCardRepayment,
   deletePayPeriod,
   deleteRecurringPayment,
   deleteTransaction,
@@ -17,9 +23,15 @@ import {
   resetPlannerData,
   toggleRecurringPayment,
   updateDebt,
+  updateCustomPayment,
   updateRecurringPayment,
   updateSettings,
   updateTransaction,
+  type CreditCardInput,
+  type CreditCardRepaymentInput,
+  type CustomPaymentInput,
+  type CustomPaymentUpdateInput,
+  type DailyBriefInput,
   type DebtInput,
   type DebtPaymentInput,
   type DebtUpdateInput,
@@ -38,6 +50,13 @@ export interface PlannerActions {
   updateSettings: typeof updateSettings
   addPot: typeof addPot
   archivePot: typeof archivePot
+  addCreditCard: typeof addCreditCard
+  archiveCreditCard: typeof archiveCreditCard
+  addCustomPayment: typeof addCustomPayment
+  updateCustomPayment: typeof updateCustomPayment
+  addCreditCardRepayment: typeof addCreditCardRepayment
+  deleteCreditCardRepayment: typeof deleteCreditCardRepayment
+  addDailyBrief: typeof addDailyBrief
   addRecurringPayment: typeof addRecurringPayment
   updateRecurringPayment: typeof updateRecurringPayment
   toggleRecurringPayment: typeof toggleRecurringPayment
@@ -84,6 +103,13 @@ export function usePlannerData() {
       updateSettings: withRefresh(updateSettings, refresh),
       addPot: withRefresh(addPot, refresh),
       archivePot: withRefresh(archivePot, refresh),
+      addCreditCard: withRefresh(addCreditCard, refresh),
+      archiveCreditCard: withRefresh(archiveCreditCard, refresh),
+      addCustomPayment: withRefresh(addCustomPayment, refresh),
+      updateCustomPayment: withRefresh(updateCustomPayment, refresh),
+      addCreditCardRepayment: withRefresh(addCreditCardRepayment, refresh),
+      deleteCreditCardRepayment: withRefresh(deleteCreditCardRepayment, refresh),
+      addDailyBrief: withRefresh(addDailyBrief, refresh),
       addRecurringPayment: withRefresh(addRecurringPayment, refresh),
       updateRecurringPayment: withRefresh(updateRecurringPayment, refresh),
       toggleRecurringPayment: withRefresh(toggleRecurringPayment, refresh),
@@ -122,6 +148,11 @@ function withRefresh<Args extends unknown[]>(
 }
 
 export type {
+  CreditCardInput,
+  CreditCardRepaymentInput,
+  CustomPaymentInput,
+  CustomPaymentUpdateInput,
+  DailyBriefInput,
   DebtInput,
   DebtPaymentInput,
   DebtUpdateInput,

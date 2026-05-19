@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DashboardPage } from './DashboardPage'
 import { DebtsPage } from './DebtsPage'
 import { HistoryPage } from './HistoryPage'
+import { AllocatingPaymentsPage } from './AllocatingPaymentsPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { PotsPage } from './PotsPage'
 import { RecurringPage } from './RecurringPage'
@@ -17,6 +18,9 @@ import type { RecurringPayment, Transaction } from '../types/models'
 type TestActions = PlannerActions & {
   addDebt: ReturnType<typeof vi.fn>
   addDebtPayment: ReturnType<typeof vi.fn>
+  addCreditCard: ReturnType<typeof vi.fn>
+  addCustomPayment: ReturnType<typeof vi.fn>
+  addCreditCardRepayment: ReturnType<typeof vi.fn>
   deletePayPeriod: ReturnType<typeof vi.fn>
   updateRecurringPayment: ReturnType<typeof vi.fn>
   updateTransaction: ReturnType<typeof vi.fn>
@@ -181,6 +185,195 @@ describe('spending page', () => {
       note: 'Dinner',
       potId: 'pot-food',
     })
+  })
+
+  it('logs spending against a credit card when credit card payment method is selected', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const today = toIsoDate(new Date())
+
+    render(
+      <SpendingPage
+        snapshot={createSnapshot({
+          creditCards: [
+            {
+              id: 'card-amex',
+              name: 'Everyday Amex',
+              provider: 'Amex',
+              limitPence: 100000,
+              dueDay: 12,
+              dueDate: null,
+              color: '#2563eb',
+              archived: false,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={actions}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '£20.00' }))
+    await user.selectOptions(screen.getByLabelText('Payment method'), 'credit_card')
+    await user.selectOptions(screen.getByLabelText('Credit card'), 'card-amex')
+    await user.type(screen.getByLabelText('Note'), 'Groceries')
+    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+
+    expect(actions.addTransaction).toHaveBeenCalledWith({
+      amountPence: 2000,
+      creditCardId: 'card-amex',
+      date: today,
+      note: 'Groceries',
+      paymentMethod: 'credit_card',
+      payPeriodId: null,
+      potId: 'pot-bills',
+      type: 'spending',
+    })
+  })
+})
+
+describe('allocating payments page', () => {
+  it('creates a credit card, custom card payment, and card repayment', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} />)
+
+    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Card')
+    await user.type(within(cardPanel).getByLabelText('Provider'), 'Capital One')
+    await user.type(within(cardPanel).getByLabelText('Limit'), '1200')
+    await user.clear(within(cardPanel).getByLabelText('Due day'))
+    await user.type(within(cardPanel).getByLabelText('Due day'), '9')
+    await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
+
+    expect(actions.addCreditCard).toHaveBeenCalledWith({
+      color: '#2563eb',
+      dueDate: null,
+      dueDay: 9,
+      limitPence: 120000,
+      name: 'Gold Card',
+      provider: 'Capital One',
+    })
+
+    const customPanel = screen.getByRole('region', { name: 'Add custom payment' })
+    await user.type(within(customPanel).getByLabelText('Payment name'), 'Tyres')
+    await user.type(within(customPanel).getByLabelText('Amount'), '30')
+    await user.clear(within(customPanel).getByLabelText('Due date'))
+    await user.type(within(customPanel).getByLabelText('Due date'), '2026-05-20')
+    await user.selectOptions(within(customPanel).getByLabelText('Credit card'), 'card-amex')
+    await user.click(within(customPanel).getByRole('button', { name: 'Add payment' }))
+
+    expect(actions.addCustomPayment).toHaveBeenCalledWith({
+      amountPence: 3000,
+      creditCardId: 'card-amex',
+      dueDate: '2026-05-20',
+      name: 'Tyres',
+    })
+
+    const repaymentPanel = screen.getByRole('region', { name: 'Record card repayment' })
+    await user.type(within(repaymentPanel).getByLabelText('Amount'), '12.50')
+    await user.type(within(repaymentPanel).getByLabelText('Note'), 'Part payment')
+    await user.click(within(repaymentPanel).getByRole('button', { name: 'Record repayment' }))
+
+    expect(actions.addCreditCardRepayment).toHaveBeenCalledWith({
+      amountPence: 1250,
+      creditCardId: 'card-amex',
+      date: toIsoDate(new Date()),
+      note: 'Part payment',
+    })
+  })
+
+  it('shows credit card diagrams and paycheck impact from linked payments', () => {
+    render(
+      <AllocatingPaymentsPage
+        snapshot={createSnapshot({
+          payPeriods: [
+            {
+              id: 'period-current',
+              startDate: '2026-05-16',
+              endDate: '2026-05-29',
+              payday: '2026-05-16',
+              nextPayday: '2026-05-30',
+              incomePence: 90000,
+              status: 'active',
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+          creditCards: [
+            {
+              id: 'card-amex',
+              name: 'Everyday Amex',
+              provider: 'Amex',
+              limitPence: 100000,
+              dueDay: 12,
+              dueDate: null,
+              color: '#2563eb',
+              archived: false,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+          recurringPayments: [
+            {
+              id: 'rec-phone',
+              name: 'Phone',
+              amountPence: 2200,
+              dueDay: 23,
+              frequency: 'monthly',
+              potId: 'pot-bills',
+              creditCardId: 'card-amex',
+              priority: 'important',
+              active: true,
+              createdAt: '2026-05-01T00:00:00.000Z',
+              updatedAt: '2026-05-01T00:00:00.000Z',
+            },
+          ],
+          transactions: [
+            {
+              id: 'txn-card',
+              potId: 'pot-food',
+              payPeriodId: 'period-current',
+              amountPence: 5000,
+              type: 'spending',
+              paymentMethod: 'credit_card',
+              creditCardId: 'card-amex',
+              date: '2026-05-18',
+              note: 'Groceries',
+              createdAt: '2026-05-18T00:00:00.000Z',
+              updatedAt: '2026-05-18T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={createActions()}
+      />,
+    )
+
+    expect(screen.getByText('Everyday Amex')).toBeInTheDocument()
+    expect(screen.getByText('Owed')).toBeInTheDocument()
+    expect(screen.getByText('£72.00')).toBeInTheDocument()
+    expect(screen.getByText('Remaining after cards')).toBeInTheDocument()
+    expect(screen.getByText('£828.00')).toBeInTheDocument()
+    expect(screen.getByText('Groceries')).toBeInTheDocument()
+    expect(screen.getByText('Phone')).toBeInTheDocument()
   })
 })
 
@@ -503,6 +696,37 @@ describe('dashboard page', () => {
     expect(screen.queryByText('Daily average')).not.toBeInTheDocument()
     expect(screen.queryByText('Projected spend')).not.toBeInTheDocument()
   })
+
+  it('shows the cached Gemini run-through with a refresh action', async () => {
+    const user = userEvent.setup()
+    const regenerate = vi.fn(async () => {})
+
+    render(
+      <DashboardPage
+        snapshot={createSnapshot()}
+        onViewChange={vi.fn()}
+        dailyBrief={{
+          currentBrief: {
+            id: 'brief-today',
+            date: '2026-05-19',
+            snapshotSignature: 'snapshot-signature',
+            content: 'Your card bills are covered. Check the fuel payment before payday.',
+            createdAt: '2026-05-19T08:00:00.000Z',
+            updatedAt: '2026-05-19T08:00:00.000Z',
+          },
+          status: 'ready',
+          error: null,
+          regenerate,
+        }}
+      />,
+    )
+
+    expect(screen.getByText("Today's Gemini run-through")).toBeInTheDocument()
+    expect(screen.getByText('Your card bills are covered. Check the fuel payment before payday.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Refresh brief' }))
+    expect(regenerate).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('history page', () => {
@@ -614,6 +838,13 @@ function createActions(): TestActions {
     updateSettings: vi.fn(async () => {}),
     addPot: vi.fn(async () => {}),
     archivePot: vi.fn(async () => {}),
+    addCreditCard: vi.fn(async () => {}),
+    archiveCreditCard: vi.fn(async () => {}),
+    addCustomPayment: vi.fn(async () => {}),
+    updateCustomPayment: vi.fn(async () => {}),
+    addCreditCardRepayment: vi.fn(async () => {}),
+    deleteCreditCardRepayment: vi.fn(async () => {}),
+    addDailyBrief: vi.fn(async () => {}),
     addRecurringPayment: vi.fn(async () => {}),
     updateRecurringPayment: vi.fn(async () => {}),
     toggleRecurringPayment: vi.fn(async () => {}),
@@ -679,6 +910,10 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
     transactions: transactions ?? [],
     debts: [],
     debtPayments: [],
+    creditCards: [],
+    customPayments: [],
+    creditCardRepayments: [],
+    dailyBriefs: [],
     ...overrides,
   }
 }

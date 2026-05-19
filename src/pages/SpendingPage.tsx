@@ -2,8 +2,14 @@ import { useState } from 'react'
 import { PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
-import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
+import type {
+  PlannerActions,
+  PlannerSnapshot,
+  TransactionInput,
+  TransactionUpdateInput,
+} from '../hooks/usePlannerData'
 import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
+import type { PaymentMethod } from '../types/models'
 
 const quickAmounts = ['3.00', '5.00', '10.00', '20.00', '50.00']
 
@@ -15,13 +21,17 @@ export function SpendingPage({
   actions: PlannerActions
 }) {
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
+  const activeCards = snapshot.creditCards.filter((card) => !card.archived)
   const latestPeriod = snapshot.payPeriods[0] ?? null
   const [potId, setPotId] = useState(activePots[0]?.id ?? '')
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pot')
+  const [creditCardId, setCreditCardId] = useState(activeCards[0]?.id ?? '')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(toIsoDate(new Date()))
   const [note, setNote] = useState('')
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
   const selectedPot = activePots.find((pot) => pot.id === potId)
+  const selectedCard = activeCards.find((card) => card.id === creditCardId)
   const recentNotes = Array.from(
     new Set(
       snapshot.transactions
@@ -30,34 +40,51 @@ export function SpendingPage({
     ),
   ).slice(0, 4)
   const parsedAmountPence = parsePoundsToPence(amount)
-  const canSubmitSpend = Boolean(potId) && parsedAmountPence > 0
+  const canSubmitSpend =
+    Boolean(potId) && parsedAmountPence > 0 && (paymentMethod === 'pot' || Boolean(creditCardId))
 
   async function submitTransaction() {
     const amountPence = parsedAmountPence
 
-    if (!potId || amountPence <= 0) {
+    if (!potId || amountPence <= 0 || (paymentMethod === 'credit_card' && !creditCardId)) {
       return
     }
 
     if (editingTransactionId) {
-      await actions.updateTransaction(editingTransactionId, {
+      const updateInput: TransactionUpdateInput = {
         potId,
         amountPence,
         date,
         note: note.trim() || 'Manual spend',
-      })
+        ...(paymentMethod === 'credit_card'
+          ? {
+              paymentMethod,
+              creditCardId,
+            }
+          : {}),
+      }
+
+      await actions.updateTransaction(editingTransactionId, updateInput)
       resetForm()
       return
     }
 
-    await actions.addTransaction({
+    const addInput: TransactionInput = {
       potId,
       amountPence,
       type: 'spending',
       date,
       note: note.trim() || 'Manual spend',
       payPeriodId: latestPeriod?.id ?? null,
-    })
+      ...(paymentMethod === 'credit_card'
+        ? {
+            paymentMethod,
+            creditCardId,
+          }
+        : {}),
+    }
+
+    await actions.addTransaction(addInput)
     resetForm()
   }
 
@@ -70,6 +97,8 @@ export function SpendingPage({
 
     setEditingTransactionId(transaction.id)
     setPotId(transaction.potId)
+    setPaymentMethod(transaction.paymentMethod ?? 'pot')
+    setCreditCardId(transaction.creditCardId ?? activeCards[0]?.id ?? '')
     setAmount((transaction.amountPence / 100).toFixed(2))
     setDate(transaction.date)
     setNote(transaction.note)
@@ -78,9 +107,19 @@ export function SpendingPage({
   function resetForm() {
     setEditingTransactionId(null)
     setPotId(activePots[0]?.id ?? '')
+    setPaymentMethod('pot')
+    setCreditCardId(activeCards[0]?.id ?? '')
     setAmount('')
     setDate(toIsoDate(new Date()))
     setNote('')
+  }
+
+  function changePaymentMethod(nextMethod: PaymentMethod) {
+    setPaymentMethod(nextMethod)
+
+    if (nextMethod === 'credit_card' && !creditCardId) {
+      setCreditCardId(activeCards[0]?.id ?? '')
+    }
   }
 
   return (
@@ -114,6 +153,25 @@ export function SpendingPage({
               ))}
             </SelectInput>
           </Field>
+          <Field label="Payment method">
+            <SelectInput value={paymentMethod} onChange={(event) => changePaymentMethod(event.target.value as PaymentMethod)}>
+              <option value="pot">Pot</option>
+              <option value="credit_card" disabled={activeCards.length === 0}>
+                Credit card
+              </option>
+            </SelectInput>
+          </Field>
+          {paymentMethod === 'credit_card' && (
+            <Field label="Credit card">
+              <SelectInput value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
+                {activeCards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.name} ({card.provider})
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+          )}
           <Field label="Date">
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
@@ -154,7 +212,9 @@ export function SpendingPage({
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-950">
                   {parsedAmountPence > 0 ? formatPence(parsedAmountPence) : 'No amount'} ·{' '}
-                  {selectedPot?.name ?? 'Choose pot'}
+                  {paymentMethod === 'credit_card'
+                    ? selectedCard?.name ?? 'Choose card'
+                    : selectedPot?.name ?? 'Choose pot'}
                 </p>
                 <p className="text-xs text-slate-500">{date}</p>
               </div>
@@ -171,13 +231,17 @@ export function SpendingPage({
           {snapshot.transactions.length > 0 ? (
             snapshot.transactions.slice(0, 12).map((transaction) => {
               const pot = snapshot.pots.find((candidate) => candidate.id === transaction.potId)
+              const card = snapshot.creditCards.find((candidate) => candidate.id === transaction.creditCardId)
 
               return (
                 <div key={transaction.id} className="flex items-center justify-between gap-4 rounded-lg bg-slate-50 px-4 py-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
                     <p className="text-xs text-slate-500">
-                      {transaction.date} · {pot?.name ?? 'Archived pot'}
+                      {transaction.date} ·{' '}
+                      {(transaction.paymentMethod ?? 'pot') === 'credit_card'
+                        ? card?.name ?? 'Archived card'
+                        : pot?.name ?? 'Archived pot'}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">

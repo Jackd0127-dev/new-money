@@ -15,12 +15,14 @@ export function RecurringPage({
   actions: PlannerActions
 }) {
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
+  const activeCards = snapshot.creditCards.filter((card) => !card.archived)
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
   const [dueDay, setDueDay] = useState('1')
   const [frequency, setFrequency] = useState<RecurringFrequency>('monthly')
   const [priority, setPriority] = useState<RecurringPriority>('essential')
   const [potId, setPotId] = useState(activePots[0]?.id ?? '')
+  const [creditCardId, setCreditCardId] = useState('')
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
 
   async function submitPayment() {
@@ -32,26 +34,41 @@ export function RecurringPage({
     }
 
     if (editingPaymentId) {
-      await actions.updateRecurringPayment(editingPaymentId, {
+      const currentPayment = snapshot.recurringPayments.find((candidate) => candidate.id === editingPaymentId)
+      const updateInput = {
         name: name.trim(),
         amountPence,
         dueDay: dueDayNumber,
         frequency,
         potId,
         priority,
-      })
+        ...(creditCardId || currentPayment?.creditCardId
+          ? {
+              creditCardId: creditCardId || null,
+            }
+          : {}),
+      }
+
+      await actions.updateRecurringPayment(editingPaymentId, updateInput)
       resetForm()
       return
     }
 
-    await actions.addRecurringPayment({
+    const addInput = {
       name: name.trim(),
       amountPence,
       dueDay: dueDayNumber,
       frequency,
       potId,
       priority,
-    })
+      ...(creditCardId
+        ? {
+            creditCardId,
+          }
+        : {}),
+    }
+
+    await actions.addRecurringPayment(addInput)
     resetForm()
   }
 
@@ -69,6 +86,7 @@ export function RecurringPage({
     setFrequency(payment.frequency)
     setPriority(payment.priority)
     setPotId(payment.potId)
+    setCreditCardId(payment.creditCardId ?? '')
   }
 
   function resetForm() {
@@ -79,6 +97,7 @@ export function RecurringPage({
     setFrequency('monthly')
     setPriority('essential')
     setPotId(activePots[0]?.id ?? '')
+    setCreditCardId('')
   }
 
   return (
@@ -117,6 +136,16 @@ export function RecurringPage({
               ))}
             </SelectInput>
           </Field>
+          <Field label="Paid on credit card">
+            <SelectInput value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
+              <option value="">Unlinked</option>
+              {activeCards.map((card) => (
+                <option key={card.id} value={card.id}>
+                  {card.name} ({card.provider})
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
           <Field label="Priority">
             <SelectInput value={priority} onChange={(event) => setPriority(event.target.value as RecurringPriority)}>
               <option value="essential">Essential</option>
@@ -142,6 +171,7 @@ export function RecurringPage({
           {snapshot.recurringPayments.length > 0 ? (
             snapshot.recurringPayments.map((payment) => {
               const pot = snapshot.pots.find((candidate) => candidate.id === payment.potId)
+              const card = snapshot.creditCards.find((candidate) => candidate.id === payment.creditCardId)
 
               return (
                 <div key={payment.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -152,6 +182,7 @@ export function RecurringPage({
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
                       Due day {payment.dueDay} · {payment.frequency} · {pot?.name ?? 'Archived pot'}
+                      {card ? ` · ${card.name}` : ''}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">

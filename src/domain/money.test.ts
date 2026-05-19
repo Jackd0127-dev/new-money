@@ -8,11 +8,23 @@ import {
   getAllocationBalance,
   getDebtSummary,
   getPayPeriodMoneySummary,
+  getCreditCardAllocationSummary,
   getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
 } from './money'
-import type { Debt, DebtPayment, Pot, PotAllocation, RecurringPayment, Transaction } from '../types/models'
+import type {
+  CreditCard,
+  CreditCardRepayment,
+  CustomPayment,
+  Debt,
+  DebtPayment,
+  PayPeriod,
+  Pot,
+  PotAllocation,
+  RecurringPayment,
+  Transaction,
+} from '../types/models'
 
 describe('paycheck calculations', () => {
   it('calculates income from hours worked and hourly rate in pence', () => {
@@ -410,5 +422,186 @@ describe('debt tracking', () => {
       minimumDueNext30DaysPence: 5000,
       progressPercent: 29,
     })
+  })
+})
+
+describe('credit card allocation', () => {
+  const cards: CreditCard[] = [
+    {
+      id: 'card-amex',
+      name: 'Everyday Amex',
+      provider: 'Amex',
+      limitPence: 100000,
+      dueDay: 12,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    },
+  ]
+  const payPeriod: PayPeriod = {
+    id: 'period-current',
+    startDate: '2026-05-16',
+    endDate: '2026-05-29',
+    payday: '2026-05-16',
+    nextPayday: '2026-05-30',
+    incomePence: 90000,
+    status: 'active',
+    createdAt: '2026-05-16T00:00:00.000Z',
+    updatedAt: '2026-05-16T00:00:00.000Z',
+  }
+
+  it('calculates card owed from linked due payments, spending, custom payments, and repayments', () => {
+    const recurringPayments: RecurringPayment[] = [
+      {
+        id: 'phone',
+        name: 'Phone',
+        amountPence: 2200,
+        dueDay: 23,
+        frequency: 'monthly',
+        potId: 'bills',
+        priority: 'important',
+        active: true,
+        creditCardId: 'card-amex',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+      {
+        id: 'travel',
+        name: 'Travel card',
+        amountPence: 1200,
+        dueDay: 18,
+        frequency: 'weekly',
+        potId: 'transport',
+        priority: 'important',
+        active: true,
+        creditCardId: 'card-amex',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+      {
+        id: 'future',
+        name: 'Future bill',
+        amountPence: 9900,
+        dueDay: 30,
+        frequency: 'monthly',
+        potId: 'bills',
+        priority: 'optional',
+        active: true,
+        creditCardId: 'card-amex',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+    ]
+    const customPayments: CustomPayment[] = [
+      {
+        id: 'custom-car',
+        name: 'Tyres',
+        amountPence: 3000,
+        dueDate: '2026-05-20',
+        creditCardId: 'card-amex',
+        status: 'unpaid',
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+    ]
+    const transactions: Transaction[] = [
+      {
+        id: 'txn-food',
+        potId: 'food',
+        amountPence: 5000,
+        type: 'spending',
+        paymentMethod: 'credit_card',
+        creditCardId: 'card-amex',
+        date: '2026-05-18',
+        note: 'Groceries',
+        createdAt: '2026-05-18T00:00:00.000Z',
+        updatedAt: '2026-05-18T00:00:00.000Z',
+      },
+      {
+        id: 'txn-future',
+        potId: 'food',
+        amountPence: 7000,
+        type: 'spending',
+        paymentMethod: 'credit_card',
+        creditCardId: 'card-amex',
+        date: '2026-06-01',
+        note: 'Future shop',
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+    ]
+    const repayments: CreditCardRepayment[] = [
+      {
+        id: 'repayment-1',
+        creditCardId: 'card-amex',
+        amountPence: 2000,
+        date: '2026-05-24',
+        note: 'Part payment',
+        createdAt: '2026-05-24T00:00:00.000Z',
+        updatedAt: '2026-05-24T00:00:00.000Z',
+      },
+    ]
+
+    const summary = getCreditCardAllocationSummary({
+      creditCards: cards,
+      recurringPayments,
+      customPayments,
+      transactions,
+      repayments,
+      payPeriod,
+    })
+
+    expect(summary.totalOwedPence).toBe(10600)
+    expect(summary.paycheckRemainingAfterCardsPence).toBe(79400)
+    expect(summary.cards[0]).toMatchObject({
+      owedPence: 10600,
+      availableCreditPence: 89400,
+      utilisationPercent: 11,
+      dueLabel: 'Day 12',
+    })
+    expect(summary.cards[0].items.map((item) => item.label)).toEqual([
+      'Groceries',
+      'Travel card',
+      'Tyres',
+      'Phone',
+      'Part payment',
+      'Travel card',
+    ])
+  })
+
+  it('lists unlinked payments separately from card balances', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: cards,
+      recurringPayments: [
+        {
+          id: 'netflix',
+          name: 'Netflix',
+          amountPence: 999,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'subs',
+          priority: 'optional',
+          active: true,
+          creditCardId: null,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      payPeriod,
+    })
+
+    expect(summary.cards[0].owedPence).toBe(0)
+    expect(summary.unlinkedItems).toEqual([
+      expect.objectContaining({
+        label: 'Netflix',
+        amountPence: 999,
+        source: 'recurring',
+      }),
+    ])
   })
 })

@@ -19,9 +19,12 @@ VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 VITE_ENABLE_APPLE_AUTH=false
+GEMINI_API_KEY=
+FIREBASE_SERVICE_ACCOUNT_JSON=
 ```
 
 The app still works without Firebase config. In that mode, data remains in this browser through IndexedDB.
+Gemini daily run-throughs only work on Vercel when `GEMINI_API_KEY` and `FIREBASE_SERVICE_ACCOUNT_JSON` are set as server-side environment variables.
 
 ## Firebase Setup
 
@@ -44,6 +47,10 @@ service cloud.firestore {
 ```
 
 Apple sign-in is implemented in code but stays disabled until the Firebase Apple provider is configured with an Apple Developer Services ID, Team ID, Key ID, and private key. Set `VITE_ENABLE_APPLE_AUTH=true` after the provider is fully enabled.
+
+## Gemini Daily Brief
+
+The app calls `/api/daily-brief` after Firebase sync is up to date for a signed-in user. The browser sends the Firebase ID token, the Vercel function verifies it with Firebase Admin, then Gemini generates one daily run-through from the planner snapshot. The Gemini key is never exposed to the client bundle.
 
 ## Checks
 

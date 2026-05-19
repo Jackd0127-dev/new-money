@@ -4,15 +4,18 @@ import {
   getRecurringPaymentOccurrences,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
+import type { DailyBriefController } from '../hooks/useDailyBrief'
 import { Button, Panel } from '../components/ui'
 import type { ViewKey } from '../types/navigation'
 
 export function DashboardPage({
   snapshot,
   onViewChange,
+  dailyBrief,
 }: {
   snapshot: PlannerSnapshot
   onViewChange: (view: ViewKey) => void
+  dailyBrief?: DailyBriefController
 }) {
   const latestPeriod = snapshot.payPeriods[0] ?? null
   const periodAllocations = latestPeriod
@@ -31,6 +34,40 @@ export function DashboardPage({
 
   return (
     <div className="space-y-6">
+      {dailyBrief && dailyBrief.status !== 'signed-out' && (
+        <Panel
+          title="Today's Gemini run-through"
+          description="Generated once per day from your signed-in planner data."
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => void dailyBrief.regenerate()}
+              disabled={dailyBrief.status === 'generating'}
+            >
+              Refresh brief
+            </Button>
+          }
+        >
+          {dailyBrief.currentBrief ? (
+            <p className="whitespace-pre-line rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+              {dailyBrief.currentBrief.content}
+            </p>
+          ) : dailyBrief.status === 'generating' ? (
+            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+              Generating today's run-through.
+            </p>
+          ) : dailyBrief.status === 'error' ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {dailyBrief.error ?? "Unable to generate today's run-through."}
+            </p>
+          ) : (
+            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+              Today's run-through will appear after sign-in and sync finish.
+            </p>
+          )}
+        </Panel>
+      )}
+
       <Panel
         title="Current pay period"
         description={

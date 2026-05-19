@@ -1,7 +1,11 @@
 import type {
+  CreditCard,
+  CreditCardRepayment,
+  CustomPayment,
   Debt,
   DebtPayment,
   PayFrequency,
+  PayPeriod,
   Pot,
   PotAllocation,
   RecurringPayment,
@@ -64,6 +68,41 @@ export interface PayPeriodMoneySummary {
   totalPaymentsDuePence: number
   moneyLeftPence: number
   isOverCommitted: boolean
+}
+
+interface CreditCardAllocationInput {
+  creditCards: CreditCard[]
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  repayments: CreditCardRepayment[]
+  payPeriod: PayPeriod | null
+}
+
+export interface CreditCardAllocationItem {
+  id: string
+  creditCardId: string | null
+  label: string
+  amountPence: number
+  date: string
+  source: 'recurring' | 'custom' | 'spending' | 'repayment'
+}
+
+export interface CreditCardAllocationCardSummary {
+  card: CreditCard
+  owedPence: number
+  availableCreditPence: number
+  utilisationPercent: number
+  dueLabel: string
+  items: CreditCardAllocationItem[]
+}
+
+export interface CreditCardAllocationSummary {
+  cards: CreditCardAllocationCardSummary[]
+  unlinkedItems: CreditCardAllocationItem[]
+  totalOwedPence: number
+  payReceivedPence: number
+  paycheckRemainingAfterCardsPence: number
 }
 
 export function calculatePaycheckAmount({
@@ -256,6 +295,101 @@ export function getPayPeriodMoneySummary({
   }
 }
 
+export function getCreditCardAllocationSummary({
+  creditCards,
+  recurringPayments,
+  customPayments,
+  transactions,
+  repayments,
+  payPeriod,
+}: CreditCardAllocationInput): CreditCardAllocationSummary {
+  const rangeStart = payPeriod?.startDate ?? '0000-01-01'
+  const rangeEnd = payPeriod?.endDate ?? toIsoDate(new Date())
+  const activeCards = creditCards.filter((card) => !card.archived)
+  const items = [
+    ...getRecurringPaymentOccurrences(recurringPayments, rangeStart, rangeEnd).map((occurrence) => ({
+      id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+      creditCardId: occurrence.payment.creditCardId ?? null,
+      label: occurrence.payment.name,
+      amountPence: occurrence.amountPence,
+      date: occurrence.dueDate,
+      source: 'recurring' as const,
+    })),
+    ...customPayments
+      .filter(
+        (payment) =>
+          payment.status === 'unpaid' &&
+          payment.dueDate >= rangeStart &&
+          payment.dueDate <= rangeEnd,
+      )
+      .map((payment) => ({
+        id: `custom-${payment.id}`,
+        creditCardId: payment.creditCardId ?? null,
+        label: payment.name,
+        amountPence: payment.amountPence,
+        date: payment.dueDate,
+        source: 'custom' as const,
+      })),
+    ...transactions
+      .filter(
+        (transaction) =>
+          transaction.type === 'spending' &&
+          transaction.paymentMethod === 'credit_card' &&
+          transaction.date >= rangeStart &&
+          transaction.date <= rangeEnd,
+      )
+      .map((transaction) => ({
+        id: `transaction-${transaction.id}`,
+        creditCardId: transaction.creditCardId ?? null,
+        label: transaction.note,
+        amountPence: transaction.amountPence,
+        date: transaction.date,
+        source: 'spending' as const,
+      })),
+    ...repayments
+      .filter((repayment) => repayment.date >= rangeStart && repayment.date <= rangeEnd)
+      .map((repayment) => ({
+        id: `repayment-${repayment.id}`,
+        creditCardId: repayment.creditCardId,
+        label: repayment.note || 'Card repayment',
+        amountPence: -repayment.amountPence,
+        date: repayment.date,
+        source: 'repayment' as const,
+      })),
+  ].sort((a, b) => {
+    const dateSort = a.date.localeCompare(b.date)
+
+    if (dateSort !== 0) {
+      return dateSort
+    }
+
+    return a.label.localeCompare(b.label)
+  })
+  const cards = activeCards.map((card) => {
+    const cardItems = items.filter((item) => item.creditCardId === card.id)
+    const owedPence = Math.max(0, cardItems.reduce((total, item) => total + item.amountPence, 0))
+    const availableCreditPence = Math.max(0, card.limitPence - owedPence)
+
+    return {
+      card,
+      owedPence,
+      availableCreditPence,
+      utilisationPercent: card.limitPence > 0 ? Math.round((owedPence / card.limitPence) * 100) : 0,
+      dueLabel: getCreditCardDueLabel(card),
+      items: cardItems,
+    }
+  })
+  const totalOwedPence = cards.reduce((total, card) => total + card.owedPence, 0)
+
+  return {
+    cards,
+    unlinkedItems: items.filter((item) => !item.creditCardId),
+    totalOwedPence,
+    payReceivedPence: payPeriod?.incomePence ?? 0,
+    paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalOwedPence,
+  }
+}
+
 export function getDaysInclusive(startDate: string, endDate: string): number {
   const start = parseDate(startDate)
   const end = parseDate(endDate)
@@ -337,6 +471,18 @@ export function getDebtSummary(
         ? Math.round((totalPaidPence / totalOriginalAmountPence) * 100)
         : 0,
   }
+}
+
+function getCreditCardDueLabel(card: CreditCard): string {
+  if (card.dueDate) {
+    return card.dueDate
+  }
+
+  if (card.dueDay) {
+    return `Day ${card.dueDay}`
+  }
+
+  return 'No due date'
 }
 
 function getRecurringPaymentDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {

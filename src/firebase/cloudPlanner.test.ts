@@ -98,5 +98,9 @@ function createSnapshot(): PlannerSnapshot {
     transactions: [],
     debts: [],
     debtPayments: [],
+    creditCards: [],
+    customPayments: [],
+    creditCardRepayments: [],
+    dailyBriefs: [],
   }
 }

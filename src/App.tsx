@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 
 import { AppShell } from './components/AppShell'
+import { AllocatingPaymentsPage } from './pages/AllocatingPaymentsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DebtsPage } from './pages/DebtsPage'
 import { HistoryPage } from './pages/HistoryPage'
@@ -10,6 +11,7 @@ import { RecurringPage } from './pages/RecurringPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SpendingPage } from './pages/SpendingPage'
 import { useCloudSync } from './hooks/useCloudSync'
+import { useDailyBrief } from './hooks/useDailyBrief'
 import { useFirebaseAuth } from './hooks/useFirebaseAuth'
 import { usePlannerData } from './hooks/usePlannerData'
 import type { ViewKey } from './types/navigation'
@@ -22,6 +24,11 @@ function App() {
     user: auth.user,
     snapshot,
     refresh: actions.refresh,
+  })
+  const dailyBrief = useDailyBrief({
+    user: sync.status === 'synced' ? auth.user : null,
+    snapshot,
+    addDailyBrief: actions.addDailyBrief,
   })
 
   if (isLoading) {
@@ -47,10 +54,11 @@ function App() {
   }
 
   const pages: Record<ViewKey, ReactNode> = {
-    dashboard: <DashboardPage snapshot={snapshot} onViewChange={setActiveView} />,
+    dashboard: <DashboardPage snapshot={snapshot} onViewChange={setActiveView} dailyBrief={dailyBrief} />,
     payday: <PaydayWizardPage snapshot={snapshot} actions={actions} />,
     pots: <PotsPage snapshot={snapshot} actions={actions} />,
     spending: <SpendingPage snapshot={snapshot} actions={actions} />,
+    allocatingPayments: <AllocatingPaymentsPage snapshot={snapshot} actions={actions} />,
     debts: <DebtsPage snapshot={snapshot} actions={actions} />,
     recurring: <RecurringPage snapshot={snapshot} actions={actions} />,
     history: <HistoryPage snapshot={snapshot} actions={actions} />,

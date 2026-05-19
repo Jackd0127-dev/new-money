@@ -3,6 +3,10 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  addCreditCard,
+  addCreditCardRepayment,
+  addCustomPayment,
+  addDailyBrief,
   createPaycheckPlan,
   deletePayPeriod,
   getPlannerSnapshot,
@@ -76,5 +80,64 @@ describe('paycheck plan storage', () => {
     expect(snapshot.paychecks).toHaveLength(0)
     expect(snapshot.potAllocations).toHaveLength(0)
     expect(foodPot?.balancePence).toBe(0)
+  })
+
+  it('persists credit cards, custom payments, repayments, and daily briefs in the planner snapshot', async () => {
+    await addCreditCard({
+      name: 'Everyday Amex',
+      provider: 'Amex',
+      limitPence: 100000,
+      dueDay: 12,
+      dueDate: null,
+      color: '#2563eb',
+    })
+
+    const withCard = await getPlannerSnapshot()
+    const card = withCard.creditCards[0]
+
+    await addCustomPayment({
+      name: 'Tyres',
+      amountPence: 3000,
+      dueDate: '2026-05-20',
+      creditCardId: card.id,
+    })
+    await addCreditCardRepayment({
+      creditCardId: card.id,
+      amountPence: 1250,
+      date: '2026-05-24',
+      note: 'Part payment',
+    })
+    await addDailyBrief({
+      date: '2026-05-19',
+      snapshotSignature: 'snapshot-signature',
+      content: 'Today: check your card balances.',
+    })
+
+    const snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.creditCards[0]).toMatchObject({
+      name: 'Everyday Amex',
+      provider: 'Amex',
+      limitPence: 100000,
+      dueDay: 12,
+      dueDate: null,
+      archived: false,
+    })
+    expect(snapshot.customPayments[0]).toMatchObject({
+      name: 'Tyres',
+      amountPence: 3000,
+      creditCardId: card.id,
+      status: 'unpaid',
+    })
+    expect(snapshot.creditCardRepayments[0]).toMatchObject({
+      creditCardId: card.id,
+      amountPence: 1250,
+      note: 'Part payment',
+    })
+    expect(snapshot.dailyBriefs[0]).toMatchObject({
+      date: '2026-05-19',
+      snapshotSignature: 'snapshot-signature',
+      content: 'Today: check your card balances.',
+    })
   })
 })

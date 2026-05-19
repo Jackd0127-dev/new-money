@@ -12,6 +12,10 @@ export type TransactionType = 'spending' | 'allocation' | 'transfer' | 'adjustme
 
 export type DebtStatus = 'active' | 'paid' | 'archived'
 
+export type PaymentMethod = 'pot' | 'credit_card'
+
+export type CustomPaymentStatus = 'unpaid' | 'paid' | 'archived'
+
 export interface Timestamped {
   createdAt: string
   updatedAt: string
@@ -45,6 +49,7 @@ export interface RecurringPayment extends Timestamped {
   dueDate?: string
   frequency: RecurringFrequency
   potId: string
+  creditCardId?: string | null
   priority: RecurringPriority
   active: boolean
 }
@@ -84,6 +89,8 @@ export interface Transaction extends Timestamped {
   payPeriodId?: string | null
   amountPence: number
   type: TransactionType
+  paymentMethod?: PaymentMethod
+  creditCardId?: string | null
   date: string
   note: string
 }
@@ -107,4 +114,39 @@ export interface DebtPayment extends Timestamped {
   amountPence: number
   date: string
   note: string
+}
+
+export interface CreditCard extends Timestamped {
+  id: string
+  name: string
+  provider: string
+  limitPence: number
+  dueDay?: number | null
+  dueDate?: string | null
+  color: string
+  archived: boolean
+}
+
+export interface CustomPayment extends Timestamped {
+  id: string
+  name: string
+  amountPence: number
+  dueDate: string
+  creditCardId?: string | null
+  status: CustomPaymentStatus
+}
+
+export interface CreditCardRepayment extends Timestamped {
+  id: string
+  creditCardId: string
+  amountPence: number
+  date: string
+  note: string
+}
+
+export interface DailyBrief extends Timestamped {
+  id: string
+  date: string
+  snapshotSignature: string
+  content: string
 }

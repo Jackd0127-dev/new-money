@@ -7,6 +7,10 @@ import {
   getUncoveredRecurringPence,
 } from '../domain/money'
 import type {
+  CreditCard,
+  CreditCardRepayment,
+  CustomPayment,
+  DailyBrief,
   Debt,
   DebtPayment,
   DebtStatus,
@@ -34,6 +38,10 @@ export interface PlannerSnapshot {
   transactions: Transaction[]
   debts: Debt[]
   debtPayments: DebtPayment[]
+  creditCards: CreditCard[]
+  customPayments: CustomPayment[]
+  creditCardRepayments: CreditCardRepayment[]
+  dailyBriefs: DailyBrief[]
 }
 
 export interface PaycheckPlanInput {
@@ -58,6 +66,7 @@ export interface RecurringPaymentInput {
   dueDay: number
   frequency: RecurringFrequency
   potId: string
+  creditCardId?: string | null
   priority: RecurringPriority
 }
 
@@ -68,6 +77,8 @@ export interface TransactionInput {
   payPeriodId?: string | null
   amountPence: number
   type: TransactionType
+  paymentMethod?: Transaction['paymentMethod']
+  creditCardId?: string | null
   date: string
   note: string
 }
@@ -75,8 +86,43 @@ export interface TransactionInput {
 export interface TransactionUpdateInput {
   potId: string
   amountPence: number
+  paymentMethod?: Transaction['paymentMethod']
+  creditCardId?: string | null
   date: string
   note: string
+}
+
+export interface CreditCardInput {
+  name: string
+  provider: string
+  limitPence: number
+  dueDay?: number | null
+  dueDate?: string | null
+  color: string
+}
+
+export interface CustomPaymentInput {
+  name: string
+  amountPence: number
+  dueDate: string
+  creditCardId?: string | null
+}
+
+export type CustomPaymentUpdateInput = CustomPaymentInput & {
+  status: CustomPayment['status']
+}
+
+export interface CreditCardRepaymentInput {
+  creditCardId: string
+  amountPence: number
+  date: string
+  note: string
+}
+
+export interface DailyBriefInput {
+  date: string
+  snapshotSignature: string
+  content: string
 }
 
 export interface DebtInput {
@@ -113,6 +159,10 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     transactions,
     debts,
     debtPayments,
+    creditCards,
+    customPayments,
+    creditCardRepayments,
+    dailyBriefs,
   ] =
     await Promise.all([
       db.settings.get('default'),
@@ -124,6 +174,10 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
       db.transactions.orderBy('date').reverse().toArray(),
       db.debts.orderBy('dueDate').toArray(),
       db.debtPayments.orderBy('date').reverse().toArray(),
+      db.creditCards.toArray(),
+      db.customPayments.orderBy('dueDate').toArray(),
+      db.creditCardRepayments.orderBy('date').reverse().toArray(),
+      db.dailyBriefs.orderBy('date').reverse().toArray(),
     ])
 
   return {
@@ -136,6 +190,10 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     transactions,
     debts,
     debtPayments,
+    creditCards: creditCards.sort((a, b) => a.name.localeCompare(b.name)),
+    customPayments,
+    creditCardRepayments,
+    dailyBriefs,
   }
 }
 
@@ -173,6 +231,96 @@ export async function archivePot(potId: string): Promise<void> {
   })
 }
 
+export async function addCreditCard(input: CreditCardInput): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.creditCards.add({
+    id: crypto.randomUUID(),
+    name: input.name.trim(),
+    provider: input.provider.trim(),
+    limitPence: Math.max(0, input.limitPence),
+    dueDay: input.dueDay ?? null,
+    dueDate: input.dueDate ?? null,
+    color: input.color,
+    archived: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function archiveCreditCard(cardId: string): Promise<void> {
+  await db.creditCards.update(cardId, {
+    archived: true,
+    updatedAt: nowIso(),
+  })
+}
+
+export async function addCustomPayment(input: CustomPaymentInput): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.customPayments.add({
+    id: crypto.randomUUID(),
+    name: input.name.trim(),
+    amountPence: Math.max(0, input.amountPence),
+    dueDate: input.dueDate,
+    creditCardId: input.creditCardId ?? null,
+    status: 'unpaid',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function updateCustomPayment(
+  paymentId: string,
+  input: CustomPaymentUpdateInput,
+): Promise<void> {
+  await db.customPayments.update(paymentId, {
+    name: input.name.trim(),
+    amountPence: Math.max(0, input.amountPence),
+    dueDate: input.dueDate,
+    creditCardId: input.creditCardId ?? null,
+    status: input.status,
+    updatedAt: nowIso(),
+  })
+}
+
+export async function addCreditCardRepayment(input: CreditCardRepaymentInput): Promise<void> {
+  const timestamp = nowIso()
+  const amountPence = Math.abs(input.amountPence)
+
+  if (!input.creditCardId || amountPence <= 0) {
+    return
+  }
+
+  await db.creditCardRepayments.add({
+    id: crypto.randomUUID(),
+    creditCardId: input.creditCardId,
+    amountPence,
+    date: input.date,
+    note: input.note.trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function deleteCreditCardRepayment(repaymentId: string): Promise<void> {
+  await db.creditCardRepayments.delete(repaymentId)
+}
+
+export async function addDailyBrief(input: DailyBriefInput): Promise<void> {
+  const timestamp = nowIso()
+  const existing = await db.dailyBriefs.where('date').equals(input.date).first()
+
+  await db.dailyBriefs.put({
+    id: existing?.id ?? crypto.randomUUID(),
+    date: input.date,
+    snapshotSignature: input.snapshotSignature,
+    content: input.content,
+    createdAt: existing?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  })
+}
+
 export async function addRecurringPayment(input: RecurringPaymentInput): Promise<void> {
   const timestamp = nowIso()
   const payment: RecurringPayment = {
@@ -182,6 +330,7 @@ export async function addRecurringPayment(input: RecurringPaymentInput): Promise
     dueDay: input.dueDay,
     frequency: input.frequency,
     potId: input.potId,
+    creditCardId: input.creditCardId ?? null,
     priority: input.priority,
     active: true,
     createdAt: timestamp,
@@ -259,6 +408,8 @@ export async function addTransaction(input: TransactionInput): Promise<void> {
       payPeriodId: input.payPeriodId ?? null,
       amountPence,
       type: input.type,
+      paymentMethod: input.paymentMethod ?? 'pot',
+      creditCardId: input.paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
       date: input.date,
       note: input.note,
       createdAt: timestamp,
@@ -267,7 +418,7 @@ export async function addTransaction(input: TransactionInput): Promise<void> {
 
     const pot = await db.pots.get(input.potId)
 
-    if (pot) {
+    if (pot && (input.paymentMethod ?? 'pot') !== 'credit_card') {
       const delta = input.type === 'spending' ? -amountPence : amountPence
       await db.pots.update(pot.id, {
         balancePence: pot.balancePence + delta,
@@ -294,7 +445,7 @@ export async function updateTransaction(
     const oldPot = await db.pots.get(current.potId)
     let samePotAfterRemovalBalance: number | null = null
 
-    if (oldPot) {
+    if (oldPot && (current.paymentMethod ?? 'pot') !== 'credit_card') {
       samePotAfterRemovalBalance = getPotBalanceAfterTransactionRemoval(oldPot, current)
       await db.pots.update(oldPot.id, {
         balancePence: samePotAfterRemovalBalance,
@@ -308,16 +459,20 @@ export async function updateTransaction(
         : await db.pots.get(input.potId)
 
     if (nextPot) {
-      const delta = current.type === 'spending' ? -amountPence : amountPence
-      await db.pots.update(nextPot.id, {
-        balancePence: nextPot.balancePence + delta,
-        updatedAt: timestamp,
-      })
+      if ((input.paymentMethod ?? 'pot') !== 'credit_card') {
+        const delta = current.type === 'spending' ? -amountPence : amountPence
+        await db.pots.update(nextPot.id, {
+          balancePence: nextPot.balancePence + delta,
+          updatedAt: timestamp,
+        })
+      }
     }
 
     await db.transactions.update(current.id, {
       potId: input.potId,
       amountPence,
+      paymentMethod: input.paymentMethod ?? 'pot',
+      creditCardId: input.paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
       date: input.date,
       note: input.note,
       updatedAt: timestamp,
@@ -337,7 +492,7 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
 
     const pot = await db.pots.get(transaction.potId)
 
-    if (pot) {
+    if (pot && (transaction.paymentMethod ?? 'pot') !== 'credit_card') {
       await db.pots.update(pot.id, {
         balancePence: getPotBalanceAfterTransactionRemoval(pot, transaction),
         updatedAt: nowIso(),
@@ -629,6 +784,10 @@ export async function resetPlannerData(): Promise<void> {
       db.transactions,
       db.debts,
       db.debtPayments,
+      db.creditCards,
+      db.customPayments,
+      db.creditCardRepayments,
+      db.dailyBriefs,
     ],
     async () => {
       await Promise.all([
@@ -641,6 +800,10 @@ export async function resetPlannerData(): Promise<void> {
         db.transactions.clear(),
         db.debts.clear(),
         db.debtPayments.clear(),
+        db.creditCards.clear(),
+        db.customPayments.clear(),
+        db.creditCardRepayments.clear(),
+        db.dailyBriefs.clear(),
       ])
       await seedDefaults()
     },
@@ -660,6 +823,10 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       db.transactions,
       db.debts,
       db.debtPayments,
+      db.creditCards,
+      db.customPayments,
+      db.creditCardRepayments,
+      db.dailyBriefs,
     ],
     async () => {
       await Promise.all([
@@ -672,6 +839,10 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
         db.transactions.clear(),
         db.debts.clear(),
         db.debtPayments.clear(),
+        db.creditCards.clear(),
+        db.customPayments.clear(),
+        db.creditCardRepayments.clear(),
+        db.dailyBriefs.clear(),
       ])
 
       await db.settings.put(normalizeSettings(snapshot.settings))
@@ -683,6 +854,10 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       await putAll(db.transactions, snapshot.transactions)
       await putAll(db.debts, snapshot.debts)
       await putAll(db.debtPayments, snapshot.debtPayments)
+      await putAll(db.creditCards, snapshot.creditCards)
+      await putAll(db.customPayments, snapshot.customPayments)
+      await putAll(db.creditCardRepayments, snapshot.creditCardRepayments)
+      await putAll(db.dailyBriefs, snapshot.dailyBriefs)
     },
   )
 }

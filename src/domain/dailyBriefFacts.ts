@@ -2,7 +2,7 @@ import {
   addIsoDays,
   getCreditCardAllocationSummary,
   getRecurringPaymentOccurrences,
-} from './money'
+} from './money.js'
 import type {
   CreditCard,
   CreditCardRepayment,
@@ -16,7 +16,7 @@ import type {
   RecurringPayment,
   Settings,
   Transaction,
-} from '../types/models'
+} from '../types/models.js'
 
 export type BriefRiskSeverity = 'critical' | 'high' | 'medium' | 'low'
 

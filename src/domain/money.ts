@@ -11,7 +11,7 @@ import type {
   RecurringPayment,
   Transaction,
   TransactionType,
-} from '../types/models'
+} from '../types/models.js'
 
 const dayMs = 24 * 60 * 60 * 1000
 

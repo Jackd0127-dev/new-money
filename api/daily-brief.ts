@@ -6,13 +6,13 @@ import { GoogleGenAI, Type } from '@google/genai'
 import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 
-import { formatPence } from '../src/domain/money'
+import { formatPence } from '../src/domain/money.js'
 import {
   getDailyBriefFacts,
   type BriefRisk,
   type DailyBriefFacts,
   type DailyBriefSnapshotInput,
-} from '../src/domain/dailyBriefFacts'
+} from '../src/domain/dailyBriefFacts.js'
 
 const dailyBriefInstructionsPath = join(dirname(fileURLToPath(import.meta.url)), 'daily-brief-instructions.md')
 

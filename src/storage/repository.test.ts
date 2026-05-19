@@ -82,6 +82,88 @@ describe('paycheck plan storage', () => {
     expect(foodPot?.balancePence).toBe(0)
   })
 
+  it('repairs duplicate recurring allocations and reverses duplicated pot balance', async () => {
+    const timestamp = '2026-05-22T00:00:00.000Z'
+
+    await db.payPeriods.add({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 90000,
+      status: 'active',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    await db.recurringPayments.add({
+      id: 'rec-fuel',
+      name: 'Fuel',
+      amountPence: 14000,
+      dueDay: 1,
+      frequency: 'monthly',
+      potId: 'pot-food',
+      priority: 'important',
+      active: true,
+      creditCardId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    await db.pots.update('pot-food', {
+      balancePence: 42000,
+      updatedAt: timestamp,
+    })
+    await db.potAllocations.bulkAdd([
+      {
+        id: 'allocation-fuel-1',
+        payPeriodId: 'period-current',
+        potId: 'pot-food',
+        amountPence: 14000,
+        source: 'recurring',
+        recurringPaymentId: 'rec-fuel',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      {
+        id: 'allocation-fuel-2',
+        payPeriodId: 'period-current',
+        potId: 'pot-food',
+        amountPence: 14000,
+        source: 'recurring',
+        recurringPaymentId: 'rec-fuel',
+        createdAt: '2026-05-22T00:01:00.000Z',
+        updatedAt: '2026-05-22T00:01:00.000Z',
+      },
+      {
+        id: 'allocation-fuel-3',
+        payPeriodId: 'period-current',
+        potId: 'pot-food',
+        amountPence: 14000,
+        source: 'recurring',
+        recurringPaymentId: 'rec-fuel',
+        createdAt: '2026-05-22T00:02:00.000Z',
+        updatedAt: '2026-05-22T00:02:00.000Z',
+      },
+    ])
+
+    const snapshot = await getPlannerSnapshot()
+    const foodPot = snapshot.pots.find((pot) => pot.id === 'pot-food')
+    const rawAllocations = await db.potAllocations.toArray()
+    const rawFoodPot = await db.pots.get('pot-food')
+
+    expect(snapshot.potAllocations).toEqual([
+      expect.objectContaining({
+        id: 'allocation-fuel-3',
+        recurringPaymentId: 'rec-fuel',
+        amountPence: 14000,
+      }),
+    ])
+    expect(foodPot?.balancePence).toBe(14000)
+    expect(rawAllocations).toHaveLength(1)
+    expect(rawFoodPot?.balancePence).toBe(14000)
+  })
+
   it('persists credit cards, custom payments, repayments, and daily briefs in the planner snapshot', async () => {
     await addCreditCard({
       name: 'Everyday Amex',

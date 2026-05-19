@@ -148,6 +148,7 @@ export interface DebtPaymentInput {
 
 export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   await ensureSeedData()
+  await repairDuplicateRecurringAllocations()
 
   const [
     settings,
@@ -860,6 +861,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       await putAll(db.dailyBriefs, snapshot.dailyBriefs)
     },
   )
+  await repairDuplicateRecurringAllocations()
 }
 
 async function ensureSeedData(): Promise<void> {
@@ -869,6 +871,37 @@ async function ensureSeedData(): Promise<void> {
   if (!settings || potCount === 0) {
     await seedDefaults()
   }
+}
+
+async function repairDuplicateRecurringAllocations(): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', [db.potAllocations, db.pots], async () => {
+    const allocationGroups = new Map<string, PotAllocation[]>()
+    const allocations = await db.potAllocations.toArray()
+
+    for (const allocation of allocations) {
+      if (!allocation.recurringPaymentId) {
+        continue
+      }
+
+      const key = `${allocation.payPeriodId}:${allocation.recurringPaymentId}`
+      allocationGroups.set(key, [...(allocationGroups.get(key) ?? []), allocation])
+    }
+
+    for (const group of allocationGroups.values()) {
+      if (group.length < 2) {
+        continue
+      }
+
+      const [, ...duplicates] = group.sort(sortNewestAllocationFirst)
+
+      for (const allocation of duplicates) {
+        await removeAllocationFromPot(allocation, timestamp)
+        await db.potAllocations.delete(allocation.id)
+      }
+    }
+  })
 }
 
 async function seedDefaults(): Promise<void> {
@@ -887,6 +920,22 @@ async function seedDefaults(): Promise<void> {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function sortNewestAllocationFirst(a: PotAllocation, b: PotAllocation): number {
+  const updatedSort = b.updatedAt.localeCompare(a.updatedAt)
+
+  if (updatedSort !== 0) {
+    return updatedSort
+  }
+
+  const createdSort = b.createdAt.localeCompare(a.createdAt)
+
+  if (createdSort !== 0) {
+    return createdSort
+  }
+
+  return b.id.localeCompare(a.id)
 }
 
 function normalizeSettings(settings?: Settings): Settings {

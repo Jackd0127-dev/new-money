@@ -29,6 +29,11 @@ vi.mock('@google/genai', () => ({
       },
     }
   }),
+  Type: {
+    ARRAY: 'ARRAY',
+    OBJECT: 'OBJECT',
+    STRING: 'STRING',
+  },
 }))
 
 describe('daily brief api', () => {
@@ -44,7 +49,16 @@ describe('daily brief api', () => {
       }),
     )
     mocks.verifyIdToken.mockResolvedValue({ uid: 'user-1' })
-    mocks.generateContent.mockResolvedValue({ text: 'Daily money run-through.' })
+    mocks.generateContent.mockResolvedValue({
+      text: JSON.stringify({
+        summary: 'You have a clear brief.',
+        risks: ['Phone is due today.'],
+        today: ['Pay or mark the phone bill as paid.'],
+        next: ['Keep bill money aside before payday.'],
+        missingData: [],
+        confidence: 'high',
+      }),
+    })
   })
 
   it('rejects requests without a Firebase ID token', async () => {
@@ -64,7 +78,7 @@ describe('daily brief api', () => {
     expect(mocks.generateContent).not.toHaveBeenCalled()
   })
 
-  it('verifies the user token and returns Gemini text', async () => {
+  it('verifies the user token and returns the formatted Gemini brief', async () => {
     const response = createResponse()
 
     await handler(
@@ -94,7 +108,101 @@ describe('daily brief api', () => {
       }),
     )
     expect(response.statusCode).toBe(200)
-    expect(response.payload).toEqual({ content: 'Daily money run-through.' })
+    expect(response.payload).toEqual({
+      content: [
+        'Summary:',
+        'You have a clear brief.',
+        '',
+        'Risks:',
+        '- Phone is due today.',
+        '',
+        'Today:',
+        '- Pay or mark the phone bill as paid.',
+        '',
+        'Next:',
+        '- Keep bill money aside before payday.',
+      ].join('\n'),
+    })
+  })
+
+  it('uses system instructions, editable instructions, brief facts, and JSON output', async () => {
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          todayIso: '2026-05-19',
+          snapshotSignature: 'snapshot-signature',
+          snapshot: {
+            payPeriods: [],
+            dailyBriefs: [
+              {
+                content: 'Do not resend old generated content.',
+              },
+            ],
+          },
+        },
+      },
+      response,
+    )
+
+    const request = mocks.generateContent.mock.calls[0][0] as {
+      contents: string
+      config: {
+        systemInstruction: string
+        responseMimeType: string
+        responseSchema: unknown
+      }
+    }
+
+    expect(request.config.systemInstruction).toContain('financial brief writer')
+    expect(request.config.responseMimeType).toBe('application/json')
+    expect(request.config.responseSchema).toEqual(expect.objectContaining({ type: 'OBJECT' }))
+    expect(request.contents).toContain('Editable daily brief instructions:')
+    expect(request.contents).toContain('Planner brief facts JSON:')
+    expect(request.contents).not.toContain('Planner snapshot JSON:')
+    expect(request.contents).not.toContain('Do not resend old generated content.')
+  })
+
+  it('returns a calculated fallback brief when Gemini returns invalid JSON', async () => {
+    mocks.generateContent.mockResolvedValueOnce({ text: 'loose text, not json' })
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          todayIso: '2026-05-19',
+          snapshotSignature: 'snapshot-signature',
+          snapshot: {
+            payPeriods: [],
+            pots: [],
+            recurringPayments: [],
+            paychecks: [],
+            potAllocations: [],
+            transactions: [],
+            debts: [],
+            debtPayments: [],
+            creditCards: [],
+            customPayments: [],
+            creditCardRepayments: [],
+          },
+        },
+      },
+      response,
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(response.payload).toEqual({
+      content: expect.stringContaining('Summary:'),
+    })
   })
 })
 

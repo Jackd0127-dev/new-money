@@ -1,4 +1,4 @@
-import type { Pot, Settings } from '../types/models'
+import type { Pot, Settings } from '../types/models.js'
 
 const createdAt = '2026-05-16T00:00:00.000Z'
 

@@ -2,7 +2,7 @@ import {
   createNextPayPeriod,
   getDebtDueAmountPence,
   getPayPeriodCostSummary,
-} from './money'
+} from './money.js'
 import type {
   CreditCardRepayment,
   CustomPayment,
@@ -12,7 +12,7 @@ import type {
   RecurringPayment,
   Settings,
   Transaction,
-} from '../types/models'
+} from '../types/models.js'
 
 export interface DebtReservePlanInput {
   debt: Debt

@@ -964,8 +964,16 @@ async function ensureSeedData(): Promise<void> {
   const settings = await db.settings.get('default')
   const potCount = await db.pots.count()
 
-  if (!settings || potCount === 0) {
+  if (!settings && potCount === 0) {
     await seedDefaults()
+    return
+  }
+
+  if (!settings) {
+    await db.settings.put({
+      ...defaultSettings,
+      updatedAt: nowIso(),
+    })
   }
 }
 

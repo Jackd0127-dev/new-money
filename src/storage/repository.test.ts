@@ -8,6 +8,7 @@ import {
   addCustomPayment,
   addDailyBrief,
   createPaycheckPlan,
+  deletePot,
   deletePayPeriod,
   getPlannerSnapshot,
   resetPlannerData,
@@ -80,6 +81,18 @@ describe('paycheck plan storage', () => {
     expect(snapshot.paychecks).toHaveLength(0)
     expect(snapshot.potAllocations).toHaveLength(0)
     expect(foodPot?.balancePence).toBe(0)
+  })
+
+  it('does not recreate default pots after every pot is deleted', async () => {
+    let snapshot = await getPlannerSnapshot()
+
+    for (const pot of snapshot.pots) {
+      await deletePot(pot.id)
+    }
+
+    snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.pots).toHaveLength(0)
   })
 
   it('repairs duplicate recurring allocations and reverses duplicated pot balance', async () => {

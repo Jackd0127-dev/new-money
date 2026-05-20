@@ -59,7 +59,7 @@ export function AiPlanPage({
     }
 
     if (!user) {
-      setAssistantResponse(createLocalAssistantResponse(plans))
+      setAssistantResponse(createVisibleAiPlannerResponse(createLocalAssistantResponse(plans)))
       setAssistantError('Sign in from Settings to ask the AI planner. Showing calculated guidance instead.')
       return
     }
@@ -91,10 +91,10 @@ export function AiPlanPage({
         throw new Error(`AI planner request failed with ${response.status}`)
       }
 
-      setAssistantResponse((await response.json()) as AiPlannerResponse)
+      setAssistantResponse(createVisibleAiPlannerResponse((await response.json()) as AiPlannerResponse))
     } catch (error) {
       setAssistantError(error instanceof Error ? error.message : 'Unable to ask the AI planner.')
-      setAssistantResponse(createLocalAssistantResponse(plans))
+      setAssistantResponse(createVisibleAiPlannerResponse(createLocalAssistantResponse(plans)))
     } finally {
       setIsAsking(false)
     }
@@ -221,13 +221,8 @@ export function AiPlanPage({
               <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div className="flex items-start gap-2">
                   <Sparkles className="mt-0.5 text-slate-500" size={18} />
-                  <p className="text-sm leading-6 text-slate-800">{assistantResponse.answer}</p>
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{assistantResponse.answer}</p>
                 </div>
-                <AiList title="Risks" items={assistantResponse.risks} />
-                <AiList title="Actions" items={assistantResponse.actions} />
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Confidence: {assistantResponse.confidence}
-                </p>
               </div>
             )}
           </div>
@@ -381,17 +376,6 @@ function DebtPlanStat({ label, value }: { label: string; value: string }) {
   )
 }
 
-function AiList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-      <ul className="mt-1 space-y-1 text-sm text-slate-700">
-        {items.length > 0 ? items.map((item) => <li key={item}>{item}</li>) : <li>No {title.toLowerCase()} returned.</li>}
-      </ul>
-    </div>
-  )
-}
-
 function createLocalAssistantResponse(plans: DebtReservePlan[]): AiPlannerResponse {
   const firstPlan = plans.find((plan) => plan.remainingDebtPence > 0)
 
@@ -412,6 +396,29 @@ function createLocalAssistantResponse(plans: DebtReservePlan[]): AiPlannerRespon
       : ['Review the next usable paycheck in the schedule.'],
     confidence: 'medium',
   }
+}
+
+function createVisibleAiPlannerResponse(response: AiPlannerResponse): AiPlannerResponse {
+  return {
+    ...response,
+    answer: ensureNextStepGuidance(response.answer, [...response.risks, ...response.actions]),
+  }
+}
+
+function ensureNextStepGuidance(answer: string, nextItems: string[]): string {
+  const trimmedAnswer = answer.trim()
+
+  if (/what i['’]d do next|what to do next|next steps?|my advice|i recommend/i.test(trimmedAnswer)) {
+    return trimmedAnswer
+  }
+
+  const nextItem = nextItems.find((item) => item.trim())?.trim()
+
+  if (!nextItem) {
+    return `${trimmedAnswer}\n\nWhat I’d do next: ask a follow-up and I’ll help you turn the debt plan into a clear next move.`
+  }
+
+  return `${trimmedAnswer}\n\nWhat I’d do next: ${nextItem}`
 }
 
 function reserveMatchesPayPeriod(reserve: DebtReserve, payPeriod: PayPeriod): boolean {

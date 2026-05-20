@@ -155,6 +155,55 @@ describe('AI plan page', () => {
     })
     expect(actions.addDebtPayment).not.toHaveBeenCalled()
   })
+
+  it('shows AI planner guidance without metadata blocks', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-jan-02',
+      payday: '2026-01-02',
+      startDate: '2026-01-02',
+      endDate: '2026-01-15',
+      nextPayday: '2026-01-16',
+      incomePence: 80000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Card balance',
+          lender: 'Card Provider',
+          originalAmountPence: 20000,
+          currentBalancePence: 20000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-01-20',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <AiPlanPage
+        snapshot={snapshot}
+        actions={createActions()}
+        selectedPayPeriod={selectedPayPeriod}
+        user={null}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText('What should I do next with my debts?'), 'What should I do?')
+    await user.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(screen.getByText(/Card balance needs/)).toBeInTheDocument()
+    expect(screen.getByText(/What I’d do next: Reserve/)).toBeInTheDocument()
+    expect(screen.queryByText('Risks')).not.toBeInTheDocument()
+    expect(screen.queryByText('Actions')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Confidence:/)).not.toBeInTheDocument()
+  })
 })
 
 describe('payday wizard', () => {

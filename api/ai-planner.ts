@@ -15,6 +15,8 @@ Never invent balances, dates, income, debts, payments, pots, credit cards, or re
 Never provide tax, legal, regulated investment, credit product, debt restructuring, or lending advice.
 Never suggest borrowing money, taking new credit, investing, or changing legal/tax arrangements.
 If the user asks to skip a paycheck, explain the calculated consequence and any shortfall.
+End every visible answer with a friendly, useful "What I'd do next:" paragraph that gives advice, improvements, and the next sensible action for the user.
+Do not rely on risks, actions, or confidence being visible in the app UI; put the useful guidance inside the answer text itself.
 Write in UK English, format money as GBP, and keep answers practical.
 `.trim()
 
@@ -192,7 +194,6 @@ async function generateOpenRouterJson({
         { role: 'system', content: systemInstruction },
         { role: 'user', content: prompt },
       ],
-      response_format: { type: 'json_object' },
     }),
   })
 
@@ -327,12 +328,13 @@ function parseAiPlannerResponse(value: string): AiPlannerResponse {
   }
 
   const response = parsed as Partial<AiPlannerResponse>
+  const confidence = response.confidence
 
   if (
     typeof response.answer !== 'string' ||
     !isStringArray(response.risks) ||
     !isStringArray(response.actions) ||
-    !['high', 'medium', 'low'].includes(String(response.confidence))
+    !isAiPlannerConfidence(confidence)
   ) {
     throw new Error('Gemini returned an invalid AI planner response shape.')
   }
@@ -341,7 +343,7 @@ function parseAiPlannerResponse(value: string): AiPlannerResponse {
     answer: response.answer.trim(),
     risks: cleanList(response.risks),
     actions: cleanList(response.actions),
-    confidence: response.confidence,
+    confidence,
   }
 }
 
@@ -399,4 +401,8 @@ function cleanList(items: string[]): string[] {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isAiPlannerConfidence(value: unknown): value is AiPlannerResponse['confidence'] {
+  return value === 'high' || value === 'medium' || value === 'low'
 }

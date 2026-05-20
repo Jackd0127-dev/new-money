@@ -151,6 +151,7 @@ describe('ai planner api', () => {
     }
 
     expect(request.config.systemInstruction).toContain('deterministic debt planner')
+    expect(request.config.systemInstruction).toContain('End every visible answer')
     expect(request.config.responseMimeType).toBe('application/json')
     expect(request.contents).toContain('Calculated debt plan facts JSON:')
     expect(request.contents).toContain('Use direct wording.')
@@ -276,7 +277,7 @@ describe('ai planner api', () => {
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       model: string
       messages: Array<{ role: string; content: string }>
-      response_format: { type: string }
+      response_format?: { type: string }
     }
     expect(requestBody.model).toBe('openai/gpt-oss-120b:free')
     expect(requestBody.messages[0]).toMatchObject({
@@ -284,7 +285,7 @@ describe('ai planner api', () => {
     })
     expect(requestBody.messages[0].content).toContain('deterministic debt planner')
     expect(requestBody.messages[1].content).toContain('Calculated debt plan facts JSON:')
-    expect(requestBody.response_format.type).toBe('json_object')
+    expect(requestBody.response_format).toBeUndefined()
     expect(response.payload).toEqual({
       answer: 'Use the OpenRouter plan.',
       risks: [],

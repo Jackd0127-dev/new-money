@@ -439,6 +439,58 @@ describe('AI assistant api', () => {
       confidence: 'high',
     })
   })
+
+  it('normalises capitalised OpenRouter response keys', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                Answer: 'Your paycheck history is in the app context.',
+                Highlights: ['Pay history is available.'],
+                Actions: ['Ask for the exact dates.'],
+                Confidence: 'MEDIUM',
+              }),
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key')
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'What paychecks have I received?',
+          todayIso: '2026-05-20',
+          activeView: 'history',
+          snapshot: createSnapshot({
+            settings: {
+              ...createSnapshot().settings,
+              aiProvider: 'openrouter',
+            },
+          }),
+        },
+      },
+      response,
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(response.payload).toEqual({
+      answer: 'Your paycheck history is in the app context.',
+      highlights: ['Pay history is available.'],
+      actions: ['Ask for the exact dates.'],
+      confidence: 'medium',
+    })
+  })
 })
 
 function createResponse() {

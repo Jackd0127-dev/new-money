@@ -682,7 +682,7 @@ function parseAssistantResponse(value: string): AssistantResponse {
     throw new Error('Assistant returned a non-object JSON response.')
   }
 
-  const response = parsed as Record<string, unknown>
+  const response = getResponseObject(parsed as Record<string, unknown>)
   const answer = getFirstString(response, ['answer', 'response', 'message', 'summary'])
 
   if (!answer) {
@@ -691,9 +691,9 @@ function parseAssistantResponse(value: string): AssistantResponse {
 
   return {
     answer: answer.trim(),
-    highlights: normalizeStringList(response.highlights),
-    actions: normalizeStringList(response.actions),
-    confidence: normalizeConfidence(response.confidence),
+    highlights: normalizeStringList(getValue(response, ['highlights', 'facts', 'keyFacts'])),
+    actions: normalizeStringList(getValue(response, ['actions', 'nextActions', 'next_steps'])),
+    confidence: normalizeConfidence(getValue(response, ['confidence', 'certainty'])),
   }
 }
 
@@ -865,7 +865,7 @@ function normalizeConfidence(value: unknown): AssistantResponse['confidence'] {
 
 function getFirstString(source: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
-    const value = source[key]
+    const value = getValue(source, [key])
 
     if (typeof value === 'string' && value.trim()) {
       return value
@@ -873,6 +873,41 @@ function getFirstString(source: Record<string, unknown>, keys: string[]): string
   }
 
   return null
+}
+
+function getResponseObject(source: Record<string, unknown>): Record<string, unknown> {
+  if (getFirstString(source, ['answer', 'response', 'message', 'summary'])) {
+    return source
+  }
+
+  for (const key of ['assistantResponse', 'assistant_response', 'result', 'data']) {
+    const value = getValue(source, [key])
+
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+  }
+
+  return source
+}
+
+function getValue(source: Record<string, unknown>, keys: string[]): unknown {
+  const entries = Object.entries(source)
+
+  for (const key of keys) {
+    if (key in source) {
+      return source[key]
+    }
+
+    const lowerKey = key.toLowerCase()
+    const match = entries.find(([candidate]) => candidate.toLowerCase() === lowerKey)
+
+    if (match) {
+      return match[1]
+    }
+  }
+
+  return undefined
 }
 
 function getErrorMessage(error: unknown): string {

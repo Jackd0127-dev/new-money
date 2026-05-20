@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 
+import { AppAssistant } from './components/AppAssistant'
 import { AppShell } from './components/AppShell'
 import { AiPlanPage } from './pages/AiPlanPage'
 import { AllocatingPaymentsPage } from './pages/AllocatingPaymentsPage'
@@ -81,9 +82,17 @@ function App() {
   }
 
   return (
-    <AppShell activeView={activeView} onViewChange={setActiveView} selectedPayPeriod={selectedPayPeriod}>
-      {pages[activeView]}
-    </AppShell>
+    <>
+      <AppShell activeView={activeView} onViewChange={setActiveView} selectedPayPeriod={selectedPayPeriod}>
+        {pages[activeView]}
+      </AppShell>
+      <AppAssistant
+        snapshot={snapshot}
+        activeView={activeView}
+        selectedPayPeriod={selectedPayPeriod}
+        user={auth.user}
+      />
+    </>
   )
 }
 

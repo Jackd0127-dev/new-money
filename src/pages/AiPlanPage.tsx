@@ -60,7 +60,7 @@ export function AiPlanPage({
 
     if (!user) {
       setAssistantResponse(createLocalAssistantResponse(plans))
-      setAssistantError('Sign in from Settings to ask Gemini. Showing calculated guidance instead.')
+      setAssistantError('Sign in from Settings to ask the AI planner. Showing calculated guidance instead.')
       return
     }
 
@@ -201,7 +201,7 @@ export function AiPlanPage({
           </div>
         </Panel>
 
-        <Panel title="Ask AI planner" description="Gemini explains the calculated plan. It does not invent or change the maths.">
+        <Panel title="Ask AI planner" description="The selected AI provider explains the calculated plan. It does not invent or change the maths.">
           <div className="space-y-4">
             <TextArea
               value={question}

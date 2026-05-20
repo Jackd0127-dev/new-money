@@ -999,6 +999,54 @@ describe('debts page', () => {
     expect(screen.getAllByText('Due amount').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Optional').length).toBeGreaterThan(0)
   })
+
+  it('does not treat a future paycheck plan as the current pay period', () => {
+    render(
+      <DebtsPage
+        snapshot={createSnapshot({
+          payPeriods: [
+            {
+              id: 'period-next',
+              startDate: '2026-05-22',
+              endDate: '2026-06-04',
+              payday: '2026-05-22',
+              nextPayday: '2026-06-05',
+              payFrequency: 'biweekly',
+              incomePence: 90000,
+              status: 'planned',
+              createdAt: '2026-05-20T00:00:00.000Z',
+              updatedAt: '2026-05-20T00:00:00.000Z',
+            },
+          ],
+          debts: [
+            {
+              id: 'debt-future-period',
+              name: 'Future period debt',
+              lender: 'Retail Bank',
+              originalAmountPence: 30000,
+              currentBalancePence: 30000,
+              minimumPaymentPence: 0,
+              dueDate: '2026-05-23',
+              interestRateApr: null,
+              note: '',
+              status: 'active',
+              createdAt: '2026-05-20T00:00:00.000Z',
+              updatedAt: '2026-05-20T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={createActions()}
+      />,
+    )
+
+    const debtDueMetric = screen.getAllByText('Debt due this pay period')[0].closest('details')
+
+    expect(debtDueMetric).not.toBeNull()
+    expect(within(debtDueMetric as HTMLElement).getAllByText('£0.00').length).toBeGreaterThan(0)
+    expect(within(debtDueMetric as HTMLElement).getByText('No active pay period today')).toBeInTheDocument()
+    expect(within(debtDueMetric as HTMLElement).getByText(/Next saved period starts 2026-05-22/)).toBeInTheDocument()
+    expect(within(debtDueMetric as HTMLElement).queryByText('Future period debt')).not.toBeInTheDocument()
+  })
 })
 
 function createActions(): TestActions {

@@ -54,7 +54,10 @@ export function DebtsPage({
     activeDebts.find((debt) => debt.id === paymentDebtId) ?? activeDebts[0] ?? null
   const selectedPaymentDebtId = selectedPaymentDebt?.id ?? ''
   const today = toIsoDate(new Date())
-  const currentPayPeriod = findPayPeriodForDate(snapshot.payPeriods, today) ?? snapshot.payPeriods[0] ?? null
+  const currentPayPeriod = findPayPeriodForDate(snapshot.payPeriods, today)
+  const nextPayPeriod = snapshot.payPeriods
+    .filter((period) => period.startDate > today)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null
   const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today, currentPayPeriod)
   const payPeriodEndDate = currentPayPeriod?.endDate ?? null
   const activeDebtIds = new Set(activeDebts.map((debt) => debt.id))
@@ -204,7 +207,7 @@ export function DebtsPage({
           breakdown={{
             formula: currentPayPeriod
               ? `Debt due this pay period = full outstanding balance for active debts due by ${currentPayPeriod.endDate}.`
-              : 'Debt due this pay period needs a saved paycheck plan.',
+              : `Debt due this pay period needs a saved pay period that includes ${today}.`,
             lines:
               dueThisPayPeriod.length > 0
                 ? [
@@ -225,11 +228,13 @@ export function DebtsPage({
                   ]
                 : [
                     {
-                      label: currentPayPeriod ? 'No debts due this pay period' : 'No paycheck plan',
+                      label: currentPayPeriod ? 'No debts due this pay period' : 'No active pay period today',
                       value: formatPence(0),
                       detail: currentPayPeriod
                         ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
-                        : 'Create a paycheck plan to set the pay-period window.',
+                        : nextPayPeriod
+                          ? `Next saved period starts ${nextPayPeriod.startDate}; next payday is ${nextPayPeriod.nextPayday}.`
+                          : 'Create a paycheck plan to set the pay-period window.',
                       tone: 'result',
                     },
                   ],

@@ -14,6 +14,8 @@ import type {
   DailyBrief,
   Debt,
   DebtPayment,
+  DebtReserve,
+  DebtReserveSource,
   DebtStatus,
   PayPeriod,
   Paycheck,
@@ -39,6 +41,7 @@ export interface PlannerSnapshot {
   transactions: Transaction[]
   debts: Debt[]
   debtPayments: DebtPayment[]
+  debtReserves: DebtReserve[]
   creditCards: CreditCard[]
   customPayments: CustomPayment[]
   creditCardRepayments: CreditCardRepayment[]
@@ -153,6 +156,37 @@ export interface DebtPaymentInput {
   note: string
 }
 
+export interface DebtReserveInput {
+  debtId: string
+  payPeriodId: string | null
+  payday: string
+  periodStartDate: string
+  periodEndDate: string
+  amountPence: number
+  source: DebtReserveSource
+  note: string
+}
+
+export interface DebtReserveUpdateInput {
+  amountPence: number
+  note: string
+}
+
+export interface DebtReserveSkipInput {
+  debtId: string
+  payPeriodId: string | null
+  payday: string
+  periodStartDate: string
+  periodEndDate: string
+  source: DebtReserveSource
+  note: string
+}
+
+export interface DebtReserveApplyInput {
+  date: string
+  note: string
+}
+
 export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   await ensureSeedData()
   await repairDuplicateRecurringAllocations()
@@ -167,6 +201,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     transactions,
     debts,
     debtPayments,
+    debtReserves,
     creditCards,
     customPayments,
     creditCardRepayments,
@@ -182,6 +217,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
       db.transactions.orderBy('date').reverse().toArray(),
       db.debts.orderBy('dueDate').toArray(),
       db.debtPayments.orderBy('date').reverse().toArray(),
+      db.debtReserves.orderBy('payday').toArray(),
       db.creditCards.toArray(),
       db.customPayments.orderBy('dueDate').toArray(),
       db.creditCardRepayments.orderBy('date').reverse().toArray(),
@@ -198,6 +234,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     transactions,
     debts,
     debtPayments,
+    debtReserves,
     creditCards: creditCards.sort((a, b) => a.name.localeCompare(b.name)),
     customPayments,
     creditCardRepayments,
@@ -206,7 +243,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
 }
 
 export async function updateSettings(
-  updates: Partial<Pick<Settings, 'defaultHoursWorked' | 'hourlyRatePence' | 'payFrequency'>>,
+  updates: Partial<Pick<Settings, 'defaultHoursWorked' | 'hourlyRatePence' | 'payFrequency' | 'aiInstructions' | 'aiProvider'>>,
 ): Promise<void> {
   const current = normalizeSettings(await db.settings.get('default'))
   await db.settings.put({
@@ -643,8 +680,9 @@ export async function updateDebt(debtId: string, input: DebtUpdateInput): Promis
 }
 
 export async function deleteDebt(debtId: string): Promise<void> {
-  await db.transaction('rw', db.debts, db.debtPayments, async () => {
+  await db.transaction('rw', db.debts, db.debtPayments, db.debtReserves, async () => {
     await db.debtPayments.where('debtId').equals(debtId).delete()
+    await db.debtReserves.where('debtId').equals(debtId).delete()
     await db.debts.delete(debtId)
   })
 }
@@ -710,6 +748,118 @@ export async function deleteDebtPayment(paymentId: string): Promise<void> {
       currentBalancePence: restoredBalancePence,
       status: restoredBalancePence > 0 ? 'active' : 'paid',
       updatedAt: nowIso(),
+    })
+  })
+}
+
+export async function addDebtReserve(input: DebtReserveInput): Promise<void> {
+  const timestamp = nowIso()
+  const amountPence = Math.max(0, input.amountPence)
+
+  if (!input.debtId || amountPence <= 0) {
+    return
+  }
+
+  await db.debtReserves.add({
+    id: crypto.randomUUID(),
+    debtId: input.debtId,
+    payPeriodId: input.payPeriodId,
+    payday: input.payday,
+    periodStartDate: input.periodStartDate,
+    periodEndDate: input.periodEndDate,
+    amountPence,
+    status: 'planned',
+    source: input.source,
+    note: input.note.trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function updateDebtReserve(
+  reserveId: string,
+  input: DebtReserveUpdateInput,
+): Promise<void> {
+  await db.debtReserves.update(reserveId, {
+    amountPence: Math.max(0, input.amountPence),
+    note: input.note.trim(),
+    updatedAt: nowIso(),
+  })
+}
+
+export async function cancelDebtReserve(reserveId: string): Promise<void> {
+  await db.debtReserves.update(reserveId, {
+    status: 'cancelled',
+    updatedAt: nowIso(),
+  })
+}
+
+export async function skipDebtReserve(input: DebtReserveSkipInput): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.debtReserves.add({
+    id: crypto.randomUUID(),
+    debtId: input.debtId,
+    payPeriodId: input.payPeriodId,
+    payday: input.payday,
+    periodStartDate: input.periodStartDate,
+    periodEndDate: input.periodEndDate,
+    amountPence: 0,
+    status: 'skipped',
+    source: input.source,
+    note: input.note.trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function applyDebtReserve(
+  reserveId: string,
+  input: DebtReserveApplyInput,
+): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', db.debts, db.debtPayments, db.debtReserves, async () => {
+    const reserve = await db.debtReserves.get(reserveId)
+
+    if (!reserve || reserve.status !== 'planned' || reserve.amountPence <= 0) {
+      return
+    }
+
+    const debt = await db.debts.get(reserve.debtId)
+
+    if (!debt || debt.currentBalancePence <= 0) {
+      await db.debtReserves.update(reserve.id, {
+        status: 'cancelled',
+        updatedAt: timestamp,
+      })
+      return
+    }
+
+    const appliedAmountPence = Math.min(reserve.amountPence, debt.currentBalancePence)
+    const nextBalancePence = debt.currentBalancePence - appliedAmountPence
+
+    await db.debtPayments.add({
+      id: crypto.randomUUID(),
+      debtId: debt.id,
+      amountPence: appliedAmountPence,
+      date: input.date,
+      note: input.note.trim() || reserve.note,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+
+    await db.debts.update(debt.id, {
+      currentBalancePence: nextBalancePence,
+      status: nextBalancePence > 0 ? 'active' : 'paid',
+      updatedAt: timestamp,
+    })
+
+    await db.debtReserves.update(reserve.id, {
+      amountPence: appliedAmountPence,
+      status: 'applied',
+      note: input.note.trim() || reserve.note,
+      updatedAt: timestamp,
     })
   })
 }
@@ -861,7 +1011,7 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
 export async function deletePayPeriod(payPeriodId: string): Promise<void> {
   await db.transaction(
     'rw',
-    [db.payPeriods, db.paychecks, db.potAllocations, db.pots, db.transactions],
+    [db.payPeriods, db.paychecks, db.potAllocations, db.pots, db.transactions, db.debtReserves],
     async () => {
       await deletePayPeriodRecords(payPeriodId, nowIso())
     },
@@ -881,6 +1031,7 @@ export async function resetPlannerData(): Promise<void> {
       db.transactions,
       db.debts,
       db.debtPayments,
+      db.debtReserves,
       db.creditCards,
       db.customPayments,
       db.creditCardRepayments,
@@ -897,6 +1048,7 @@ export async function resetPlannerData(): Promise<void> {
         db.transactions.clear(),
         db.debts.clear(),
         db.debtPayments.clear(),
+        db.debtReserves.clear(),
         db.creditCards.clear(),
         db.customPayments.clear(),
         db.creditCardRepayments.clear(),
@@ -920,6 +1072,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       db.transactions,
       db.debts,
       db.debtPayments,
+      db.debtReserves,
       db.creditCards,
       db.customPayments,
       db.creditCardRepayments,
@@ -936,6 +1089,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
         db.transactions.clear(),
         db.debts.clear(),
         db.debtPayments.clear(),
+        db.debtReserves.clear(),
         db.creditCards.clear(),
         db.customPayments.clear(),
         db.creditCardRepayments.clear(),
@@ -951,6 +1105,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       await putAll(db.transactions, snapshot.transactions)
       await putAll(db.debts, snapshot.debts)
       await putAll(db.debtPayments, snapshot.debtPayments)
+      await putAll(db.debtReserves, snapshot.debtReserves ?? [])
       await putAll(db.creditCards, snapshot.creditCards)
       await putAll(db.customPayments, snapshot.customPayments)
       await putAll(db.creditCardRepayments, snapshot.creditCardRepayments)
@@ -1052,6 +1207,8 @@ function normalizeSettings(settings?: Settings): Settings {
     ...defaultSettings,
     ...settings,
     defaultHoursWorked: settings?.defaultHoursWorked ?? defaultSettings.defaultHoursWorked,
+    aiInstructions: settings?.aiInstructions ?? defaultSettings.aiInstructions,
+    aiProvider: settings?.aiProvider ?? defaultSettings.aiProvider,
   }
 }
 
@@ -1190,6 +1347,10 @@ async function deletePayPeriodRecords(payPeriodId: string, timestamp: string): P
   }
 
   await db.transactions.where('payPeriodId').equals(payPeriodId).modify({
+    payPeriodId: null,
+    updatedAt: timestamp,
+  })
+  await db.debtReserves.where('payPeriodId').equals(payPeriodId).modify({
     payPeriodId: null,
     updatedAt: timestamp,
   })

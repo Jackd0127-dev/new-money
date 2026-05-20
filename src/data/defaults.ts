@@ -9,6 +9,8 @@ export const defaultSettings: Settings = {
   defaultPayPeriodDays: 14,
   hourlyRatePence: 1250,
   defaultHoursWorked: 72,
+  aiInstructions: '',
+  aiProvider: 'gemini',
   createdAt,
   updatedAt: createdAt,
 }

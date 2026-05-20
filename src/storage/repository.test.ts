@@ -7,11 +7,17 @@ import {
   addCreditCardRepayment,
   addCustomPayment,
   addDailyBrief,
+  addDebt,
+  addDebtReserve,
+  applyDebtReserve,
+  cancelDebtReserve,
   createPaycheckPlan,
   deletePot,
   deletePayPeriod,
   getPlannerSnapshot,
   resetPlannerData,
+  skipDebtReserve,
+  updateDebtReserve,
 } from './repository'
 import { db } from './db'
 
@@ -234,5 +240,97 @@ describe('paycheck plan storage', () => {
       snapshotSignature: 'snapshot-signature',
       content: 'Today: check your card balances.',
     })
+  })
+
+  it('stores, updates, skips, cancels, and applies debt reserves without paying until applied', async () => {
+    await createPaycheckPlan({
+      payday: '2026-01-02',
+      payFrequency: 'biweekly',
+      hoursWorked: 80,
+      hourlyRatePence: 1000,
+      actualAmountPence: 80000,
+      allocations: [],
+    })
+    await addDebt({
+      name: 'Card balance',
+      lender: 'Card Provider',
+      currentBalancePence: 200000,
+      minimumPaymentPence: 0,
+      dueDate: '2026-02-01',
+      interestRateApr: null,
+      note: '',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const debt = snapshot.debts[0]
+    const period = snapshot.payPeriods[0]
+
+    await addDebtReserve({
+      debtId: debt.id,
+      payPeriodId: period.id,
+      payday: period.payday,
+      periodStartDate: period.startDate,
+      periodEndDate: period.endDate,
+      amountPence: 66666,
+      source: 'assistant',
+      note: 'First assistant reserve',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    const plannedReserve = snapshot.debtReserves[0]
+
+    expect(plannedReserve).toMatchObject({
+      debtId: debt.id,
+      amountPence: 66666,
+      status: 'planned',
+      source: 'assistant',
+    })
+    expect(snapshot.debts[0].currentBalancePence).toBe(200000)
+
+    await updateDebtReserve(plannedReserve.id, {
+      amountPence: 70000,
+      note: 'Adjusted assistant reserve',
+    })
+    await cancelDebtReserve(plannedReserve.id)
+    await skipDebtReserve({
+      debtId: debt.id,
+      payPeriodId: period.id,
+      payday: period.payday,
+      periodStartDate: period.startDate,
+      periodEndDate: period.endDate,
+      source: 'assistant',
+      note: 'Move this paycheck to later',
+    })
+    await addDebtReserve({
+      debtId: debt.id,
+      payPeriodId: period.id,
+      payday: period.payday,
+      periodStartDate: period.startDate,
+      periodEndDate: period.endDate,
+      amountPence: 50000,
+      source: 'assistant',
+      note: 'Ready to apply',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    const activeReserve = snapshot.debtReserves.find((reserve) => reserve.status === 'planned')
+    expect(activeReserve?.amountPence).toBe(50000)
+    expect(snapshot.debtReserves.some((reserve) => reserve.status === 'cancelled')).toBe(true)
+    expect(snapshot.debtReserves.some((reserve) => reserve.status === 'skipped')).toBe(true)
+
+    await applyDebtReserve(activeReserve!.id, {
+      date: '2026-01-02',
+      note: 'Paid from reserved money',
+    })
+
+    snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.debtReserves.find((reserve) => reserve.id === activeReserve!.id)?.status).toBe('applied')
+    expect(snapshot.debtPayments[0]).toMatchObject({
+      debtId: debt.id,
+      amountPence: 50000,
+      note: 'Paid from reserved money',
+    })
+    expect(snapshot.debts[0].currentBalancePence).toBe(150000)
   })
 })

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DashboardPage } from './DashboardPage'
 import { DebtsPage } from './DebtsPage'
 import { HistoryPage } from './HistoryPage'
+import { AiPlanPage } from './AiPlanPage'
 import { AllocatingPaymentsPage } from './AllocatingPaymentsPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { PotsPage } from './PotsPage'
@@ -29,6 +30,11 @@ type TestActions = PlannerActions & {
   updatePot: ReturnType<typeof vi.fn>
   updateRecurringPayment: ReturnType<typeof vi.fn>
   updateTransaction: ReturnType<typeof vi.fn>
+  addDebtReserve: ReturnType<typeof vi.fn>
+  updateDebtReserve: ReturnType<typeof vi.fn>
+  cancelDebtReserve: ReturnType<typeof vi.fn>
+  skipDebtReserve: ReturnType<typeof vi.fn>
+  applyDebtReserve: ReturnType<typeof vi.fn>
 }
 
 describe('settings page', () => {
@@ -46,9 +52,108 @@ describe('settings page', () => {
       defaultHoursWorked: 72,
       hourlyRatePence: 1250,
       payFrequency: 'biweekly',
+      aiInstructions: '',
+      aiProvider: 'gemini',
     })
     expect(screen.getByText('Settings saved')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
+  })
+
+  it('saves custom AI instructions with the normal settings form', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.type(screen.getByLabelText('Custom AI instructions'), 'Be blunt and prioritise debt deadlines.')
+    await user.click(screen.getByRole('button', { name: 'Save settings' }))
+
+    expect(actions.updateSettings).toHaveBeenCalledWith({
+      defaultHoursWorked: 72,
+      hourlyRatePence: 1250,
+      payFrequency: 'biweekly',
+      aiInstructions: 'Be blunt and prioritise debt deadlines.',
+      aiProvider: 'gemini',
+    })
+  })
+
+  it('saves the selected AI provider', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.selectOptions(screen.getByLabelText('AI provider'), 'openrouter')
+    await user.click(screen.getByRole('button', { name: 'Save settings' }))
+
+    expect(actions.updateSettings).toHaveBeenCalledWith({
+      defaultHoursWorked: 72,
+      hourlyRatePence: 1250,
+      payFrequency: 'biweekly',
+      aiInstructions: '',
+      aiProvider: 'openrouter',
+    })
+  })
+})
+
+describe('AI plan page', () => {
+  it('shows a deterministic debt reserve recommendation and reserves it without paying the debt', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-jan-02',
+      payday: '2026-01-02',
+      startDate: '2026-01-02',
+      endDate: '2026-01-15',
+      nextPayday: '2026-01-16',
+      incomePence: 80000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Card balance',
+          lender: 'Card Provider',
+          originalAmountPence: 20000,
+          currentBalancePence: 20000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-01-20',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <AiPlanPage
+        snapshot={snapshot}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+        user={null}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'AI debt plan' })).toBeInTheDocument()
+    expect(screen.getByText('Set aside this paycheck')).toBeInTheDocument()
+    expect(screen.getAllByText('£100.00').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: 'Reserve £100.00 for Card balance' }))
+
+    expect(actions.addDebtReserve).toHaveBeenCalledWith({
+      debtId: 'debt-card',
+      payPeriodId: 'period-jan-02',
+      payday: '2026-01-02',
+      periodStartDate: '2026-01-02',
+      periodEndDate: '2026-01-15',
+      amountPence: 10000,
+      source: 'assistant',
+      note: 'AI Plan reserve for Card balance',
+    })
+    expect(actions.addDebtPayment).not.toHaveBeenCalled()
   })
 })
 
@@ -817,6 +922,64 @@ describe('dashboard page', () => {
     expect(screen.queryByText('Available after bills')).not.toBeInTheDocument()
   })
 
+  it('deducts planned debt reserves and only counts the unreserved debt due amount', () => {
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-22',
+          endDate: '2026-06-04',
+          payday: '2026-05-22',
+          nextPayday: '2026-06-05',
+          payFrequency: 'biweekly',
+          incomePence: 100000,
+          status: 'active',
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Card balance',
+          lender: 'Card Provider',
+          originalAmountPence: 50000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-05-30',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+      debtReserves: [
+        {
+          id: 'reserve-card',
+          debtId: 'debt-card',
+          payPeriodId: 'period-current',
+          payday: '2026-05-22',
+          periodStartDate: '2026-05-22',
+          periodEndDate: '2026-06-04',
+          amountPence: 20000,
+          status: 'planned',
+          source: 'assistant',
+          note: 'Reserve part of the debt',
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
+
+    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    expect(within(currentPeriod).getAllByText('£500.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('£200.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('£300.00').length).toBeGreaterThan(0)
+  })
+
   it('keeps projection and daily average metrics off the simplified dashboard', () => {
     const snapshot = createSnapshot({
       payPeriods: [
@@ -1125,6 +1288,11 @@ function createActions(): TestActions {
     deleteDebt: vi.fn(async () => {}),
     addDebtPayment: vi.fn(async () => {}),
     deleteDebtPayment: vi.fn(async () => {}),
+    addDebtReserve: vi.fn(async () => {}),
+    updateDebtReserve: vi.fn(async () => {}),
+    cancelDebtReserve: vi.fn(async () => {}),
+    skipDebtReserve: vi.fn(async () => {}),
+    applyDebtReserve: vi.fn(async () => {}),
     createPaycheckPlan: vi.fn(async () => {}),
     deletePayPeriod: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),
@@ -1144,6 +1312,8 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
       defaultHoursWorked: 72,
+      aiInstructions: '',
+      aiProvider: 'gemini',
       createdAt: timestamp,
       updatedAt: timestamp,
     },
@@ -1178,10 +1348,29 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
     transactions: transactions ?? [],
     debts: [],
     debtPayments: [],
+    debtReserves: [],
     creditCards: [],
     customPayments: [],
     creditCardRepayments: [],
     dailyBriefs: [],
+    ...overrides,
+  }
+}
+
+function createPayPeriod(overrides: Partial<PlannerSnapshot['payPeriods'][number]> = {}): PlannerSnapshot['payPeriods'][number] {
+  const timestamp = '2026-05-16T00:00:00.000Z'
+
+  return {
+    id: 'period-current',
+    startDate: '2026-05-16',
+    endDate: '2026-05-29',
+    payday: '2026-05-16',
+    nextPayday: '2026-05-30',
+    payFrequency: 'biweekly',
+    incomePence: 90000,
+    status: 'active',
+    createdAt: timestamp,
+    updatedAt: timestamp,
     ...overrides,
   }
 }

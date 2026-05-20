@@ -4,6 +4,7 @@ import type {
   CustomPayment,
   Debt,
   DebtPayment,
+  DebtReserve,
   PayFrequency,
   PayPeriod,
   Pot,
@@ -68,6 +69,7 @@ interface PayPeriodCostSummaryInput {
   transactions: Transaction[]
   debts: Debt[]
   creditCardRepayments: CreditCardRepayment[]
+  debtReserves?: DebtReserve[]
 }
 
 export interface PayPeriodMoneySummary {
@@ -84,6 +86,7 @@ export type PeriodCostItemSource =
   | 'saved_payment'
   | 'manual_spend'
   | 'debt_minimum'
+  | 'debt_reserve'
   | 'credit_card_repayment'
 
 export interface PeriodCostItem {
@@ -102,6 +105,7 @@ export interface PayPeriodCostSummary {
   savedPaymentsPence: number
   manualSpendingPence: number
   debtMinimumsPence: number
+  debtReservesPence: number
   creditCardChargesPence: number
   creditCardRepaymentsPence: number
   creditCardNetPence: number
@@ -115,6 +119,22 @@ export function getDebtDueAmountPence(
   debt: Pick<Debt, 'currentBalancePence'>,
 ): number {
   return Math.max(0, debt.currentBalancePence)
+}
+
+export function getPlannedDebtReservePence(
+  reserves: DebtReserve[],
+  debtId?: string,
+): number {
+  return reserves
+    .filter((reserve) => reserve.status === 'planned' && (!debtId || reserve.debtId === debtId))
+    .reduce((total, reserve) => total + reserve.amountPence, 0)
+}
+
+export function getDebtDueAmountAfterReservesPence(
+  debt: Pick<Debt, 'id' | 'currentBalancePence'>,
+  reserves: DebtReserve[],
+): number {
+  return Math.max(0, getDebtDueAmountPence(debt) - getPlannedDebtReservePence(reserves, debt.id))
 }
 
 interface CreditCardAllocationInput {
@@ -350,6 +370,7 @@ export function getPayPeriodCostSummary({
   transactions,
   debts,
   creditCardRepayments,
+  debtReserves = [],
 }: PayPeriodCostSummaryInput): PayPeriodCostSummary {
   if (!payPeriod) {
     return createEmptyPayPeriodCostSummary()
@@ -398,6 +419,26 @@ export function getPayPeriodCostSummary({
       creditCardId: transaction.paymentMethod === 'credit_card' ? transaction.creditCardId ?? null : null,
       potId: transaction.potId ?? null,
     }))
+  const debtReserveItems = debtReserves
+    .filter(
+      (reserve) =>
+        reserve.status === 'planned' &&
+        reserve.amountPence > 0 &&
+        isDebtReserveInPayPeriod(reserve, payPeriod),
+    )
+    .map((reserve) => {
+      const debt = debts.find((candidate) => candidate.id === reserve.debtId)
+
+      return {
+        id: `debt-reserve-${reserve.id}`,
+        label: debt ? `${debt.name} reserve` : 'Debt reserve',
+        amountPence: reserve.amountPence,
+        date: reserve.payday,
+        source: 'debt_reserve' as const,
+        creditCardId: null,
+        potId: null,
+      }
+    })
   const debtMinimumItems = debts
     .filter(
       (debt) =>
@@ -408,12 +449,13 @@ export function getPayPeriodCostSummary({
     .map((debt) => ({
       id: `debt-${debt.id}`,
       label: debt.name,
-      amountPence: getDebtDueAmountPence(debt),
+      amountPence: getDebtDueAmountAfterReservesPence(debt, debtReserves),
       date: debt.dueDate,
       source: 'debt_minimum' as const,
       creditCardId: null,
       potId: null,
     }))
+    .filter((item) => item.amountPence > 0)
   const repaymentItems = creditCardRepayments
     .filter((repayment) => isIsoDateBetweenInclusive(repayment.date, payPeriod.startDate, payPeriod.endDate))
     .map((repayment) => ({
@@ -429,6 +471,7 @@ export function getPayPeriodCostSummary({
     ...recurringItems,
     ...savedPaymentItems,
     ...manualSpendItems,
+    ...debtReserveItems,
     ...debtMinimumItems,
     ...repaymentItems,
   ].sort(sortPeriodCostItems)
@@ -441,6 +484,7 @@ export function getPayPeriodCostSummary({
   const manualSpendingPence = sumPositive(
     manualSpendItems.filter((item) => !item.creditCardId),
   )
+  const debtReservesPence = sumPositive(debtReserveItems)
   const debtMinimumsPence = sumPositive(debtMinimumItems)
   const creditCardChargesPence = sumPositive(
     [...recurringItems, ...savedPaymentItems, ...manualSpendItems].filter((item) => item.creditCardId),
@@ -453,6 +497,7 @@ export function getPayPeriodCostSummary({
     directRecurringPence +
     savedPaymentsPence +
     manualSpendingPence +
+    debtReservesPence +
     debtMinimumsPence +
     creditCardNetPence
   const moneyLeftPence = payPeriod.incomePence - totalCostsPence
@@ -463,6 +508,7 @@ export function getPayPeriodCostSummary({
     savedPaymentsPence,
     manualSpendingPence,
     debtMinimumsPence,
+    debtReservesPence,
     creditCardChargesPence,
     creditCardRepaymentsPence,
     creditCardNetPence,
@@ -628,6 +674,7 @@ export function getDebtSummary(
   payments: DebtPayment[],
   today: string,
   payPeriod: Pick<PayPeriod, 'endDate'> | null = null,
+  debtReserves: DebtReserve[] = [],
 ): DebtSummary {
   const activeDebts = debts.filter(
     (debt) => debt.status === 'active' && debt.currentBalancePence > 0,
@@ -656,7 +703,7 @@ export function getDebtSummary(
     debtDueThisPayPeriodPence: payPeriod
       ? activeDebts
           .filter((debt) => debt.dueDate <= payPeriod.endDate)
-          .reduce((total, debt) => total + getDebtDueAmountPence(debt), 0)
+          .reduce((total, debt) => total + getDebtDueAmountAfterReservesPence(debt, debtReserves), 0)
       : 0,
     progressPercent:
       totalOriginalAmountPence > 0
@@ -684,6 +731,7 @@ function createEmptyPayPeriodCostSummary(): PayPeriodCostSummary {
     savedPaymentsPence: 0,
     manualSpendingPence: 0,
     debtMinimumsPence: 0,
+    debtReservesPence: 0,
     creditCardChargesPence: 0,
     creditCardRepaymentsPence: 0,
     creditCardNetPence: 0,
@@ -692,6 +740,17 @@ function createEmptyPayPeriodCostSummary(): PayPeriodCostSummary {
     isOverCommitted: false,
     items: [],
   }
+}
+
+function isDebtReserveInPayPeriod(
+  reserve: Pick<DebtReserve, 'payPeriodId' | 'periodStartDate' | 'periodEndDate'>,
+  payPeriod: PayPeriod,
+): boolean {
+  if (reserve.payPeriodId) {
+    return reserve.payPeriodId === payPeriod.id
+  }
+
+  return reserve.periodStartDate === payPeriod.startDate && reserve.periodEndDate === payPeriod.endDate
 }
 
 function sumPositive(items: Array<{ amountPence: number }>): number {

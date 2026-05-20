@@ -6,8 +6,8 @@ import { CloudSyncPanel } from '../components/CloudSyncPanel'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { CloudSyncController } from '../hooks/useCloudSync'
 import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
-import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput } from '../components/ui'
-import type { PayFrequency } from '../types/models'
+import { Button, Field, MoneyMetric, Panel, SelectInput, TextArea, TextInput } from '../components/ui'
+import type { AiProvider, PayFrequency } from '../types/models'
 
 export function SettingsPage({
   snapshot,
@@ -23,6 +23,8 @@ export function SettingsPage({
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
   const [defaultHoursWorked, setDefaultHoursWorked] = useState(String(snapshot.settings.defaultHoursWorked))
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
+  const [aiInstructions, setAiInstructions] = useState(snapshot.settings.aiInstructions)
+  const [aiProvider, setAiProvider] = useState<AiProvider>(snapshot.settings.aiProvider)
   const [saved, setSaved] = useState(false)
   const totalPotBalancePence = snapshot.pots.reduce((total, pot) => total + pot.balancePence, 0)
   const archivedPotCount = snapshot.pots.filter((pot) => pot.archived).length
@@ -33,6 +35,8 @@ export function SettingsPage({
       defaultHoursWorked: Number.parseFloat(defaultHoursWorked) || 0,
       hourlyRatePence: parsePoundsToPence(hourlyRate),
       payFrequency,
+      aiInstructions: aiInstructions.trim(),
+      aiProvider,
     })
     setSaved(true)
   }
@@ -77,6 +81,36 @@ export function SettingsPage({
               <option value="monthly">Monthly</option>
               <option value="custom">Custom</option>
             </SelectInput>
+          </Field>
+          <Field
+            label="AI provider"
+            hint="Gemini stays as the default. OpenRouter uses openai/gpt-oss-120b:free on the server."
+          >
+            <SelectInput
+              aria-label="AI provider"
+              value={aiProvider}
+              onChange={(event) => {
+                setAiProvider(event.target.value as AiProvider)
+                setSaved(false)
+              }}
+            >
+              <option value="gemini">Gemini</option>
+              <option value="openrouter">OpenRouter gpt-oss-120b</option>
+            </SelectInput>
+          </Field>
+          <Field
+            label="Custom AI instructions"
+            hint="Used for tone and preferences only. The app still owns all money calculations."
+          >
+            <TextArea
+              aria-label="Custom AI instructions"
+              value={aiInstructions}
+              onChange={(event) => {
+                setAiInstructions(event.target.value)
+                setSaved(false)
+              }}
+              placeholder="Example: be direct, prioritise debts due soon, keep answers short."
+            />
           </Field>
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={saveSettings} disabled={saved}>

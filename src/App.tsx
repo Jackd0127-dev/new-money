@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 
 import { AppShell } from './components/AppShell'
+import { AiPlanPage } from './pages/AiPlanPage'
 import { AllocatingPaymentsPage } from './pages/AllocatingPaymentsPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -65,6 +66,7 @@ function App() {
         onViewChange={setActiveView}
       />
     ),
+    aiPlan: <AiPlanPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} user={auth.user} />,
     payday: <PaydayWizardPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
     pots: <PotsPage snapshot={snapshot} actions={actions} />,
     spending: <SpendingPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,

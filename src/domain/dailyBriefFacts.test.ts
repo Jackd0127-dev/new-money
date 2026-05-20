@@ -109,6 +109,8 @@ function createSnapshot(overrides: Partial<DailyBriefSnapshotInput> = {}): Daily
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
       defaultHoursWorked: 72,
+      aiInstructions: '',
+      aiProvider: 'gemini',
       createdAt: timestamp,
       updatedAt: timestamp,
     },

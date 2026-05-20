@@ -43,6 +43,7 @@ export function RecurringPage({
     transactions: snapshot.transactions,
     debts: snapshot.debts,
     creditCardRepayments: snapshot.creditCardRepayments,
+    debtReserves: snapshot.debtReserves,
   })
 
   async function submitPayment() {
@@ -275,12 +276,12 @@ function NextPaydayOwedPanel({
               value={formatPence(summary.debtMinimumsPence)}
               tone={summary.debtMinimumsPence > 0 ? 'warning' : 'neutral'}
               breakdown={{
-                formula: 'Debt due = full outstanding balances for active debts due by the end of this next pay period.',
+                formula: 'Debt due = outstanding balances due by the end of this next pay period after planned reserves.',
                 lines: [
                   {
                     label: 'Debt due',
                     value: formatPence(summary.debtMinimumsPence),
-                    detail: `Due by ${period.endDate}, including overdue active debts.`,
+                    detail: `Due by ${period.endDate}, after accepted debt reserves are subtracted.`,
                     tone: 'result',
                   },
                 ],
@@ -350,7 +351,7 @@ function getNextPaydayOwedBreakdown(
   period: PayPeriod,
 ): CalculationBreakdown {
   return {
-    formula: 'Total owed next payday = recurring + saved payments + manual spending + debt due + credit-card net.',
+    formula: 'Total owed next payday = recurring + saved payments + manual spending + debt reserves + debt due + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -371,9 +372,15 @@ function getNextPaydayOwedBreakdown(
         tone: 'add',
       },
       {
+        label: 'Debt reserves',
+        value: formatPence(summary.debtReservesPence),
+        detail: 'Accepted set-asides already planned for this next period.',
+        tone: 'add',
+      },
+      {
         label: 'Debt due',
         value: formatPence(summary.debtMinimumsPence),
-        detail: 'Full outstanding balances overdue or due by this next period end.',
+        detail: 'Remaining outstanding balances overdue or due by this next period end.',
         tone: 'add',
       },
       {
@@ -436,6 +443,10 @@ function formatCostSource(source: PayPeriodCostSummary['items'][number]['source'
 
   if (source === 'debt_minimum') {
     return 'Debt due'
+  }
+
+  if (source === 'debt_reserve') {
+    return 'Debt reserve'
   }
 
   return 'Card repayment'

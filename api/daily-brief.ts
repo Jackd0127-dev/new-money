@@ -103,7 +103,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   const body = parseBody(req.body)
-  const geminiApiKey = process.env.GEMINI_API_KEY
   const todayIso = body.todayIso ?? new Date().toISOString().slice(0, 10)
 
   try {
@@ -115,8 +114,41 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     })
   }
 
-  const briefFacts = getDailyBriefFacts(toBriefSnapshotInput(body.snapshot), todayIso)
+  const briefSnapshot = toBriefSnapshotInput(body.snapshot)
+  const aiProvider = briefSnapshot.settings?.aiProvider ?? 'gemini'
+  const briefFacts = getDailyBriefFacts(briefSnapshot, todayIso)
   const fallbackContent = formatFallbackDailyBrief(briefFacts)
+
+  if (aiProvider === 'openrouter') {
+    const openRouterApiKey = process.env.OPENROUTER_API_KEY
+
+    if (!openRouterApiKey) {
+      return res.status(200).json({ content: fallbackContent })
+    }
+
+    try {
+      const prompt = buildPrompt({
+        todayIso,
+        snapshotSignature: body.snapshotSignature ?? 'unknown',
+        briefFacts,
+      })
+      const content = formatDailyBriefResponse(
+        parseDailyBriefResponse(
+          await generateOpenRouterJson({
+            apiKey: openRouterApiKey,
+            systemInstruction,
+            prompt,
+          }),
+        ),
+      )
+
+      return res.status(200).json({ content: content || fallbackContent })
+    } catch {
+      return res.status(200).json({ content: fallbackContent })
+    }
+  }
+
+  const geminiApiKey = process.env.GEMINI_API_KEY
 
   if (!geminiApiKey) {
     return res.status(200).json({ content: fallbackContent })
@@ -147,6 +179,49 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   } catch {
     return res.status(200).json({ content: fallbackContent })
   }
+}
+
+async function generateOpenRouterJson({
+  apiKey,
+  systemInstruction,
+  prompt,
+}: {
+  apiKey: string
+  systemInstruction: string
+  prompt: string
+}): Promise<string> {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://money.scriptai.space',
+      'X-OpenRouter-Title': 'New Money',
+    },
+    body: JSON.stringify({
+      model: 'openai/gpt-oss-120b:free',
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt },
+      ],
+      response_format: { type: 'json_object' },
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter request failed with ${response.status}`)
+  }
+
+  const body = (await response.json()) as {
+    choices?: Array<{ message?: { content?: unknown } }>
+  }
+  const content = body.choices?.[0]?.message?.content
+
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('OpenRouter returned an empty daily brief.')
+  }
+
+  return content.trim()
 }
 
 function initializeFirebaseAdmin() {

@@ -818,6 +818,7 @@ describe('pay period cost summary', () => {
       directRecurringPence: 25000,
       savedPaymentsPence: 3000,
       manualSpendingPence: 1250,
+      debtReservesPence: 0,
       debtMinimumsPence: 75000,
       creditCardChargesPence: 7200,
       creditCardRepaymentsPence: 2000,

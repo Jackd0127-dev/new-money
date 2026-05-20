@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { clsx } from 'clsx'
 import { ChevronDown } from 'lucide-react'
 
@@ -101,6 +101,18 @@ export function SelectInput({ className, ...props }: SelectHTMLAttributes<HTMLSe
     <select
       className={clsx(
         'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-950 shadow-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function TextArea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={clsx(
+        'min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100',
         className,
       )}
       {...props}

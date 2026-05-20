@@ -27,6 +27,7 @@ export function DashboardPage({
     transactions: snapshot.transactions,
     debts: snapshot.debts,
     creditCardRepayments: snapshot.creditCardRepayments,
+    debtReserves: snapshot.debtReserves,
   })
 
   return (
@@ -127,7 +128,7 @@ function getTotalPayBreakdown(
 
 function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
   return {
-    formula: 'Total costs = recurring + saved payments + manual spending + debt due + credit-card net.',
+    formula: 'Total costs = recurring + saved payments + manual spending + debt reserves + debt due + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -148,9 +149,15 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
         tone: 'add',
       },
       {
+        label: 'Debt reserves',
+        value: formatPence(summary.debtReservesPence),
+        detail: 'Accepted AI/manual set-asides for debts in this pay period. They do not mark debts paid.',
+        tone: 'add',
+      },
+      {
         label: 'Debt due',
         value: formatPence(summary.debtMinimumsPence),
-        detail: 'Full outstanding balances for active debts overdue or due by the end of this pay period.',
+        detail: 'Outstanding debt due by the end of this period after planned reserves are subtracted.',
         tone: 'add',
       },
       {

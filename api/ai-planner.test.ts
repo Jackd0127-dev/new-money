@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import handler from './daily-brief'
+import handler from './ai-planner'
 
 const mocks = vi.hoisted(() => ({
   verifyIdToken: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('@google/genai', () => ({
   },
 }))
 
-describe('daily brief api', () => {
+describe('ai planner api', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubEnv('GEMINI_API_KEY', 'gemini-key')
@@ -51,11 +51,9 @@ describe('daily brief api', () => {
     mocks.verifyIdToken.mockResolvedValue({ uid: 'user-1' })
     mocks.generateContent.mockResolvedValue({
       text: JSON.stringify({
-        summary: 'You have a clear brief.',
-        risks: ['Phone is due today.'],
-        today: ['Pay or mark the phone bill as paid.'],
-        next: ['Keep bill money aside before payday.'],
-        missingData: [],
+        answer: 'Reserve the recommended amount first, then review the shortfall.',
+        risks: ['The selected paycheck is tight.'],
+        actions: ['Reserve £666.66 for Card balance.'],
         confidence: 'high',
       }),
     })
@@ -78,7 +76,7 @@ describe('daily brief api', () => {
     expect(mocks.generateContent).not.toHaveBeenCalled()
   })
 
-  it('verifies the user token and returns the formatted Gemini brief', async () => {
+  it('sends calculated debt plan facts and custom instructions to Gemini', async () => {
     const response = createResponse()
 
     await handler(
@@ -88,62 +86,55 @@ describe('daily brief api', () => {
           authorization: 'Bearer firebase-token',
         },
         body: {
-          todayIso: '2026-05-19',
-          snapshotSignature: 'snapshot-signature',
+          question: 'What should I do next?',
+          todayIso: '2026-01-01',
+          selectedPayPeriodId: 'period-jan-02',
+          customInstructions: 'Use direct wording.',
           snapshot: {
-            payPeriods: [],
-            recurringPayments: [],
-            creditCards: [],
-          },
-        },
-      },
-      response,
-    )
-
-    expect(mocks.verifyIdToken).toHaveBeenCalledWith('firebase-token')
-    expect(mocks.initializeApp).toHaveBeenCalled()
-    expect(mocks.generateContent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: expect.stringContaining('gemini'),
-      }),
-    )
-    expect(response.statusCode).toBe(200)
-    expect(response.payload).toEqual({
-      content: [
-        'Summary:',
-        'You have a clear brief.',
-        '',
-        'Risks:',
-        '- Phone is due today.',
-        '',
-        'Today:',
-        '- Pay or mark the phone bill as paid.',
-        '',
-        'Next:',
-        '- Keep bill money aside before payday.',
-      ].join('\n'),
-    })
-  })
-
-  it('uses system instructions, editable instructions, brief facts, and JSON output', async () => {
-    const response = createResponse()
-
-    await handler(
-      {
-        method: 'POST',
-        headers: {
-          authorization: 'Bearer firebase-token',
-        },
-        body: {
-          todayIso: '2026-05-19',
-          snapshotSignature: 'snapshot-signature',
-          snapshot: {
-            payPeriods: [],
-            dailyBriefs: [
+            settings: {
+              id: 'default',
+              currency: 'GBP',
+              payFrequency: 'biweekly',
+              defaultPayPeriodDays: 14,
+              hourlyRatePence: 1000,
+              defaultHoursWorked: 80,
+              aiInstructions: 'Prefer short advice.',
+              aiProvider: 'gemini',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            payPeriods: [
               {
-                content: 'Do not resend old generated content.',
+                id: 'period-jan-02',
+                payday: '2026-01-02',
+                startDate: '2026-01-02',
+                endDate: '2026-01-15',
+                nextPayday: '2026-01-16',
+                payFrequency: 'biweekly',
+                incomePence: 80000,
+                status: 'active',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
               },
             ],
+            debts: [
+              {
+                id: 'debt-card',
+                name: 'Card balance',
+                lender: 'Card Provider',
+                originalAmountPence: 200000,
+                currentBalancePence: 200000,
+                minimumPaymentPence: 0,
+                dueDate: '2026-02-01',
+                interestRateApr: null,
+                note: '',
+                status: 'active',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+              },
+            ],
+            debtReserves: [],
+            dailyBriefs: [{ content: 'Do not send old generated content.' }],
           },
         },
       },
@@ -159,17 +150,22 @@ describe('daily brief api', () => {
       }
     }
 
-    expect(request.config.systemInstruction).toContain('financial brief writer')
+    expect(request.config.systemInstruction).toContain('deterministic debt planner')
     expect(request.config.responseMimeType).toBe('application/json')
-    expect(request.config.responseSchema).toEqual(expect.objectContaining({ type: 'OBJECT' }))
-    expect(request.contents).toContain('Editable daily brief instructions:')
-    expect(request.contents).toContain('Planner brief facts JSON:')
-    expect(request.contents).not.toContain('Planner snapshot JSON:')
-    expect(request.contents).not.toContain('Do not resend old generated content.')
+    expect(request.contents).toContain('Calculated debt plan facts JSON:')
+    expect(request.contents).toContain('Use direct wording.')
+    expect(request.contents).toContain('66666')
+    expect(request.contents).not.toContain('Do not send old generated content.')
+    expect(response.payload).toEqual({
+      answer: 'Reserve the recommended amount first, then review the shortfall.',
+      risks: ['The selected paycheck is tight.'],
+      actions: ['Reserve £666.66 for Card balance.'],
+      confidence: 'high',
+    })
   })
 
-  it('returns a calculated fallback brief when Gemini returns invalid JSON', async () => {
-    mocks.generateContent.mockResolvedValueOnce({ text: 'loose text, not json' })
+  it('falls back to deterministic guidance when Gemini returns invalid JSON', async () => {
+    mocks.generateContent.mockResolvedValueOnce({ text: 'loose text' })
     const response = createResponse()
 
     await handler(
@@ -179,20 +175,12 @@ describe('daily brief api', () => {
           authorization: 'Bearer firebase-token',
         },
         body: {
-          todayIso: '2026-05-19',
-          snapshotSignature: 'snapshot-signature',
+          question: 'Can I skip this?',
+          selectedPayPeriodId: 'period-jan-02',
           snapshot: {
             payPeriods: [],
-            pots: [],
-            recurringPayments: [],
-            paychecks: [],
-            potAllocations: [],
-            transactions: [],
             debts: [],
-            debtPayments: [],
-            creditCards: [],
-            customPayments: [],
-            creditCardRepayments: [],
+            debtReserves: [],
           },
         },
       },
@@ -200,12 +188,15 @@ describe('daily brief api', () => {
     )
 
     expect(response.statusCode).toBe(200)
-    expect(response.payload).toEqual({
-      content: expect.stringContaining('Summary:'),
-    })
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        answer: expect.stringContaining('No active debt plan'),
+        confidence: 'low',
+      }),
+    )
   })
 
-  it('uses OpenRouter when the planner settings choose OpenRouter', async () => {
+  it('uses OpenRouter gpt-oss-120b when the planner is set to OpenRouter', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -213,11 +204,9 @@ describe('daily brief api', () => {
           {
             message: {
               content: JSON.stringify({
-                summary: 'OpenRouter brief.',
+                answer: 'Use the OpenRouter plan.',
                 risks: [],
-                today: ['Check the AI Plan tab.'],
-                next: [],
-                missingData: [],
+                actions: ['Reserve this paycheck amount.'],
                 confidence: 'medium',
               }),
             },
@@ -236,8 +225,9 @@ describe('daily brief api', () => {
           authorization: 'Bearer firebase-token',
         },
         body: {
-          todayIso: '2026-05-19',
-          snapshotSignature: 'snapshot-signature',
+          question: 'Use the new model?',
+          todayIso: '2026-01-01',
+          selectedPayPeriodId: 'period-jan-02',
           snapshot: {
             settings: {
               id: 'default',
@@ -248,11 +238,25 @@ describe('daily brief api', () => {
               defaultHoursWorked: 80,
               aiInstructions: 'Prefer short advice.',
               aiProvider: 'openrouter',
-              createdAt: '2026-05-19T00:00:00.000Z',
-              updatedAt: '2026-05-19T00:00:00.000Z',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
             },
-            payPeriods: [],
-            dailyBriefs: [{ content: 'Old generated brief.' }],
+            payPeriods: [
+              {
+                id: 'period-jan-02',
+                payday: '2026-01-02',
+                startDate: '2026-01-02',
+                endDate: '2026-01-15',
+                nextPayday: '2026-01-16',
+                payFrequency: 'biweekly',
+                incomePence: 80000,
+                status: 'active',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+              },
+            ],
+            debts: [],
+            debtReserves: [],
           },
         },
       },
@@ -272,25 +276,20 @@ describe('daily brief api', () => {
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       model: string
       messages: Array<{ role: string; content: string }>
+      response_format: { type: string }
     }
     expect(requestBody.model).toBe('openai/gpt-oss-120b:free')
-    expect(requestBody.messages[0].content).toContain('financial brief writer')
-    expect(requestBody.messages[1].content).toContain('Planner brief facts JSON:')
-    expect(requestBody.messages[1].content).not.toContain('Old generated brief.')
+    expect(requestBody.messages[0]).toMatchObject({
+      role: 'system',
+    })
+    expect(requestBody.messages[0].content).toContain('deterministic debt planner')
+    expect(requestBody.messages[1].content).toContain('Calculated debt plan facts JSON:')
+    expect(requestBody.response_format.type).toBe('json_object')
     expect(response.payload).toEqual({
-      content: [
-        'Summary:',
-        'OpenRouter brief.',
-        '',
-        'Risks:',
-        '- No major risks flagged.',
-        '',
-        'Today:',
-        '- Check the AI Plan tab.',
-        '',
-        'Next:',
-        '- Keep upcoming payments updated before payday.',
-      ].join('\n'),
+      answer: 'Use the OpenRouter plan.',
+      risks: [],
+      actions: ['Reserve this paycheck amount.'],
+      confidence: 'medium',
     })
   })
 })

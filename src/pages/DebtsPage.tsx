@@ -4,7 +4,7 @@ import { PenLine, Trash2 } from 'lucide-react'
 import {
   findPayPeriodForDate,
   formatPence,
-  getDebtDueAmountPence,
+  getDebtDueAmountAfterReservesPence,
   getDebtSummary,
   parsePoundsToPence,
   toIsoDate,
@@ -60,7 +60,7 @@ export function DebtsPage({
   const nextPayPeriod = snapshot.payPeriods
     .filter((period) => period.startDate > today)
     .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null
-  const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today, currentPayPeriod)
+  const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today, currentPayPeriod, snapshot.debtReserves)
   const payPeriodEndDate = currentPayPeriod?.endDate ?? null
   const activeDebtIds = new Set(activeDebts.map((debt) => debt.id))
   const recordedDebtPaymentPence = snapshot.debtPayments
@@ -215,7 +215,7 @@ export function DebtsPage({
                 ? [
                     ...dueThisPayPeriod.map((debt) => ({
                       label: debt.name,
-                      value: formatPence(getDebtDueAmountPence(debt)),
+                      value: formatPence(getDebtDueAmountAfterReservesPence(debt, snapshot.debtReserves)),
                       detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
                       tone: 'add' as const,
                     })),
@@ -447,7 +447,7 @@ export function DebtsPage({
                   ? Math.round((paidPence / debt.originalAmountPence) * 100)
                   : 100
               const isOverdue = debt.status === 'active' && debt.dueDate < today
-              const debtDueAmountPence = getDebtDueAmountPence(debt)
+              const debtDueAmountPence = getDebtDueAmountAfterReservesPence(debt, snapshot.debtReserves)
 
               return (
                 <div key={debt.id} className="rounded-lg border border-slate-200 bg-white p-4">

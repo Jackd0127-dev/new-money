@@ -7,10 +7,13 @@ import {
   addDailyBrief,
   addDebt,
   addDebtPayment,
+  addDebtReserve,
   addPot,
   addRecurringPayment,
   addTransaction,
   archiveCreditCard,
+  applyDebtReserve,
+  cancelDebtReserve,
   createPaycheckPlan,
   deleteCustomPayment,
   deleteDebt,
@@ -22,10 +25,12 @@ import {
   deleteTransaction,
   getPlannerSnapshot,
   resetPlannerData,
+  skipDebtReserve,
   toggleRecurringPayment,
   updateCreditCard,
   updateCreditCardRepayment,
   updateDebt,
+  updateDebtReserve,
   updateCustomPayment,
   updatePot,
   updateRecurringPayment,
@@ -40,6 +45,10 @@ import {
   type DailyBriefInput,
   type DebtInput,
   type DebtPaymentInput,
+  type DebtReserveApplyInput,
+  type DebtReserveInput,
+  type DebtReserveSkipInput,
+  type DebtReserveUpdateInput,
   type DebtUpdateInput,
   type PaycheckPlanInput,
   type PlannerSnapshot,
@@ -80,6 +89,11 @@ export interface PlannerActions {
   deleteDebt: typeof deleteDebt
   addDebtPayment: typeof addDebtPayment
   deleteDebtPayment: typeof deleteDebtPayment
+  addDebtReserve: typeof addDebtReserve
+  updateDebtReserve: typeof updateDebtReserve
+  cancelDebtReserve: typeof cancelDebtReserve
+  skipDebtReserve: typeof skipDebtReserve
+  applyDebtReserve: typeof applyDebtReserve
   createPaycheckPlan: typeof createPaycheckPlan
   deletePayPeriod: typeof deletePayPeriod
   resetPlannerData: typeof resetPlannerData
@@ -137,6 +151,11 @@ export function usePlannerData() {
       deleteDebt: withRefresh(deleteDebt, refresh),
       addDebtPayment: withRefresh(addDebtPayment, refresh),
       deleteDebtPayment: withRefresh(deleteDebtPayment, refresh),
+      addDebtReserve: withRefresh(addDebtReserve, refresh),
+      updateDebtReserve: withRefresh(updateDebtReserve, refresh),
+      cancelDebtReserve: withRefresh(cancelDebtReserve, refresh),
+      skipDebtReserve: withRefresh(skipDebtReserve, refresh),
+      applyDebtReserve: withRefresh(applyDebtReserve, refresh),
       createPaycheckPlan: withRefresh(createPaycheckPlan, refresh),
       deletePayPeriod: withRefresh(deletePayPeriod, refresh),
       resetPlannerData: withRefresh(resetPlannerData, refresh),
@@ -172,6 +191,10 @@ export type {
   DailyBriefInput,
   DebtInput,
   DebtPaymentInput,
+  DebtReserveApplyInput,
+  DebtReserveInput,
+  DebtReserveSkipInput,
+  DebtReserveUpdateInput,
   DebtUpdateInput,
   PaycheckPlanInput,
   PlannerSnapshot,

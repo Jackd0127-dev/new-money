@@ -8,6 +8,7 @@ import {
   ListChecks,
   PiggyBank,
   Settings,
+  Sparkles,
   WalletCards,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -22,6 +23,7 @@ const navItems: Array<{
   icon: typeof Gauge
 }> = [
   { key: 'dashboard', label: 'Dashboard', icon: Gauge },
+  { key: 'aiPlan', label: 'AI Plan', icon: Sparkles },
   { key: 'payday', label: 'Payday', icon: Banknote },
   { key: 'pots', label: 'Pots', icon: PiggyBank },
   { key: 'spending', label: 'Spending', icon: WalletCards },

@@ -1,5 +1,7 @@
 export type PayFrequency = 'weekly' | 'biweekly' | 'monthly' | 'custom'
 
+export type AiProvider = 'gemini' | 'openrouter'
+
 export type PotType = 'spending' | 'reserved' | 'saving' | 'investment' | 'buffer'
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly' | 'yearly'
@@ -16,6 +18,10 @@ export type PaymentMethod = 'pot' | 'credit_card'
 
 export type CustomPaymentStatus = 'unpaid' | 'paid' | 'archived'
 
+export type DebtReserveStatus = 'planned' | 'skipped' | 'applied' | 'cancelled'
+
+export type DebtReserveSource = 'assistant' | 'manual'
+
 export interface Timestamped {
   createdAt: string
   updatedAt: string
@@ -29,6 +35,8 @@ export interface Settings extends Timestamped {
   defaultPayPeriodDays: number
   hourlyRatePence: number
   defaultHoursWorked: number
+  aiInstructions: string
+  aiProvider: AiProvider
 }
 
 export interface Pot extends Timestamped {
@@ -113,6 +121,19 @@ export interface DebtPayment extends Timestamped {
   debtId: string
   amountPence: number
   date: string
+  note: string
+}
+
+export interface DebtReserve extends Timestamped {
+  id: string
+  debtId: string
+  payPeriodId: string | null
+  payday: string
+  periodStartDate: string
+  periodEndDate: string
+  amountPence: number
+  status: DebtReserveStatus
+  source: DebtReserveSource
   note: string
 }
 

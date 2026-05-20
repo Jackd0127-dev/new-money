@@ -17,6 +17,7 @@ import {
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
+import type { PayPeriod } from '../types/models'
 import { Button, MoneyMetric, Panel } from '../components/ui'
 
 type CalendarEventType =
@@ -80,8 +81,16 @@ const eventStyles: Record<CalendarEventType, { label: string; className: string;
   },
 }
 
-export function CalendarPage({ snapshot }: { snapshot: PlannerSnapshot }) {
-  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(new Date()))
+export function CalendarPage({
+  snapshot,
+  selectedPayPeriod,
+}: {
+  snapshot: PlannerSnapshot
+  selectedPayPeriod?: PayPeriod | null
+}) {
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    startOfMonth(selectedPayPeriod ? parseIsoDate(selectedPayPeriod.startDate) : new Date()),
+  )
   const monthStart = toIsoDate(visibleMonth)
   const monthEnd = toIsoDate(new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth() + 1, 0)))
   const events = useMemo(
@@ -114,7 +123,11 @@ export function CalendarPage({ snapshot }: { snapshot: PlannerSnapshot }) {
               </div>
               <div>
                 <h2 className="text-2xl font-semibold text-slate-950">{formatMonth(visibleMonth)}</h2>
-                <p className="mt-1 text-sm text-slate-500">Pay, due payments, cards, insurance, and spending signals.</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedPayPeriod
+                    ? `Showing selected period ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}.`
+                    : 'Pay, due payments, cards, insurance, and spending signals.'}
+                </p>
               </div>
             </div>
           </div>
@@ -185,11 +198,20 @@ export function CalendarPage({ snapshot }: { snapshot: PlannerSnapshot }) {
             const dayEvents = eventsByDate.get(cell.date) ?? []
             const isCurrentMonth = cell.date >= monthStart && cell.date <= monthEnd
             const isToday = cell.date === toIsoDate(new Date())
+            const isSelectedPeriodDay = selectedPayPeriod
+              ? cell.date >= selectedPayPeriod.startDate && cell.date <= selectedPayPeriod.endDate
+              : false
 
             return (
               <div
                 key={cell.date}
-                className={`min-h-[132px] border-b border-r border-slate-100 p-2 ${isCurrentMonth ? 'bg-white' : 'bg-slate-50 text-slate-400'}`}
+                className={`min-h-[132px] border-b border-r p-2 ${
+                  isSelectedPeriodDay
+                    ? 'border-slate-200 bg-slate-50'
+                    : isCurrentMonth
+                      ? 'border-slate-100 bg-white'
+                      : 'border-slate-100 bg-slate-50 text-slate-400'
+                }`}
               >
                 <div className="mb-2 flex items-center justify-between">
                   <span
@@ -431,6 +453,10 @@ function getEventRank(type: CalendarEventType): number {
 
 function startOfMonth(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1))
+}
+
+function parseIsoDate(value: string): Date {
+  return new Date(`${value}T00:00:00.000Z`)
 }
 
 function formatMonth(date: Date): string {

@@ -9,20 +9,21 @@ import type {
   TransactionUpdateInput,
 } from '../hooks/usePlannerData'
 import { Button, CalculationDetails, Field, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
-import type { PaymentMethod } from '../types/models'
+import type { PaymentMethod, PayPeriod } from '../types/models'
 
 const quickAmounts = ['3.00', '5.00', '10.00', '20.00', '50.00']
 
 export function SpendingPage({
   snapshot,
   actions,
+  selectedPayPeriod,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  selectedPayPeriod?: PayPeriod | null
 }) {
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
-  const latestPeriod = snapshot.payPeriods[0] ?? null
   const [potId, setPotId] = useState(activePots[0]?.id ?? '')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pot')
   const [creditCardId, setCreditCardId] = useState(activeCards[0]?.id ?? '')
@@ -42,7 +43,7 @@ export function SpendingPage({
   const parsedAmountPence = parsePoundsToPence(amount)
   const canSubmitSpend =
     parsedAmountPence > 0 && (paymentMethod === 'pot' ? Boolean(potId) : Boolean(creditCardId))
-  const groupedTransactions = groupTransactionsByPeriod(snapshot.transactions, snapshot)
+  const groupedTransactions = groupTransactionsByPeriod(snapshot.transactions, snapshot, selectedPayPeriod ?? null)
 
   async function submitTransaction() {
     const amountPence = parsedAmountPence
@@ -72,7 +73,7 @@ export function SpendingPage({
       type: 'spending',
       date,
       note: note.trim() || 'Manual spend',
-      payPeriodId: findPayPeriodForDate(snapshot.payPeriods, date)?.id ?? latestPeriod?.id ?? null,
+      payPeriodId: findPayPeriodForDate(snapshot.payPeriods, date)?.id ?? null,
       paymentMethod,
       creditCardId: paymentMethod === 'credit_card' ? creditCardId : null,
     }
@@ -227,13 +228,24 @@ export function SpendingPage({
             groupedTransactions.map((group, index) => (
               <details
                 key={group.id}
-                open={index === 0}
-                className="rounded-lg border border-slate-200 bg-white"
+                open={group.isSelected || (!selectedPayPeriod && index === 0)}
+                className={
+                  group.isSelected
+                    ? 'rounded-lg border border-slate-950 bg-white shadow-sm'
+                    : 'rounded-lg border border-slate-200 bg-white'
+                }
               >
                 <summary className="cursor-pointer list-none px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                        {group.isSelected && (
+                          <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
+                            Viewing
+                          </span>
+                        )}
+                      </div>
                       <p className="mt-1 text-xs text-slate-500">{group.transactions.length} entries</p>
                     </div>
                     <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
@@ -299,6 +311,8 @@ interface TransactionGroup {
   label: string
   transactions: PlannerSnapshot['transactions']
   totalPence: number
+  isSelected: boolean
+  sortDate: string
 }
 
 function getSpendingGroupBreakdown(group: TransactionGroup): CalculationBreakdown {
@@ -326,9 +340,21 @@ function getSpendingGroupBreakdown(group: TransactionGroup): CalculationBreakdow
 function groupTransactionsByPeriod(
   transactions: PlannerSnapshot['transactions'],
   snapshot: PlannerSnapshot,
+  selectedPayPeriod: PayPeriod | null,
 ): TransactionGroup[] {
   const groups = new Map<string, TransactionGroup>()
   const periodsById = new Map(snapshot.payPeriods.map((period) => [period.id, period]))
+
+  if (selectedPayPeriod) {
+    groups.set(selectedPayPeriod.id, {
+      id: selectedPayPeriod.id,
+      label: `${selectedPayPeriod.payday} pay period · ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`,
+      transactions: [],
+      totalPence: 0,
+      isSelected: true,
+      sortDate: selectedPayPeriod.startDate,
+    })
+  }
 
   for (const transaction of transactions) {
     const period =
@@ -345,6 +371,8 @@ function groupTransactionsByPeriod(
         label,
         transactions: [],
         totalPence: 0,
+        isSelected: period?.id === selectedPayPeriod?.id,
+        sortDate: period?.startDate ?? transaction.date,
       }
 
     existingGroup.transactions.push(transaction)
@@ -357,5 +385,11 @@ function groupTransactionsByPeriod(
       ...group,
       transactions: group.transactions.sort((a, b) => b.date.localeCompare(a.date)),
     }))
-    .sort((a, b) => b.transactions[0].date.localeCompare(a.transactions[0].date))
+    .sort((a, b) => {
+      if (a.isSelected !== b.isSelected) {
+        return a.isSelected ? -1 : 1
+      }
+
+      return b.sortDate.localeCompare(a.sortDate)
+    })
 }

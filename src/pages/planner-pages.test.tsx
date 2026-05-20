@@ -312,68 +312,71 @@ describe('allocating payments page', () => {
   })
 
   it('shows credit card diagrams and paycheck impact from linked payments', () => {
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          incomePence: 90000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 23,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          creditCardId: 'card-amex',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-card',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 5000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-amex',
+          date: '2026-05-18',
+          note: 'Groceries',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+
     render(
       <AllocatingPaymentsPage
-        snapshot={createSnapshot({
-          payPeriods: [
-            {
-              id: 'period-current',
-              startDate: '2026-05-16',
-              endDate: '2026-05-29',
-              payday: '2026-05-16',
-              nextPayday: '2026-05-30',
-              incomePence: 90000,
-              status: 'active',
-              createdAt: '2026-05-16T00:00:00.000Z',
-              updatedAt: '2026-05-16T00:00:00.000Z',
-            },
-          ],
-          creditCards: [
-            {
-              id: 'card-amex',
-              name: 'Everyday Amex',
-              provider: 'Amex',
-              limitPence: 100000,
-              dueDay: 12,
-              dueDate: null,
-              color: '#2563eb',
-              archived: false,
-              createdAt: '2026-05-16T00:00:00.000Z',
-              updatedAt: '2026-05-16T00:00:00.000Z',
-            },
-          ],
-          recurringPayments: [
-            {
-              id: 'rec-phone',
-              name: 'Phone',
-              amountPence: 2200,
-              dueDay: 23,
-              frequency: 'monthly',
-              potId: 'pot-bills',
-              creditCardId: 'card-amex',
-              priority: 'important',
-              active: true,
-              createdAt: '2026-05-01T00:00:00.000Z',
-              updatedAt: '2026-05-01T00:00:00.000Z',
-            },
-          ],
-          transactions: [
-            {
-              id: 'txn-card',
-              potId: 'pot-food',
-              payPeriodId: 'period-current',
-              amountPence: 5000,
-              type: 'spending',
-              paymentMethod: 'credit_card',
-              creditCardId: 'card-amex',
-              date: '2026-05-18',
-              note: 'Groceries',
-              createdAt: '2026-05-18T00:00:00.000Z',
-              updatedAt: '2026-05-18T00:00:00.000Z',
-            },
-          ],
-        })}
+        snapshot={snapshot}
         actions={createActions()}
+        selectedPayPeriod={snapshot.payPeriods[0]}
       />,
     )
 
@@ -536,7 +539,7 @@ describe('recurring page', () => {
       ],
     })
 
-    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={snapshot.payPeriods[0]} />)
 
     expect(screen.getByRole('region', { name: 'Recurring calendar' })).toBeInTheDocument()
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
@@ -604,7 +607,7 @@ describe('recurring page', () => {
       ],
     })
 
-    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={snapshot.payPeriods[0]} />)
 
     const nextPaydayPanel = screen.getByRole('region', { name: 'What you owe next payday' })
     expect(within(nextPaydayPanel).getAllByText('Total owed next payday').length).toBeGreaterThan(0)
@@ -657,6 +660,50 @@ describe('recurring page', () => {
 })
 
 describe('dashboard page', () => {
+  it('lets the selected pay period change from the dashboard selector', async () => {
+    const user = userEvent.setup()
+    const onPayPeriodChange = vi.fn()
+    const snapshot = createSnapshot({
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          incomePence: 90000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'period-next',
+          startDate: '2026-05-30',
+          endDate: '2026-06-12',
+          payday: '2026-05-30',
+          nextPayday: '2026-06-13',
+          incomePence: 95000,
+          status: 'planned',
+          createdAt: '2026-05-30T00:00:00.000Z',
+          updatedAt: '2026-05-30T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={snapshot.payPeriods[0]}
+        onPayPeriodChange={onPayPeriodChange}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Viewing pay period' }), 'period-next')
+
+    expect(onPayPeriodChange).toHaveBeenCalledWith('period-next')
+  })
+
   it('shows one clear pay summary with correct current period maths', () => {
     const snapshot = createSnapshot({
       payPeriods: [
@@ -757,9 +804,9 @@ describe('dashboard page', () => {
       ],
     })
 
-    render(<DashboardPage snapshot={snapshot} onViewChange={vi.fn()} />)
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
 
-    const currentPeriod = screen.getByRole('region', { name: 'Current pay period' })
+    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
     expect(within(currentPeriod).getAllByText('Total pay').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('Total costs').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('Money left').length).toBeGreaterThan(0)
@@ -800,7 +847,7 @@ describe('dashboard page', () => {
       ],
     })
 
-    render(<DashboardPage snapshot={snapshot} onViewChange={vi.fn()} />)
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
 
     expect(screen.queryByRole('region', { name: 'Budget insights' })).not.toBeInTheDocument()
     expect(screen.queryByText('Daily average')).not.toBeInTheDocument()

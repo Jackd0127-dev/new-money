@@ -12,26 +12,28 @@ import {
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, CalculationDetails, Field, MoneyMetric, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
-import type { CustomPaymentStatus, RecurringPayment, Transaction } from '../types/models'
+import type { CustomPaymentStatus, PayPeriod, RecurringPayment, Transaction } from '../types/models'
 
 const cardColors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
 
 export function AllocatingPaymentsPage({
   snapshot,
   actions,
+  selectedPayPeriod,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  selectedPayPeriod?: PayPeriod | null
 }) {
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
-  const latestPeriod = snapshot.payPeriods[0] ?? null
+  const viewedPeriod = selectedPayPeriod ?? null
   const summary = getCreditCardAllocationSummary({
     creditCards: snapshot.creditCards,
     recurringPayments: snapshot.recurringPayments,
     customPayments: snapshot.customPayments,
     transactions: snapshot.transactions,
     repayments: snapshot.creditCardRepayments,
-    payPeriod: latestPeriod,
+    payPeriod: viewedPeriod,
   })
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [editingCardId, setEditingCardId] = useState<string | null>(null)
@@ -53,8 +55,8 @@ export function AllocatingPaymentsPage({
   const [repaymentNote, setRepaymentNote] = useState('')
   const paymentRows = useMemo(() => getPaymentRows(snapshot), [snapshot])
   const paymentGroups = useMemo(
-    () => groupPaymentRowsByPeriod(paymentRows, snapshot),
-    [paymentRows, snapshot],
+    () => groupPaymentRowsByPeriod(paymentRows, snapshot, viewedPeriod),
+    [paymentRows, snapshot, viewedPeriod],
   )
   const selectedCardSummary = selectedCardId
     ? summary.cards.find((cardSummary) => cardSummary.card.id === selectedCardId) ?? null
@@ -300,15 +302,15 @@ export function AllocatingPaymentsPage({
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
         <MoneyMetric
-          label="Latest pay"
+          label="Selected pay"
           value={formatPence(summary.payReceivedPence)}
           breakdown={{
-            formula: 'Latest pay is the income saved on the newest paycheck plan.',
+            formula: 'Selected pay is the income saved on the pay period currently selected on the dashboard.',
             lines: [
               {
-                label: latestPeriod ? 'Newest pay period' : 'No active pay period',
+                label: viewedPeriod ? 'Selected pay period' : 'No selected pay period',
                 value: formatPence(summary.payReceivedPence),
-                detail: latestPeriod ? `${latestPeriod.startDate} to ${latestPeriod.endDate}` : undefined,
+                detail: viewedPeriod ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate}` : undefined,
                 tone: 'result',
               },
             ],
@@ -325,9 +327,9 @@ export function AllocatingPaymentsPage({
           value={formatPence(summary.paycheckRemainingAfterCardsPence)}
           tone={summary.paycheckRemainingAfterCardsPence < 0 ? 'bad' : 'good'}
           breakdown={{
-            formula: 'Remaining after cards = latest pay - cards owed.',
+            formula: 'Remaining after cards = selected pay - cards owed.',
             lines: [
-              { label: 'Latest pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
+              { label: 'Selected pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
               { label: 'Cards owed', value: `-${formatPence(summary.totalOwedPence)}`, tone: 'subtract' },
               {
                 label: 'Remaining after cards',
@@ -537,11 +539,26 @@ export function AllocatingPaymentsPage({
             <div className="space-y-3">
               {paymentGroups.length > 0 ? (
                 paymentGroups.map((group, index) => (
-                  <details key={group.id} open={index === 0} className="rounded-lg border border-slate-200 bg-white">
+                  <details
+                    key={group.id}
+                    open={group.isSelected || (!viewedPeriod && index === 0)}
+                    className={
+                      group.isSelected
+                        ? 'rounded-lg border border-slate-950 bg-white shadow-sm'
+                        : 'rounded-lg border border-slate-200 bg-white'
+                    }
+                  >
                     <summary className="cursor-pointer list-none px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                            {group.isSelected && (
+                              <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
+                                Viewing
+                              </span>
+                            )}
+                          </div>
                           <p className="mt-1 text-xs text-slate-500">{group.rows.length} payments</p>
                         </div>
                         <p className="text-sm font-semibold text-slate-950">{formatPence(group.totalPence)}</p>
@@ -640,6 +657,8 @@ interface PaymentGroup {
   label: string
   rows: PaymentRow[]
   totalPence: number
+  isSelected: boolean
+  sortDate: string
 }
 
 function getPaymentGroupBreakdown(group: PaymentGroup): CalculationBreakdown {
@@ -1036,8 +1055,23 @@ function getPaymentRows(snapshot: PlannerSnapshot): PaymentRow[] {
   ].sort((a, b) => b.date.localeCompare(a.date))
 }
 
-function groupPaymentRowsByPeriod(rows: PaymentRow[], snapshot: PlannerSnapshot): PaymentGroup[] {
+function groupPaymentRowsByPeriod(
+  rows: PaymentRow[],
+  snapshot: PlannerSnapshot,
+  selectedPayPeriod: PayPeriod | null,
+): PaymentGroup[] {
   const groups = new Map<string, PaymentGroup>()
+
+  if (selectedPayPeriod) {
+    groups.set(selectedPayPeriod.id, {
+      id: selectedPayPeriod.id,
+      label: `${selectedPayPeriod.payday} pay period · ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`,
+      rows: [],
+      totalPence: 0,
+      isSelected: true,
+      sortDate: selectedPayPeriod.startDate,
+    })
+  }
 
   for (const row of rows) {
     const period = isIsoDate(row.date) ? findPayPeriodForDate(snapshot.payPeriods, row.date) : null
@@ -1054,6 +1088,8 @@ function groupPaymentRowsByPeriod(rows: PaymentRow[], snapshot: PlannerSnapshot)
         label,
         rows: [],
         totalPence: 0,
+        isSelected: period?.id === selectedPayPeriod?.id,
+        sortDate: period?.startDate ?? (isIsoDate(row.date) ? row.date : '9999-12-31'),
       }
 
     existingGroup.rows.push(row)
@@ -1062,9 +1098,11 @@ function groupPaymentRowsByPeriod(rows: PaymentRow[], snapshot: PlannerSnapshot)
   }
 
   return [...groups.values()].sort((a, b) => {
-    const aDate = a.rows.find((row) => isIsoDate(row.date))?.date ?? '9999-12-31'
-    const bDate = b.rows.find((row) => isIsoDate(row.date))?.date ?? '9999-12-31'
-    return bDate.localeCompare(aDate)
+    if (a.isSelected !== b.isSelected) {
+      return a.isSelected ? -1 : 1
+    }
+
+    return b.sortDate.localeCompare(a.sortDate)
   })
 }
 

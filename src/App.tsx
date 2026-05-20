@@ -11,6 +11,7 @@ import { PotsPage } from './pages/PotsPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SpendingPage } from './pages/SpendingPage'
+import { findPayPeriodForDate, toIsoDate } from './domain/money'
 import { useCloudSync } from './hooks/useCloudSync'
 import { useFirebaseAuth } from './hooks/useFirebaseAuth'
 import { usePlannerData } from './hooks/usePlannerData'
@@ -18,6 +19,7 @@ import type { ViewKey } from './types/navigation'
 
 function App() {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
+  const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string | null>(null)
   const { snapshot, isLoading, error, actions } = usePlannerData()
   const auth = useFirebaseAuth()
   const sync = useCloudSync({
@@ -47,21 +49,37 @@ function App() {
     )
   }
 
+  const today = toIsoDate(new Date())
+  const selectedPayPeriod =
+    (selectedPayPeriodId
+      ? snapshot.payPeriods.find((period) => period.id === selectedPayPeriodId)
+      : null) ??
+    findPayPeriodForDate(snapshot.payPeriods, today)
+
   const pages: Record<ViewKey, ReactNode> = {
-    dashboard: <DashboardPage snapshot={snapshot} onViewChange={setActiveView} />,
-    payday: <PaydayWizardPage snapshot={snapshot} actions={actions} />,
+    dashboard: (
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        onPayPeriodChange={setSelectedPayPeriodId}
+        onViewChange={setActiveView}
+      />
+    ),
+    payday: <PaydayWizardPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
     pots: <PotsPage snapshot={snapshot} actions={actions} />,
-    spending: <SpendingPage snapshot={snapshot} actions={actions} />,
-    allocatingPayments: <AllocatingPaymentsPage snapshot={snapshot} actions={actions} />,
-    debts: <DebtsPage snapshot={snapshot} actions={actions} />,
-    recurring: <RecurringPage snapshot={snapshot} actions={actions} />,
-    calendar: <CalendarPage snapshot={snapshot} />,
+    spending: <SpendingPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    allocatingPayments: (
+      <AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />
+    ),
+    debts: <DebtsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    recurring: <RecurringPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    calendar: <CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />,
     history: <HistoryPage snapshot={snapshot} actions={actions} />,
     settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} sync={sync} />,
   }
 
   return (
-    <AppShell activeView={activeView} onViewChange={setActiveView}>
+    <AppShell activeView={activeView} onViewChange={setActiveView} selectedPayPeriod={selectedPayPeriod}>
       {pages[activeView]}
     </AppShell>
   )

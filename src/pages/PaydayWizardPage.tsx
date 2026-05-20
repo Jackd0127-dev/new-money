@@ -24,11 +24,16 @@ import type { PayFrequency, PayPeriod } from '../types/models'
 export function PaydayWizardPage({
   snapshot,
   actions,
+  selectedPayPeriod,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  selectedPayPeriod?: PayPeriod | null
 }) {
-  const initialDraft = getPaydayDraft(snapshot, snapshot.payPeriods[0]?.payday ?? toIsoDate(new Date()))
+  const initialDraft = getPaydayDraft(
+    snapshot,
+    selectedPayPeriod?.payday ?? snapshot.payPeriods[0]?.payday ?? toIsoDate(new Date()),
+  )
   const [payday, setPayday] = useState(initialDraft.payday)
   const [hoursWorked, setHoursWorked] = useState(initialDraft.hoursWorked)
   const [hourlyRate, setHourlyRate] = useState(initialDraft.hourlyRate)

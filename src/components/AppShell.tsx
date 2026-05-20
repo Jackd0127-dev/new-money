@@ -13,6 +13,7 @@ import {
 import { clsx } from 'clsx'
 
 import type { ViewKey } from '../types/navigation'
+import type { PayPeriod } from '../types/models'
 import { Button } from './ui'
 
 const navItems: Array<{
@@ -35,10 +36,12 @@ const navItems: Array<{
 export function AppShell({
   activeView,
   onViewChange,
+  selectedPayPeriod,
   children,
 }: {
   activeView: ViewKey
   onViewChange: (view: ViewKey) => void
+  selectedPayPeriod?: PayPeriod | null
   children: React.ReactNode
 }) {
   return (
@@ -82,7 +85,11 @@ export function AppShell({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold text-slate-950">Paycheck control panel</h1>
-              <p className="hidden text-sm text-slate-500 sm:block">Plan pay, track costs, and keep cloud sync running.</p>
+              <p className="hidden text-sm text-slate-500 sm:block">
+                {selectedPayPeriod
+                  ? `Viewing ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`
+                  : 'Plan pay, track costs, and keep cloud sync running.'}
+              </p>
             </div>
             <div className="flex shrink-0 gap-2">
               <Button variant="secondary" onClick={() => onViewChange('spending')}>

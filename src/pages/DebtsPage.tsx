@@ -11,7 +11,7 @@ import {
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, CalculationDetails, Field, MoneyMetric, Panel, SelectInput, TextInput } from '../components/ui'
-import type { Debt, DebtStatus } from '../types/models'
+import type { Debt, DebtStatus, PayPeriod } from '../types/models'
 
 interface DebtFormState {
   name: string
@@ -38,9 +38,11 @@ const emptyDebtForm = (): DebtFormState => ({
 export function DebtsPage({
   snapshot,
   actions,
+  selectedPayPeriod,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  selectedPayPeriod?: PayPeriod | null
 }) {
   const [debtForm, setDebtForm] = useState<DebtFormState>(emptyDebtForm)
   const [editingDebtId, setEditingDebtId] = useState<string | null>(null)
@@ -54,7 +56,7 @@ export function DebtsPage({
     activeDebts.find((debt) => debt.id === paymentDebtId) ?? activeDebts[0] ?? null
   const selectedPaymentDebtId = selectedPaymentDebt?.id ?? ''
   const today = toIsoDate(new Date())
-  const currentPayPeriod = findPayPeriodForDate(snapshot.payPeriods, today)
+  const currentPayPeriod = selectedPayPeriod ?? findPayPeriodForDate(snapshot.payPeriods, today)
   const nextPayPeriod = snapshot.payPeriods
     .filter((period) => period.startDate > today)
     .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null

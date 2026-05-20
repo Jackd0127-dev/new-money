@@ -16,9 +16,11 @@ import type { PayFrequency, PayPeriod, RecurringFrequency, RecurringPriority } f
 export function RecurringPage({
   snapshot,
   actions,
+  selectedPayPeriod,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  selectedPayPeriod?: PayPeriod | null
 }) {
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
@@ -30,9 +32,9 @@ export function RecurringPage({
   const [potId, setPotId] = useState(activePots[0]?.id ?? '')
   const [creditCardId, setCreditCardId] = useState('')
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
-  const latestPeriod = snapshot.payPeriods[0] ?? null
-  const nextPaydayPeriod = latestPeriod
-    ? getNextPaydayPeriod(latestPeriod, latestPeriod.payFrequency ?? snapshot.settings.payFrequency)
+  const viewedPeriod = selectedPayPeriod ?? null
+  const nextPaydayPeriod = viewedPeriod
+    ? getNextPaydayPeriod(viewedPeriod, viewedPeriod.payFrequency ?? snapshot.settings.payFrequency)
     : null
   const nextPaydaySummary = getPayPeriodCostSummary({
     payPeriod: nextPaydayPeriod,
@@ -237,7 +239,7 @@ export function RecurringPage({
         </Panel>
       </div>
 
-      <RecurringCalendar snapshot={snapshot} />
+      <RecurringCalendar snapshot={snapshot} payPeriod={viewedPeriod} />
       <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
     </div>
   )

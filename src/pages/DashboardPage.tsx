@@ -4,19 +4,24 @@ import {
   type PayPeriodCostSummary,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, MoneyMetric, Panel, type CalculationBreakdown } from '../components/ui'
+import { Button, MoneyMetric, Panel, SelectInput, type CalculationBreakdown } from '../components/ui'
+import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
 export function DashboardPage({
   snapshot,
+  selectedPayPeriod,
+  onPayPeriodChange,
   onViewChange,
 }: {
   snapshot: PlannerSnapshot
+  selectedPayPeriod?: PayPeriod | null
+  onPayPeriodChange?: (payPeriodId: string | null) => void
   onViewChange: (view: ViewKey) => void
 }) {
-  const latestPeriod = snapshot.payPeriods[0] ?? null
+  const viewedPeriod = selectedPayPeriod ?? null
   const summary = getPayPeriodCostSummary({
-    payPeriod: latestPeriod,
+    payPeriod: viewedPeriod,
     recurringPayments: snapshot.recurringPayments,
     customPayments: snapshot.customPayments,
     transactions: snapshot.transactions,
@@ -27,21 +32,45 @@ export function DashboardPage({
   return (
     <div className="space-y-6">
       <Panel
-        title="Current pay period"
+        title="Selected pay period"
         description={
-          latestPeriod
-            ? `${latestPeriod.startDate} to ${latestPeriod.endDate} · next payday ${latestPeriod.nextPayday}`
-            : 'Create your first paycheck plan to see your pay, payments due, and money left.'
+          viewedPeriod
+            ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate} · next payday ${viewedPeriod.nextPayday}`
+            : snapshot.payPeriods.length > 0
+              ? 'No saved pay period contains today. Choose a saved period to view its numbers.'
+              : 'Create your first paycheck plan to see your pay, payments due, and money left.'
         }
-        action={<Button onClick={() => onViewChange('payday')}>{latestPeriod ? 'Update pay' : 'Plan pay'}</Button>}
+        action={
+          <div className="flex flex-col gap-2 sm:min-w-80 sm:flex-row sm:items-end">
+            {snapshot.payPeriods.length > 0 && (
+              <label className="block min-w-0 flex-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewing</span>
+                <SelectInput
+                  aria-label="Viewing pay period"
+                  className="mt-1"
+                  value={viewedPeriod?.id ?? ''}
+                  onChange={(event) => onPayPeriodChange?.(event.target.value || null)}
+                >
+                  {!viewedPeriod && <option value="">Choose a pay period</option>}
+                  {snapshot.payPeriods.map((period) => (
+                    <option key={period.id} value={period.id}>
+                      {formatPayPeriodOption(period)}
+                    </option>
+                  ))}
+                </SelectInput>
+              </label>
+            )}
+            <Button onClick={() => onViewChange('payday')}>{viewedPeriod ? 'Update pay' : 'Plan pay'}</Button>
+          </div>
+        }
       >
-        {latestPeriod ? (
+        {viewedPeriod ? (
           <div className="grid gap-4 lg:grid-cols-3">
             <MoneyMetric
               label="Total pay"
               value={formatPence(summary.payReceivedPence)}
               tone="primary"
-              breakdown={getTotalPayBreakdown(summary, latestPeriod.startDate, latestPeriod.endDate)}
+              breakdown={getTotalPayBreakdown(summary, viewedPeriod.startDate, viewedPeriod.endDate)}
             />
             <MoneyMetric
               label="Total costs"
@@ -58,15 +87,23 @@ export function DashboardPage({
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-            <p className="text-base font-semibold text-slate-950">No paycheck plan yet</p>
+            <p className="text-base font-semibold text-slate-950">
+              {snapshot.payPeriods.length > 0 ? 'No active pay period selected' : 'No paycheck plan yet'}
+            </p>
             <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">
-              Enter your pay and recurring payments to get one clear dashboard total.
+              {snapshot.payPeriods.length > 0
+                ? 'Use the pay-period dropdown to review a saved paycheck window.'
+                : 'Enter your pay and recurring payments to get one clear dashboard total.'}
             </p>
           </div>
         )}
       </Panel>
     </div>
   )
+}
+
+function formatPayPeriodOption(period: PayPeriod): string {
+  return `${period.payday} · ${period.startDate} to ${period.endDate} · ${formatPence(period.incomePence)}`
 }
 
 function getTotalPayBreakdown(

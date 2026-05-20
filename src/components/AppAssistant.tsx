@@ -67,7 +67,17 @@ export function AppAssistant({
     ])
 
     if (!user) {
-      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createUnavailableResponse('Sign in from Settings to ask New Money AI.', 'Authentication is required before any planner data is sent to an AI provider.') })])
+      setMessages((current) => [
+        ...current,
+        createMessage({
+          role: 'assistant',
+          ...createUnavailableResponse(
+            'Sign in from Settings to ask New Money AI.',
+            'Authentication is required before any planner data is sent to an AI provider.',
+            'Sign in from Settings, then ask again so I can use your synced planner data.',
+          ),
+        }),
+      ])
       return
     }
 
@@ -95,7 +105,7 @@ export function AppAssistant({
       }
 
       const assistantResponse = (await response.json()) as AssistantResponse
-      setMessages((current) => [...current, createMessage({ role: 'assistant', ...assistantResponse })])
+      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createVisibleAssistantResponse(assistantResponse) })])
     } catch (error) {
       setMessages((current) => [...current, createMessage({ role: 'assistant', ...createUnavailableResponse('AI provider failed.', error instanceof Error ? error.message : 'Unknown AI provider error.') })])
     } finally {
@@ -225,34 +235,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         )}
       >
         <p className={clsx('whitespace-pre-wrap', isUser ? 'text-white' : 'text-slate-800')}>{message.answer}</p>
-        {!isUser && message.highlights.length > 0 && (
-          <AssistantList title="Highlights" items={message.highlights} />
-        )}
-        {!isUser && message.actions.length > 0 && (
-          <AssistantList title="Actions" items={message.actions} />
-        )}
-        {!isUser && (
-          <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            Confidence: {message.confidence}
-          </p>
-        )}
       </div>
     </article>
-  )
-}
-
-function AssistantList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="mt-3 rounded-lg bg-slate-50 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-      <ul className="mt-2 space-y-1.5">
-        {items.map((item) => (
-          <li key={item} className="text-sm text-slate-700">
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
   )
 }
 
@@ -263,13 +247,36 @@ function createMessage(input: Omit<ChatMessage, 'id'>): ChatMessage {
   }
 }
 
-function createUnavailableResponse(answer: string, reason: string): AssistantResponse {
+function createUnavailableResponse(answer: string, reason: string, action = 'Check Settings, confirm you are signed in, and verify the selected AI provider has a working server key.'): AssistantResponse {
   return {
-    answer,
+    answer: `${answer}\n\n${reason}\n\nWhat I’d do next: ${action}`,
     highlights: [reason],
-    actions: ['Check Settings, confirm you are signed in, and verify the selected AI provider has a working server key.'],
+    actions: [action],
     confidence: 'low',
   }
+}
+
+function createVisibleAssistantResponse(response: AssistantResponse): AssistantResponse {
+  return {
+    ...response,
+    answer: ensureNextStepGuidance(response.answer, response.actions),
+  }
+}
+
+function ensureNextStepGuidance(answer: string, actions: string[]): string {
+  const trimmedAnswer = answer.trim()
+
+  if (/what i['’]d do next|what to do next|next steps?|my advice|i recommend/i.test(trimmedAnswer)) {
+    return trimmedAnswer
+  }
+
+  const nextStep = actions.find((action) => action.trim())?.trim()
+
+  if (!nextStep) {
+    return `${trimmedAnswer}\n\nWhat I’d do next: ask me a follow-up and I’ll help you decide the best move from the current planner data.`
+  }
+
+  return `${trimmedAnswer}\n\nWhat I’d do next: ${nextStep}`
 }
 
 async function getAssistantErrorMessage(response: Response): Promise<string> {

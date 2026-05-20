@@ -12,7 +12,7 @@ describe('AppAssistant', () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        answer: 'You are on Spending and your Food pot has £120.00.',
+        answer: 'You are on Spending and your Food pot has £120.00.\n\nWhat I’d do next: check Lunch in recent spending and keep an eye on the Food pot.',
         highlights: ['Current tab: Spending'],
         actions: ['Check Lunch in recent spending.'],
         confidence: 'high',
@@ -61,8 +61,13 @@ describe('AppAssistant', () => {
     expect(requestBody.selectedPayPeriodId).toBe('period-current')
     expect(requestBody.snapshot.pots[0].name).toBe('Food')
     expect(requestBody.snapshot.transactions[0].note).toBe('Lunch')
-    expect(screen.getByText('You are on Spending and your Food pot has £120.00.')).toBeInTheDocument()
-    expect(screen.getByText('Check Lunch in recent spending.')).toBeInTheDocument()
+    expect(screen.getByText(/You are on Spending and your Food pot has £120.00/)).toBeInTheDocument()
+    expect(screen.getByText(/What I’d do next: check Lunch in recent spending/)).toBeInTheDocument()
+    expect(screen.queryByText('Highlights')).not.toBeInTheDocument()
+    expect(screen.queryByText('Current tab: Spending')).not.toBeInTheDocument()
+    expect(screen.queryByText('Actions')).not.toBeInTheDocument()
+    expect(screen.queryByText('Check Lunch in recent spending.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Confidence:/)).not.toBeInTheDocument()
   })
 
   it('does not create a local financial answer when the user is not signed in', async () => {
@@ -84,6 +89,7 @@ describe('AppAssistant', () => {
     const dialog = screen.getByRole('dialog', { name: 'New Money AI helper' })
 
     expect(within(dialog).getByText(/Sign in from Settings to ask New Money AI/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/What I’d do next: Sign in from Settings/)).toBeInTheDocument()
     expect(within(dialog).queryByText(/I can still see the local dashboard context/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/pay is/)).not.toBeInTheDocument()
   })
@@ -121,6 +127,10 @@ describe('AppAssistant', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(within(dialog).getByText(/Assistant returned invalid JSON/)).toBeInTheDocument()
     expect(within(dialog).getAllByText(/AI provider failed/).length).toBeGreaterThan(0)
+    expect(within(dialog).getByText(/What I’d do next: Check Settings/)).toBeInTheDocument()
+    expect(within(dialog).queryByText('Highlights')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Actions')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/Confidence:/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/I can see History/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/Create or select a pay period/)).not.toBeInTheDocument()
   })

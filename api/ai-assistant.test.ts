@@ -107,6 +107,7 @@ describe('AI assistant api', () => {
     }
 
     expect(request.config.systemInstruction).toContain('whole-app assistant')
+    expect(request.config.systemInstruction).toContain('End every visible answer')
     expect(request.config.responseMimeType).toBe('application/json')
     expect(request.contents).toContain('Current screen context JSON:')
     expect(request.contents).toContain('"activeView":"spending"')

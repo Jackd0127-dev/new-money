@@ -77,7 +77,7 @@ describe('AI assistant api', () => {
     expect(mocks.generateContent).not.toHaveBeenCalled()
   })
 
-  it('sends full app snapshot, computed summaries, and current tab context to Gemini', async () => {
+  it('sends compact app context, computed summaries, and current tab context to Gemini', async () => {
     const response = createResponse()
 
     await handler(
@@ -113,10 +113,13 @@ describe('AI assistant api', () => {
     expect(request.contents).toContain('"activeViewLabel":"Spending"')
     expect(request.contents).toContain('Computed app summaries JSON:')
     expect(request.contents).toContain('"dashboard"')
-    expect(request.contents).toContain('Full planner snapshot JSON:')
+    expect(request.contents).toContain('Compact app context JSON:')
+    expect(request.contents).toContain('Focused app facts JSON:')
+    expect(request.contents).not.toContain('Full planner snapshot JSON:')
     expect(request.contents).toContain('"Food"')
     expect(request.contents).toContain('"Lunch"')
-    expect(request.contents).toContain('"Saved generated brief"')
+    expect(request.contents).toContain('"contentLength"')
+    expect(request.contents).not.toContain('"Saved generated brief"')
     expect(response.payload).toEqual({
       answer: 'Food spending is visible from the Spending tab context.',
       highlights: ['Current tab: Spending', 'Food pot balance: £120.00'],
@@ -186,7 +189,7 @@ describe('AI assistant api', () => {
     }
     expect(requestBody.model).toBe('openai/gpt-oss-120b:free')
     expect(requestBody.messages[0].content).toContain('whole-app assistant')
-    expect(requestBody.messages[1].content).toContain('Full planner snapshot JSON:')
+    expect(requestBody.messages[1].content).toContain('Compact app context JSON:')
     expect(requestBody.response_format).toBeUndefined()
     expect(response.payload).toEqual({
       answer: 'OpenRouter has the same full app context.',
@@ -194,6 +197,104 @@ describe('AI assistant api', () => {
       actions: ['Review the dashboard period.'],
       confidence: 'medium',
     })
+  })
+
+  it('compresses large app snapshots while preserving paycheck history for OpenRouter', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                answer: 'You have two recorded paychecks: 2 May and 16 May.',
+                highlights: ['2 paychecks found.'],
+                actions: ['Open History to review them.'],
+                confidence: 'high',
+              }),
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key')
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'What paychecks have I received in total and when?',
+          todayIso: '2026-05-20',
+          activeView: 'history',
+          snapshot: createSnapshot({
+            settings: {
+              ...createSnapshot().settings,
+              aiProvider: 'openrouter',
+            },
+            payPeriods: [
+              createPayPeriod({
+                id: 'period-one',
+                payday: '2026-05-02',
+                startDate: '2026-05-02',
+                endDate: '2026-05-15',
+                nextPayday: '2026-05-16',
+                incomePence: 80000,
+              }),
+              createPayPeriod({
+                id: 'period-two',
+                payday: '2026-05-16',
+                startDate: '2026-05-16',
+                endDate: '2026-05-29',
+                nextPayday: '2026-05-30',
+                incomePence: 85000,
+              }),
+            ],
+            paychecks: [
+              createPaycheck({
+                id: 'paycheck-one',
+                payPeriodId: 'period-one',
+                calculatedAmountPence: 80000,
+                actualAmountPence: 80500,
+              }),
+              createPaycheck({
+                id: 'paycheck-two',
+                payPeriodId: 'period-two',
+                calculatedAmountPence: 85000,
+                actualAmountPence: null,
+              }),
+            ],
+            dailyBriefs: [
+              {
+                id: 'brief-huge',
+                date: '2026-05-20',
+                snapshotSignature: 'huge',
+                content: 'x'.repeat(500_000),
+                createdAt: '2026-05-20T00:00:00.000Z',
+                updatedAt: '2026-05-20T00:00:00.000Z',
+              },
+            ],
+          }),
+        },
+      },
+      response,
+    )
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      messages: Array<{ content: string }>
+    }
+    const prompt = requestBody.messages[1].content
+
+    expect((fetchMock.mock.calls[0][1].body as string).length).toBeLessThan(100_000)
+    expect(prompt).toContain('"payHistory"')
+    expect(prompt).toContain('"payday":"2026-05-02"')
+    expect(prompt).toContain('"receivedAmountPence":80500')
+    expect(prompt).not.toContain('x'.repeat(1000))
+    expect(response.statusCode).toBe(200)
   })
 
   it('returns an AI error instead of a deterministic local answer when the provider fails', async () => {
@@ -418,6 +519,22 @@ function createPayPeriod(overrides: Record<string, unknown> = {}) {
     payFrequency: 'biweekly',
     incomePence: 90000,
     status: 'active',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  }
+}
+
+function createPaycheck(overrides: Record<string, unknown> = {}) {
+  const timestamp = '2026-05-20T00:00:00.000Z'
+
+  return {
+    id: 'paycheck-current',
+    payPeriodId: 'period-current',
+    hoursWorked: 72,
+    hourlyRatePence: 1250,
+    calculatedAmountPence: 90000,
+    actualAmountPence: null,
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,

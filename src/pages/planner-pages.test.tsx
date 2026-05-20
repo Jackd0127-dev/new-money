@@ -942,6 +942,20 @@ describe('debts page', () => {
     render(
       <DebtsPage
         snapshot={createSnapshot({
+          payPeriods: [
+            {
+              id: 'period-current',
+              startDate: '2026-05-16',
+              endDate: '2026-05-29',
+              payday: '2026-05-16',
+              nextPayday: '2026-05-30',
+              payFrequency: 'biweekly',
+              incomePence: 90000,
+              status: 'active',
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
           debts: [
             {
               id: 'debt-zero-minimum',
@@ -957,16 +971,33 @@ describe('debts page', () => {
               createdAt: '2026-05-20T00:00:00.000Z',
               updatedAt: '2026-05-20T00:00:00.000Z',
             },
+            {
+              id: 'debt-next-period',
+              name: 'Next period debt',
+              lender: 'Retail Bank',
+              originalAmountPence: 50000,
+              currentBalancePence: 50000,
+              minimumPaymentPence: 0,
+              dueDate: '2026-06-02',
+              interestRateApr: null,
+              note: '',
+              status: 'active',
+              createdAt: '2026-05-20T00:00:00.000Z',
+              updatedAt: '2026-05-20T00:00:00.000Z',
+            },
           ],
         })}
         actions={createActions()}
       />,
     )
 
-    expect(screen.getAllByText('Debt due 30 days').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('£300.00').length).toBeGreaterThan(0)
-    expect(screen.getByText('Due amount')).toBeInTheDocument()
-    expect(screen.getByText('Optional')).toBeInTheDocument()
+    const debtDueMetric = screen.getAllByText('Debt due this pay period')[0].closest('details')
+
+    expect(debtDueMetric).not.toBeNull()
+    expect(within(debtDueMetric as HTMLElement).getAllByText('£300.00').length).toBeGreaterThan(0)
+    expect(within(debtDueMetric as HTMLElement).queryByText('Next period debt')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Due amount').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Optional').length).toBeGreaterThan(0)
   })
 })
 

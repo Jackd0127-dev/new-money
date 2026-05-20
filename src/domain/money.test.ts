@@ -412,23 +412,26 @@ describe('debt tracking', () => {
       updatedAt: '2026-05-12T00:00:00.000Z',
     },
   ]
+  const payPeriod: Pick<PayPeriod, 'endDate'> = {
+    endDate: '2026-05-29',
+  }
 
-  it('summarises active debt balances, progress, and upcoming balances due', () => {
-    expect(getDebtSummary(debts, payments, '2026-05-18')).toEqual({
+  it('summarises active debt balances, progress, and balances due this pay period', () => {
+    expect(getDebtSummary(debts, payments, '2026-05-18', payPeriod)).toEqual({
       activeDebtCount: 1,
       overdueDebtCount: 0,
       totalCurrentBalancePence: 85000,
       totalOriginalAmountPence: 120000,
       totalPaidPence: 35000,
-      minimumDueNext30DaysPence: 85000,
+      debtDueThisPayPeriodPence: 85000,
       progressPercent: 29,
     })
   })
 
   it('keeps overdue active debt balances in the due total until the debt is paid', () => {
-    expect(getDebtSummary(debts, payments, '2026-05-21')).toMatchObject({
+    expect(getDebtSummary(debts, payments, '2026-05-21', payPeriod)).toMatchObject({
       overdueDebtCount: 1,
-      minimumDueNext30DaysPence: 85000,
+      debtDueThisPayPeriodPence: 85000,
     })
   })
 
@@ -453,9 +456,52 @@ describe('debt tracking', () => {
         ],
         [],
         '2026-05-20',
+        payPeriod,
       ),
     ).toMatchObject({
-      minimumDueNext30DaysPence: 30000,
+      debtDueThisPayPeriodPence: 30000,
+    })
+  })
+
+  it('excludes active debts due after the current pay period', () => {
+    expect(
+      getDebtSummary(
+        [
+          {
+            id: 'debt-current-period',
+            name: 'Store card',
+            lender: 'Retail Bank',
+            originalAmountPence: 30000,
+            currentBalancePence: 30000,
+            minimumPaymentPence: 0,
+            dueDate: '2026-05-23',
+            interestRateApr: null,
+            note: '',
+            status: 'active',
+            createdAt: '2026-05-20T00:00:00.000Z',
+            updatedAt: '2026-05-20T00:00:00.000Z',
+          },
+          {
+            id: 'debt-next-period',
+            name: 'Next period',
+            lender: 'Retail Bank',
+            originalAmountPence: 50000,
+            currentBalancePence: 50000,
+            minimumPaymentPence: 0,
+            dueDate: '2026-06-02',
+            interestRateApr: null,
+            note: '',
+            status: 'active',
+            createdAt: '2026-05-20T00:00:00.000Z',
+            updatedAt: '2026-05-20T00:00:00.000Z',
+          },
+        ],
+        [],
+        '2026-05-20',
+        payPeriod,
+      ),
+    ).toMatchObject({
+      debtDueThisPayPeriodPence: 30000,
     })
   })
 })

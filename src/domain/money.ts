@@ -51,7 +51,7 @@ export interface DebtSummary {
   totalCurrentBalancePence: number
   totalOriginalAmountPence: number
   totalPaidPence: number
-  minimumDueNext30DaysPence: number
+  debtDueThisPayPeriodPence: number
   progressPercent: number
 }
 
@@ -627,6 +627,7 @@ export function getDebtSummary(
   debts: Debt[],
   payments: DebtPayment[],
   today: string,
+  payPeriod: Pick<PayPeriod, 'endDate'> | null = null,
 ): DebtSummary {
   const activeDebts = debts.filter(
     (debt) => debt.status === 'active' && debt.currentBalancePence > 0,
@@ -645,7 +646,6 @@ export function getDebtSummary(
     .reduce((total, payment) => total + payment.amountPence, 0)
   const balanceReductionPence = Math.max(0, totalOriginalAmountPence - totalCurrentBalancePence)
   const totalPaidPence = Math.max(recordedPaymentPence, balanceReductionPence)
-  const next30Days = addIsoDays(today, 30)
 
   return {
     activeDebtCount: activeDebts.length,
@@ -653,9 +653,11 @@ export function getDebtSummary(
     totalCurrentBalancePence,
     totalOriginalAmountPence,
     totalPaidPence,
-    minimumDueNext30DaysPence: activeDebts
-      .filter((debt) => debt.dueDate <= next30Days)
-      .reduce((total, debt) => total + getDebtDueAmountPence(debt), 0),
+    debtDueThisPayPeriodPence: payPeriod
+      ? activeDebts
+          .filter((debt) => debt.dueDate <= payPeriod.endDate)
+          .reduce((total, debt) => total + getDebtDueAmountPence(debt), 0)
+      : 0,
     progressPercent:
       totalOriginalAmountPence > 0
         ? Math.round((totalPaidPence / totalOriginalAmountPence) * 100)

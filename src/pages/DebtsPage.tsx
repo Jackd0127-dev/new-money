@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PenLine, Trash2 } from 'lucide-react'
 
 import {
-  addIsoDays,
+  findPayPeriodForDate,
   formatPence,
   getDebtDueAmountPence,
   getDebtSummary,
@@ -54,14 +54,18 @@ export function DebtsPage({
     activeDebts.find((debt) => debt.id === paymentDebtId) ?? activeDebts[0] ?? null
   const selectedPaymentDebtId = selectedPaymentDebt?.id ?? ''
   const today = toIsoDate(new Date())
-  const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today)
-  const next30Days = addIsoDays(today, 30)
+  const currentPayPeriod = findPayPeriodForDate(snapshot.payPeriods, today) ?? snapshot.payPeriods[0] ?? null
+  const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today, currentPayPeriod)
+  const payPeriodEndDate = currentPayPeriod?.endDate ?? null
   const activeDebtIds = new Set(activeDebts.map((debt) => debt.id))
   const recordedDebtPaymentPence = snapshot.debtPayments
     .filter((payment) => activeDebtIds.has(payment.debtId))
     .reduce((total, payment) => total + payment.amountPence, 0)
   const balanceReductionPence = Math.max(0, summary.totalOriginalAmountPence - summary.totalCurrentBalancePence)
-  const dueWithin30Days = activeDebts.filter((debt) => debt.dueDate <= next30Days)
+  const dueThisPayPeriod = payPeriodEndDate
+    ? activeDebts.filter((debt) => debt.dueDate <= payPeriodEndDate)
+    : []
+  const debtDueThisPayPeriodPence = summary.debtDueThisPayPeriodPence
   const overdueDebts = activeDebts.filter((debt) => debt.dueDate < today)
   const parsedDebtBalancePence = parsePoundsToPence(debtForm.currentBalance)
   const parsedMinimumPence = parsePoundsToPence(debtForm.minimumPayment)
@@ -194,27 +198,41 @@ export function DebtsPage({
           }}
         />
         <MoneyMetric
-          label="Debt due 30 days"
-          value={formatPence(summary.minimumDueNext30DaysPence)}
-          tone={summary.minimumDueNext30DaysPence > 0 ? 'warning' : 'neutral'}
+          label="Debt due this pay period"
+          value={formatPence(debtDueThisPayPeriodPence)}
+          tone={debtDueThisPayPeriodPence > 0 ? 'warning' : 'neutral'}
           breakdown={{
-            formula: `Debt due 30 days = full outstanding balance for active debts due by ${next30Days}.`,
+            formula: currentPayPeriod
+              ? `Debt due this pay period = full outstanding balance for active debts due by ${currentPayPeriod.endDate}.`
+              : 'Debt due this pay period needs a saved paycheck plan.',
             lines:
-              dueWithin30Days.length > 0
+              dueThisPayPeriod.length > 0
                 ? [
-                    ...dueWithin30Days.map((debt) => ({
+                    ...dueThisPayPeriod.map((debt) => ({
                       label: debt.name,
                       value: formatPence(getDebtDueAmountPence(debt)),
                       detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
                       tone: 'add' as const,
                     })),
                     {
-                      label: 'Debt due 30 days',
-                      value: formatPence(summary.minimumDueNext30DaysPence),
+                      label: 'Debt due this pay period',
+                      value: formatPence(debtDueThisPayPeriodPence),
+                      detail: currentPayPeriod
+                        ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
+                        : undefined,
                       tone: 'result' as const,
                     },
                   ]
-                : [{ label: 'No debts due', value: formatPence(0), tone: 'result' }],
+                : [
+                    {
+                      label: currentPayPeriod ? 'No debts due this pay period' : 'No paycheck plan',
+                      value: formatPence(0),
+                      detail: currentPayPeriod
+                        ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
+                        : 'Create a paycheck plan to set the pay-period window.',
+                      tone: 'result',
+                    },
+                  ],
           }}
         />
         <MoneyMetric

@@ -115,7 +115,8 @@ describe('payday wizard', () => {
     expect(screen.getByDisplayValue('84.5')).toBeInTheDocument()
     expect(screen.getByDisplayValue('13.50')).toBeInTheDocument()
     expect(screen.getByDisplayValue('1200.00')).toBeInTheDocument()
-    expect(screen.getByLabelText('Food')).toHaveValue('150.00')
+    expect(screen.queryByRole('region', { name: 'Payday allocation' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Food')).not.toBeInTheDocument()
 
     await user.clear(screen.getByLabelText('Hours worked'))
     await user.type(screen.getByLabelText('Hours worked'), '86')
@@ -127,7 +128,7 @@ describe('payday wizard', () => {
       hoursWorked: 86,
       hourlyRatePence: 1350,
       actualAmountPence: 120000,
-      allocations: [{ potId: 'pot-food', amountPence: 15000 }],
+      allocations: [],
     })
   })
 })

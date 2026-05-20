@@ -1,13 +1,10 @@
-import { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { useState } from 'react'
+import { CheckCircle2 } from 'lucide-react'
 
 import {
   calculatePaycheckAmount,
   createNextPayPeriod,
   formatPence,
-  getAllocationBalance,
-  getRecurringPaymentsDue,
-  getTotalPence,
   parsePoundsToPence,
   toIsoDate,
 } from '../domain/money'
@@ -28,10 +25,8 @@ export function PaydayWizardPage({
   const [hourlyRate, setHourlyRate] = useState(initialDraft.hourlyRate)
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(initialDraft.payFrequency)
   const [actualReceived, setActualReceived] = useState(initialDraft.actualReceived)
-  const [allocations, setAllocations] = useState<Record<string, string>>(initialDraft.allocations)
   const [saved, setSaved] = useState(false)
 
-  const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const existingPeriod = snapshot.payPeriods.find((candidate) => candidate.payday === payday) ?? null
   const period = createNextPayPeriod(payday, payFrequency)
   const hours = Number.parseFloat(hoursWorked) || 0
@@ -46,21 +41,7 @@ export function PaydayWizardPage({
     hoursWorked: hours,
     hourlyRatePence,
   })
-  const duePayments = useMemo(
-    () => getRecurringPaymentsDue(snapshot.recurringPayments, period.startDate, period.endDate),
-    [period.endDate, period.startDate, snapshot.recurringPayments],
-  )
-  const reservedPence = getTotalPence(duePayments)
-  const manualAllocationPence = Object.values(allocations).reduce(
-    (total, value) => total + parsePoundsToPence(value),
-    0,
-  )
-  const allocationBalance = getAllocationBalance({
-    incomePence,
-    reservedPence,
-    allocationPence: manualAllocationPence,
-  })
-  const canSubmit = incomePence > 0 && !allocationBalance.isOverAllocated
+  const canSubmit = incomePence > 0
 
   function loadPayday(nextPayday: string) {
     const draft = getPaydayDraft(snapshot, nextPayday)
@@ -70,7 +51,6 @@ export function PaydayWizardPage({
     setHourlyRate(draft.hourlyRate)
     setPayFrequency(draft.payFrequency)
     setActualReceived(draft.actualReceived)
-    setAllocations(draft.allocations)
     setSaved(false)
   }
 
@@ -85,19 +65,14 @@ export function PaydayWizardPage({
       hoursWorked: hours,
       hourlyRatePence,
       actualAmountPence,
-      allocations: activePots
-        .map((pot) => ({
-          potId: pot.id,
-          amountPence: parsePoundsToPence(allocations[pot.id] ?? ''),
-        }))
-        .filter((allocation) => allocation.amountPence > 0),
+      allocations: [],
     })
     setSaved(true)
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-      <Panel title="Payday wizard" description="Enter pay and assign money for this payday.">
+    <div className="max-w-3xl">
+      <Panel title="Payday wizard" description="Enter pay details for this payday.">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Payday">
             <TextInput
@@ -163,49 +138,6 @@ export function PaydayWizardPage({
           <p className="mt-2 text-3xl font-semibold">{formatPence(incomePence)}</p>
           <p className="mt-2 text-xs text-slate-400">Estimate from hours: {formatPence(calculatedPence)}</p>
         </div>
-      </Panel>
-
-      <Panel title="Payday allocation" description="Assign the rest of this payday after automatic reserved totals.">
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-lg bg-blue-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Reserved</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">{formatPence(reservedPence)}</p>
-          </div>
-          <div className="rounded-lg bg-slate-100 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assigned by you</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">{formatPence(manualAllocationPence)}</p>
-          </div>
-          <div className="rounded-lg bg-emerald-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Left unassigned</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">{formatPence(allocationBalance.remainingPence)}</p>
-          </div>
-        </div>
-
-        {allocationBalance.isOverAllocated && (
-          <div className="mt-4 flex gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <AlertTriangle className="mt-0.5 shrink-0" size={18} />
-            Allocations exceed money available after reserved payments.
-          </div>
-        )}
-
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          {activePots.map((pot) => (
-            <Field key={pot.id} label={pot.name}>
-              <TextInput
-                inputMode="decimal"
-                placeholder="0.00"
-                value={allocations[pot.id] ?? ''}
-                onChange={(event) => {
-                  setAllocations((current) => ({
-                    ...current,
-                    [pot.id]: event.target.value,
-                  }))
-                  setSaved(false)
-                }}
-              />
-            </Field>
-          ))}
-        </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button disabled={!canSubmit || saved} onClick={submitPlan}>
@@ -221,7 +153,6 @@ export function PaydayWizardPage({
             </span>
           )}
         </div>
-
       </Panel>
     </div>
   )
@@ -237,14 +168,10 @@ function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
       hourlyRate: (snapshot.settings.hourlyRatePence / 100).toFixed(2),
       payFrequency: snapshot.settings.payFrequency,
       actualReceived: '',
-      allocations: {},
     }
   }
 
   const paycheck = snapshot.paychecks.find((candidate) => candidate.payPeriodId === period.id)
-  const manualAllocations = snapshot.potAllocations.filter(
-    (allocation) => allocation.payPeriodId === period.id && allocation.source !== 'recurring',
-  )
 
   return {
     payday,
@@ -255,12 +182,6 @@ function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
       paycheck?.actualAmountPence === null || paycheck?.actualAmountPence === undefined
         ? ''
         : (paycheck.actualAmountPence / 100).toFixed(2),
-    allocations: Object.fromEntries(
-      manualAllocations.map((allocation) => [
-        allocation.potId,
-        (allocation.amountPence / 100).toFixed(2),
-      ]),
-    ),
   }
 }
 

@@ -6,7 +6,7 @@ import { CloudSyncPanel } from '../components/CloudSyncPanel'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { CloudSyncController } from '../hooks/useCloudSync'
 import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
-import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
+import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput } from '../components/ui'
 import type { PayFrequency } from '../types/models'
 
 export function SettingsPage({
@@ -24,6 +24,9 @@ export function SettingsPage({
   const [defaultHoursWorked, setDefaultHoursWorked] = useState(String(snapshot.settings.defaultHoursWorked))
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
   const [saved, setSaved] = useState(false)
+  const totalPotBalancePence = snapshot.pots.reduce((total, pot) => total + pot.balancePence, 0)
+  const archivedPotCount = snapshot.pots.filter((pot) => pot.archived).length
+  const activeRecurringCount = snapshot.recurringPayments.filter((payment) => payment.active).length
 
   async function saveSettings() {
     await actions.updateSettings({
@@ -93,20 +96,57 @@ export function SettingsPage({
 
       <Panel title="Planner data" description="Signed-in data syncs automatically with Firebase in the background.">
         <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-lg bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pots</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">{snapshot.pots.length}</p>
-          </div>
-          <div className="rounded-lg bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recurring</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">{snapshot.recurringPayments.length}</p>
-          </div>
-          <div className="rounded-lg bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total pot balance</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">
-              {formatPence(snapshot.pots.reduce((total, pot) => total + pot.balancePence, 0))}
-            </p>
-          </div>
+          <MoneyMetric
+            label="Pots"
+            value={String(snapshot.pots.length)}
+            breakdown={{
+              formula: 'Pots = active pots + archived pots.',
+              lines: [
+                { label: 'Active pots', value: String(snapshot.pots.length - archivedPotCount), tone: 'add' },
+                { label: 'Archived pots', value: String(archivedPotCount), tone: 'muted' },
+                { label: 'Pots', value: String(snapshot.pots.length), tone: 'result' },
+              ],
+            }}
+          />
+          <MoneyMetric
+            label="Recurring"
+            value={String(snapshot.recurringPayments.length)}
+            breakdown={{
+              formula: 'Recurring = active recurring payments + paused recurring payments.',
+              lines: [
+                { label: 'Active recurring', value: String(activeRecurringCount), tone: 'add' },
+                {
+                  label: 'Paused recurring',
+                  value: String(snapshot.recurringPayments.length - activeRecurringCount),
+                  tone: 'muted',
+                },
+                { label: 'Recurring', value: String(snapshot.recurringPayments.length), tone: 'result' },
+              ],
+            }}
+          />
+          <MoneyMetric
+            label="Total pot balance"
+            value={formatPence(totalPotBalancePence)}
+            breakdown={{
+              formula: 'Total pot balance = the saved balance of every pot.',
+              lines:
+                snapshot.pots.length > 0
+                  ? [
+                      ...snapshot.pots.map((pot) => ({
+                        label: pot.name,
+                        value: formatPence(pot.balancePence),
+                        detail: pot.archived ? 'Archived pot' : `${pot.type} pot`,
+                        tone: pot.balancePence >= 0 ? ('add' as const) : ('subtract' as const),
+                      })),
+                      {
+                        label: 'Total pot balance',
+                        value: formatPence(totalPotBalancePence),
+                        tone: 'result' as const,
+                      },
+                    ]
+                  : [{ label: 'No pots', value: formatPence(0), tone: 'result' }],
+            }}
+          />
         </div>
       </Panel>
     </div>

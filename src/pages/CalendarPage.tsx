@@ -132,9 +132,32 @@ export function CalendarPage({ snapshot }: { snapshot: PlannerSnapshot }) {
       </Panel>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <MoneyMetric label="Pay shown" value={formatPence(payPence)} tone={payPence > 0 ? 'good' : 'neutral'} />
-        <MoneyMetric label="Costs shown" value={formatPence(duePence)} tone={duePence > 0 ? 'warning' : 'neutral'} />
-        <MoneyMetric label="Calendar items" value={String(events.length)} />
+        <MoneyMetric
+          label="Pay shown"
+          value={formatPence(payPence)}
+          tone={payPence > 0 ? 'good' : 'neutral'}
+          breakdown={{
+            formula: 'Pay shown = payday income events visible in this month.',
+            lines: getCalendarBreakdownLines(events.filter((event) => event.type === 'payday' && event.amountPence > 0), 'Pay shown'),
+          }}
+        />
+        <MoneyMetric
+          label="Costs shown"
+          value={formatPence(duePence)}
+          tone={duePence > 0 ? 'warning' : 'neutral'}
+          breakdown={{
+            formula: 'Costs shown = all non-payday calendar events with a positive amount.',
+            lines: getCalendarBreakdownLines(events.filter((event) => event.type !== 'payday' && event.amountPence > 0), 'Costs shown'),
+          }}
+        />
+        <MoneyMetric
+          label="Calendar items"
+          value={String(events.length)}
+          breakdown={{
+            formula: 'Calendar items = every sign rendered in the visible month.',
+            lines: getCalendarItemCountLines(events),
+          }}
+        />
       </div>
 
       <Panel title="Calendar" description="Colour-coded signs show what is due on each day.">
@@ -211,6 +234,47 @@ export function CalendarPage({ snapshot }: { snapshot: PlannerSnapshot }) {
       </Panel>
     </div>
   )
+}
+
+function getCalendarBreakdownLines(events: CalendarEvent[], resultLabel: string) {
+  const totalPence = events.reduce((total, event) => total + event.amountPence, 0)
+
+  if (events.length === 0) {
+    return [{ label: 'No matching events', value: formatPence(0), tone: 'result' as const }]
+  }
+
+  return [
+    ...events.map((event) => ({
+      label: event.title,
+      value: formatPence(event.amountPence),
+      detail: `${event.date} · ${eventStyles[event.type].label}`,
+      tone: 'add' as const,
+    })),
+    {
+      label: resultLabel,
+      value: formatPence(totalPence),
+      tone: 'result' as const,
+    },
+  ]
+}
+
+function getCalendarItemCountLines(events: CalendarEvent[]) {
+  const counts = Object.entries(eventStyles)
+    .map(([type, style]) => ({
+      label: style.label,
+      value: String(events.filter((event) => event.type === type).length),
+      tone: 'neutral' as const,
+    }))
+    .filter((line) => line.value !== '0')
+
+  return [
+    ...(counts.length > 0 ? counts : [{ label: 'No items this month', value: '0', tone: 'muted' as const }]),
+    {
+      label: 'Calendar items',
+      value: String(events.length),
+      tone: 'result' as const,
+    },
+  ]
 }
 
 function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate: string): CalendarEvent[] {

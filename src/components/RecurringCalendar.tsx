@@ -7,7 +7,7 @@ import {
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
-import { Panel } from './ui'
+import { MoneyMetric, Panel } from './ui'
 
 export function RecurringCalendar({
   snapshot,
@@ -40,15 +40,33 @@ export function RecurringCalendar({
     >
       <div className="grid gap-4 lg:grid-cols-[0.72fr_1.28fr]">
         <div className="space-y-3">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Before next payday</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-950">
-              {formatPence(dueBeforeNextPaydayPence)}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              {latestPeriod ? `Due by ${latestPeriod.endDate}` : 'Create a paycheck plan to unlock period warnings.'}
-            </p>
-          </div>
+          <MoneyMetric
+            label="Before next payday"
+            value={formatPence(dueBeforeNextPaydayPence)}
+            tone={dueBeforeNextPaydayPence > 0 ? 'warning' : 'neutral'}
+            breakdown={{
+              formula: latestPeriod
+                ? `Before next payday = active recurring occurrences due from ${latestPeriod.startDate} to ${latestPeriod.endDate}.`
+                : 'Create a paycheck plan to compare recurring payments with the current pay period.',
+              lines:
+                dueBeforeNextPayday.length > 0
+                  ? [
+                      ...dueBeforeNextPayday.map((occurrence) => ({
+                        label: occurrence.payment.name,
+                        value: formatPence(occurrence.amountPence),
+                        detail: `${occurrence.dueDate} · ${occurrence.payment.frequency}`,
+                        tone: 'add' as const,
+                      })),
+                      {
+                        label: 'Before next payday',
+                        value: formatPence(dueBeforeNextPaydayPence),
+                        tone: 'result' as const,
+                      },
+                    ]
+                  : [{ label: 'No recurring due before payday', value: formatPence(0), tone: 'result' }],
+              note: latestPeriod ? `Due by ${latestPeriod.endDate}.` : 'Create a paycheck plan to unlock period warnings.',
+            }}
+          />
 
           {dueBeforeNextPaydayPence > 0 && (
             <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">

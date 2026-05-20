@@ -3,7 +3,7 @@ import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
+import { Button, CalculationDetails, Field, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
 import type { PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
@@ -179,8 +179,9 @@ export function PotsPage({
 
                 {isOpen && (
                   <div role="region" aria-label={`${pot.name} activity`} className="mt-4 border-t border-slate-100 pt-4">
+                    <CalculationDetails breakdown={getPotBalanceBreakdown(pot.id, pot.balancePence, activityItems)} />
                     {activityItems.length > 0 ? (
-                      <div className="space-y-2">
+                      <div className="mt-3 space-y-2">
                         {activityItems.map((item) => (
                           <div
                             key={item.id}
@@ -221,6 +222,39 @@ interface PotActivityItem {
   title: string
   detail: string
   amountPence: number
+}
+
+function getPotBalanceBreakdown(
+  potId: string,
+  balancePence: number,
+  activityItems: PotActivityItem[],
+): CalculationBreakdown {
+  const activityNetPence = activityItems.reduce((total, item) => total + item.amountPence, 0)
+  const startingOrImportedPence = balancePence - activityNetPence
+
+  return {
+    formula: 'Pot balance = starting/imported balance + recorded activity shown below.',
+    lines: [
+      {
+        label: 'Starting or imported balance',
+        value: formatPence(startingOrImportedPence),
+        detail: `Balance not represented by the visible activity for this pot (${potId}).`,
+        tone: startingOrImportedPence >= 0 ? 'add' : 'subtract',
+      },
+      ...activityItems.map((item) => ({
+        label: item.title,
+        value: formatSignedPence(item.amountPence),
+        detail: item.detail,
+        tone: item.amountPence >= 0 ? ('add' as const) : ('subtract' as const),
+      })),
+      {
+        label: 'Current pot balance',
+        value: formatPence(balancePence),
+        tone: 'result',
+      },
+    ],
+    note: 'This explains the displayed balance using the pot record plus the activity currently stored for it.',
+  }
 }
 
 function getPotActivityItems(potId: string, snapshot: PlannerSnapshot): PotActivityItem[] {

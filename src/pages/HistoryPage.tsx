@@ -2,7 +2,7 @@ import { Trash2 } from 'lucide-react'
 
 import { formatPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Panel } from '../components/ui'
+import { Button, CalculationDetails, Panel, type CalculationBreakdown } from '../components/ui'
 
 export function HistoryPage({
   snapshot,
@@ -45,7 +45,19 @@ export function HistoryPage({
                       {period.startDate} to {period.endDate}
                     </td>
                     <td className="px-4 py-3 text-slate-950">{formatPence(period.incomePence)}</td>
-                    <td className="px-4 py-3 text-slate-950">{formatPence(allocated)}</td>
+                    <td className="px-4 py-3 text-slate-950">
+                      <details>
+                        <summary className="cursor-pointer list-none font-semibold text-slate-950">
+                          {formatPence(allocated)}
+                        </summary>
+                        <CalculationDetails
+                          breakdown={getHistoryAllocationBreakdown(
+                            snapshot.potAllocations.filter((allocation) => allocation.payPeriodId === period.id),
+                            snapshot,
+                          )}
+                        />
+                      </details>
+                    </td>
                     <td className="px-4 py-3 capitalize text-slate-600">{period.status}</td>
                     <td className="px-4 py-3">
                       <Button
@@ -71,4 +83,38 @@ export function HistoryPage({
       </div>
     </Panel>
   )
+}
+
+function getHistoryAllocationBreakdown(
+  allocations: PlannerSnapshot['potAllocations'],
+  snapshot: PlannerSnapshot,
+): CalculationBreakdown {
+  const allocatedPence = allocations.reduce((total, allocation) => total + allocation.amountPence, 0)
+
+  return {
+    formula: 'Allocated = recurring reserves plus any manual allocations saved on that paycheck plan.',
+    lines:
+      allocations.length > 0
+        ? [
+            ...allocations.map((allocation) => {
+              const pot = snapshot.pots.find((candidate) => candidate.id === allocation.potId)
+              const payment = allocation.recurringPaymentId
+                ? snapshot.recurringPayments.find((candidate) => candidate.id === allocation.recurringPaymentId)
+                : null
+
+              return {
+                label: payment?.name ?? pot?.name ?? 'Deleted pot',
+                value: formatPence(allocation.amountPence),
+                detail: allocation.source === 'recurring' ? 'Recurring reserve' : 'Manual allocation',
+                tone: 'add' as const,
+              }
+            }),
+            {
+              label: 'Allocated',
+              value: formatPence(allocatedPence),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No allocations', value: formatPence(0), tone: 'result' }],
+  }
 }

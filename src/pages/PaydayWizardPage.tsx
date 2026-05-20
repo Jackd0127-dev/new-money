@@ -9,7 +9,16 @@ import {
   toIsoDate,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
+import {
+  Button,
+  Field,
+  MoneyMetric,
+  Panel,
+  SelectInput,
+  TextInput,
+  type CalculationBreakdown,
+  type CalculationLine,
+} from '../components/ui'
 import type { PayFrequency, PayPeriod } from '../types/models'
 
 export function PaydayWizardPage({
@@ -133,10 +142,19 @@ export function PaydayWizardPage({
           </Field>
         </div>
 
-        <div className="mt-5 rounded-lg bg-slate-950 p-5 text-white">
-          <p className="text-sm text-slate-300">Pay to plan</p>
-          <p className="mt-2 text-3xl font-semibold">{formatPence(incomePence)}</p>
-          <p className="mt-2 text-xs text-slate-400">Estimate from hours: {formatPence(calculatedPence)}</p>
+        <div className="mt-5">
+          <MoneyMetric
+            label="Pay to plan"
+            value={formatPence(incomePence)}
+            tone="primary"
+            breakdown={getPayToPlanBreakdown({
+              actualAmountPence,
+              calculatedPence,
+              hourlyRatePence,
+              hours,
+              incomePence,
+            })}
+          />
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -156,6 +174,60 @@ export function PaydayWizardPage({
       </Panel>
     </div>
   )
+}
+
+function getPayToPlanBreakdown({
+  actualAmountPence,
+  calculatedPence,
+  hourlyRatePence,
+  hours,
+  incomePence,
+}: {
+  actualAmountPence: number | null
+  calculatedPence: number
+  hourlyRatePence: number
+  hours: number
+  incomePence: number
+}): CalculationBreakdown {
+  const lines: CalculationLine[] = [
+    {
+      label: 'Hours worked',
+      value: String(hours),
+      tone: 'muted' as const,
+    },
+    {
+      label: 'Hourly rate',
+      value: formatPence(hourlyRatePence),
+      tone: 'muted' as const,
+    },
+    {
+      label: 'Hours estimate',
+      value: formatPence(calculatedPence),
+      detail: `${hours} hours × ${formatPence(hourlyRatePence)} per hour.`,
+      tone: 'add' as const,
+    },
+  ]
+
+  if (actualAmountPence !== null) {
+    lines.push({
+      label: 'Actual received override',
+      value: formatPence(actualAmountPence),
+      detail: 'Because actual received is filled in, this replaces the hours estimate.',
+      tone: 'result' as const,
+    })
+  }
+
+  lines.push({
+    label: 'Pay to plan',
+    value: formatPence(incomePence),
+    tone: 'result' as const,
+  })
+
+  return {
+    formula: actualAmountPence === null ? 'Pay to plan = hours worked × hourly rate.' : 'Pay to plan = actual received.',
+    lines,
+    note: 'This is the income saved to the paycheck plan when you confirm or update it.',
+  }
 }
 
 function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {

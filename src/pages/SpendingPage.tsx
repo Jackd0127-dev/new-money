@@ -8,7 +8,7 @@ import type {
   TransactionInput,
   TransactionUpdateInput,
 } from '../hooks/usePlannerData'
-import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
+import { Button, CalculationDetails, Field, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
 import type { PaymentMethod } from '../types/models'
 
 const quickAmounts = ['3.00', '5.00', '10.00', '20.00', '50.00']
@@ -239,7 +239,10 @@ export function SpendingPage({
                     <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
                   </div>
                 </summary>
-                <div className="divide-y divide-slate-100 border-t border-slate-100">
+                <div className="border-t border-slate-100 p-3">
+                  <CalculationDetails breakdown={getSpendingGroupBreakdown(group)} />
+                </div>
+                <div className="divide-y divide-slate-100">
                   {group.transactions.map((transaction) => {
                     const pot = snapshot.pots.find((candidate) => candidate.id === transaction.potId)
                     const card = snapshot.creditCards.find((candidate) => candidate.id === transaction.creditCardId)
@@ -296,6 +299,28 @@ interface TransactionGroup {
   label: string
   transactions: PlannerSnapshot['transactions']
   totalPence: number
+}
+
+function getSpendingGroupBreakdown(group: TransactionGroup): CalculationBreakdown {
+  return {
+    formula: 'Period spending total = every manual spending entry in this dropdown.',
+    lines:
+      group.transactions.length > 0
+        ? [
+            ...group.transactions.map((transaction) => ({
+              label: transaction.note,
+              value: formatPence(transaction.amountPence),
+              detail: transaction.date,
+              tone: 'add' as const,
+            })),
+            {
+              label: 'Period spending total',
+              value: formatPence(group.totalPence),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No spending entries', value: formatPence(0), tone: 'result' }],
+  }
 }
 
 function groupTransactionsByPeriod(

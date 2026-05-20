@@ -11,7 +11,7 @@ import {
   type CreditCardAllocationItem,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput } from '../components/ui'
+import { Button, CalculationDetails, Field, MoneyMetric, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
 import type { CustomPaymentStatus, RecurringPayment, Transaction } from '../types/models'
 
 const cardColors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
@@ -299,16 +299,43 @@ export function AllocatingPaymentsPage({
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
-        <MoneyMetric label="Latest pay" value={formatPence(summary.payReceivedPence)} />
+        <MoneyMetric
+          label="Latest pay"
+          value={formatPence(summary.payReceivedPence)}
+          breakdown={{
+            formula: 'Latest pay is the income saved on the newest paycheck plan.',
+            lines: [
+              {
+                label: latestPeriod ? 'Newest pay period' : 'No active pay period',
+                value: formatPence(summary.payReceivedPence),
+                detail: latestPeriod ? `${latestPeriod.startDate} to ${latestPeriod.endDate}` : undefined,
+                tone: 'result',
+              },
+            ],
+          }}
+        />
         <MoneyMetric
           label="Cards owed"
           value={formatPence(summary.totalOwedPence)}
           tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
+          breakdown={getCardsOwedBreakdown(summary.cards)}
         />
         <MoneyMetric
           label="Remaining after cards"
           value={formatPence(summary.paycheckRemainingAfterCardsPence)}
           tone={summary.paycheckRemainingAfterCardsPence < 0 ? 'bad' : 'good'}
+          breakdown={{
+            formula: 'Remaining after cards = latest pay - cards owed.',
+            lines: [
+              { label: 'Latest pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
+              { label: 'Cards owed', value: `-${formatPence(summary.totalOwedPence)}`, tone: 'subtract' },
+              {
+                label: 'Remaining after cards',
+                value: formatPence(summary.paycheckRemainingAfterCardsPence),
+                tone: 'result',
+              },
+            ],
+          }}
         />
       </div>
 
@@ -521,6 +548,7 @@ export function AllocatingPaymentsPage({
                       </div>
                     </summary>
                     <div className="space-y-3 border-t border-slate-100 p-3">
+                      <CalculationDetails breakdown={getPaymentGroupBreakdown(group)} />
                       {group.rows.map((row) => (
                         <PaymentAllocationRow
                           key={row.id}
@@ -612,6 +640,28 @@ interface PaymentGroup {
   label: string
   rows: PaymentRow[]
   totalPence: number
+}
+
+function getPaymentGroupBreakdown(group: PaymentGroup): CalculationBreakdown {
+  return {
+    formula: 'Payment group total = every row listed in this pay-period dropdown.',
+    lines:
+      group.rows.length > 0
+        ? [
+            ...group.rows.map((row) => ({
+              label: row.label,
+              value: formatPence(row.amountPence),
+              detail: `${row.date} · ${row.sourceLabel}`,
+              tone: 'add' as const,
+            })),
+            {
+              label: 'Payment group total',
+              value: formatPence(group.totalPence),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No rows', value: formatPence(0), tone: 'result' }],
+  }
 }
 
 function PaymentAllocationRow({
@@ -729,10 +779,36 @@ function CreditCardOverview({
       </Panel>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MoneyMetric label="Owed now" value={formatPence(cardSummary.owedPence)} tone={cardSummary.owedPence > 0 ? 'warning' : 'good'} />
-        <MoneyMetric label="Left on card" value={formatPence(cardSummary.availableCreditPence)} />
-        <MoneyMetric label="Taken this period" value={formatPence(chargedPence)} tone={chargedPence > 0 ? 'warning' : 'neutral'} />
-        <MoneyMetric label="Repaid this period" value={formatPence(repaidPence)} tone={repaidPence > 0 ? 'good' : 'neutral'} />
+        <MoneyMetric
+          label="Owed now"
+          value={formatPence(cardSummary.owedPence)}
+          tone={cardSummary.owedPence > 0 ? 'warning' : 'good'}
+          breakdown={getCardOwedBreakdown(cardSummary, chargedPence, repaidPence)}
+        />
+        <MoneyMetric
+          label="Left on card"
+          value={formatPence(cardSummary.availableCreditPence)}
+          breakdown={{
+            formula: 'Left on card = card limit - owed now.',
+            lines: [
+              { label: 'Card limit', value: formatPence(cardSummary.card.limitPence), tone: 'add' },
+              { label: 'Owed now', value: `-${formatPence(cardSummary.owedPence)}`, tone: 'subtract' },
+              { label: 'Left on card', value: formatPence(cardSummary.availableCreditPence), tone: 'result' },
+            ],
+          }}
+        />
+        <MoneyMetric
+          label="Taken this period"
+          value={formatPence(chargedPence)}
+          tone={chargedPence > 0 ? 'warning' : 'neutral'}
+          breakdown={getCardChargesBreakdown(cardSummary)}
+        />
+        <MoneyMetric
+          label="Repaid this period"
+          value={formatPence(repaidPence)}
+          tone={repaidPence > 0 ? 'good' : 'neutral'}
+          breakdown={getCardRepaymentsBreakdown(cardSummary, repaidPence)}
+        />
       </div>
 
       <Panel title="What changed this card" description="Every linked charge and repayment in the selected pay period.">
@@ -758,6 +834,110 @@ function CreditCardOverview({
       </Panel>
     </div>
   )
+}
+
+function getCardsOwedBreakdown(cards: CreditCardAllocationCardSummary[]): CalculationBreakdown {
+  return {
+    formula: 'Cards owed = the sum of each active card balance for this pay period.',
+    lines:
+      cards.length > 0
+        ? [
+            ...cards.map((cardSummary) => ({
+              label: cardSummary.card.name,
+              value: formatPence(cardSummary.owedPence),
+              detail: `${cardSummary.items.length} linked items after repayments.`,
+              tone: cardSummary.owedPence > 0 ? ('add' as const) : ('muted' as const),
+            })),
+            {
+              label: 'Cards owed',
+              value: formatPence(cards.reduce((total, cardSummary) => total + cardSummary.owedPence, 0)),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No active cards', value: formatPence(0), tone: 'result' }],
+    note: 'Each card balance is floored at zero so overpayments do not create negative owed amounts.',
+  }
+}
+
+function getCardOwedBreakdown(
+  cardSummary: CreditCardAllocationCardSummary,
+  chargedPence: number,
+  repaidPence: number,
+): CalculationBreakdown {
+  return {
+    formula: 'Owed now = linked charges - repayments, never below zero.',
+    lines: [
+      {
+        label: 'Linked charges',
+        value: formatPence(chargedPence),
+        detail: 'Recurring, saved payments, and credit-card spending linked to this card.',
+        tone: 'add',
+      },
+      {
+        label: 'Repayments',
+        value: `-${formatPence(repaidPence)}`,
+        detail: 'Repayments recorded against this card in the selected pay period.',
+        tone: 'subtract',
+      },
+      {
+        label: 'Owed now',
+        value: formatPence(cardSummary.owedPence),
+        tone: 'result',
+      },
+    ],
+  }
+}
+
+function getCardChargesBreakdown(cardSummary: CreditCardAllocationCardSummary): CalculationBreakdown {
+  const chargeItems = cardSummary.items.filter((item) => item.source !== 'repayment')
+  const chargedPence = chargeItems.reduce((total, item) => total + item.amountPence, 0)
+
+  return {
+    formula: 'Taken this period = every non-repayment item linked to this card.',
+    lines:
+      chargeItems.length > 0
+        ? [
+            ...chargeItems.map((item) => ({
+              label: item.label,
+              value: formatPence(item.amountPence),
+              detail: `${item.date} · ${overviewSourceLabel(item.source)}`,
+              tone: 'add' as const,
+            })),
+            {
+              label: 'Taken this period',
+              value: formatPence(chargedPence),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No linked charges', value: formatPence(0), tone: 'result' }],
+  }
+}
+
+function getCardRepaymentsBreakdown(
+  cardSummary: CreditCardAllocationCardSummary,
+  repaidPence: number,
+): CalculationBreakdown {
+  const repaymentItems = cardSummary.items.filter((item) => item.source === 'repayment')
+
+  return {
+    formula: 'Repaid this period = repayments recorded against this card.',
+    lines:
+      repaymentItems.length > 0
+        ? [
+            ...repaymentItems.map((item) => ({
+              label: item.label,
+              value: formatPence(Math.abs(item.amountPence)),
+              detail: item.date,
+              tone: 'subtract' as const,
+            })),
+            {
+              label: 'Repaid this period',
+              value: formatPence(repaidPence),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No repayments', value: formatPence(0), tone: 'result' }],
+  }
 }
 
 function CreditCardOverviewItem({

@@ -1,9 +1,10 @@
 import {
   formatPence,
   getPayPeriodCostSummary,
+  type PayPeriodCostSummary,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Panel } from '../components/ui'
+import { Button, MoneyMetric, Panel, type CalculationBreakdown } from '../components/ui'
 import type { ViewKey } from '../types/navigation'
 
 export function DashboardPage({
@@ -36,20 +37,23 @@ export function DashboardPage({
       >
         {latestPeriod ? (
           <div className="grid gap-4 lg:grid-cols-3">
-            <PaySummaryCard
+            <MoneyMetric
               label="Total pay"
               value={formatPence(summary.payReceivedPence)}
               tone="primary"
+              breakdown={getTotalPayBreakdown(summary, latestPeriod.startDate, latestPeriod.endDate)}
             />
-            <PaySummaryCard
+            <MoneyMetric
               label="Total costs"
               value={formatPence(summary.totalCostsPence)}
               tone="warning"
+              breakdown={getTotalCostsBreakdown(summary)}
             />
-            <PaySummaryCard
+            <MoneyMetric
               label="Money left"
               value={formatPence(summary.moneyLeftPence)}
               tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
+              breakdown={getMoneyLeftBreakdown(summary)}
             />
           </div>
         ) : (
@@ -65,29 +69,101 @@ export function DashboardPage({
   )
 }
 
-function PaySummaryCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone: 'primary' | 'warning' | 'good' | 'bad'
-}) {
-  const className =
-    tone === 'primary'
-      ? 'bg-slate-950 text-white'
-      : tone === 'warning'
-        ? 'border border-amber-200 bg-amber-50 text-slate-950'
-        : tone === 'good'
-          ? 'border border-emerald-200 bg-emerald-50 text-slate-950'
-          : 'border border-red-200 bg-red-50 text-slate-950'
-  const labelClassName = tone === 'primary' ? 'text-slate-300' : 'text-slate-500'
+function getTotalPayBreakdown(
+  summary: PayPeriodCostSummary,
+  startDate: string,
+  endDate: string,
+): CalculationBreakdown {
+  return {
+    formula: 'Total pay is the income saved on the active paycheck plan.',
+    lines: [
+      {
+        label: 'Saved paycheck income',
+        value: formatPence(summary.payReceivedPence),
+        detail: `${startDate} to ${endDate}`,
+        tone: 'result',
+      },
+    ],
+    note: 'This comes from the Payday tab. If you enter actual received, that replaces the hours estimate.',
+  }
+}
 
-  return (
-    <div className={`rounded-lg p-5 ${className}`}>
-      <p className={`text-sm font-medium ${labelClassName}`}>{label}</p>
-      <p className="mt-3 text-3xl font-semibold">{value}</p>
-    </div>
-  )
+function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
+  return {
+    formula: 'Total costs = recurring + saved payments + manual spending + debt minimums + credit-card net.',
+    lines: [
+      {
+        label: 'Recurring not on cards',
+        value: formatPence(summary.directRecurringPence),
+        detail: 'Bills due this pay period that are not linked to a credit card.',
+        tone: 'add',
+      },
+      {
+        label: 'Saved payments not on cards',
+        value: formatPence(summary.savedPaymentsPence),
+        detail: 'One-off saved payments due in this period and not linked to a credit card.',
+        tone: 'add',
+      },
+      {
+        label: 'Manual spending not on cards',
+        value: formatPence(summary.manualSpendingPence),
+        detail: 'Logged spending in this period paid from a pot.',
+        tone: 'add',
+      },
+      {
+        label: 'Debt minimums',
+        value: formatPence(summary.debtMinimumsPence),
+        detail: 'Active debt minimum payments due inside this pay period.',
+        tone: 'add',
+      },
+      {
+        label: 'Credit-card charges',
+        value: formatPence(summary.creditCardChargesPence),
+        detail: 'Recurring, saved, and manual spends linked to credit cards.',
+        tone: 'add',
+      },
+      {
+        label: 'Card repayments',
+        value: `-${formatPence(summary.creditCardRepaymentsPence)}`,
+        detail: 'Repayments reduce card costs for the period.',
+        tone: 'subtract',
+      },
+      {
+        label: 'Credit-card net used',
+        value: formatPence(summary.creditCardNetPence),
+        detail: 'Charges minus repayments, never below zero.',
+        tone: 'result',
+      },
+      {
+        label: 'Total costs',
+        value: formatPence(summary.totalCostsPence),
+        tone: 'result',
+      },
+    ],
+    note: `${summary.items.length} dated items fed this period total.`,
+  }
+}
+
+function getMoneyLeftBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
+  return {
+    formula: 'Money left = total pay - total costs.',
+    lines: [
+      {
+        label: 'Total pay',
+        value: formatPence(summary.payReceivedPence),
+        tone: 'add',
+      },
+      {
+        label: 'Total costs',
+        value: `-${formatPence(summary.totalCostsPence)}`,
+        tone: 'subtract',
+      },
+      {
+        label: 'Money left',
+        value: formatPence(summary.moneyLeftPence),
+        tone: 'result',
+      },
+    ],
+    note: summary.moneyLeftPence < 0 ? 'This period is over committed.' : 'This is what remains after the listed costs.',
+  }
 }

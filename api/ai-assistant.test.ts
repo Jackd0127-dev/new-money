@@ -182,10 +182,12 @@ describe('AI assistant api', () => {
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       model: string
       messages: Array<{ role: string; content: string }>
+      response_format?: unknown
     }
     expect(requestBody.model).toBe('openai/gpt-oss-120b:free')
     expect(requestBody.messages[0].content).toContain('whole-app assistant')
     expect(requestBody.messages[1].content).toContain('Full planner snapshot JSON:')
+    expect(requestBody.response_format).toBeUndefined()
     expect(response.payload).toEqual({
       answer: 'OpenRouter has the same full app context.',
       highlights: ['Provider: OpenRouter'],

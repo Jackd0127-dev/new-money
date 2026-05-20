@@ -185,12 +185,11 @@ async function generateOpenRouterJson({
         { role: 'system', content: systemInstruction },
         { role: 'user', content: prompt },
       ],
-      response_format: { type: 'json_object' },
     }),
   })
 
   if (!response.ok) {
-    throw new Error(`OpenRouter request failed with ${response.status}`)
+    throw new Error(`OpenRouter request failed with ${response.status}: ${await response.text()}`)
   }
 
   const body = (await response.json()) as {

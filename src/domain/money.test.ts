@@ -413,22 +413,49 @@ describe('debt tracking', () => {
     },
   ]
 
-  it('summarises active debt balances, progress, and upcoming minimum payments', () => {
+  it('summarises active debt balances, progress, and upcoming balances due', () => {
     expect(getDebtSummary(debts, payments, '2026-05-18')).toEqual({
       activeDebtCount: 1,
       overdueDebtCount: 0,
       totalCurrentBalancePence: 85000,
       totalOriginalAmountPence: 120000,
       totalPaidPence: 35000,
-      minimumDueNext30DaysPence: 5000,
+      minimumDueNext30DaysPence: 85000,
       progressPercent: 29,
     })
   })
 
-  it('keeps overdue active debt minimums in the due total until the debt is paid', () => {
+  it('keeps overdue active debt balances in the due total until the debt is paid', () => {
     expect(getDebtSummary(debts, payments, '2026-05-21')).toMatchObject({
       overdueDebtCount: 1,
-      minimumDueNext30DaysPence: 5000,
+      minimumDueNext30DaysPence: 85000,
+    })
+  })
+
+  it('uses the full active debt balance as due even when the optional minimum is zero', () => {
+    expect(
+      getDebtSummary(
+        [
+          {
+            id: 'debt-zero-minimum',
+            name: 'Store card',
+            lender: 'Retail Bank',
+            originalAmountPence: 30000,
+            currentBalancePence: 30000,
+            minimumPaymentPence: 0,
+            dueDate: '2026-05-23',
+            interestRateApr: null,
+            note: '',
+            status: 'active',
+            createdAt: '2026-05-20T00:00:00.000Z',
+            updatedAt: '2026-05-20T00:00:00.000Z',
+          },
+        ],
+        [],
+        '2026-05-20',
+      ),
+    ).toMatchObject({
+      minimumDueNext30DaysPence: 30000,
     })
   })
 })
@@ -745,13 +772,13 @@ describe('pay period cost summary', () => {
       directRecurringPence: 25000,
       savedPaymentsPence: 3000,
       manualSpendingPence: 1250,
-      debtMinimumsPence: 6500,
+      debtMinimumsPence: 75000,
       creditCardChargesPence: 7200,
       creditCardRepaymentsPence: 2000,
       creditCardNetPence: 5200,
-      totalCostsPence: 40950,
-      moneyLeftPence: 49050,
-      isOverCommitted: false,
+      totalCostsPence: 109450,
+      moneyLeftPence: -19450,
+      isOverCommitted: true,
     })
   })
 })

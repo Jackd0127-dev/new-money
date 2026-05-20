@@ -609,7 +609,7 @@ describe('recurring page', () => {
     const nextPaydayPanel = screen.getByRole('region', { name: 'What you owe next payday' })
     expect(within(nextPaydayPanel).getAllByText('Total owed next payday').length).toBeGreaterThan(0)
     expect(within(nextPaydayPanel).getByText('2026-05-30 to 2026-06-12')).toBeInTheDocument()
-    expect(within(nextPaydayPanel).getAllByText('£735.00').length).toBeGreaterThan(0)
+    expect(within(nextPaydayPanel).getAllByText('£1,495.00').length).toBeGreaterThan(0)
     expect(within(nextPaydayPanel).getByText('Rent')).toBeInTheDocument()
     expect(within(nextPaydayPanel).getByText('MOT')).toBeInTheDocument()
     expect(within(nextPaydayPanel).getByText('Loan')).toBeInTheDocument()
@@ -909,6 +909,64 @@ describe('debts page', () => {
       name: 'Car finance',
       note: '',
     })
+  })
+
+  it('allows an active debt without a minimum payment', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<DebtsPage snapshot={createSnapshot()} actions={actions} />)
+
+    const debtPanel = screen.getByRole('region', { name: 'Add debt' })
+    await user.type(within(debtPanel).getByLabelText('Debt name'), 'Store card')
+    await user.type(within(debtPanel).getByLabelText('Lender'), 'Retail Bank')
+    await user.type(within(debtPanel).getByLabelText('Current balance'), '300')
+    await user.clear(within(debtPanel).getByLabelText('Due date'))
+    await user.type(within(debtPanel).getByLabelText('Due date'), '2026-05-23')
+
+    expect(within(debtPanel).getByRole('button', { name: 'Add debt' })).toBeEnabled()
+    await user.click(within(debtPanel).getByRole('button', { name: 'Add debt' }))
+
+    expect(actions.addDebt).toHaveBeenCalledWith({
+      currentBalancePence: 30000,
+      dueDate: '2026-05-23',
+      interestRateApr: null,
+      lender: 'Retail Bank',
+      minimumPaymentPence: 0,
+      name: 'Store card',
+      note: '',
+    })
+  })
+
+  it('shows the full balance as due for active debts even when minimum payment is zero', () => {
+    render(
+      <DebtsPage
+        snapshot={createSnapshot({
+          debts: [
+            {
+              id: 'debt-zero-minimum',
+              name: 'Store card',
+              lender: 'Retail Bank',
+              originalAmountPence: 30000,
+              currentBalancePence: 30000,
+              minimumPaymentPence: 0,
+              dueDate: '2026-05-23',
+              interestRateApr: null,
+              note: '',
+              status: 'active',
+              createdAt: '2026-05-20T00:00:00.000Z',
+              updatedAt: '2026-05-20T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={createActions()}
+      />,
+    )
+
+    expect(screen.getAllByText('Debt due 30 days').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('£300.00').length).toBeGreaterThan(0)
+    expect(screen.getByText('Due amount')).toBeInTheDocument()
+    expect(screen.getByText('Optional')).toBeInTheDocument()
   })
 })
 

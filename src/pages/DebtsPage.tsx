@@ -4,6 +4,7 @@ import { PenLine, Trash2 } from 'lucide-react'
 import {
   addIsoDays,
   formatPence,
+  getDebtDueAmountPence,
   getDebtSummary,
   parsePoundsToPence,
   toIsoDate,
@@ -60,7 +61,7 @@ export function DebtsPage({
     .filter((payment) => activeDebtIds.has(payment.debtId))
     .reduce((total, payment) => total + payment.amountPence, 0)
   const balanceReductionPence = Math.max(0, summary.totalOriginalAmountPence - summary.totalCurrentBalancePence)
-  const dueWithin30Days = activeDebts.filter((debt) => debt.minimumPaymentPence > 0 && debt.dueDate <= next30Days)
+  const dueWithin30Days = activeDebts.filter((debt) => debt.dueDate <= next30Days)
   const overdueDebts = activeDebts.filter((debt) => debt.dueDate < today)
   const parsedDebtBalancePence = parsePoundsToPence(debtForm.currentBalance)
   const parsedMinimumPence = parsePoundsToPence(debtForm.minimumPayment)
@@ -193,27 +194,27 @@ export function DebtsPage({
           }}
         />
         <MoneyMetric
-          label="Minimum due 30 days"
+          label="Debt due 30 days"
           value={formatPence(summary.minimumDueNext30DaysPence)}
           tone={summary.minimumDueNext30DaysPence > 0 ? 'warning' : 'neutral'}
           breakdown={{
-            formula: `Minimum due 30 days = overdue active minimums plus active minimums due by ${next30Days}.`,
+            formula: `Debt due 30 days = full outstanding balance for active debts due by ${next30Days}.`,
             lines:
               dueWithin30Days.length > 0
                 ? [
                     ...dueWithin30Days.map((debt) => ({
                       label: debt.name,
-                      value: formatPence(debt.minimumPaymentPence),
+                      value: formatPence(getDebtDueAmountPence(debt)),
                       detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
                       tone: 'add' as const,
                     })),
                     {
-                      label: 'Minimum due 30 days',
+                      label: 'Debt due 30 days',
                       value: formatPence(summary.minimumDueNext30DaysPence),
                       tone: 'result' as const,
                     },
                   ]
-                : [{ label: 'No minimums due', value: formatPence(0), tone: 'result' }],
+                : [{ label: 'No debts due', value: formatPence(0), tone: 'result' }],
           }}
         />
         <MoneyMetric
@@ -280,7 +281,7 @@ export function DebtsPage({
                   onChange={(event) =>
                     setDebtForm({ ...debtForm, minimumPayment: event.target.value })
                   }
-                  placeholder="50.00"
+                  placeholder="Optional"
                 />
               </Field>
             </div>
@@ -421,6 +422,7 @@ export function DebtsPage({
                   ? Math.round((paidPence / debt.originalAmountPence) * 100)
                   : 100
               const isOverdue = debt.status === 'active' && debt.dueDate < today
+              const debtDueAmountPence = getDebtDueAmountPence(debt)
 
               return (
                 <div key={debt.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -458,10 +460,11 @@ export function DebtsPage({
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div className="mt-4 grid gap-3 md:grid-cols-5">
                     <DebtStat label="Balance" value={formatPence(debt.currentBalancePence)} />
                     <DebtStat label="Original" value={formatPence(debt.originalAmountPence)} />
-                    <DebtStat label="Minimum" value={formatPence(debt.minimumPaymentPence)} />
+                    <DebtStat label="Due amount" value={formatPence(debtDueAmountPence)} />
+                    <DebtStat label="Minimum" value={debt.minimumPaymentPence > 0 ? formatPence(debt.minimumPaymentPence) : 'Optional'} />
                     <DebtStat
                       label="Due"
                       value={formatShortDate(debt.dueDate)}

@@ -18,9 +18,9 @@ describe('getDailyBriefFacts', () => {
     })
     expect(facts.balances).toMatchObject({
       currentAvailablePence: 13600,
-      committedBeforeNextPaydayPence: 107500,
-      projectedAvailableBeforeNextPaydayPence: -93900,
-      safeToSpendPence: -9390,
+      committedBeforeNextPaydayPence: 147500,
+      projectedAvailableBeforeNextPaydayPence: -133900,
+      safeToSpendPence: -13390,
     })
     expect(facts.payments.dueToday).toEqual([
       expect.objectContaining({
@@ -56,6 +56,7 @@ describe('getDailyBriefFacts', () => {
         id: 'debt-car',
         name: 'Car finance',
         minimumPaymentPence: 10000,
+        amountDuePence: 50000,
         dueIso: '2026-05-22',
       }),
     ])

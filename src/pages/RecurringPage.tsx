@@ -269,14 +269,14 @@ function NextPaydayOwedPanel({
               breakdown={getNextPaydayOwedBreakdown(summary, period)}
             />
             <MoneyMetric
-              label="Debt minimums"
+              label="Debt due"
               value={formatPence(summary.debtMinimumsPence)}
               tone={summary.debtMinimumsPence > 0 ? 'warning' : 'neutral'}
               breakdown={{
-                formula: 'Debt minimums = unpaid active minimums due by the end of this next pay period.',
+                formula: 'Debt due = full outstanding balances for active debts due by the end of this next pay period.',
                 lines: [
                   {
-                    label: 'Debt minimums',
+                    label: 'Debt due',
                     value: formatPence(summary.debtMinimumsPence),
                     detail: `Due by ${period.endDate}, including overdue active debts.`,
                     tone: 'result',
@@ -348,7 +348,7 @@ function getNextPaydayOwedBreakdown(
   period: PayPeriod,
 ): CalculationBreakdown {
   return {
-    formula: 'Total owed next payday = recurring + saved payments + manual spending + debt minimums + credit-card net.',
+    formula: 'Total owed next payday = recurring + saved payments + manual spending + debt due + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -369,9 +369,9 @@ function getNextPaydayOwedBreakdown(
         tone: 'add',
       },
       {
-        label: 'Debt minimums',
+        label: 'Debt due',
         value: formatPence(summary.debtMinimumsPence),
-        detail: 'Active minimums overdue or due by this next period end.',
+        detail: 'Full outstanding balances overdue or due by this next period end.',
         tone: 'add',
       },
       {
@@ -433,7 +433,7 @@ function formatCostSource(source: PayPeriodCostSummary['items'][number]['source'
   }
 
   if (source === 'debt_minimum') {
-    return 'Debt minimum'
+    return 'Debt due'
   }
 
   return 'Card repayment'

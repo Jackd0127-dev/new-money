@@ -90,7 +90,7 @@ function getTotalPayBreakdown(
 
 function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
   return {
-    formula: 'Total costs = recurring + saved payments + manual spending + debt minimums + credit-card net.',
+    formula: 'Total costs = recurring + saved payments + manual spending + debt due + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -111,9 +111,9 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
         tone: 'add',
       },
       {
-        label: 'Debt minimums',
+        label: 'Debt due',
         value: formatPence(summary.debtMinimumsPence),
-        detail: 'Active debt minimum payments overdue or due by the end of this pay period.',
+        detail: 'Full outstanding balances for active debts overdue or due by the end of this pay period.',
         tone: 'add',
       },
       {

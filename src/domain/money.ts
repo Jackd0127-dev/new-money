@@ -111,6 +111,12 @@ export interface PayPeriodCostSummary {
   items: PeriodCostItem[]
 }
 
+export function getDebtDueAmountPence(
+  debt: Pick<Debt, 'currentBalancePence'>,
+): number {
+  return Math.max(0, debt.currentBalancePence)
+}
+
 interface CreditCardAllocationInput {
   creditCards: CreditCard[]
   recurringPayments: RecurringPayment[]
@@ -397,13 +403,12 @@ export function getPayPeriodCostSummary({
       (debt) =>
         debt.status === 'active' &&
         debt.currentBalancePence > 0 &&
-        debt.minimumPaymentPence > 0 &&
         debt.dueDate <= payPeriod.endDate,
     )
     .map((debt) => ({
       id: `debt-${debt.id}`,
       label: debt.name,
-      amountPence: debt.minimumPaymentPence,
+      amountPence: getDebtDueAmountPence(debt),
       date: debt.dueDate,
       source: 'debt_minimum' as const,
       creditCardId: null,
@@ -649,8 +654,8 @@ export function getDebtSummary(
     totalOriginalAmountPence,
     totalPaidPence,
     minimumDueNext30DaysPence: activeDebts
-      .filter((debt) => debt.minimumPaymentPence > 0 && debt.dueDate <= next30Days)
-      .reduce((total, debt) => total + debt.minimumPaymentPence, 0),
+      .filter((debt) => debt.dueDate <= next30Days)
+      .reduce((total, debt) => total + getDebtDueAmountPence(debt), 0),
     progressPercent:
       totalOriginalAmountPence > 0
         ? Math.round((totalPaidPence / totalOriginalAmountPence) * 100)

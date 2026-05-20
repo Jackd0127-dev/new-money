@@ -1,6 +1,7 @@
 import {
   addIsoDays,
   getCreditCardAllocationSummary,
+  getDebtDueAmountPence,
   getRecurringPaymentOccurrences,
 } from './money.js'
 import type {
@@ -78,6 +79,7 @@ export interface BriefDebtPayment {
   name: string
   lender: string
   minimumPaymentPence: number
+  amountDuePence: number
   dueIso: string
 }
 
@@ -192,6 +194,7 @@ export function getDailyBriefFacts(
       name: debt.name,
       lender: debt.lender,
       minimumPaymentPence: debt.minimumPaymentPence,
+      amountDuePence: getDebtDueAmountPence(debt),
       dueIso: debt.dueDate,
     }))
     .sort((a, b) => a.dueIso.localeCompare(b.dueIso) || a.name.localeCompare(b.name))
@@ -200,7 +203,7 @@ export function getDailyBriefFacts(
     .reduce((total, pot) => total + pot.balancePence, 0)
   const committedBeforeNextPaydayPence =
     duePayments.reduce((total, payment) => total + payment.amountPence, 0) +
-    debtMinimumPaymentsDue.reduce((total, debt) => total + debt.minimumPaymentPence, 0)
+    debtMinimumPaymentsDue.reduce((total, debt) => total + debt.amountDuePence, 0)
   const projectedAvailableBeforeNextPaydayPence = currentAvailablePence - committedBeforeNextPaydayPence
   const safeToSpendPence =
     daysUntilNextPayday && daysUntilNextPayday > 0

@@ -12,6 +12,7 @@ import {
 
 import {
   formatPence,
+  getDebtDueAmountPence,
   getRecurringPaymentOccurrences,
   toIsoDate,
 } from '../domain/money'
@@ -322,7 +323,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       id: `debt-${debt.id}`,
       date: debt.dueDate,
       title: debt.name,
-      amountPence: debt.minimumPaymentPence,
+      amountPence: getDebtDueAmountPence(debt),
       type: 'debt' as const,
     }))
   const spendingEvents = snapshot.transactions

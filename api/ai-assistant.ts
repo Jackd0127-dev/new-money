@@ -237,6 +237,8 @@ function buildPrompt({
 
   return [
     'Return only valid JSON with exactly these keys: answer, highlights, actions, confidence.',
+    'Required JSON example: {"answer":"Direct answer","highlights":["Fact from app data"],"actions":["Visible app action"],"confidence":"high"}',
+    'highlights and actions must be arrays of strings. confidence must be one of high, medium, or low.',
     customInstructions ? `User custom instructions:\n${truncateText(customInstructions, 2000)}` : '',
     `User question:\n${question || 'Give the most useful answer for the current app screen.'}`,
     `Current screen context JSON:\n${JSON.stringify(promptContext.screen)}`,
@@ -680,23 +682,18 @@ function parseAssistantResponse(value: string): AssistantResponse {
     throw new Error('Assistant returned a non-object JSON response.')
   }
 
-  const response = parsed as Partial<AssistantResponse>
-  const confidence = response.confidence
+  const response = parsed as Record<string, unknown>
+  const answer = getFirstString(response, ['answer', 'response', 'message', 'summary'])
 
-  if (
-    typeof response.answer !== 'string' ||
-    !isStringArray(response.highlights) ||
-    !isStringArray(response.actions) ||
-    !isAssistantConfidence(confidence)
-  ) {
+  if (!answer) {
     throw new Error('Assistant returned an invalid JSON shape.')
   }
 
   return {
-    answer: response.answer.trim(),
-    highlights: cleanList(response.highlights),
-    actions: cleanList(response.actions),
-    confidence,
+    answer: answer.trim(),
+    highlights: normalizeStringList(response.highlights),
+    actions: normalizeStringList(response.actions),
+    confidence: normalizeConfidence(response.confidence),
   }
 }
 
@@ -812,15 +809,70 @@ function extractGeminiText(response: unknown): string {
 }
 
 function cleanList(items: string[]): string[] {
-  return items.map((item) => item.trim()).filter(Boolean)
+  return items.map(cleanListItem).filter(Boolean)
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+function cleanListItem(item: string): string {
+  return item
+    .replace(/^\s*[-*•]\s*/, '')
+    .replace(/^\s*\d+[.)]\s*/, '')
+    .trim()
 }
 
-function isAssistantConfidence(value: unknown): value is AssistantResponse['confidence'] {
-  return value === 'high' || value === 'medium' || value === 'low'
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return cleanList(value.filter((item): item is string => typeof item === 'string'))
+  }
+
+  if (typeof value === 'string') {
+    return cleanList(value.split(/\r?\n/))
+  }
+
+  return []
+}
+
+function normalizeConfidence(value: unknown): AssistantResponse['confidence'] {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+
+    if (normalized.includes('high')) {
+      return 'high'
+    }
+
+    if (normalized.includes('medium')) {
+      return 'medium'
+    }
+
+    if (normalized.includes('low')) {
+      return 'low'
+    }
+  }
+
+  if (typeof value === 'number') {
+    if (value >= 0.75) {
+      return 'high'
+    }
+
+    if (value >= 0.45) {
+      return 'medium'
+    }
+
+    return 'low'
+  }
+
+  return 'medium'
+}
+
+function getFirstString(source: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = source[key]
+
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+
+  return null
 }
 
 function getErrorMessage(error: unknown): string {

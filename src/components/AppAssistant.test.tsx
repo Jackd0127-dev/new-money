@@ -65,7 +65,7 @@ describe('AppAssistant', () => {
     expect(screen.getByText('Check Lunch in recent spending.')).toBeInTheDocument()
   })
 
-  it('falls back to local context when the user is not signed in', async () => {
+  it('does not create a local financial answer when the user is not signed in', async () => {
     const user = userEvent.setup()
 
     render(
@@ -83,8 +83,46 @@ describe('AppAssistant', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'New Money AI helper' })
 
-    expect(within(dialog).getByText(/Sign in from Settings to ask the AI helper/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/I can still see the local dashboard context/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Sign in from Settings to ask New Money AI/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/I can still see the local dashboard context/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/pay is/)).not.toBeInTheDocument()
+  })
+
+  it('shows provider errors instead of a local deterministic answer', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({
+        error: 'AI provider failed',
+        provider: 'gemini',
+        reason: 'Assistant returned invalid JSON.',
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AppAssistant
+        snapshot={createSnapshot()}
+        activeView="history"
+        selectedPayPeriod={null}
+        user={{
+          getIdToken: async () => 'firebase-token',
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
+    await user.type(screen.getByLabelText('Ask New Money AI'), 'Give me every paycheck I received.')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'New Money AI helper' })
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(within(dialog).getByText(/Assistant returned invalid JSON/)).toBeInTheDocument()
+    expect(within(dialog).getAllByText(/AI provider failed/).length).toBeGreaterThan(0)
+    expect(within(dialog).queryByText(/I can see History/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/Create or select a pay period/)).not.toBeInTheDocument()
   })
 })
 

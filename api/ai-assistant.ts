@@ -4,7 +4,7 @@ import { getAuth } from 'firebase-admin/auth'
 
 import { defaultSettings } from '../src/data/defaults.js'
 import { buildAssistantAppContext } from '../src/domain/assistantContext.js'
-import { formatPence, toIsoDate } from '../src/domain/money.js'
+import { toIsoDate } from '../src/domain/money.js'
 import type { PlannerSnapshot } from '../src/storage/repository.js'
 import type { AiProvider } from '../src/types/models.js'
 
@@ -107,18 +107,18 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     selectedPayPeriodId: body.selectedPayPeriodId ?? null,
     todayIso,
   })
-  const fallback = createFallbackResponse(context)
   const prompt = buildPrompt({
     question: body.question ?? '',
     customInstructions: snapshot.settings.aiInstructions,
     context,
   })
+  const provider = snapshot.settings.aiProvider
 
-  if (snapshot.settings.aiProvider === 'openrouter') {
+  if (provider === 'openrouter') {
     const openRouterApiKey = process.env.OPENROUTER_API_KEY
 
     if (!openRouterApiKey) {
-      return res.status(200).json(fallback)
+      return res.status(503).json(createAiProviderError('openrouter', 'OpenRouter API key is not configured.'))
     }
 
     try {
@@ -131,15 +131,16 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           }),
         ),
       )
-    } catch {
-      return res.status(200).json(fallback)
+    } catch (error) {
+      logAiProviderError(provider, error)
+      return res.status(502).json(createAiProviderError(provider, getErrorMessage(error)))
     }
   }
 
   const geminiApiKey = process.env.GEMINI_API_KEY
 
   if (!geminiApiKey) {
-    return res.status(200).json(fallback)
+    return res.status(503).json(createAiProviderError('gemini', 'Gemini API key is not configured.'))
   }
 
   try {
@@ -155,8 +156,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     })
 
     return res.status(200).json(parseAssistantResponse(extractGeminiText(response)))
-  } catch {
-    return res.status(200).json(fallback)
+  } catch (error) {
+    logAiProviderError(provider, error)
+    return res.status(502).json(createAiProviderError(provider, getErrorMessage(error)))
   }
 }
 
@@ -213,6 +215,7 @@ function buildPrompt({
   context: ReturnType<typeof buildAssistantAppContext>
 }): string {
   return [
+    'Return only valid JSON with exactly these keys: answer, highlights, actions, confidence.',
     customInstructions ? `User custom instructions:\n${customInstructions}` : '',
     `User question:\n${question || 'Give the most useful answer for the current app screen.'}`,
     `Current screen context JSON:\n${JSON.stringify(context.screen)}`,
@@ -224,30 +227,19 @@ function buildPrompt({
   ].filter(Boolean).join('\n\n')
 }
 
-function createFallbackResponse(context: ReturnType<typeof buildAssistantAppContext>): AssistantResponse {
-  const period = context.screen.selectedPayPeriod
-  const dashboard = context.summaries.dashboard
-
+function createAiProviderError(provider: AiProvider, reason: string) {
   return {
-    answer: period
-      ? `I can see ${context.screen.activeViewLabel} for ${period.startDate} to ${period.endDate}. Pay is ${formatPence(dashboard.payReceivedPence)}, total costs are ${formatPence(dashboard.totalCostsPence)}, and money left is ${formatPence(dashboard.moneyLeftPence)}.`
-      : `I can see ${context.screen.activeViewLabel}, but there is no selected pay period yet.`,
-    highlights: [
-      `${context.overview.counts.pots} pots, ${context.overview.counts.debts} debts, ${context.overview.counts.transactions} transactions.`,
-      `Total pot balance: ${formatPence(context.overview.totalsPence.totalPotBalancePence)}.`,
-    ],
-    actions: period
-      ? ['Use the current tab controls to edit the item you asked about.', 'Open Dashboard to review the selected period totals.']
-      : ['Create or select a pay period so the assistant can anchor the answer.'],
-    confidence: period ? 'medium' : 'low',
+    error: 'AI provider failed',
+    provider,
+    reason,
   }
 }
 
 function parseAssistantResponse(value: string): AssistantResponse {
-  const parsed = JSON.parse(value) as unknown
+  const parsed = JSON.parse(extractJsonObjectText(value)) as unknown
 
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Assistant returned a non-object response.')
+    throw new Error('Assistant returned a non-object JSON response.')
   }
 
   const response = parsed as Partial<AssistantResponse>
@@ -258,7 +250,7 @@ function parseAssistantResponse(value: string): AssistantResponse {
     !isStringArray(response.actions) ||
     !['high', 'medium', 'low'].includes(String(response.confidence))
   ) {
-    throw new Error('Assistant returned an invalid response shape.')
+    throw new Error('Assistant returned an invalid JSON shape.')
   }
 
   return {
@@ -267,6 +259,25 @@ function parseAssistantResponse(value: string): AssistantResponse {
     actions: cleanList(response.actions),
     confidence: response.confidence,
   }
+}
+
+function extractJsonObjectText(value: string): string {
+  const trimmed = value.trim()
+
+  if (!trimmed) {
+    throw new Error('Assistant returned empty JSON.')
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  const candidate = (fenced?.[1] ?? trimmed).trim()
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+
+  if (start < 0 || end < start) {
+    throw new Error('Assistant returned invalid JSON.')
+  }
+
+  return candidate.slice(start, end + 1)
 }
 
 function normalizePlannerSnapshot(snapshot: unknown): PlannerSnapshot {
@@ -367,4 +378,15 @@ function cleanList(items: string[]): string[] {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown AI provider error.'
+}
+
+function logAiProviderError(provider: AiProvider, error: unknown) {
+  console.error('AI assistant provider failed', {
+    provider,
+    reason: getErrorMessage(error),
+  })
 }

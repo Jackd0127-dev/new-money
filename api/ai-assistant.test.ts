@@ -193,6 +193,97 @@ describe('AI assistant api', () => {
       confidence: 'medium',
     })
   })
+
+  it('returns an AI error instead of a deterministic local answer when the provider fails', async () => {
+    mocks.generateContent.mockResolvedValueOnce({ text: 'not json' })
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'Give me every paycheck I have received.',
+          todayIso: '2026-05-20',
+          activeView: 'history',
+          snapshot: createSnapshot({
+            payPeriods: [
+              createPayPeriod({ id: 'period-one', payday: '2026-05-02', incomePence: 80000 }),
+              createPayPeriod({ id: 'period-two', payday: '2026-05-16', incomePence: 85000 }),
+            ],
+          }),
+        },
+      },
+      response,
+    )
+
+    expect(response.statusCode).toBe(502)
+    expect(response.payload).toEqual({
+      error: 'AI provider failed',
+      provider: 'gemini',
+      reason: 'Assistant returned invalid JSON.',
+    })
+    expect(JSON.stringify(response.payload)).not.toContain('I can see History')
+    expect(JSON.stringify(response.payload)).not.toContain('Create or select a pay period')
+  })
+
+  it('accepts JSON wrapped in a markdown fence from OpenRouter', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: [
+                '```json',
+                JSON.stringify({
+                  answer: 'Your paycheck history is available to the model.',
+                  highlights: ['2 paychecks found.'],
+                  actions: ['Open History for the table.'],
+                  confidence: 'high',
+                }),
+                '```',
+              ].join('\n'),
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key')
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'Give me every paycheck.',
+          todayIso: '2026-05-20',
+          activeView: 'history',
+          snapshot: createSnapshot({
+            settings: {
+              ...createSnapshot().settings,
+              aiProvider: 'openrouter',
+            },
+          }),
+        },
+      },
+      response,
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(response.payload).toEqual({
+      answer: 'Your paycheck history is available to the model.',
+      highlights: ['2 paychecks found.'],
+      actions: ['Open History for the table.'],
+      confidence: 'high',
+    })
+  })
 })
 
 function createResponse() {
@@ -309,6 +400,24 @@ function createSnapshot(overrides: Record<string, unknown> = {}) {
         updatedAt: timestamp,
       },
     ],
+    ...overrides,
+  }
+}
+
+function createPayPeriod(overrides: Record<string, unknown> = {}) {
+  const timestamp = '2026-05-20T00:00:00.000Z'
+
+  return {
+    id: 'period-current',
+    startDate: '2026-05-16',
+    endDate: '2026-05-29',
+    payday: '2026-05-16',
+    nextPayday: '2026-05-30',
+    payFrequency: 'biweekly',
+    incomePence: 90000,
+    status: 'active',
+    createdAt: timestamp,
+    updatedAt: timestamp,
     ...overrides,
   }
 }

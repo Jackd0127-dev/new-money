@@ -1,9 +1,9 @@
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { Bot, ChevronDown, Loader2, MessageCircle, Send, Sparkles, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
-import { buildAssistantAppContext, getViewLabel } from '../domain/assistantContext'
-import { formatPence, toIsoDate } from '../domain/money'
+import { getViewLabel } from '../domain/assistantContext'
+import { toIsoDate } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
@@ -41,16 +41,6 @@ export function AppAssistant({
   const [isSending, setIsSending] = useState(false)
   const todayIso = toIsoDate(new Date())
   const viewLabel = getViewLabel(activeView)
-  const context = useMemo(
-    () =>
-      buildAssistantAppContext({
-        snapshot,
-        activeView,
-        selectedPayPeriodId: selectedPayPeriod?.id ?? null,
-        todayIso,
-      }),
-    [activeView, selectedPayPeriod?.id, snapshot, todayIso],
-  )
   const periodLabel = selectedPayPeriod
     ? `${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`
     : 'No pay period selected'
@@ -77,7 +67,7 @@ export function AppAssistant({
     ])
 
     if (!user) {
-      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createLocalResponse(context, true) })])
+      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createUnavailableResponse('Sign in from Settings to ask New Money AI.', 'Authentication is required before any planner data is sent to an AI provider.') })])
       return
     }
 
@@ -101,13 +91,13 @@ export function AppAssistant({
       })
 
       if (!response.ok) {
-        throw new Error(`AI helper request failed with ${response.status}`)
+        throw new Error(await getAssistantErrorMessage(response))
       }
 
       const assistantResponse = (await response.json()) as AssistantResponse
       setMessages((current) => [...current, createMessage({ role: 'assistant', ...assistantResponse })])
-    } catch {
-      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createLocalResponse(context, false) })])
+    } catch (error) {
+      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createUnavailableResponse('AI provider failed.', error instanceof Error ? error.message : 'Unknown AI provider error.') })])
     } finally {
       setIsSending(false)
     }
@@ -273,24 +263,30 @@ function createMessage(input: Omit<ChatMessage, 'id'>): ChatMessage {
   }
 }
 
-function createLocalResponse(
-  context: ReturnType<typeof buildAssistantAppContext>,
-  missingSignIn: boolean,
-): AssistantResponse {
-  const dashboard = context.summaries.dashboard
-  const base = missingSignIn
-    ? 'Sign in from Settings to ask the AI helper.'
-    : 'The AI helper could not reach the selected model.'
-
+function createUnavailableResponse(answer: string, reason: string): AssistantResponse {
   return {
-    answer: `${base} I can still see the local ${context.screen.activeViewLabel.toLowerCase()} context: pay is ${formatPence(dashboard.payReceivedPence)}, costs are ${formatPence(dashboard.totalCostsPence)}, and money left is ${formatPence(dashboard.moneyLeftPence)}.`,
-    highlights: [
-      `${context.overview.counts.pots} pots, ${context.overview.counts.activeDebts} active debts, ${context.overview.counts.transactions} transactions.`,
-      `Total pot balance: ${formatPence(context.overview.totalsPence.totalPotBalancePence)}.`,
-    ],
-    actions: missingSignIn
-      ? ['Open Settings and sign in, then ask again.']
-      : ['Try again, or switch AI provider in Settings if one provider is unavailable.'],
-    confidence: 'medium',
+    answer,
+    highlights: [reason],
+    actions: ['Check Settings, confirm you are signed in, and verify the selected AI provider has a working server key.'],
+    confidence: 'low',
+  }
+}
+
+async function getAssistantErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as {
+      error?: unknown
+      provider?: unknown
+      reason?: unknown
+    }
+    const parts = [
+      typeof body.error === 'string' ? body.error : `AI helper request failed with ${response.status}`,
+      typeof body.provider === 'string' ? `Provider: ${body.provider}` : '',
+      typeof body.reason === 'string' ? body.reason : '',
+    ].filter(Boolean)
+
+    return parts.join(' · ')
+  } catch {
+    return `AI helper request failed with ${response.status}`
   }
 }

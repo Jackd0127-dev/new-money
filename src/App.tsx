@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 
 import { AppShell } from './components/AppShell'
 import { AllocatingPaymentsPage } from './pages/AllocatingPaymentsPage'
+import { CalendarPage } from './pages/CalendarPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DebtsPage } from './pages/DebtsPage'
 import { HistoryPage } from './pages/HistoryPage'
@@ -11,7 +12,6 @@ import { RecurringPage } from './pages/RecurringPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SpendingPage } from './pages/SpendingPage'
 import { useCloudSync } from './hooks/useCloudSync'
-import { useDailyBrief } from './hooks/useDailyBrief'
 import { useFirebaseAuth } from './hooks/useFirebaseAuth'
 import { usePlannerData } from './hooks/usePlannerData'
 import type { ViewKey } from './types/navigation'
@@ -25,12 +25,6 @@ function App() {
     snapshot,
     refresh: actions.refresh,
   })
-  const dailyBrief = useDailyBrief({
-    user: sync.status === 'synced' ? auth.user : null,
-    snapshot,
-    addDailyBrief: actions.addDailyBrief,
-  })
-
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
@@ -54,13 +48,14 @@ function App() {
   }
 
   const pages: Record<ViewKey, ReactNode> = {
-    dashboard: <DashboardPage snapshot={snapshot} onViewChange={setActiveView} dailyBrief={dailyBrief} />,
+    dashboard: <DashboardPage snapshot={snapshot} onViewChange={setActiveView} />,
     payday: <PaydayWizardPage snapshot={snapshot} actions={actions} />,
     pots: <PotsPage snapshot={snapshot} actions={actions} />,
     spending: <SpendingPage snapshot={snapshot} actions={actions} />,
     allocatingPayments: <AllocatingPaymentsPage snapshot={snapshot} actions={actions} />,
     debts: <DebtsPage snapshot={snapshot} actions={actions} />,
     recurring: <RecurringPage snapshot={snapshot} actions={actions} />,
+    calendar: <CalendarPage snapshot={snapshot} />,
     history: <HistoryPage snapshot={snapshot} actions={actions} />,
     settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} sync={sync} />,
   }

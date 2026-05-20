@@ -71,6 +71,26 @@ export function hasMeaningfulPlannerData(snapshot: PlannerSnapshot): boolean {
   )
 }
 
+export function getPlannerSnapshotUpdatedAtIso(snapshot: PlannerSnapshot): string {
+  const timestamps = [
+    snapshot.settings.updatedAt,
+    ...snapshot.pots.map((item) => item.updatedAt),
+    ...snapshot.recurringPayments.map((item) => item.updatedAt),
+    ...snapshot.payPeriods.map((item) => item.updatedAt),
+    ...snapshot.paychecks.map((item) => item.updatedAt),
+    ...snapshot.potAllocations.map((item) => item.updatedAt),
+    ...snapshot.transactions.map((item) => item.updatedAt),
+    ...snapshot.debts.map((item) => item.updatedAt),
+    ...snapshot.debtPayments.map((item) => item.updatedAt),
+    ...snapshot.creditCards.map((item) => item.updatedAt),
+    ...snapshot.customPayments.map((item) => item.updatedAt),
+    ...snapshot.creditCardRepayments.map((item) => item.updatedAt),
+    ...snapshot.dailyBriefs.map((item) => item.updatedAt),
+  ].filter(Boolean)
+
+  return timestamps.sort().at(-1) ?? snapshot.settings.createdAt
+}
+
 function getSnapshotRef(userId: string) {
   const firestore = requireFirestore()
   return doc(firestore, 'users', userId, 'planner', 'snapshot')

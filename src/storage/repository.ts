@@ -2,6 +2,7 @@ import { defaultPots, defaultSettings } from '../data/defaults'
 import {
   calculatePaycheckAmount,
   createNextPayPeriod,
+  findPayPeriodForDate,
   getPotBalanceAfterTransactionRemoval,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
@@ -60,6 +61,8 @@ export interface PotInput {
   color: string
 }
 
+export type PotUpdateInput = PotInput
+
 export interface RecurringPaymentInput {
   name: string
   amountPence: number
@@ -73,7 +76,7 @@ export interface RecurringPaymentInput {
 export type RecurringPaymentUpdateInput = RecurringPaymentInput
 
 export interface TransactionInput {
-  potId: string
+  potId?: string | null
   payPeriodId?: string | null
   amountPence: number
   type: TransactionType
@@ -84,7 +87,7 @@ export interface TransactionInput {
 }
 
 export interface TransactionUpdateInput {
-  potId: string
+  potId?: string | null
   amountPence: number
   paymentMethod?: Transaction['paymentMethod']
   creditCardId?: string | null
@@ -100,6 +103,8 @@ export interface CreditCardInput {
   dueDate?: string | null
   color: string
 }
+
+export type CreditCardUpdateInput = CreditCardInput
 
 export interface CustomPaymentInput {
   name: string
@@ -118,6 +123,8 @@ export interface CreditCardRepaymentInput {
   date: string
   note: string
 }
+
+export type CreditCardRepaymentUpdateInput = CreditCardRepaymentInput
 
 export interface DailyBriefInput {
   date: string
@@ -225,11 +232,44 @@ export async function addPot(input: PotInput): Promise<void> {
   })
 }
 
-export async function archivePot(potId: string): Promise<void> {
+export async function updatePot(potId: string, input: PotUpdateInput): Promise<void> {
   await db.pots.update(potId, {
-    archived: true,
+    name: input.name.trim(),
+    type: input.type,
+    balancePence: input.balancePence,
+    color: input.color,
     updatedAt: nowIso(),
   })
+}
+
+export async function deletePot(potId: string): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction(
+    'rw',
+    [db.pots, db.recurringPayments, db.potAllocations, db.transactions],
+    async () => {
+      const [recurringCount, allocationCount, transactionCount] = await Promise.all([
+        db.recurringPayments.where('potId').equals(potId).count(),
+        db.potAllocations.where('potId').equals(potId).count(),
+        db.transactions.where('potId').equals(potId).count(),
+      ])
+
+      if (recurringCount + allocationCount + transactionCount > 0) {
+        await db.pots.update(potId, {
+          archived: true,
+          updatedAt: timestamp,
+        })
+        return
+      }
+
+      await db.pots.delete(potId)
+    },
+  )
+}
+
+export async function archivePot(potId: string): Promise<void> {
+  await deletePot(potId)
 }
 
 export async function addCreditCard(input: CreditCardInput): Promise<void> {
@@ -246,6 +286,18 @@ export async function addCreditCard(input: CreditCardInput): Promise<void> {
     archived: false,
     createdAt: timestamp,
     updatedAt: timestamp,
+  })
+}
+
+export async function updateCreditCard(cardId: string, input: CreditCardUpdateInput): Promise<void> {
+  await db.creditCards.update(cardId, {
+    name: input.name.trim(),
+    provider: input.provider.trim(),
+    limitPence: Math.max(0, input.limitPence),
+    dueDay: input.dueDay ?? null,
+    dueDate: input.dueDate ?? null,
+    color: input.color,
+    updatedAt: nowIso(),
   })
 }
 
@@ -285,6 +337,13 @@ export async function updateCustomPayment(
   })
 }
 
+export async function deleteCustomPayment(paymentId: string): Promise<void> {
+  await db.customPayments.update(paymentId, {
+    status: 'archived',
+    updatedAt: nowIso(),
+  })
+}
+
 export async function addCreditCardRepayment(input: CreditCardRepaymentInput): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
@@ -301,6 +360,25 @@ export async function addCreditCardRepayment(input: CreditCardRepaymentInput): P
     note: input.note.trim(),
     createdAt: timestamp,
     updatedAt: timestamp,
+  })
+}
+
+export async function updateCreditCardRepayment(
+  repaymentId: string,
+  input: CreditCardRepaymentUpdateInput,
+): Promise<void> {
+  const amountPence = Math.abs(input.amountPence)
+
+  if (!input.creditCardId || amountPence <= 0) {
+    return
+  }
+
+  await db.creditCardRepayments.update(repaymentId, {
+    creditCardId: input.creditCardId,
+    amountPence,
+    date: input.date,
+    note: input.note.trim(),
+    updatedAt: nowIso(),
   })
 }
 
@@ -401,25 +479,33 @@ export async function deleteRecurringPayment(paymentId: string): Promise<void> {
 export async function addTransaction(input: TransactionInput): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
+  const paymentMethod = input.paymentMethod ?? 'pot'
 
-  await db.transaction('rw', db.transactions, db.pots, async () => {
+  await db.transaction('rw', db.transactions, db.pots, db.payPeriods, async () => {
+    const periodId = input.payPeriodId ?? (await findStoredPayPeriodIdForDate(input.date))
+    const potId = paymentMethod === 'credit_card' ? null : input.potId ?? null
+
+    if (paymentMethod === 'pot' && !potId) {
+      return
+    }
+
     await db.transactions.add({
       id: crypto.randomUUID(),
-      potId: input.potId,
-      payPeriodId: input.payPeriodId ?? null,
+      potId,
+      payPeriodId: periodId,
       amountPence,
       type: input.type,
-      paymentMethod: input.paymentMethod ?? 'pot',
-      creditCardId: input.paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
+      paymentMethod,
+      creditCardId: paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
       date: input.date,
       note: input.note,
       createdAt: timestamp,
       updatedAt: timestamp,
     })
 
-    const pot = await db.pots.get(input.potId)
+    const pot = potId ? await db.pots.get(potId) : null
 
-    if (pot && (input.paymentMethod ?? 'pot') !== 'credit_card') {
+    if (pot && paymentMethod !== 'credit_card') {
       const delta = input.type === 'spending' ? -amountPence : amountPence
       await db.pots.update(pot.id, {
         balancePence: pot.balancePence + delta,
@@ -435,15 +521,22 @@ export async function updateTransaction(
 ): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
+  const paymentMethod = input.paymentMethod ?? 'pot'
 
-  await db.transaction('rw', db.transactions, db.pots, async () => {
+  await db.transaction('rw', db.transactions, db.pots, db.payPeriods, async () => {
     const current = await db.transactions.get(transactionId)
 
     if (!current) {
       return
     }
 
-    const oldPot = await db.pots.get(current.potId)
+    const nextPotId = paymentMethod === 'credit_card' ? null : input.potId ?? null
+
+    if (paymentMethod === 'pot' && !nextPotId) {
+      return
+    }
+
+    const oldPot = current.potId ? await db.pots.get(current.potId) : null
     let samePotAfterRemovalBalance: number | null = null
 
     if (oldPot && (current.paymentMethod ?? 'pot') !== 'credit_card') {
@@ -455,12 +548,14 @@ export async function updateTransaction(
     }
 
     const nextPot =
-      input.potId === current.potId && oldPot && samePotAfterRemovalBalance !== null
+      nextPotId === current.potId && oldPot && samePotAfterRemovalBalance !== null
         ? { ...oldPot, balancePence: samePotAfterRemovalBalance }
-        : await db.pots.get(input.potId)
+        : nextPotId
+          ? await db.pots.get(nextPotId)
+          : null
 
     if (nextPot) {
-      if ((input.paymentMethod ?? 'pot') !== 'credit_card') {
+      if (paymentMethod !== 'credit_card') {
         const delta = current.type === 'spending' ? -amountPence : amountPence
         await db.pots.update(nextPot.id, {
           balancePence: nextPot.balancePence + delta,
@@ -470,10 +565,11 @@ export async function updateTransaction(
     }
 
     await db.transactions.update(current.id, {
-      potId: input.potId,
+      potId: nextPotId,
+      payPeriodId: await findStoredPayPeriodIdForDate(input.date),
       amountPence,
-      paymentMethod: input.paymentMethod ?? 'pot',
-      creditCardId: input.paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
+      paymentMethod,
+      creditCardId: paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
       date: input.date,
       note: input.note,
       updatedAt: timestamp,
@@ -491,7 +587,7 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
 
     await db.transactions.delete(transaction.id)
 
-    const pot = await db.pots.get(transaction.potId)
+    const pot = transaction.potId ? await db.pots.get(transaction.potId) : null
 
     if (pot && (transaction.paymentMethod ?? 'pot') !== 'credit_card') {
       await db.pots.update(pot.id, {
@@ -916,6 +1012,11 @@ async function seedDefaults(): Promise<void> {
       updatedAt: nowIso(),
     })),
   )
+}
+
+async function findStoredPayPeriodIdForDate(date: string): Promise<string | null> {
+  const payPeriods = await db.payPeriods.toArray()
+  return findPayPeriodForDate(payPeriods, date)?.id ?? null
 }
 
 function nowIso(): string {

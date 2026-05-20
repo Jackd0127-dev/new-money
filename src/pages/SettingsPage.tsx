@@ -34,18 +34,6 @@ export function SettingsPage({
     setSaved(true)
   }
 
-  async function resetData() {
-    const confirmed = window.confirm(
-      auth?.user
-        ? 'Reset planner data in this browser? Because cloud sync is signed in, the reset can sync to your cloud copy too.'
-        : 'Reset all local planner data in this browser?',
-    )
-
-    if (confirmed) {
-      await actions.resetPlannerData()
-    }
-  }
-
   return (
     <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
       <Panel title="Pay defaults" description="These defaults speed up each payday plan.">
@@ -103,7 +91,7 @@ export function SettingsPage({
 
       {auth && sync && <CloudSyncPanel auth={auth} sync={sync} />}
 
-      <Panel title="Local data" description="Data is stored in this browser first, with optional Firebase sync.">
+      <Panel title="Planner data" description="Signed-in data syncs automatically with Firebase in the background.">
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pots</p>
@@ -119,16 +107,6 @@ export function SettingsPage({
               {formatPence(snapshot.pots.reduce((total, pot) => total + pot.balancePence, 0))}
             </p>
           </div>
-        </div>
-        <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-900">Reset path</p>
-          <p className="mt-1 text-sm leading-6 text-amber-800">
-            This clears this browser and restores starter pots. If cloud sync is signed in, the reset can also
-            sync to your cloud copy.
-          </p>
-          <Button className="mt-4" variant="danger" onClick={resetData}>
-            Reset local data
-          </Button>
         </div>
       </Panel>
     </div>

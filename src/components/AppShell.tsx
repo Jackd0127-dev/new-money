@@ -1,7 +1,6 @@
 import {
   Banknote,
   CalendarClock,
-  ChartNoAxesColumnIncreasing,
   CircleDollarSign,
   Clock3,
   CreditCard,
@@ -28,6 +27,7 @@ const navItems: Array<{
   { key: 'allocatingPayments', label: 'Allocating Payments', icon: ListChecks },
   { key: 'debts', label: 'Debts', icon: CreditCard },
   { key: 'recurring', label: 'Recurring', icon: CalendarClock },
+  { key: 'calendar', label: 'Calendar', icon: CalendarClock },
   { key: 'history', label: 'History', icon: Clock3 },
   { key: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -75,15 +75,6 @@ export function AppShell({
             )
           })}
         </nav>
-        <div className="absolute bottom-5 left-4 right-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <ChartNoAxesColumnIncreasing size={18} />
-            Local-first
-          </div>
-          <p className="mt-2 text-xs leading-5 text-slate-500">
-            Data stays local first. Sign in from Settings when you want Firebase sync across devices.
-          </p>
-        </div>
       </aside>
 
       <div className="lg:pl-64">
@@ -91,7 +82,7 @@ export function AppShell({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold text-slate-950">Paycheck control panel</h1>
-              <p className="hidden text-sm text-slate-500 sm:block">Plan pay, reserve bills, spend from pots.</p>
+              <p className="hidden text-sm text-slate-500 sm:block">Plan pay, track costs, and keep cloud sync running.</p>
             </div>
             <div className="flex shrink-0 gap-2">
               <Button variant="secondary" onClick={() => onViewChange('spending')}>

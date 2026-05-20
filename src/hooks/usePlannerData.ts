@@ -11,23 +11,29 @@ import {
   addRecurringPayment,
   addTransaction,
   archiveCreditCard,
-  archivePot,
   createPaycheckPlan,
+  deleteCustomPayment,
   deleteDebt,
   deleteDebtPayment,
   deleteCreditCardRepayment,
   deletePayPeriod,
+  deletePot,
   deleteRecurringPayment,
   deleteTransaction,
   getPlannerSnapshot,
   resetPlannerData,
   toggleRecurringPayment,
+  updateCreditCard,
+  updateCreditCardRepayment,
   updateDebt,
   updateCustomPayment,
+  updatePot,
   updateRecurringPayment,
   updateSettings,
   updateTransaction,
   type CreditCardInput,
+  type CreditCardRepaymentUpdateInput,
+  type CreditCardUpdateInput,
   type CreditCardRepaymentInput,
   type CustomPaymentInput,
   type CustomPaymentUpdateInput,
@@ -38,6 +44,7 @@ import {
   type PaycheckPlanInput,
   type PlannerSnapshot,
   type PotInput,
+  type PotUpdateInput,
   type RecurringPaymentInput,
   type RecurringPaymentUpdateInput,
   type TransactionInput,
@@ -49,12 +56,16 @@ export interface PlannerActions {
   refresh: () => Promise<void>
   updateSettings: typeof updateSettings
   addPot: typeof addPot
-  archivePot: typeof archivePot
+  updatePot: typeof updatePot
+  deletePot: typeof deletePot
   addCreditCard: typeof addCreditCard
+  updateCreditCard: typeof updateCreditCard
   archiveCreditCard: typeof archiveCreditCard
   addCustomPayment: typeof addCustomPayment
   updateCustomPayment: typeof updateCustomPayment
+  deleteCustomPayment: typeof deleteCustomPayment
   addCreditCardRepayment: typeof addCreditCardRepayment
+  updateCreditCardRepayment: typeof updateCreditCardRepayment
   deleteCreditCardRepayment: typeof deleteCreditCardRepayment
   addDailyBrief: typeof addDailyBrief
   addRecurringPayment: typeof addRecurringPayment
@@ -102,12 +113,16 @@ export function usePlannerData() {
       refresh,
       updateSettings: withRefresh(updateSettings, refresh),
       addPot: withRefresh(addPot, refresh),
-      archivePot: withRefresh(archivePot, refresh),
+      updatePot: withRefresh(updatePot, refresh),
+      deletePot: withRefresh(deletePot, refresh),
       addCreditCard: withRefresh(addCreditCard, refresh),
+      updateCreditCard: withRefresh(updateCreditCard, refresh),
       archiveCreditCard: withRefresh(archiveCreditCard, refresh),
       addCustomPayment: withRefresh(addCustomPayment, refresh),
       updateCustomPayment: withRefresh(updateCustomPayment, refresh),
+      deleteCustomPayment: withRefresh(deleteCustomPayment, refresh),
       addCreditCardRepayment: withRefresh(addCreditCardRepayment, refresh),
+      updateCreditCardRepayment: withRefresh(updateCreditCardRepayment, refresh),
       deleteCreditCardRepayment: withRefresh(deleteCreditCardRepayment, refresh),
       addDailyBrief: withRefresh(addDailyBrief, refresh),
       addRecurringPayment: withRefresh(addRecurringPayment, refresh),
@@ -150,6 +165,8 @@ function withRefresh<Args extends unknown[]>(
 export type {
   CreditCardInput,
   CreditCardRepaymentInput,
+  CreditCardRepaymentUpdateInput,
+  CreditCardUpdateInput,
   CustomPaymentInput,
   CustomPaymentUpdateInput,
   DailyBriefInput,
@@ -159,6 +176,7 @@ export type {
   PaycheckPlanInput,
   PlannerSnapshot,
   PotInput,
+  PotUpdateInput,
   RecurringPayment,
   RecurringPaymentInput,
   RecurringPaymentUpdateInput,

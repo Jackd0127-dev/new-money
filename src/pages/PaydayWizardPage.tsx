@@ -97,7 +97,7 @@ export function PaydayWizardPage({
 
   return (
     <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-      <Panel title="Payday wizard" description="Enter pay, reserve bills, then manually assign the rest.">
+      <Panel title="Payday wizard" description="Enter pay and assign money for this payday.">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Payday">
             <TextInput
@@ -165,7 +165,7 @@ export function PaydayWizardPage({
         </div>
       </Panel>
 
-      <Panel title="Manual allocations" description="Recurring bills are reserved automatically; you assign the rest.">
+      <Panel title="Payday allocation" description="Assign the rest of this payday after automatic reserved totals.">
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-lg bg-blue-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Reserved</p>
@@ -222,21 +222,6 @@ export function PaydayWizardPage({
           )}
         </div>
 
-        <div className="mt-5 rounded-lg bg-slate-50 p-4">
-          <p className="text-sm font-semibold text-slate-950">Reserved this period</p>
-          <div className="mt-3 space-y-2">
-            {duePayments.length > 0 ? (
-              duePayments.map((payment) => (
-                <div key={payment.id} className="flex justify-between text-sm">
-                  <span className="text-slate-600">{payment.name}</span>
-                  <span className="font-semibold text-slate-950">{formatPence(payment.amountPence)}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-slate-500">No recurring payments fall inside this pay period.</p>
-            )}
-          </div>
-        </div>
       </Panel>
     </div>
   )

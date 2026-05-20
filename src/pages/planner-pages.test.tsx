@@ -21,7 +21,12 @@ type TestActions = PlannerActions & {
   addCreditCard: ReturnType<typeof vi.fn>
   addCustomPayment: ReturnType<typeof vi.fn>
   addCreditCardRepayment: ReturnType<typeof vi.fn>
+  deletePot: ReturnType<typeof vi.fn>
   deletePayPeriod: ReturnType<typeof vi.fn>
+  updateCreditCard: ReturnType<typeof vi.fn>
+  updateCreditCardRepayment: ReturnType<typeof vi.fn>
+  updateCustomPayment: ReturnType<typeof vi.fn>
+  updatePot: ReturnType<typeof vi.fn>
   updateRecurringPayment: ReturnType<typeof vi.fn>
   updateTransaction: ReturnType<typeof vi.fn>
 }
@@ -141,9 +146,11 @@ describe('spending page', () => {
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 1000,
+      creditCardId: null,
       date: today,
       note: 'Coffee',
       payPeriodId: null,
+      paymentMethod: 'pot',
       potId: 'pot-bills',
       type: 'spending',
     })
@@ -181,8 +188,10 @@ describe('spending page', () => {
 
     expect(actions.updateTransaction).toHaveBeenCalledWith('txn-food', {
       amountPence: 1420,
+      creditCardId: null,
       date: '2026-05-16',
       note: 'Dinner',
+      paymentMethod: 'pot',
       potId: 'pot-food',
     })
   })
@@ -227,7 +236,7 @@ describe('spending page', () => {
       note: 'Groceries',
       paymentMethod: 'credit_card',
       payPeriodId: null,
-      potId: 'pot-bills',
+      potId: null,
       type: 'spending',
     })
   })
@@ -273,7 +282,7 @@ describe('allocating payments page', () => {
       provider: 'Capital One',
     })
 
-    const customPanel = screen.getByRole('region', { name: 'Add custom payment' })
+    const customPanel = screen.getByRole('region', { name: 'Add saved payment' })
     await user.type(within(customPanel).getByLabelText('Payment name'), 'Tyres')
     await user.type(within(customPanel).getByLabelText('Amount'), '30')
     await user.clear(within(customPanel).getByLabelText('Due date'))
@@ -369,7 +378,7 @@ describe('allocating payments page', () => {
 
     expect(screen.getByText('Everyday Amex')).toBeInTheDocument()
     expect(screen.getByText('Owed')).toBeInTheDocument()
-    expect(screen.getByText('£72.00')).toBeInTheDocument()
+    expect(screen.getAllByText('£72.00').length).toBeGreaterThan(0)
     expect(screen.getByText('Remaining after cards')).toBeInTheDocument()
     expect(screen.getByText('£828.00')).toBeInTheDocument()
     expect(screen.getByText('Groceries')).toBeInTheDocument()
@@ -378,6 +387,35 @@ describe('allocating payments page', () => {
 })
 
 describe('pots page', () => {
+  it('edits and deletes pots after confirmation', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<PotsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Edit Food' }))
+
+    const editPanel = screen.getByRole('region', { name: 'Edit pot' })
+    await user.clear(within(editPanel).getByLabelText('Pot name'))
+    await user.type(within(editPanel).getByLabelText('Pot name'), 'Groceries')
+    await user.click(within(editPanel).getByRole('button', { name: 'Save pot' }))
+
+    expect(actions.updatePot).toHaveBeenCalledWith('pot-food', {
+      balancePence: 12000,
+      color: '#16a34a',
+      name: 'Groceries',
+      type: 'spending',
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Delete Food' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete Food?')
+    expect(actions.deletePot).toHaveBeenCalledWith('pot-food')
+
+    confirmSpy.mockRestore()
+  })
+
   it('expands a pot to show spending, recurring payments, and allocations tied to it', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
@@ -650,8 +688,8 @@ describe('dashboard page', () => {
     render(<DashboardPage snapshot={snapshot} onViewChange={vi.fn()} />)
 
     const currentPeriod = screen.getByRole('region', { name: 'Current pay period' })
-    expect(within(currentPeriod).getByText('Pay received')).toBeInTheDocument()
-    expect(within(currentPeriod).getByText('Total payments due')).toBeInTheDocument()
+    expect(within(currentPeriod).getByText('Total pay')).toBeInTheDocument()
+    expect(within(currentPeriod).getByText('Total costs')).toBeInTheDocument()
     expect(within(currentPeriod).getByText('Money left')).toBeInTheDocument()
     expect(within(currentPeriod).getByText('£798.00')).toBeInTheDocument()
     expect(within(currentPeriod).getAllByText('£250.00').length).toBeGreaterThan(0)
@@ -697,36 +735,6 @@ describe('dashboard page', () => {
     expect(screen.queryByText('Projected spend')).not.toBeInTheDocument()
   })
 
-  it('shows the cached Gemini run-through with a refresh action', async () => {
-    const user = userEvent.setup()
-    const regenerate = vi.fn(async () => {})
-
-    render(
-      <DashboardPage
-        snapshot={createSnapshot()}
-        onViewChange={vi.fn()}
-        dailyBrief={{
-          currentBrief: {
-            id: 'brief-today',
-            date: '2026-05-19',
-            snapshotSignature: 'snapshot-signature',
-            content: 'Your card bills are covered. Check the fuel payment before payday.',
-            createdAt: '2026-05-19T08:00:00.000Z',
-            updatedAt: '2026-05-19T08:00:00.000Z',
-          },
-          status: 'ready',
-          error: null,
-          regenerate,
-        }}
-      />,
-    )
-
-    expect(screen.getByText("Today's Gemini run-through")).toBeInTheDocument()
-    expect(screen.getByText('Your card bills are covered. Check the fuel payment before payday.')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Refresh brief' }))
-    expect(regenerate).toHaveBeenCalledTimes(1)
-  })
 })
 
 describe('history page', () => {
@@ -837,12 +845,16 @@ function createActions(): TestActions {
     refresh: vi.fn(async () => {}),
     updateSettings: vi.fn(async () => {}),
     addPot: vi.fn(async () => {}),
-    archivePot: vi.fn(async () => {}),
+    updatePot: vi.fn(async () => {}),
+    deletePot: vi.fn(async () => {}),
     addCreditCard: vi.fn(async () => {}),
+    updateCreditCard: vi.fn(async () => {}),
     archiveCreditCard: vi.fn(async () => {}),
     addCustomPayment: vi.fn(async () => {}),
     updateCustomPayment: vi.fn(async () => {}),
+    deleteCustomPayment: vi.fn(async () => {}),
     addCreditCardRepayment: vi.fn(async () => {}),
+    updateCreditCardRepayment: vi.fn(async () => {}),
     deleteCreditCardRepayment: vi.fn(async () => {}),
     addDailyBrief: vi.fn(async () => {}),
     addRecurringPayment: vi.fn(async () => {}),

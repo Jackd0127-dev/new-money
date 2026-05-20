@@ -85,7 +85,7 @@ export interface PotAllocation extends Timestamped {
 
 export interface Transaction extends Timestamped {
   id: string
-  potId: string
+  potId?: string | null
   payPeriodId?: string | null
   amountPence: number
   type: TransactionType

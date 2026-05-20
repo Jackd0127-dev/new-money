@@ -3,8 +3,6 @@ import {
   Apple,
   CheckCircle2,
   Cloud,
-  CloudDownload,
-  CloudUpload,
   LogOut,
   Mail,
   RefreshCw,
@@ -123,7 +121,7 @@ export function CloudSyncPanel({
   return (
     <Panel
       title="Cloud sync"
-      description="Local data stays in this browser first. Signed-in data is backed up to Firestore."
+      description="Signed-in planner data syncs with Firestore automatically."
       action={<StatusBadge status={sync.status} />}
     >
       <div className="space-y-4">
@@ -134,7 +132,14 @@ export function CloudSyncPanel({
               {sync.cloudUpdatedAtIso ? `Cloud updated ${formatDateTime(sync.cloudUpdatedAtIso)}` : sync.message}
             </p>
           </div>
-          <Button variant="ghost" onClick={auth.signOut}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (window.confirm('Sign out of cloud sync on this device?')) {
+                void auth.signOut()
+              }
+            }}
+          >
             <LogOut size={18} />
             Sign out
           </Button>
@@ -150,20 +155,9 @@ export function CloudSyncPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <Button onClick={sync.uploadLocalToCloud} disabled={sync.isBusy}>
-            <CloudUpload size={18} />
-            Upload this browser
-          </Button>
-          <Button variant="secondary" onClick={sync.downloadCloudToLocal} disabled={sync.isBusy || !sync.canDownloadCloud}>
-            <CloudDownload size={18} />
-            Download cloud
-          </Button>
-          <Button variant="ghost" onClick={sync.retryCloudCheck} disabled={sync.isBusy}>
-            <RefreshCw size={18} />
-            Check again
-          </Button>
-        </div>
+        <p className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+          Changes are checked, uploaded, and downloaded in the background while you are signed in.
+        </p>
       </div>
     </Panel>
   )

@@ -7,6 +7,7 @@ import {
   getPotBalanceAfterTransactionRemoval,
   getAllocationBalance,
   getDebtSummary,
+  getPayPeriodCostSummary,
   getPayPeriodMoneySummary,
   getCreditCardAllocationSummary,
   getRecurringPaymentOccurrences,
@@ -603,5 +604,133 @@ describe('credit card allocation', () => {
         source: 'recurring',
       }),
     ])
+  })
+})
+
+describe('pay period cost summary', () => {
+  it('calculates dashboard costs from due payments, saved payments, manual spending, debts, and net card costs', () => {
+    const payPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+      status: 'active',
+      createdAt: '2026-05-16T00:00:00.000Z',
+      updatedAt: '2026-05-16T00:00:00.000Z',
+    }
+    const summary = getPayPeriodCostSummary({
+      payPeriod,
+      recurringPayments: [
+        {
+          id: 'rent',
+          name: 'Rent',
+          amountPence: 25000,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'bills',
+          priority: 'essential',
+          active: true,
+          creditCardId: null,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 23,
+          frequency: 'monthly',
+          potId: 'bills',
+          priority: 'important',
+          active: true,
+          creditCardId: 'card-amex',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'custom-tyres',
+          name: 'Tyres',
+          amountPence: 3000,
+          dueDate: '2026-05-20',
+          creditCardId: null,
+          status: 'unpaid',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-food',
+          potId: 'food',
+          payPeriodId: 'period-current',
+          amountPence: 1250,
+          type: 'spending',
+          paymentMethod: 'pot',
+          creditCardId: null,
+          date: '2026-05-18',
+          note: 'Lunch',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+        {
+          id: 'txn-card',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 5000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-amex',
+          date: '2026-05-19',
+          note: 'Groceries',
+          createdAt: '2026-05-19T00:00:00.000Z',
+          updatedAt: '2026-05-19T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Old card',
+          lender: 'Bank',
+          originalAmountPence: 100000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 4000,
+          dueDate: '2026-05-22',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      creditCardRepayments: [
+        {
+          id: 'repayment-1',
+          creditCardId: 'card-amex',
+          amountPence: 2000,
+          date: '2026-05-24',
+          note: 'Part payment',
+          createdAt: '2026-05-24T00:00:00.000Z',
+          updatedAt: '2026-05-24T00:00:00.000Z',
+        },
+      ],
+    })
+
+    expect(summary).toMatchObject({
+      payReceivedPence: 90000,
+      directRecurringPence: 25000,
+      savedPaymentsPence: 3000,
+      manualSpendingPence: 1250,
+      debtMinimumsPence: 4000,
+      creditCardChargesPence: 7200,
+      creditCardRepaymentsPence: 2000,
+      creditCardNetPence: 5200,
+      totalCostsPence: 38450,
+      moneyLeftPence: 51550,
+      isOverCommitted: false,
+    })
   })
 })

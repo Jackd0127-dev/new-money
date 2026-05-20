@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { PenLine, Trash2 } from 'lucide-react'
 
-import { formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
+import { findPayPeriodForDate, formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
 import type {
   PlannerActions,
   PlannerSnapshot,
@@ -41,27 +41,24 @@ export function SpendingPage({
   ).slice(0, 4)
   const parsedAmountPence = parsePoundsToPence(amount)
   const canSubmitSpend =
-    Boolean(potId) && parsedAmountPence > 0 && (paymentMethod === 'pot' || Boolean(creditCardId))
+    parsedAmountPence > 0 && (paymentMethod === 'pot' ? Boolean(potId) : Boolean(creditCardId))
+  const groupedTransactions = groupTransactionsByPeriod(snapshot.transactions, snapshot)
 
   async function submitTransaction() {
     const amountPence = parsedAmountPence
 
-    if (!potId || amountPence <= 0 || (paymentMethod === 'credit_card' && !creditCardId)) {
+    if (amountPence <= 0 || (paymentMethod === 'pot' && !potId) || (paymentMethod === 'credit_card' && !creditCardId)) {
       return
     }
 
     if (editingTransactionId) {
       const updateInput: TransactionUpdateInput = {
-        potId,
+        potId: paymentMethod === 'pot' ? potId : null,
         amountPence,
         date,
         note: note.trim() || 'Manual spend',
-        ...(paymentMethod === 'credit_card'
-          ? {
-              paymentMethod,
-              creditCardId,
-            }
-          : {}),
+        paymentMethod,
+        creditCardId: paymentMethod === 'credit_card' ? creditCardId : null,
       }
 
       await actions.updateTransaction(editingTransactionId, updateInput)
@@ -70,18 +67,14 @@ export function SpendingPage({
     }
 
     const addInput: TransactionInput = {
-      potId,
+      potId: paymentMethod === 'pot' ? potId : null,
       amountPence,
       type: 'spending',
       date,
       note: note.trim() || 'Manual spend',
-      payPeriodId: latestPeriod?.id ?? null,
-      ...(paymentMethod === 'credit_card'
-        ? {
-            paymentMethod,
-            creditCardId,
-          }
-        : {}),
+      payPeriodId: findPayPeriodForDate(snapshot.payPeriods, date)?.id ?? latestPeriod?.id ?? null,
+      paymentMethod,
+      creditCardId: paymentMethod === 'credit_card' ? creditCardId : null,
     }
 
     await actions.addTransaction(addInput)
@@ -96,7 +89,7 @@ export function SpendingPage({
     }
 
     setEditingTransactionId(transaction.id)
-    setPotId(transaction.potId)
+    setPotId(transaction.potId ?? activePots[0]?.id ?? '')
     setPaymentMethod(transaction.paymentMethod ?? 'pot')
     setCreditCardId(transaction.creditCardId ?? activeCards[0]?.id ?? '')
     setAmount((transaction.amountPence / 100).toFixed(2))
@@ -126,7 +119,7 @@ export function SpendingPage({
     <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
       <Panel
         title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
-        description="Choose the pot the money came from."
+        description="Choose whether the money came from a pot or a credit card."
       >
         <div className="space-y-4">
           <Field label="Amount">
@@ -144,15 +137,6 @@ export function SpendingPage({
               </button>
             ))}
           </div>
-          <Field label="Pot">
-            <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
-              {activePots.map((pot) => (
-                <option key={pot.id} value={pot.id}>
-                  {pot.name} · {formatPence(pot.balancePence)}
-                </option>
-              ))}
-            </SelectInput>
-          </Field>
           <Field label="Payment method">
             <SelectInput value={paymentMethod} onChange={(event) => changePaymentMethod(event.target.value as PaymentMethod)}>
               <option value="pot">Pot</option>
@@ -161,6 +145,17 @@ export function SpendingPage({
               </option>
             </SelectInput>
           </Field>
+          {paymentMethod === 'pot' && (
+            <Field label="Pot">
+              <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
+                {activePots.map((pot) => (
+                  <option key={pot.id} value={pot.id}>
+                    {pot.name} · {formatPence(pot.balancePence)}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+          )}
           {paymentMethod === 'credit_card' && (
             <Field label="Credit card">
               <SelectInput value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
@@ -226,48 +221,67 @@ export function SpendingPage({
         </div>
       </Panel>
 
-      <Panel title="Recent spending" description="Manual entries reduce the selected pot immediately.">
+      <Panel title="Spending by pay period" description="Manual spending is grouped into the pay period containing its date.">
         <div className="space-y-3">
-          {snapshot.transactions.length > 0 ? (
-            snapshot.transactions.slice(0, 12).map((transaction) => {
-              const pot = snapshot.pots.find((candidate) => candidate.id === transaction.potId)
-              const card = snapshot.creditCards.find((candidate) => candidate.id === transaction.creditCardId)
+          {groupedTransactions.length > 0 ? (
+            groupedTransactions.map((group, index) => (
+              <details
+                key={group.id}
+                open={index === 0}
+                className="rounded-lg border border-slate-200 bg-white"
+              >
+                <summary className="cursor-pointer list-none px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                      <p className="mt-1 text-xs text-slate-500">{group.transactions.length} entries</p>
+                    </div>
+                    <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
+                  </div>
+                </summary>
+                <div className="divide-y divide-slate-100 border-t border-slate-100">
+                  {group.transactions.map((transaction) => {
+                    const pot = snapshot.pots.find((candidate) => candidate.id === transaction.potId)
+                    const card = snapshot.creditCards.find((candidate) => candidate.id === transaction.creditCardId)
 
-              return (
-                <div key={transaction.id} className="flex items-center justify-between gap-4 rounded-lg bg-slate-50 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
-                    <p className="text-xs text-slate-500">
-                      {transaction.date} ·{' '}
-                      {(transaction.paymentMethod ?? 'pot') === 'credit_card'
-                        ? card?.name ?? 'Archived card'
-                        : pot?.name ?? 'Archived pot'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm font-semibold text-red-700">-{formatPence(transaction.amountPence)}</p>
-                    <Button
-                      variant="secondary"
-                      onClick={() => startEditingTransaction(transaction.id)}
-                      aria-label={`Edit ${transaction.note}`}
-                    >
-                      <PenLine size={16} />
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={() => {
-                        if (window.confirm(`Delete ${transaction.note}?`)) {
-                          void actions.deleteTransaction(transaction.id)
-                        }
-                      }}
-                      aria-label={`Delete ${transaction.note}`}
-                    >
-                      <Trash2 size={16} />
-                    </Button>
-                  </div>
+                    return (
+                      <div key={transaction.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
+                          <p className="text-xs text-slate-500">
+                            {transaction.date} ·{' '}
+                            {(transaction.paymentMethod ?? 'pot') === 'credit_card'
+                              ? card?.name ?? 'Archived card'
+                              : pot?.name ?? 'Archived pot'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <p className="text-sm font-semibold text-red-700">-{formatPence(transaction.amountPence)}</p>
+                          <Button
+                            variant="secondary"
+                            onClick={() => startEditingTransaction(transaction.id)}
+                            aria-label={`Edit ${transaction.note}`}
+                          >
+                            <PenLine size={16} />
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() => {
+                              if (window.confirm(`Delete ${transaction.note}?`)) {
+                                void actions.deleteTransaction(transaction.id)
+                              }
+                            }}
+                            aria-label={`Delete ${transaction.note}`}
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })
+              </details>
+            ))
           ) : (
             <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No spending entries yet.</p>
           )}
@@ -275,4 +289,48 @@ export function SpendingPage({
       </Panel>
     </div>
   )
+}
+
+interface TransactionGroup {
+  id: string
+  label: string
+  transactions: PlannerSnapshot['transactions']
+  totalPence: number
+}
+
+function groupTransactionsByPeriod(
+  transactions: PlannerSnapshot['transactions'],
+  snapshot: PlannerSnapshot,
+): TransactionGroup[] {
+  const groups = new Map<string, TransactionGroup>()
+  const periodsById = new Map(snapshot.payPeriods.map((period) => [period.id, period]))
+
+  for (const transaction of transactions) {
+    const period =
+      (transaction.payPeriodId ? periodsById.get(transaction.payPeriodId) : null) ??
+      findPayPeriodForDate(snapshot.payPeriods, transaction.date)
+    const id = period?.id ?? 'outside-periods'
+    const label = period
+      ? `${period.payday} pay period · ${period.startDate} to ${period.endDate}`
+      : 'Outside saved pay periods'
+    const existingGroup =
+      groups.get(id) ??
+      {
+        id,
+        label,
+        transactions: [],
+        totalPence: 0,
+      }
+
+    existingGroup.transactions.push(transaction)
+    existingGroup.totalPence += transaction.amountPence
+    groups.set(id, existingGroup)
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      transactions: group.transactions.sort((a, b) => b.date.localeCompare(a.date)),
+    }))
+    .sort((a, b) => b.transactions[0].date.localeCompare(a.transactions[0].date))
 }

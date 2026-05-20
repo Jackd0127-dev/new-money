@@ -6,5 +6,6 @@ export type ViewKey =
   | 'allocatingPayments'
   | 'debts'
   | 'recurring'
+  | 'calendar'
   | 'history'
   | 'settings'

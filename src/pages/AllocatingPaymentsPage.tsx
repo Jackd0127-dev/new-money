@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
-import { CreditCard, PlusCircle } from 'lucide-react'
+import { ArrowLeft, CreditCard as CreditCardIcon, PenLine, PlusCircle, Trash2 } from 'lucide-react'
 
 import {
+  findPayPeriodForDate,
   formatPence,
   getCreditCardAllocationSummary,
   parsePoundsToPence,
   toIsoDate,
+  type CreditCardAllocationCardSummary,
+  type CreditCardAllocationItem,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput } from '../components/ui'
-import type { RecurringPayment, Transaction } from '../types/models'
+import type { CustomPaymentStatus, RecurringPayment, Transaction } from '../types/models'
 
 const cardColors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
 
@@ -30,20 +33,32 @@ export function AllocatingPaymentsPage({
     repayments: snapshot.creditCardRepayments,
     payPeriod: latestPeriod,
   })
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const [editingCardId, setEditingCardId] = useState<string | null>(null)
   const [cardName, setCardName] = useState('')
   const [cardProvider, setCardProvider] = useState('')
   const [cardLimit, setCardLimit] = useState('')
   const [cardDueDay, setCardDueDay] = useState('1')
   const [cardColor, setCardColor] = useState(cardColors[0])
+  const [editingCustomPaymentId, setEditingCustomPaymentId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [customAmount, setCustomAmount] = useState('')
   const [customDueDate, setCustomDueDate] = useState(toIsoDate(new Date()))
   const [customCreditCardId, setCustomCreditCardId] = useState(activeCards[0]?.id ?? '')
+  const [customStatus, setCustomStatus] = useState<CustomPaymentStatus>('unpaid')
+  const [editingRepaymentId, setEditingRepaymentId] = useState<string | null>(null)
   const [repaymentCardId, setRepaymentCardId] = useState(activeCards[0]?.id ?? '')
   const [repaymentAmount, setRepaymentAmount] = useState('')
   const [repaymentDate, setRepaymentDate] = useState(toIsoDate(new Date()))
   const [repaymentNote, setRepaymentNote] = useState('')
   const paymentRows = useMemo(() => getPaymentRows(snapshot), [snapshot])
+  const paymentGroups = useMemo(
+    () => groupPaymentRowsByPeriod(paymentRows, snapshot),
+    [paymentRows, snapshot],
+  )
+  const selectedCardSummary = selectedCardId
+    ? summary.cards.find((cardSummary) => cardSummary.card.id === selectedCardId) ?? null
+    : null
 
   async function submitCard() {
     const limitPence = parsePoundsToPence(cardLimit)
@@ -53,18 +68,23 @@ export function AllocatingPaymentsPage({
       return
     }
 
-    await actions.addCreditCard({
+    const payload = {
       name: cardName.trim(),
       provider: cardProvider.trim(),
       limitPence,
       dueDay,
       dueDate: null,
       color: cardColor,
-    })
-    setCardName('')
-    setCardProvider('')
-    setCardLimit('')
-    setCardDueDay('1')
+    }
+
+    if (editingCardId) {
+      await actions.updateCreditCard(editingCardId, payload)
+      resetCardForm()
+      return
+    }
+
+    await actions.addCreditCard(payload)
+    resetCardForm()
   }
 
   async function submitCustomPayment() {
@@ -74,15 +94,24 @@ export function AllocatingPaymentsPage({
       return
     }
 
-    await actions.addCustomPayment({
+    const payload = {
       name: customName.trim(),
       amountPence,
       dueDate: customDueDate,
       creditCardId: customCreditCardId || null,
-    })
-    setCustomName('')
-    setCustomAmount('')
-    setCustomDueDate(toIsoDate(new Date()))
+    }
+
+    if (editingCustomPaymentId) {
+      await actions.updateCustomPayment(editingCustomPaymentId, {
+        ...payload,
+        status: customStatus,
+      })
+      resetCustomPaymentForm()
+      return
+    }
+
+    await actions.addCustomPayment(payload)
+    resetCustomPaymentForm()
   }
 
   async function submitRepayment() {
@@ -92,15 +121,21 @@ export function AllocatingPaymentsPage({
       return
     }
 
-    await actions.addCreditCardRepayment({
+    const payload = {
       creditCardId: repaymentCardId,
       amountPence,
       date: repaymentDate,
       note: repaymentNote.trim(),
-    })
-    setRepaymentAmount('')
-    setRepaymentNote('')
-    setRepaymentDate(toIsoDate(new Date()))
+    }
+
+    if (editingRepaymentId) {
+      await actions.updateCreditCardRepayment(editingRepaymentId, payload)
+      resetRepaymentForm()
+      return
+    }
+
+    await actions.addCreditCardRepayment(payload)
+    resetRepaymentForm()
   }
 
   async function linkPayment(row: PaymentRow, creditCardId: string) {
@@ -149,20 +184,127 @@ export function AllocatingPaymentsPage({
     }
 
     await actions.updateTransaction(transaction.id, {
-      potId: transaction.potId,
+      potId: nextCardId ? null : transaction.potId ?? null,
       amountPence: transaction.amountPence,
       date: transaction.date,
       note: transaction.note,
-      paymentMethod: nextCardId ? 'credit_card' : 'pot',
+      paymentMethod: nextCardId || transaction.paymentMethod === 'credit_card' ? 'credit_card' : 'pot',
       creditCardId: nextCardId,
     })
+  }
+
+  function startEditingCard(cardId: string) {
+    const card = snapshot.creditCards.find((candidate) => candidate.id === cardId)
+
+    if (!card) {
+      return
+    }
+
+    setSelectedCardId(null)
+    setEditingCardId(card.id)
+    setCardName(card.name)
+    setCardProvider(card.provider)
+    setCardLimit((card.limitPence / 100).toFixed(2))
+    setCardDueDay(String(card.dueDay ?? 1))
+    setCardColor(card.color)
+  }
+
+  function startEditingCustomPayment(paymentId: string) {
+    const payment = snapshot.customPayments.find((candidate) => candidate.id === paymentId)
+
+    if (!payment) {
+      return
+    }
+
+    setSelectedCardId(null)
+    setEditingCustomPaymentId(payment.id)
+    setCustomName(payment.name)
+    setCustomAmount((payment.amountPence / 100).toFixed(2))
+    setCustomDueDate(payment.dueDate)
+    setCustomCreditCardId(payment.creditCardId ?? '')
+    setCustomStatus(payment.status)
+  }
+
+  function startEditingRepayment(repaymentId: string) {
+    const repayment = snapshot.creditCardRepayments.find((candidate) => candidate.id === repaymentId)
+
+    if (!repayment) {
+      return
+    }
+
+    setSelectedCardId(null)
+    setEditingRepaymentId(repayment.id)
+    setRepaymentCardId(repayment.creditCardId)
+    setRepaymentAmount((repayment.amountPence / 100).toFixed(2))
+    setRepaymentDate(repayment.date)
+    setRepaymentNote(repayment.note)
+  }
+
+  function resetCardForm() {
+    setEditingCardId(null)
+    setCardName('')
+    setCardProvider('')
+    setCardLimit('')
+    setCardDueDay('1')
+    setCardColor(cardColors[0])
+  }
+
+  function resetCustomPaymentForm() {
+    setEditingCustomPaymentId(null)
+    setCustomName('')
+    setCustomAmount('')
+    setCustomDueDate(toIsoDate(new Date()))
+    setCustomCreditCardId(activeCards[0]?.id ?? '')
+    setCustomStatus('unpaid')
+  }
+
+  function resetRepaymentForm() {
+    setEditingRepaymentId(null)
+    setRepaymentAmount('')
+    setRepaymentNote('')
+    setRepaymentDate(toIsoDate(new Date()))
+    setRepaymentCardId(activeCards[0]?.id ?? '')
+  }
+
+  if (selectedCardSummary) {
+    return (
+      <CreditCardOverview
+        activeCards={activeCards}
+        cardSummary={selectedCardSummary}
+        snapshot={snapshot}
+        onBack={() => setSelectedCardId(null)}
+        onDeleteCard={(cardId, cardNameToDelete) => {
+          if (window.confirm(`Delete ${cardNameToDelete}?`)) {
+            void actions.archiveCreditCard(cardId)
+          }
+        }}
+        onDeleteCustomPayment={(paymentId, paymentName) => {
+          if (window.confirm(`Delete ${paymentName}?`)) {
+            void actions.deleteCustomPayment(paymentId)
+          }
+        }}
+        onDeleteRepayment={(repaymentId) => {
+          if (window.confirm('Delete this card repayment?')) {
+            void actions.deleteCreditCardRepayment(repaymentId)
+          }
+        }}
+        onEditCard={startEditingCard}
+        onEditCustomPayment={startEditingCustomPayment}
+        onEditRepayment={startEditingRepayment}
+        onLinkPayment={linkPayment}
+      />
+    )
   }
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
         <MoneyMetric label="Latest pay" value={formatPence(summary.payReceivedPence)} />
-        <MoneyMetric label="Cards owed" value={formatPence(summary.totalOwedPence)} tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'} />
+        <MoneyMetric
+          label="Cards owed"
+          value={formatPence(summary.totalOwedPence)}
+          tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
+        />
         <MoneyMetric
           label="Remaining after cards"
           value={formatPence(summary.paycheckRemainingAfterCardsPence)}
@@ -170,9 +312,12 @@ export function AllocatingPaymentsPage({
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+      <div className="grid gap-6 xl:grid-cols-[0.72fr_1.28fr]">
         <div className="space-y-6">
-          <Panel title="Add credit card" description="Create cards that payments can be linked to.">
+          <Panel
+            title={editingCardId ? 'Edit credit card' : 'Add credit card'}
+            description="Cards are used to group linked payments, spending, and repayments."
+          >
             <div className="space-y-4">
               <Field label="Card name">
                 <TextInput value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
@@ -206,14 +351,24 @@ export function AllocatingPaymentsPage({
                   ))}
                 </div>
               </Field>
-              <Button onClick={submitCard}>
-                <PlusCircle size={18} />
-                Add card
-              </Button>
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={submitCard}>
+                  <PlusCircle size={18} />
+                  {editingCardId ? 'Save card' : 'Add card'}
+                </Button>
+                {editingCardId && (
+                  <Button variant="secondary" onClick={resetCardForm}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
             </div>
           </Panel>
 
-          <Panel title="Add custom payment" description="One-off payments can be linked to a card or left unlinked.">
+          <Panel
+            title={editingCustomPaymentId ? 'Edit saved payment' : 'Add saved payment'}
+            description="One-off payments can be linked to a card or left unlinked."
+          >
             <div className="space-y-4">
               <Field label="Payment name">
                 <TextInput value={customName} onChange={(event) => setCustomName(event.target.value)} placeholder="Tyres" />
@@ -234,11 +389,30 @@ export function AllocatingPaymentsPage({
                   ))}
                 </SelectInput>
               </Field>
-              <Button onClick={submitCustomPayment}>Add payment</Button>
+              {editingCustomPaymentId && (
+                <Field label="Status">
+                  <SelectInput value={customStatus} onChange={(event) => setCustomStatus(event.target.value as CustomPaymentStatus)}>
+                    <option value="unpaid">Unpaid</option>
+                    <option value="paid">Paid</option>
+                    <option value="archived">Archived</option>
+                  </SelectInput>
+                </Field>
+              )}
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={submitCustomPayment}>{editingCustomPaymentId ? 'Save payment' : 'Add payment'}</Button>
+                {editingCustomPaymentId && (
+                  <Button variant="secondary" onClick={resetCustomPaymentForm}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
             </div>
           </Panel>
 
-          <Panel title="Record card repayment" description="Repayments reduce the amount shown as owed.">
+          <Panel
+            title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
+            description="Repayments reduce the amount shown as owed."
+          >
             <div className="space-y-4">
               <Field label="Credit card">
                 <SelectInput value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
@@ -258,19 +432,31 @@ export function AllocatingPaymentsPage({
               <Field label="Note">
                 <TextInput value={repaymentNote} onChange={(event) => setRepaymentNote(event.target.value)} placeholder="Statement payment" />
               </Field>
-              <Button onClick={submitRepayment} disabled={activeCards.length === 0}>
-                Record repayment
-              </Button>
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={submitRepayment} disabled={activeCards.length === 0}>
+                  {editingRepaymentId ? 'Save repayment' : 'Record repayment'}
+                </Button>
+                {editingRepaymentId && (
+                  <Button variant="secondary" onClick={resetRepaymentForm}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
             </div>
           </Panel>
         </div>
 
         <div className="space-y-6">
-          <Panel title="Credit cards" description="Owed amounts are calculated from linked payments in the current pay period.">
+          <Panel title="Credit cards" description="Tap a card for the full editable overview.">
             <div className="grid gap-4 lg:grid-cols-2">
               {summary.cards.length > 0 ? (
                 summary.cards.map((cardSummary) => (
-                  <div key={cardSummary.card.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <button
+                    key={cardSummary.card.id}
+                    type="button"
+                    onClick={() => setSelectedCardId(cardSummary.card.id)}
+                    className="rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-950"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -281,14 +467,12 @@ export function AllocatingPaymentsPage({
                           {cardSummary.card.provider} · due {cardSummary.dueLabel}
                         </p>
                       </div>
-                      <CreditCard size={20} className="text-slate-400" />
+                      <CreditCardIcon size={20} className="text-slate-400" />
                     </div>
                     <div className="mt-5 grid gap-3 sm:grid-cols-2">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owed</p>
-                        <p className="mt-1 text-2xl font-semibold text-slate-950">
-                          {formatPence(cardSummary.owedPence)} owed
-                        </p>
+                        <p className="mt-1 text-2xl font-semibold text-slate-950">{formatPence(cardSummary.owedPence)}</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Available</p>
@@ -305,11 +489,16 @@ export function AllocatingPaymentsPage({
                           }}
                         />
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {cardSummary.utilisationPercent}% of {formatPence(cardSummary.card.limitPence)} limit
-                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                          {cardSummary.utilisationPercent}% of {formatPence(cardSummary.card.limitPence)}
+                        </span>
+                        <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                          {cardSummary.items.length} linked items
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  </button>
                 ))
               ) : (
                 <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No credit cards yet.</p>
@@ -317,34 +506,85 @@ export function AllocatingPaymentsPage({
             </div>
           </Panel>
 
-          <Panel title="Payment allocation list" description="Link or unlink payments and card spending.">
+          <Panel title="Payment allocation list" description="Link payments and card spending into cards by pay period.">
             <div className="space-y-3">
-              {paymentRows.length > 0 ? (
-                paymentRows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px]"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-slate-950">{row.label}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {row.sourceLabel} · {row.date} · {formatPence(row.amountPence)}
-                      </p>
-                    </div>
-                    <SelectInput value={row.creditCardId ?? ''} onChange={(event) => void linkPayment(row, event.target.value)}>
-                      <option value="">Unlinked</option>
-                      {activeCards.map((card) => (
-                        <option key={card.id} value={card.id}>
-                          {card.name} ({card.provider})
-                        </option>
+              {paymentGroups.length > 0 ? (
+                paymentGroups.map((group, index) => (
+                  <details key={group.id} open={index === 0} className="rounded-lg border border-slate-200 bg-white">
+                    <summary className="cursor-pointer list-none px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                          <p className="mt-1 text-xs text-slate-500">{group.rows.length} payments</p>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-950">{formatPence(group.totalPence)}</p>
+                      </div>
+                    </summary>
+                    <div className="space-y-3 border-t border-slate-100 p-3">
+                      {group.rows.map((row) => (
+                        <PaymentAllocationRow
+                          key={row.id}
+                          activeCards={activeCards}
+                          row={row}
+                          onDeleteCustomPayment={(paymentId, paymentName) => {
+                            if (window.confirm(`Delete ${paymentName}?`)) {
+                              void actions.deleteCustomPayment(paymentId)
+                            }
+                          }}
+                          onEditCustomPayment={startEditingCustomPayment}
+                          onLinkPayment={linkPayment}
+                        />
                       ))}
-                    </SelectInput>
-                  </div>
+                    </div>
+                  </details>
                 ))
               ) : (
                 <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
                   No payments or card spending are available to allocate yet.
                 </p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Card repayments" description="Edit or delete repayments already recorded.">
+            <div className="space-y-3">
+              {snapshot.creditCardRepayments.length > 0 ? (
+                snapshot.creditCardRepayments.map((repayment) => {
+                  const card = snapshot.creditCards.find((candidate) => candidate.id === repayment.creditCardId)
+
+                  return (
+                    <div
+                      key={repayment.id}
+                      className="flex flex-col gap-3 rounded-lg bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">{repayment.note || 'Card repayment'}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {repayment.date} · {card?.name ?? 'Archived card'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <p className="text-sm font-semibold text-emerald-700">-{formatPence(repayment.amountPence)}</p>
+                        <Button variant="secondary" onClick={() => startEditingRepayment(repayment.id)} aria-label={`Edit repayment ${repayment.note || repayment.date}`}>
+                          <PenLine size={16} />
+                        </Button>
+                        <Button
+                          variant="danger"
+                          onClick={() => {
+                            if (window.confirm('Delete this card repayment?')) {
+                              void actions.deleteCreditCardRepayment(repayment.id)
+                            }
+                          }}
+                          aria-label={`Delete repayment ${repayment.note || repayment.date}`}
+                        >
+                          <Trash2 size={16} />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No repayments recorded yet.</p>
               )}
             </div>
           </Panel>
@@ -367,6 +607,234 @@ interface PaymentRow {
   creditCardId: string | null
 }
 
+interface PaymentGroup {
+  id: string
+  label: string
+  rows: PaymentRow[]
+  totalPence: number
+}
+
+function PaymentAllocationRow({
+  activeCards,
+  row,
+  onDeleteCustomPayment,
+  onEditCustomPayment,
+  onLinkPayment,
+}: {
+  activeCards: PlannerSnapshot['creditCards']
+  row: PaymentRow
+  onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
+  onEditCustomPayment: (paymentId: string) => void
+  onLinkPayment: (row: PaymentRow, creditCardId: string) => Promise<void>
+}) {
+  return (
+    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_auto]">
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-slate-950">{row.label}</p>
+          <span className={sourceBadgeClass(row.source)}>{row.sourceLabel}</span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {row.date} · {formatPence(row.amountPence)}
+        </p>
+      </div>
+      <SelectInput value={row.creditCardId ?? ''} onChange={(event) => void onLinkPayment(row, event.target.value)}>
+        <option value="">Unlinked</option>
+        {activeCards.map((card) => (
+          <option key={card.id} value={card.id}>
+            {card.name} ({card.provider})
+          </option>
+        ))}
+      </SelectInput>
+      <div className="flex gap-2">
+        {row.source === 'custom' && (
+          <>
+            <Button variant="secondary" onClick={() => onEditCustomPayment(row.entityId)} aria-label={`Edit ${row.label}`}>
+              <PenLine size={16} />
+            </Button>
+            <Button variant="danger" onClick={() => onDeleteCustomPayment(row.entityId, row.label)} aria-label={`Delete ${row.label}`}>
+              <Trash2 size={16} />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CreditCardOverview({
+  activeCards,
+  cardSummary,
+  snapshot,
+  onBack,
+  onDeleteCard,
+  onDeleteCustomPayment,
+  onDeleteRepayment,
+  onEditCard,
+  onEditCustomPayment,
+  onEditRepayment,
+  onLinkPayment,
+}: {
+  activeCards: PlannerSnapshot['creditCards']
+  cardSummary: CreditCardAllocationCardSummary
+  snapshot: PlannerSnapshot
+  onBack: () => void
+  onDeleteCard: (cardId: string, cardName: string) => void
+  onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
+  onDeleteRepayment: (repaymentId: string) => void
+  onEditCard: (cardId: string) => void
+  onEditCustomPayment: (paymentId: string) => void
+  onEditRepayment: (repaymentId: string) => void
+  onLinkPayment: (row: PaymentRow, creditCardId: string) => Promise<void>
+}) {
+  const chargedPence = cardSummary.items
+    .filter((item) => item.source !== 'repayment')
+    .reduce((total, item) => total + item.amountPence, 0)
+  const repaidPence = Math.abs(
+    cardSummary.items
+      .filter((item) => item.source === 'repayment')
+      .reduce((total, item) => total + item.amountPence, 0),
+  )
+
+  return (
+    <div className="space-y-6">
+      <Panel>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Button variant="secondary" onClick={onBack}>
+              <ArrowLeft size={18} />
+              Back
+            </Button>
+            <div className="mt-5 flex items-center gap-3">
+              <span className="size-4 rounded-full" style={{ backgroundColor: cardSummary.card.color }} />
+              <div>
+                <h2 className="text-2xl font-semibold text-slate-950">{cardSummary.card.name}</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {cardSummary.card.provider} · due {cardSummary.dueLabel}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => onEditCard(cardSummary.card.id)}>
+              <PenLine size={16} />
+              Edit card
+            </Button>
+            <Button variant="danger" onClick={() => onDeleteCard(cardSummary.card.id, cardSummary.card.name)}>
+              <Trash2 size={16} />
+              Delete card
+            </Button>
+          </div>
+        </div>
+      </Panel>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MoneyMetric label="Owed now" value={formatPence(cardSummary.owedPence)} tone={cardSummary.owedPence > 0 ? 'warning' : 'good'} />
+        <MoneyMetric label="Left on card" value={formatPence(cardSummary.availableCreditPence)} />
+        <MoneyMetric label="Taken this period" value={formatPence(chargedPence)} tone={chargedPence > 0 ? 'warning' : 'neutral'} />
+        <MoneyMetric label="Repaid this period" value={formatPence(repaidPence)} tone={repaidPence > 0 ? 'good' : 'neutral'} />
+      </div>
+
+      <Panel title="What changed this card" description="Every linked charge and repayment in the selected pay period.">
+        <div className="space-y-3">
+          {cardSummary.items.length > 0 ? (
+            cardSummary.items.map((item) => (
+              <CreditCardOverviewItem
+                key={item.id}
+                activeCards={activeCards}
+                item={item}
+                snapshot={snapshot}
+                onDeleteCustomPayment={onDeleteCustomPayment}
+                onDeleteRepayment={onDeleteRepayment}
+                onEditCustomPayment={onEditCustomPayment}
+                onEditRepayment={onEditRepayment}
+                onLinkPayment={onLinkPayment}
+              />
+            ))
+          ) : (
+            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No linked charges in this pay period.</p>
+          )}
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function CreditCardOverviewItem({
+  activeCards,
+  item,
+  snapshot,
+  onDeleteCustomPayment,
+  onDeleteRepayment,
+  onEditCustomPayment,
+  onEditRepayment,
+  onLinkPayment,
+}: {
+  activeCards: PlannerSnapshot['creditCards']
+  item: CreditCardAllocationItem
+  snapshot: PlannerSnapshot
+  onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
+  onDeleteRepayment: (repaymentId: string) => void
+  onEditCustomPayment: (paymentId: string) => void
+  onEditRepayment: (repaymentId: string) => void
+  onLinkPayment: (row: PaymentRow, creditCardId: string) => Promise<void>
+}) {
+  const row = creditCardItemToPaymentRow(item)
+  const isRepayment = item.source === 'repayment'
+  const repaymentId = isRepayment ? item.id.replace('repayment-', '') : null
+  const amountClassName = item.amountPence < 0 ? 'text-emerald-700' : 'text-red-700'
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-[1fr_180px_auto]">
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-slate-950">{item.label}</p>
+          <span className={overviewBadgeClass(item.source)}>{overviewSourceLabel(item.source)}</span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {item.date} · {whereFromLabel(item, snapshot)}
+        </p>
+      </div>
+      <p className={`self-center text-sm font-semibold ${amountClassName}`}>
+        {item.amountPence < 0 ? '-' : ''}
+        {formatPence(Math.abs(item.amountPence))}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {row && (
+          <SelectInput value={row.creditCardId ?? ''} onChange={(event) => void onLinkPayment(row, event.target.value)}>
+            <option value="">Unlinked</option>
+            {activeCards.map((card) => (
+              <option key={card.id} value={card.id}>
+                {card.name} ({card.provider})
+              </option>
+            ))}
+          </SelectInput>
+        )}
+        {item.source === 'custom' && row && (
+          <>
+            <Button variant="secondary" onClick={() => onEditCustomPayment(row.entityId)} aria-label={`Edit ${item.label}`}>
+              <PenLine size={16} />
+            </Button>
+            <Button variant="danger" onClick={() => onDeleteCustomPayment(row.entityId, item.label)} aria-label={`Delete ${item.label}`}>
+              <Trash2 size={16} />
+            </Button>
+          </>
+        )}
+        {isRepayment && repaymentId && (
+          <>
+            <Button variant="secondary" onClick={() => onEditRepayment(repaymentId)} aria-label={`Edit ${item.label}`}>
+              <PenLine size={16} />
+            </Button>
+            <Button variant="danger" onClick={() => onDeleteRepayment(repaymentId)} aria-label={`Delete ${item.label}`}>
+              <Trash2 size={16} />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function getPaymentRows(snapshot: PlannerSnapshot): PaymentRow[] {
   return [
     ...snapshot.recurringPayments.map((payment) => recurringPaymentToRow(payment)),
@@ -376,7 +844,7 @@ function getPaymentRows(snapshot: PlannerSnapshot): PaymentRow[] {
         id: `custom-${payment.id}`,
         entityId: payment.id,
         source: 'custom' as const,
-        sourceLabel: 'Custom payment',
+        sourceLabel: 'Saved payment',
         label: payment.name,
         amountPence: payment.amountPence,
         date: payment.dueDate,
@@ -388,12 +856,44 @@ function getPaymentRows(snapshot: PlannerSnapshot): PaymentRow[] {
   ].sort((a, b) => b.date.localeCompare(a.date))
 }
 
+function groupPaymentRowsByPeriod(rows: PaymentRow[], snapshot: PlannerSnapshot): PaymentGroup[] {
+  const groups = new Map<string, PaymentGroup>()
+
+  for (const row of rows) {
+    const period = isIsoDate(row.date) ? findPayPeriodForDate(snapshot.payPeriods, row.date) : null
+    const id = period?.id ?? (isIsoDate(row.date) ? 'outside-periods' : 'recurring-templates')
+    const label = period
+      ? `${period.payday} pay period · ${period.startDate} to ${period.endDate}`
+      : isIsoDate(row.date)
+        ? 'Outside saved pay periods'
+        : 'Recurring templates'
+    const existingGroup =
+      groups.get(id) ??
+      {
+        id,
+        label,
+        rows: [],
+        totalPence: 0,
+      }
+
+    existingGroup.rows.push(row)
+    existingGroup.totalPence += row.amountPence
+    groups.set(id, existingGroup)
+  }
+
+  return [...groups.values()].sort((a, b) => {
+    const aDate = a.rows.find((row) => isIsoDate(row.date))?.date ?? '9999-12-31'
+    const bDate = b.rows.find((row) => isIsoDate(row.date))?.date ?? '9999-12-31'
+    return bDate.localeCompare(aDate)
+  })
+}
+
 function recurringPaymentToRow(payment: RecurringPayment): PaymentRow {
   return {
     id: `recurring-${payment.id}`,
     entityId: payment.id,
     source: 'recurring',
-    sourceLabel: 'Recurring payment',
+    sourceLabel: 'Recurring',
     label: payment.name,
     amountPence: payment.amountPence,
     date: payment.dueDate ?? `Day ${payment.dueDay ?? 1}`,
@@ -412,4 +912,117 @@ function transactionToRow(transaction: Transaction): PaymentRow {
     date: transaction.date,
     creditCardId: transaction.creditCardId ?? null,
   }
+}
+
+function creditCardItemToPaymentRow(item: CreditCardAllocationItem): PaymentRow | null {
+  if (item.source === 'repayment') {
+    return null
+  }
+
+  if (item.source === 'recurring') {
+    const entityId = item.id.slice('recurring-'.length, -11)
+
+    return {
+      id: `recurring-${entityId}`,
+      entityId,
+      source: 'recurring',
+      sourceLabel: 'Recurring',
+      label: item.label,
+      amountPence: item.amountPence,
+      date: item.date,
+      creditCardId: item.creditCardId ?? null,
+    }
+  }
+
+  if (item.source === 'custom') {
+    const entityId = item.id.replace('custom-', '')
+
+    return {
+      id: `custom-${entityId}`,
+      entityId,
+      source: 'custom',
+      sourceLabel: 'Saved payment',
+      label: item.label,
+      amountPence: item.amountPence,
+      date: item.date,
+      creditCardId: item.creditCardId ?? null,
+    }
+  }
+
+  const entityId = item.id.replace('transaction-', '')
+
+  return {
+    id: `transaction-${entityId}`,
+    entityId,
+    source: 'transaction',
+    sourceLabel: 'Spending',
+    label: item.label,
+    amountPence: item.amountPence,
+    date: item.date,
+    creditCardId: item.creditCardId ?? null,
+  }
+}
+
+function whereFromLabel(item: CreditCardAllocationItem, snapshot: PlannerSnapshot): string {
+  if (item.source === 'repayment') {
+    return 'Card repayment'
+  }
+
+  if (item.potId) {
+    return snapshot.pots.find((pot) => pot.id === item.potId)?.name ?? 'Archived pot'
+  }
+
+  if (item.creditCardId) {
+    return snapshot.creditCards.find((card) => card.id === item.creditCardId)?.name ?? 'Archived card'
+  }
+
+  return 'Unlinked'
+}
+
+function sourceBadgeClass(source: PaymentRowSource): string {
+  if (source === 'recurring') {
+    return 'rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700'
+  }
+
+  if (source === 'custom') {
+    return 'rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700'
+  }
+
+  return 'rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700'
+}
+
+function overviewBadgeClass(source: CreditCardAllocationItem['source']): string {
+  if (source === 'recurring') {
+    return 'rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700'
+  }
+
+  if (source === 'custom') {
+    return 'rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700'
+  }
+
+  if (source === 'repayment') {
+    return 'rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700'
+  }
+
+  return 'rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700'
+}
+
+function overviewSourceLabel(source: CreditCardAllocationItem['source']): string {
+  if (source === 'recurring') {
+    return 'Recurring'
+  }
+
+  if (source === 'custom') {
+    return 'Saved payment'
+  }
+
+  if (source === 'repayment') {
+    return 'Repayment'
+  }
+
+  return 'Spending'
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }

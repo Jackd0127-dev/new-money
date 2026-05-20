@@ -3,10 +3,10 @@ import type { User } from 'firebase/auth'
 
 import {
   getCloudPlannerSnapshot,
+  getPlannerSnapshotUpdatedAtIso,
   getSnapshotSignature,
   hasMeaningfulPlannerData,
   saveCloudPlannerSnapshot,
-  type CloudPlannerRecord,
 } from '../firebase/cloudPlanner'
 import { isFirebaseConfigured } from '../firebase/client'
 import {
@@ -28,9 +28,6 @@ export interface CloudSyncController {
   message: string
   cloudUpdatedAtIso: string | null
   isBusy: boolean
-  canDownloadCloud: boolean
-  uploadLocalToCloud: () => Promise<void>
-  downloadCloudToLocal: () => Promise<void>
   retryCloudCheck: () => Promise<void>
 }
 
@@ -53,7 +50,6 @@ export function useCloudSync({
   )
   const [cloudUpdatedAtIso, setCloudUpdatedAtIso] = useState<string | null>(null)
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
-  const pendingCloudRecordRef = useRef<CloudPlannerRecord | null>(null)
   const lastUploadedSignatureRef = useRef<string | null>(null)
   const checkedUserRef = useRef<string | null>(null)
 
@@ -70,7 +66,6 @@ export function useCloudSync({
       setMessage('Sign in to sync this browser with the cloud.')
       setCloudUpdatedAtIso(null)
       setAutoSyncEnabled(false)
-      pendingCloudRecordRef.current = null
       lastUploadedSignatureRef.current = snapshot ? getSnapshotSignature(snapshot) : null
       return
     }
@@ -89,10 +84,9 @@ export function useCloudSync({
       if (!cloudRecord) {
         const updatedAtIso = await saveCloudPlannerSnapshot(user.uid, snapshot)
         lastUploadedSignatureRef.current = getSnapshotSignature(snapshot)
-        pendingCloudRecordRef.current = null
         setCloudUpdatedAtIso(updatedAtIso)
         setStatus('synced')
-        setMessage('Cloud sync is ready. This browser was backed up.')
+        setMessage('Automatic cloud sync is ready.')
         setAutoSyncEnabled(true)
         return
       }
@@ -102,7 +96,6 @@ export function useCloudSync({
       setCloudUpdatedAtIso(cloudRecord.updatedAtIso)
 
       if (localSignature === cloudSignature) {
-        pendingCloudRecordRef.current = null
         lastUploadedSignatureRef.current = localSignature
         setStatus('synced')
         setMessage('Cloud sync is up to date.')
@@ -113,17 +106,31 @@ export function useCloudSync({
       if (!hasMeaningfulPlannerData(snapshot)) {
         await replacePlannerSnapshot(cloudRecord.snapshot)
         await refresh()
-        pendingCloudRecordRef.current = null
         lastUploadedSignatureRef.current = cloudSignature
         setStatus('synced')
-        setMessage('Cloud data was downloaded to this browser.')
+        setMessage('Cloud data was downloaded automatically.')
         setAutoSyncEnabled(true)
         return
       }
 
-      pendingCloudRecordRef.current = cloudRecord
-      setStatus('choice-needed')
-      setMessage('Cloud data already exists. Choose whether this browser or the cloud should win.')
+      const localUpdatedAtIso = getPlannerSnapshotUpdatedAtIso(snapshot)
+
+      if (cloudRecord.updatedAtIso && cloudRecord.updatedAtIso > localUpdatedAtIso) {
+        await replacePlannerSnapshot(cloudRecord.snapshot)
+        await refresh()
+        lastUploadedSignatureRef.current = cloudSignature
+        setStatus('synced')
+        setMessage('Newer cloud data was downloaded automatically.')
+        setAutoSyncEnabled(true)
+        return
+      }
+
+      const updatedAtIso = await saveCloudPlannerSnapshot(user.uid, snapshot)
+      lastUploadedSignatureRef.current = localSignature
+      setCloudUpdatedAtIso(updatedAtIso)
+      setStatus('synced')
+      setMessage('Newer local changes were uploaded automatically.')
+      setAutoSyncEnabled(true)
     } catch (caughtError) {
       setStatus('error')
       setMessage(toSyncMessage(caughtError))
@@ -152,6 +159,18 @@ export function useCloudSync({
     }, 0)
 
     return () => window.clearTimeout(timeout)
+  }, [checkCloud, snapshot, user])
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !user || !snapshot) {
+      return undefined
+    }
+
+    const interval = window.setInterval(() => {
+      void checkCloud()
+    }, 30_000)
+
+    return () => window.clearInterval(interval)
   }, [checkCloud, snapshot, user])
 
   useEffect(() => {
@@ -185,69 +204,11 @@ export function useCloudSync({
     return () => window.clearTimeout(timeout)
   }, [autoSyncEnabled, snapshot, user])
 
-  const uploadLocalToCloud = useCallback(async () => {
-    if (!user || !snapshot) {
-      return
-    }
-
-    setStatus('syncing')
-    setMessage('Uploading this browser to the cloud.')
-
-    try {
-      const updatedAtIso = await saveCloudPlannerSnapshot(user.uid, snapshot)
-      lastUploadedSignatureRef.current = getSnapshotSignature(snapshot)
-      pendingCloudRecordRef.current = null
-      setCloudUpdatedAtIso(updatedAtIso)
-      setStatus('synced')
-      setMessage('This browser is now the cloud version.')
-      setAutoSyncEnabled(true)
-    } catch (caughtError) {
-      setStatus('error')
-      setMessage(toSyncMessage(caughtError))
-    }
-  }, [snapshot, user])
-
-  const downloadCloudToLocal = useCallback(async () => {
-    if (!user) {
-      return
-    }
-
-    setStatus('syncing')
-    setMessage('Downloading cloud data to this browser.')
-    setAutoSyncEnabled(false)
-
-    try {
-      const cloudRecord = pendingCloudRecordRef.current ?? (await getCloudPlannerSnapshot(user.uid))
-
-      if (!cloudRecord) {
-        setStatus('synced')
-        setMessage('No cloud data was found yet.')
-        setAutoSyncEnabled(true)
-        return
-      }
-
-      await replacePlannerSnapshot(cloudRecord.snapshot)
-      await refresh()
-      lastUploadedSignatureRef.current = getSnapshotSignature(cloudRecord.snapshot)
-      pendingCloudRecordRef.current = null
-      setCloudUpdatedAtIso(cloudRecord.updatedAtIso)
-      setStatus('synced')
-      setMessage('Cloud data was downloaded to this browser.')
-      setAutoSyncEnabled(true)
-    } catch (caughtError) {
-      setStatus('error')
-      setMessage(toSyncMessage(caughtError))
-    }
-  }, [refresh, user])
-
   return {
     status,
     message,
     cloudUpdatedAtIso,
     isBusy: status === 'checking' || status === 'syncing',
-    canDownloadCloud: Boolean(user),
-    uploadLocalToCloud,
-    downloadCloudToLocal,
     retryCloudCheck: checkCloud,
   }
 }

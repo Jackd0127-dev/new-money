@@ -185,6 +185,10 @@ function getSpendingByPot(
   const spendByPotId = new Map<string, number>()
 
   for (const transaction of transactions) {
+    if (!transaction.potId) {
+      continue
+    }
+
     spendByPotId.set(transaction.potId, (spendByPotId.get(transaction.potId) ?? 0) + transaction.amountPence)
   }
 

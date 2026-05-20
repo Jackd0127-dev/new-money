@@ -61,6 +61,15 @@ interface PayPeriodMoneySummaryInput {
   allocations: Array<Pick<PotAllocation, 'potId' | 'amountPence' | 'recurringPaymentId'>>
 }
 
+interface PayPeriodCostSummaryInput {
+  payPeriod: PayPeriod | null
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  debts: Debt[]
+  creditCardRepayments: CreditCardRepayment[]
+}
+
 export interface PayPeriodMoneySummary {
   payReceivedPence: number
   allocatedPence: number
@@ -68,6 +77,38 @@ export interface PayPeriodMoneySummary {
   totalPaymentsDuePence: number
   moneyLeftPence: number
   isOverCommitted: boolean
+}
+
+export type PeriodCostItemSource =
+  | 'recurring'
+  | 'saved_payment'
+  | 'manual_spend'
+  | 'debt_minimum'
+  | 'credit_card_repayment'
+
+export interface PeriodCostItem {
+  id: string
+  label: string
+  amountPence: number
+  date: string
+  source: PeriodCostItemSource
+  creditCardId?: string | null
+  potId?: string | null
+}
+
+export interface PayPeriodCostSummary {
+  payReceivedPence: number
+  directRecurringPence: number
+  savedPaymentsPence: number
+  manualSpendingPence: number
+  debtMinimumsPence: number
+  creditCardChargesPence: number
+  creditCardRepaymentsPence: number
+  creditCardNetPence: number
+  totalCostsPence: number
+  moneyLeftPence: number
+  isOverCommitted: boolean
+  items: PeriodCostItem[]
 }
 
 interface CreditCardAllocationInput {
@@ -82,6 +123,7 @@ interface CreditCardAllocationInput {
 export interface CreditCardAllocationItem {
   id: string
   creditCardId: string | null
+  potId?: string | null
   label: string
   amountPence: number
   date: string
@@ -295,6 +337,137 @@ export function getPayPeriodMoneySummary({
   }
 }
 
+export function getPayPeriodCostSummary({
+  payPeriod,
+  recurringPayments,
+  customPayments,
+  transactions,
+  debts,
+  creditCardRepayments,
+}: PayPeriodCostSummaryInput): PayPeriodCostSummary {
+  if (!payPeriod) {
+    return createEmptyPayPeriodCostSummary()
+  }
+
+  const recurringItems = getRecurringPaymentOccurrences(
+    recurringPayments,
+    payPeriod.startDate,
+    payPeriod.endDate,
+  ).map((occurrence) => ({
+    id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+    label: occurrence.payment.name,
+    amountPence: occurrence.amountPence,
+    date: occurrence.dueDate,
+    source: 'recurring' as const,
+    creditCardId: occurrence.payment.creditCardId ?? null,
+    potId: occurrence.payment.potId,
+  }))
+  const savedPaymentItems = customPayments
+    .filter(
+      (payment) =>
+        payment.status !== 'archived' &&
+        isIsoDateBetweenInclusive(payment.dueDate, payPeriod.startDate, payPeriod.endDate),
+    )
+    .map((payment) => ({
+      id: `custom-${payment.id}`,
+      label: payment.name,
+      amountPence: payment.amountPence,
+      date: payment.dueDate,
+      source: 'saved_payment' as const,
+      creditCardId: payment.creditCardId ?? null,
+      potId: null,
+    }))
+  const manualSpendItems = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === 'spending' &&
+        isIsoDateBetweenInclusive(transaction.date, payPeriod.startDate, payPeriod.endDate),
+    )
+    .map((transaction) => ({
+      id: `transaction-${transaction.id}`,
+      label: transaction.note,
+      amountPence: transaction.amountPence,
+      date: transaction.date,
+      source: 'manual_spend' as const,
+      creditCardId: transaction.paymentMethod === 'credit_card' ? transaction.creditCardId ?? null : null,
+      potId: transaction.potId ?? null,
+    }))
+  const debtMinimumItems = debts
+    .filter(
+      (debt) =>
+        debt.status === 'active' &&
+        debt.currentBalancePence > 0 &&
+        debt.minimumPaymentPence > 0 &&
+        isIsoDateBetweenInclusive(debt.dueDate, payPeriod.startDate, payPeriod.endDate),
+    )
+    .map((debt) => ({
+      id: `debt-${debt.id}`,
+      label: debt.name,
+      amountPence: debt.minimumPaymentPence,
+      date: debt.dueDate,
+      source: 'debt_minimum' as const,
+      creditCardId: null,
+      potId: null,
+    }))
+  const repaymentItems = creditCardRepayments
+    .filter((repayment) => isIsoDateBetweenInclusive(repayment.date, payPeriod.startDate, payPeriod.endDate))
+    .map((repayment) => ({
+      id: `repayment-${repayment.id}`,
+      label: repayment.note || 'Card repayment',
+      amountPence: -repayment.amountPence,
+      date: repayment.date,
+      source: 'credit_card_repayment' as const,
+      creditCardId: repayment.creditCardId,
+      potId: null,
+    }))
+  const allItems = [
+    ...recurringItems,
+    ...savedPaymentItems,
+    ...manualSpendItems,
+    ...debtMinimumItems,
+    ...repaymentItems,
+  ].sort(sortPeriodCostItems)
+  const directRecurringPence = sumPositive(
+    recurringItems.filter((item) => !item.creditCardId),
+  )
+  const savedPaymentsPence = sumPositive(
+    savedPaymentItems.filter((item) => !item.creditCardId),
+  )
+  const manualSpendingPence = sumPositive(
+    manualSpendItems.filter((item) => !item.creditCardId),
+  )
+  const debtMinimumsPence = sumPositive(debtMinimumItems)
+  const creditCardChargesPence = sumPositive(
+    [...recurringItems, ...savedPaymentItems, ...manualSpendItems].filter((item) => item.creditCardId),
+  )
+  const creditCardRepaymentsPence = Math.abs(
+    repaymentItems.reduce((total, item) => total + item.amountPence, 0),
+  )
+  const creditCardNetPence = Math.max(0, creditCardChargesPence - creditCardRepaymentsPence)
+  const totalCostsPence =
+    directRecurringPence +
+    savedPaymentsPence +
+    manualSpendingPence +
+    debtMinimumsPence +
+    creditCardNetPence
+  const moneyLeftPence = payPeriod.incomePence - totalCostsPence
+
+  return {
+    payReceivedPence: payPeriod.incomePence,
+    directRecurringPence,
+    savedPaymentsPence,
+    manualSpendingPence,
+    debtMinimumsPence,
+    creditCardChargesPence,
+    creditCardRepaymentsPence,
+    creditCardNetPence,
+    totalCostsPence,
+    moneyLeftPence,
+    isOverCommitted: moneyLeftPence < 0,
+    items: allItems,
+  }
+}
+
 export function getCreditCardAllocationSummary({
   creditCards,
   recurringPayments,
@@ -310,6 +483,7 @@ export function getCreditCardAllocationSummary({
     ...getRecurringPaymentOccurrences(recurringPayments, rangeStart, rangeEnd).map((occurrence) => ({
       id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
       creditCardId: occurrence.payment.creditCardId ?? null,
+      potId: occurrence.payment.potId,
       label: occurrence.payment.name,
       amountPence: occurrence.amountPence,
       date: occurrence.dueDate,
@@ -325,6 +499,7 @@ export function getCreditCardAllocationSummary({
       .map((payment) => ({
         id: `custom-${payment.id}`,
         creditCardId: payment.creditCardId ?? null,
+        potId: null,
         label: payment.name,
         amountPence: payment.amountPence,
         date: payment.dueDate,
@@ -341,6 +516,7 @@ export function getCreditCardAllocationSummary({
       .map((transaction) => ({
         id: `transaction-${transaction.id}`,
         creditCardId: transaction.creditCardId ?? null,
+        potId: transaction.potId ?? null,
         label: transaction.note,
         amountPence: transaction.amountPence,
         date: transaction.date,
@@ -351,6 +527,7 @@ export function getCreditCardAllocationSummary({
       .map((repayment) => ({
         id: `repayment-${repayment.id}`,
         creditCardId: repayment.creditCardId,
+        potId: null,
         label: repayment.note || 'Card repayment',
         amountPence: -repayment.amountPence,
         date: repayment.date,
@@ -433,6 +610,14 @@ export function addIsoDays(date: string, days: number): string {
   return toIsoDate(addDays(parseDate(date), days))
 }
 
+export function findPayPeriodForDate(payPeriods: PayPeriod[], date: string): PayPeriod | null {
+  return (
+    payPeriods.find((period) =>
+      isIsoDateBetweenInclusive(date, period.startDate, period.endDate),
+    ) ?? null
+  )
+}
+
 export function getDebtSummary(
   debts: Debt[],
   payments: DebtPayment[],
@@ -483,6 +668,41 @@ function getCreditCardDueLabel(card: CreditCard): string {
   }
 
   return 'No due date'
+}
+
+function createEmptyPayPeriodCostSummary(): PayPeriodCostSummary {
+  return {
+    payReceivedPence: 0,
+    directRecurringPence: 0,
+    savedPaymentsPence: 0,
+    manualSpendingPence: 0,
+    debtMinimumsPence: 0,
+    creditCardChargesPence: 0,
+    creditCardRepaymentsPence: 0,
+    creditCardNetPence: 0,
+    totalCostsPence: 0,
+    moneyLeftPence: 0,
+    isOverCommitted: false,
+    items: [],
+  }
+}
+
+function sumPositive(items: Array<{ amountPence: number }>): number {
+  return items.reduce((total, item) => total + Math.max(0, item.amountPence), 0)
+}
+
+function sortPeriodCostItems(a: PeriodCostItem, b: PeriodCostItem): number {
+  const dateSort = a.date.localeCompare(b.date)
+
+  if (dateSort !== 0) {
+    return dateSort
+  }
+
+  return a.label.localeCompare(b.label)
+}
+
+function isIsoDateBetweenInclusive(date: string, startDate: string, endDate: string): boolean {
+  return date >= startDate && date <= endDate
 }
 
 function getRecurringPaymentDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {

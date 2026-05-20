@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Archive, ChevronDown } from 'lucide-react'
+import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -20,26 +20,62 @@ export function PotsPage({
   const [amount, setAmount] = useState('')
   const [color, setColor] = useState(colors[0])
   const [openPotId, setOpenPotId] = useState<string | null>(null)
+  const [editingPotId, setEditingPotId] = useState<string | null>(null)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
+  const editingPot = editingPotId
+    ? snapshot.pots.find((candidate) => candidate.id === editingPotId) ?? null
+    : null
 
   async function submitPot() {
     if (!name.trim()) {
       return
     }
 
-    await actions.addPot({
+    const payload = {
       name: name.trim(),
       type,
       balancePence: amount ? parsePoundsToPence(amount) : 0,
       color,
-    })
+    }
+
+    if (editingPot) {
+      await actions.updatePot(editingPot.id, payload)
+      resetForm()
+      return
+    }
+
+    await actions.addPot(payload)
+    resetForm()
+  }
+
+  function startEditingPot(potId: string) {
+    const pot = snapshot.pots.find((candidate) => candidate.id === potId)
+
+    if (!pot) {
+      return
+    }
+
+    setEditingPotId(pot.id)
+    setName(pot.name)
+    setType(pot.type)
+    setAmount((pot.balancePence / 100).toFixed(2))
+    setColor(pot.color)
+  }
+
+  function resetForm() {
+    setEditingPotId(null)
     setName('')
     setAmount('')
+    setType('spending')
+    setColor(colors[0])
   }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
-      <Panel title="Create pot" description="Pots carry balances forward until you spend or move the money.">
+      <Panel
+        title={editingPot ? 'Edit pot' : 'Create pot'}
+        description="Pots carry balances forward until you spend or move the money."
+      >
         <div className="space-y-4">
           <Field label="Pot name">
             <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Car insurance" />
@@ -74,7 +110,14 @@ export function PotsPage({
               ))}
             </div>
           </Field>
-          <Button onClick={submitPot}>Add pot</Button>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={submitPot}>{editingPot ? 'Save pot' : 'Add pot'}</Button>
+            {editingPot && (
+              <Button variant="secondary" onClick={resetForm}>
+                Cancel
+              </Button>
+            )}
+          </div>
         </div>
       </Panel>
 
@@ -112,9 +155,26 @@ export function PotsPage({
                       <p className="px-1 pb-1 text-sm text-slate-500">Amount {formatPence(pot.targetPence)}</p>
                     )}
                   </button>
-                  <Button variant="ghost" onClick={() => actions.archivePot(pot.id)} aria-label={`Archive ${pot.name}`}>
-                    <Archive size={16} />
-                  </Button>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => startEditingPot(pot.id)}
+                      aria-label={`Edit ${pot.name}`}
+                    >
+                      <PenLine size={16} />
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => {
+                        if (window.confirm(`Delete ${pot.name}?`)) {
+                          void actions.deletePot(pot.id)
+                        }
+                      }}
+                      aria-label={`Delete ${pot.name}`}
+                    >
+                      <Trash2 size={16} />
+                    </Button>
+                  </div>
                 </div>
 
                 {isOpen && (

@@ -113,7 +113,7 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
       {
         label: 'Debt minimums',
         value: formatPence(summary.debtMinimumsPence),
-        detail: 'Active debt minimum payments due inside this pay period.',
+        detail: 'Active debt minimum payments overdue or due by the end of this pay period.',
         tone: 'add',
       },
       {

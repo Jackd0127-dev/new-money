@@ -60,7 +60,7 @@ export function DebtsPage({
     .filter((payment) => activeDebtIds.has(payment.debtId))
     .reduce((total, payment) => total + payment.amountPence, 0)
   const balanceReductionPence = Math.max(0, summary.totalOriginalAmountPence - summary.totalCurrentBalancePence)
-  const dueWithin30Days = activeDebts.filter((debt) => debt.dueDate >= today && debt.dueDate <= next30Days)
+  const dueWithin30Days = activeDebts.filter((debt) => debt.minimumPaymentPence > 0 && debt.dueDate <= next30Days)
   const overdueDebts = activeDebts.filter((debt) => debt.dueDate < today)
   const parsedDebtBalancePence = parsePoundsToPence(debtForm.currentBalance)
   const parsedMinimumPence = parsePoundsToPence(debtForm.minimumPayment)
@@ -197,14 +197,14 @@ export function DebtsPage({
           value={formatPence(summary.minimumDueNext30DaysPence)}
           tone={summary.minimumDueNext30DaysPence > 0 ? 'warning' : 'neutral'}
           breakdown={{
-            formula: `Minimum due 30 days = active debt minimums due from ${today} to ${next30Days}.`,
+            formula: `Minimum due 30 days = overdue active minimums plus active minimums due by ${next30Days}.`,
             lines:
               dueWithin30Days.length > 0
                 ? [
                     ...dueWithin30Days.map((debt) => ({
                       label: debt.name,
                       value: formatPence(debt.minimumPaymentPence),
-                      detail: `Due ${debt.dueDate}`,
+                      detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
                       tone: 'add' as const,
                     })),
                     {

@@ -398,7 +398,7 @@ export function getPayPeriodCostSummary({
         debt.status === 'active' &&
         debt.currentBalancePence > 0 &&
         debt.minimumPaymentPence > 0 &&
-        isIsoDateBetweenInclusive(debt.dueDate, payPeriod.startDate, payPeriod.endDate),
+        debt.dueDate <= payPeriod.endDate,
     )
     .map((debt) => ({
       id: `debt-${debt.id}`,
@@ -649,7 +649,7 @@ export function getDebtSummary(
     totalOriginalAmountPence,
     totalPaidPence,
     minimumDueNext30DaysPence: activeDebts
-      .filter((debt) => debt.dueDate >= today && debt.dueDate <= next30Days)
+      .filter((debt) => debt.minimumPaymentPence > 0 && debt.dueDate <= next30Days)
       .reduce((total, debt) => total + debt.minimumPaymentPence, 0),
     progressPercent:
       totalOriginalAmountPence > 0

@@ -544,6 +544,77 @@ describe('recurring page', () => {
     expect(screen.getByText('Before payday')).toBeInTheDocument()
   })
 
+  it('shows a next payday owed dropdown with the next pay period costs', () => {
+    const snapshot = createSnapshot({
+      recurringPayments: [
+        {
+          id: 'rec-rent',
+          name: 'Rent',
+          amountPence: 65000,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'custom-mot',
+          name: 'MOT',
+          amountPence: 4500,
+          dueDate: '2026-06-02',
+          creditCardId: null,
+          status: 'unpaid',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-loan',
+          name: 'Loan',
+          lender: 'Finance Co',
+          originalAmountPence: 100000,
+          currentBalancePence: 80000,
+          minimumPaymentPence: 4000,
+          dueDate: '2026-06-03',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      payPeriods: [
+        {
+          id: 'period-current',
+          startDate: '2026-05-16',
+          endDate: '2026-05-29',
+          payday: '2026-05-16',
+          nextPayday: '2026-05-30',
+          payFrequency: 'biweekly',
+          incomePence: 90000,
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+
+    const nextPaydayPanel = screen.getByRole('region', { name: 'What you owe next payday' })
+    expect(within(nextPaydayPanel).getAllByText('Total owed next payday').length).toBeGreaterThan(0)
+    expect(within(nextPaydayPanel).getByText('2026-05-30 to 2026-06-12')).toBeInTheDocument()
+    expect(within(nextPaydayPanel).getAllByText('£735.00').length).toBeGreaterThan(0)
+    expect(within(nextPaydayPanel).getByText('Rent')).toBeInTheDocument()
+    expect(within(nextPaydayPanel).getByText('MOT')).toBeInTheDocument()
+    expect(within(nextPaydayPanel).getByText('Loan')).toBeInTheDocument()
+  })
+
   it('edits an existing recurring payment', async () => {
     const user = userEvent.setup()
     const actions = createActions()

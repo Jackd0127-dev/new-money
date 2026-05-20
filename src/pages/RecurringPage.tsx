@@ -1,11 +1,17 @@
 import { useState } from 'react'
 import { PenLine, Trash2 } from 'lucide-react'
 
-import { formatPence, parsePoundsToPence } from '../domain/money'
+import {
+  createNextPayPeriod,
+  formatPence,
+  getPayPeriodCostSummary,
+  parsePoundsToPence,
+  type PayPeriodCostSummary,
+} from '../domain/money'
 import { RecurringCalendar } from '../components/RecurringCalendar'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, Panel, SelectInput, TextInput } from '../components/ui'
-import type { RecurringFrequency, RecurringPriority } from '../types/models'
+import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
+import type { PayFrequency, PayPeriod, RecurringFrequency, RecurringPriority } from '../types/models'
 
 export function RecurringPage({
   snapshot,
@@ -24,6 +30,18 @@ export function RecurringPage({
   const [potId, setPotId] = useState(activePots[0]?.id ?? '')
   const [creditCardId, setCreditCardId] = useState('')
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
+  const latestPeriod = snapshot.payPeriods[0] ?? null
+  const nextPaydayPeriod = latestPeriod
+    ? getNextPaydayPeriod(latestPeriod, latestPeriod.payFrequency ?? snapshot.settings.payFrequency)
+    : null
+  const nextPaydaySummary = getPayPeriodCostSummary({
+    payPeriod: nextPaydayPeriod,
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    debts: snapshot.debts,
+    creditCardRepayments: snapshot.creditCardRepayments,
+  })
 
   async function submitPayment() {
     const amountPence = parsePoundsToPence(amount)
@@ -220,6 +238,203 @@ export function RecurringPage({
       </div>
 
       <RecurringCalendar snapshot={snapshot} />
+      <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
     </div>
   )
+}
+
+function NextPaydayOwedPanel({
+  period,
+  summary,
+}: {
+  period: PayPeriod | null
+  summary: PayPeriodCostSummary
+}) {
+  return (
+    <Panel
+      title="What you owe next payday"
+      description={
+        period
+          ? `${period.startDate} to ${period.endDate}`
+          : 'Create a paycheck plan to preview the next payday period.'
+      }
+    >
+      {period ? (
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr_0.9fr]">
+            <MoneyMetric
+              label="Total owed next payday"
+              value={formatPence(summary.totalCostsPence)}
+              tone={summary.totalCostsPence > 0 ? 'warning' : 'neutral'}
+              breakdown={getNextPaydayOwedBreakdown(summary, period)}
+            />
+            <MoneyMetric
+              label="Debt minimums"
+              value={formatPence(summary.debtMinimumsPence)}
+              tone={summary.debtMinimumsPence > 0 ? 'warning' : 'neutral'}
+              breakdown={{
+                formula: 'Debt minimums = unpaid active minimums due by the end of this next pay period.',
+                lines: [
+                  {
+                    label: 'Debt minimums',
+                    value: formatPence(summary.debtMinimumsPence),
+                    detail: `Due by ${period.endDate}, including overdue active debts.`,
+                    tone: 'result',
+                  },
+                ],
+              }}
+            />
+            <MoneyMetric
+              label="Money left estimate"
+              value={formatPence(summary.moneyLeftPence)}
+              tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
+              breakdown={{
+                formula: 'Money left estimate = last saved pay - next payday costs.',
+                lines: [
+                  { label: 'Last saved pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
+                  { label: 'Next payday costs', value: `-${formatPence(summary.totalCostsPence)}`, tone: 'subtract' },
+                  { label: 'Money left estimate', value: formatPence(summary.moneyLeftPence), tone: 'result' },
+                ],
+                note: 'This preview uses the last paycheck amount until you save the next payday plan.',
+              }}
+            />
+          </div>
+
+          <details className="rounded-lg border border-slate-200 bg-slate-50">
+            <summary className="cursor-pointer list-none px-4 py-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-semibold text-slate-950">Dated items in this preview</p>
+                <p className="text-xs font-semibold text-slate-500">{summary.items.length} items</p>
+              </div>
+            </summary>
+            <div className="space-y-2 border-t border-slate-200 p-3">
+              {summary.items.length > 0 ? (
+                summary.items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="grid gap-2 rounded-md bg-white px-3 py-2 text-sm sm:grid-cols-[1fr_auto]"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-800">{item.label}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {item.date} · {formatCostSource(item.source)}
+                      </p>
+                    </div>
+                    <p className={item.amountPence < 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-950'}>
+                      {item.amountPence < 0 ? '-' : ''}
+                      {formatPence(Math.abs(item.amountPence))}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-md bg-white px-3 py-2 text-sm text-slate-500">
+                  Nothing is dated inside the next payday period yet.
+                </p>
+              )}
+            </div>
+          </details>
+        </div>
+      ) : (
+        <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+          No payday plan is available to build a next-period preview.
+        </p>
+      )}
+    </Panel>
+  )
+}
+
+function getNextPaydayOwedBreakdown(
+  summary: PayPeriodCostSummary,
+  period: PayPeriod,
+): CalculationBreakdown {
+  return {
+    formula: 'Total owed next payday = recurring + saved payments + manual spending + debt minimums + credit-card net.',
+    lines: [
+      {
+        label: 'Recurring not on cards',
+        value: formatPence(summary.directRecurringPence),
+        detail: `Due from ${period.startDate} to ${period.endDate}.`,
+        tone: 'add',
+      },
+      {
+        label: 'Saved payments not on cards',
+        value: formatPence(summary.savedPaymentsPence),
+        detail: 'One-off saved payments due in this next pay period.',
+        tone: 'add',
+      },
+      {
+        label: 'Manual spending not on cards',
+        value: formatPence(summary.manualSpendingPence),
+        detail: 'Manual spending already dated inside this next pay period.',
+        tone: 'add',
+      },
+      {
+        label: 'Debt minimums',
+        value: formatPence(summary.debtMinimumsPence),
+        detail: 'Active minimums overdue or due by this next period end.',
+        tone: 'add',
+      },
+      {
+        label: 'Credit-card charges',
+        value: formatPence(summary.creditCardChargesPence),
+        detail: 'Recurring, saved, and manual spends linked to cards.',
+        tone: 'add',
+      },
+      {
+        label: 'Card repayments',
+        value: `-${formatPence(summary.creditCardRepaymentsPence)}`,
+        detail: 'Repayments dated inside this next pay period.',
+        tone: 'subtract',
+      },
+      {
+        label: 'Credit-card net used',
+        value: formatPence(summary.creditCardNetPence),
+        detail: 'Card charges minus repayments, never below zero.',
+        tone: 'result',
+      },
+      {
+        label: 'Total owed next payday',
+        value: formatPence(summary.totalCostsPence),
+        tone: 'result',
+      },
+    ],
+    note: `${summary.items.length} dated items feed this next-payday preview.`,
+  }
+}
+
+function getNextPaydayPeriod(currentPeriod: PayPeriod, frequency: PayFrequency): PayPeriod {
+  const nextDates = createNextPayPeriod(currentPeriod.nextPayday, frequency)
+
+  return {
+    id: 'next-payday-preview',
+    startDate: nextDates.startDate,
+    endDate: nextDates.endDate,
+    payday: currentPeriod.nextPayday,
+    nextPayday: nextDates.nextPayday,
+    payFrequency: frequency,
+    incomePence: currentPeriod.incomePence,
+    status: 'planned',
+    createdAt: currentPeriod.updatedAt,
+    updatedAt: currentPeriod.updatedAt,
+  }
+}
+
+function formatCostSource(source: PayPeriodCostSummary['items'][number]['source']): string {
+  if (source === 'recurring') {
+    return 'Recurring'
+  }
+
+  if (source === 'saved_payment') {
+    return 'Saved payment'
+  }
+
+  if (source === 'manual_spend') {
+    return 'Manual spend'
+  }
+
+  if (source === 'debt_minimum') {
+    return 'Debt minimum'
+  }
+
+  return 'Card repayment'
 }

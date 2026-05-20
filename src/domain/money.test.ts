@@ -424,6 +424,13 @@ describe('debt tracking', () => {
       progressPercent: 29,
     })
   })
+
+  it('keeps overdue active debt minimums in the due total until the debt is paid', () => {
+    expect(getDebtSummary(debts, payments, '2026-05-21')).toMatchObject({
+      overdueDebtCount: 1,
+      minimumDueNext30DaysPence: 5000,
+    })
+  })
 })
 
 describe('credit card allocation', () => {
@@ -705,6 +712,20 @@ describe('pay period cost summary', () => {
           createdAt: '2026-05-01T00:00:00.000Z',
           updatedAt: '2026-05-01T00:00:00.000Z',
         },
+        {
+          id: 'debt-overdue',
+          name: 'Overdue loan',
+          lender: 'Finance Co',
+          originalAmountPence: 30000,
+          currentBalancePence: 25000,
+          minimumPaymentPence: 2500,
+          dueDate: '2026-05-10',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
       ],
       creditCardRepayments: [
         {
@@ -724,12 +745,12 @@ describe('pay period cost summary', () => {
       directRecurringPence: 25000,
       savedPaymentsPence: 3000,
       manualSpendingPence: 1250,
-      debtMinimumsPence: 4000,
+      debtMinimumsPence: 6500,
       creditCardChargesPence: 7200,
       creditCardRepaymentsPence: 2000,
       creditCardNetPence: 5200,
-      totalCostsPence: 38450,
-      moneyLeftPence: 51550,
+      totalCostsPence: 40950,
+      moneyLeftPence: 49050,
       isOverCommitted: false,
     })
   })

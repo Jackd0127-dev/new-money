@@ -9,6 +9,8 @@ import type {
   Debt,
   DebtReserve,
   PayPeriod,
+  Pot,
+  PotAllocation,
   RecurringPayment,
   Settings,
   Transaction,
@@ -25,6 +27,8 @@ export interface DebtReservePlanInput {
   transactions: Transaction[]
   creditCardRepayments: CreditCardRepayment[]
   debtReserves: DebtReserve[]
+  pots?: Pot[]
+  potAllocations?: PotAllocation[]
 }
 
 export interface DebtReservePlanPeriod {
@@ -166,6 +170,11 @@ function toPlanPeriod(
     debts: input.allDebts.filter((debt) => debt.id !== input.debt.id),
     creditCardRepayments: input.creditCardRepayments,
     debtReserves: input.debtReserves,
+    pots: input.pots ?? [],
+    potAllocations: [
+      ...(input.potAllocations ?? []),
+      ...(projected ? buildProjectedPotAllocations(input.pots ?? [], period.id ?? `projected-${period.payday}`) : []),
+    ],
   })
 
   return {
@@ -178,6 +187,23 @@ function toPlanPeriod(
     availablePence: period.incomePence - summary.totalCostsPence,
     projected,
   }
+}
+
+function buildProjectedPotAllocations(pots: Pot[], payPeriodId: string): PotAllocation[] {
+  const timestamp = 'projected'
+
+  return pots
+    .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0)
+    .map((pot) => ({
+      id: `projected-auto-pot-${payPeriodId}-${pot.id}`,
+      payPeriodId,
+      potId: pot.id,
+      amountPence: pot.targetPence ?? 0,
+      source: 'pot_auto' as const,
+      recurringPaymentId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }))
 }
 
 function splitDebtAcrossPeriods(

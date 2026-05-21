@@ -18,6 +18,7 @@ import {
   resetPlannerData,
   skipDebtReserve,
   updateDebtReserve,
+  updatePot,
 } from './repository'
 import { db } from './db'
 
@@ -87,6 +88,41 @@ describe('paycheck plan storage', () => {
     expect(snapshot.paychecks).toHaveLength(0)
     expect(snapshot.potAllocations).toHaveLength(0)
     expect(foodPot?.balancePence).toBe(0)
+  })
+
+  it('automatically adds pot top-ups when a paycheck plan is confirmed', async () => {
+    await updatePot('pot-food', {
+      name: 'Food',
+      type: 'spending',
+      balancePence: 0,
+      targetPence: 5000,
+      color: '#16a34a',
+    })
+
+    await createPaycheckPlan({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+
+    const snapshot = await getPlannerSnapshot()
+    const foodPot = snapshot.pots.find((pot) => pot.id === 'pot-food')
+
+    expect(snapshot.potAllocations).toEqual([
+      expect.objectContaining({
+        potId: 'pot-food',
+        amountPence: 5000,
+        source: 'pot_auto',
+        recurringPaymentId: null,
+      }),
+    ])
+    expect(foodPot).toMatchObject({
+      balancePence: 5000,
+      targetPence: 5000,
+    })
   })
 
   it('does not recreate default pots after every pot is deleted', async () => {

@@ -46,6 +46,8 @@ export function AiPlanPage({
         transactions: snapshot.transactions,
         creditCardRepayments: snapshot.creditCardRepayments,
         debtReserves: snapshot.debtReserves,
+        pots: snapshot.pots,
+        potAllocations: snapshot.potAllocations,
       }),
     [snapshot, viewedPeriod],
   )

@@ -28,6 +28,8 @@ export function DashboardPage({
     debts: snapshot.debts,
     creditCardRepayments: snapshot.creditCardRepayments,
     debtReserves: snapshot.debtReserves,
+    pots: snapshot.pots,
+    potAllocations: snapshot.potAllocations,
   })
 
   return (
@@ -128,7 +130,7 @@ function getTotalPayBreakdown(
 
 function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
   return {
-    formula: 'Total costs = recurring + saved payments + manual spending + debt reserves + debt due + credit-card net.',
+    formula: 'Total costs = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -146,6 +148,12 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
         label: 'Manual spending not on cards',
         value: formatPence(summary.manualSpendingPence),
         detail: 'Logged spending in this period paid from a pot.',
+        tone: 'add',
+      },
+      {
+        label: 'Pot payday top-ups',
+        value: formatPence(summary.potAllocationsPence),
+        detail: 'Money automatically moved into pots from this paycheck.',
         tone: 'add',
       },
       {

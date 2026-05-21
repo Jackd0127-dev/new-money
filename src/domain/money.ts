@@ -70,6 +70,8 @@ interface PayPeriodCostSummaryInput {
   debts: Debt[]
   creditCardRepayments: CreditCardRepayment[]
   debtReserves?: DebtReserve[]
+  pots?: Pot[]
+  potAllocations?: PotAllocation[]
 }
 
 export interface PayPeriodMoneySummary {
@@ -85,6 +87,7 @@ export type PeriodCostItemSource =
   | 'recurring'
   | 'saved_payment'
   | 'manual_spend'
+  | 'pot_allocation'
   | 'debt_minimum'
   | 'debt_reserve'
   | 'credit_card_repayment'
@@ -104,6 +107,7 @@ export interface PayPeriodCostSummary {
   directRecurringPence: number
   savedPaymentsPence: number
   manualSpendingPence: number
+  potAllocationsPence: number
   debtMinimumsPence: number
   debtReservesPence: number
   creditCardChargesPence: number
@@ -371,6 +375,8 @@ export function getPayPeriodCostSummary({
   debts,
   creditCardRepayments,
   debtReserves = [],
+  pots = [],
+  potAllocations = [],
 }: PayPeriodCostSummaryInput): PayPeriodCostSummary {
   if (!payPeriod) {
     return createEmptyPayPeriodCostSummary()
@@ -419,6 +425,33 @@ export function getPayPeriodCostSummary({
       creditCardId: transaction.paymentMethod === 'credit_card' ? transaction.creditCardId ?? null : null,
       potId: transaction.potId ?? null,
     }))
+  const potLookup = new Map(pots.map((pot) => [pot.id, pot]))
+  const potAllocationItems = potAllocations
+    .filter(
+      (allocation) =>
+        allocation.payPeriodId === payPeriod.id &&
+        allocation.amountPence > 0 &&
+        allocation.source !== 'recurring' &&
+        !allocation.recurringPaymentId,
+    )
+    .map((allocation) => {
+      const pot = potLookup.get(allocation.potId)
+      const label = pot
+        ? allocation.source === 'pot_auto'
+          ? `${pot.name} payday top-up`
+          : `${pot.name} allocation`
+        : 'Pot allocation'
+
+      return {
+        id: `pot-allocation-${allocation.id}`,
+        label,
+        amountPence: allocation.amountPence,
+        date: payPeriod.payday,
+        source: 'pot_allocation' as const,
+        creditCardId: null,
+        potId: allocation.potId,
+      }
+    })
   const debtReserveItems = debtReserves
     .filter(
       (reserve) =>
@@ -471,6 +504,7 @@ export function getPayPeriodCostSummary({
     ...recurringItems,
     ...savedPaymentItems,
     ...manualSpendItems,
+    ...potAllocationItems,
     ...debtReserveItems,
     ...debtMinimumItems,
     ...repaymentItems,
@@ -484,6 +518,7 @@ export function getPayPeriodCostSummary({
   const manualSpendingPence = sumPositive(
     manualSpendItems.filter((item) => !item.creditCardId),
   )
+  const potAllocationsPence = sumPositive(potAllocationItems)
   const debtReservesPence = sumPositive(debtReserveItems)
   const debtMinimumsPence = sumPositive(debtMinimumItems)
   const creditCardChargesPence = sumPositive(
@@ -497,6 +532,7 @@ export function getPayPeriodCostSummary({
     directRecurringPence +
     savedPaymentsPence +
     manualSpendingPence +
+    potAllocationsPence +
     debtReservesPence +
     debtMinimumsPence +
     creditCardNetPence
@@ -507,6 +543,7 @@ export function getPayPeriodCostSummary({
     directRecurringPence,
     savedPaymentsPence,
     manualSpendingPence,
+    potAllocationsPence,
     debtMinimumsPence,
     debtReservesPence,
     creditCardChargesPence,
@@ -730,6 +767,7 @@ function createEmptyPayPeriodCostSummary(): PayPeriodCostSummary {
     directRecurringPence: 0,
     savedPaymentsPence: 0,
     manualSpendingPence: 0,
+    potAllocationsPence: 0,
     debtMinimumsPence: 0,
     debtReservesPence: 0,
     creditCardChargesPence: 0,

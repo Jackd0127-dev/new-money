@@ -11,7 +11,7 @@ import {
 import { RecurringCalendar } from '../components/RecurringCalendar'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
-import type { PayFrequency, PayPeriod, RecurringFrequency, RecurringPriority } from '../types/models'
+import type { PayFrequency, PayPeriod, PotAllocation, RecurringFrequency, RecurringPriority } from '../types/models'
 
 export function RecurringPage({
   snapshot,
@@ -44,6 +44,11 @@ export function RecurringPage({
     debts: snapshot.debts,
     creditCardRepayments: snapshot.creditCardRepayments,
     debtReserves: snapshot.debtReserves,
+    pots: snapshot.pots,
+    potAllocations: [
+      ...snapshot.potAllocations,
+      ...(nextPaydayPeriod ? getPreviewPotTopUps(snapshot, nextPaydayPeriod) : []),
+    ],
   })
 
   async function submitPayment() {
@@ -351,7 +356,7 @@ function getNextPaydayOwedBreakdown(
   period: PayPeriod,
 ): CalculationBreakdown {
   return {
-    formula: 'Total owed next payday = recurring + saved payments + manual spending + debt reserves + debt due + credit-card net.',
+    formula: 'Total owed next payday = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -369,6 +374,12 @@ function getNextPaydayOwedBreakdown(
         label: 'Manual spending not on cards',
         value: formatPence(summary.manualSpendingPence),
         detail: 'Manual spending already dated inside this next pay period.',
+        tone: 'add',
+      },
+      {
+        label: 'Pot payday top-ups',
+        value: formatPence(summary.potAllocationsPence),
+        detail: 'Automatic pot money already planned for this next period.',
         tone: 'add',
       },
       {
@@ -428,6 +439,27 @@ function getNextPaydayPeriod(currentPeriod: PayPeriod, frequency: PayFrequency):
   }
 }
 
+function getPreviewPotTopUps(snapshot: PlannerSnapshot, period: PayPeriod): PotAllocation[] {
+  const existingAutoPotIds = new Set(
+    snapshot.potAllocations
+      .filter((allocation) => allocation.payPeriodId === period.id && allocation.source === 'pot_auto')
+      .map((allocation) => allocation.potId),
+  )
+
+  return snapshot.pots
+    .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0 && !existingAutoPotIds.has(pot.id))
+    .map((pot) => ({
+      id: `preview-pot-${period.id}-${pot.id}`,
+      payPeriodId: period.id,
+      potId: pot.id,
+      amountPence: pot.targetPence ?? 0,
+      source: 'pot_auto' as const,
+      recurringPaymentId: null,
+      createdAt: period.createdAt,
+      updatedAt: period.updatedAt,
+    }))
+}
+
 function formatCostSource(source: PayPeriodCostSummary['items'][number]['source']): string {
   if (source === 'recurring') {
     return 'Recurring'
@@ -439,6 +471,10 @@ function formatCostSource(source: PayPeriodCostSummary['items'][number]['source'
 
   if (source === 'manual_spend') {
     return 'Manual spend'
+  }
+
+  if (source === 'pot_allocation') {
+    return 'Pot top-up'
   }
 
   if (source === 'debt_minimum') {

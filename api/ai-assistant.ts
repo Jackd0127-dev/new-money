@@ -4,9 +4,14 @@ import { getAuth } from 'firebase-admin/auth'
 
 import { defaultSettings } from '../src/data/defaults.js'
 import { buildAssistantAppContext } from '../src/domain/assistantContext.js'
-import { toIsoDate } from '../src/domain/money.js'
+import {
+  calculatePaycheckAmount,
+  createNextPayPeriod,
+  getPayPeriodCostSummary,
+  toIsoDate,
+} from '../src/domain/money.js'
 import type { PlannerSnapshot } from '../src/storage/repository.js'
-import type { AiProvider } from '../src/types/models.js'
+import type { AiProvider, PayPeriod, PotAllocation } from '../src/types/models.js'
 
 const systemInstruction = `
 You are New Money AI, a whole-app assistant inside a private UK paycheck-planner app.
@@ -14,6 +19,9 @@ You have access to the user's compact whole-app planner context, computed summar
 Use only the provided app data. Never invent balances, dates, payments, debts, pots, cards, reserves, or settings.
 Prioritise the current tab and selected pay period when the user asks an ambiguous question.
 Money calculations should come from the computed summaries first. If you do simple arithmetic from compact app facts, show the inputs clearly.
+For future saving, affordability, or investment-target questions, use the projected cash-flow facts based on settings, recurring payments, saved payments, debts, credit-card costs, debt reserves, and automatic pot top-ups. If no payday is recorded, clearly say the calendar timing is an estimate based on settings.
+Do not treat missing recorded paychecks as zero future income when Settings contains default hours and hourly rate.
+Treat investment questions as cash-flow target questions only. Do not recommend buying, selling, or choosing investments.
 You may explain what changed, where money went, what is due, which app tab to use, and what action the user can take next.
 You cannot modify app data yourself. Tell the user which visible app action to use instead.
 Never provide tax, legal, regulated investment, credit product, debt restructuring, or lending advice.
@@ -96,6 +104,7 @@ interface CompactPromptAppContext {
   customPayments: unknown
   creditCardRepayments: unknown
   dailyBriefs: unknown
+  futurePlanning: unknown
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
@@ -288,6 +297,7 @@ function buildCompactPromptContext(context: ReturnType<typeof buildAssistantAppC
       compactCreditCardRepayment(repayment, lookups),
     ),
     dailyBriefs: limitList(sortByDate(snapshot.dailyBriefs, 'date', 'desc'), 40, compactDailyBrief),
+    futurePlanning: buildFuturePlanningFacts(context, lookups),
   }
 
   return {
@@ -338,7 +348,192 @@ function compactComputedSummaries(context: ReturnType<typeof buildAssistantAppCo
         schedule: limitList(plan.schedule, 80, (item) => item),
       })),
     },
+    futurePlanning: buildFuturePlanningFacts(context, lookups),
   }
+}
+
+function buildFuturePlanningFacts(
+  context: ReturnType<typeof buildAssistantAppContext>,
+  lookups: ReturnType<typeof buildLookups>,
+) {
+  const snapshot = context.snapshot
+  const settingsPaycheckEstimatePence = calculatePaycheckAmount({
+    hoursWorked: snapshot.settings.defaultHoursWorked,
+    hourlyRatePence: snapshot.settings.hourlyRatePence,
+  })
+  const automaticPotTopUps = snapshot.pots
+    .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0)
+    .map((pot) => ({
+      potId: pot.id,
+      potName: pot.name,
+      amountPence: pot.targetPence ?? 0,
+      type: pot.type,
+    }))
+  const seedPeriod = getProjectionSeedPeriod(snapshot, context.screen.selectedPayPeriod, context.screen.todayIso)
+  const projectedPeriods = buildProjectedPeriods({
+    snapshot,
+    seedPeriod,
+    todayIso: context.screen.todayIso,
+    settingsPaycheckEstimatePence,
+    count: 8,
+  }).map((period) => {
+    const potAllocations = [
+      ...snapshot.potAllocations,
+      ...buildAssistantProjectedPotAllocations(snapshot, period.id),
+    ]
+    const summary = getPayPeriodCostSummary({
+      payPeriod: period,
+      recurringPayments: snapshot.recurringPayments,
+      customPayments: snapshot.customPayments,
+      transactions: snapshot.transactions,
+      debts: snapshot.debts,
+      creditCardRepayments: snapshot.creditCardRepayments,
+      debtReserves: snapshot.debtReserves,
+      pots: snapshot.pots,
+      potAllocations,
+    })
+
+    return {
+      payPeriodId: period.id,
+      payday: period.payday,
+      periodStartDate: period.startDate,
+      periodEndDate: period.endDate,
+      incomePence: period.incomePence,
+      projected: !snapshot.payPeriods.some((savedPeriod) => savedPeriod.id === period.id),
+      incomeSource: snapshot.payPeriods.some((savedPeriod) => savedPeriod.id === period.id)
+        ? 'savedPayPeriod'
+        : seedPeriod
+          ? 'projectedFromSavedPayPeriod'
+          : 'settingsEstimate',
+      totalCostsPence: summary.totalCostsPence,
+      moneyLeftPence: summary.moneyLeftPence,
+      recurringPence: summary.directRecurringPence,
+      savedPaymentsPence: summary.savedPaymentsPence,
+      manualSpendingPence: summary.manualSpendingPence,
+      potTopUpsPence: summary.potAllocationsPence,
+      debtReservesPence: summary.debtReservesPence,
+      debtDuePence: summary.debtMinimumsPence,
+      creditCardNetPence: summary.creditCardNetPence,
+      costItems: limitList(summary.items, 80, (item) => ({
+        ...item,
+        label: truncateText(item.label, 140),
+        potName: getLookupName(lookups.pots, item.potId),
+        creditCardName: getLookupName(lookups.creditCards, item.creditCardId),
+      })),
+    }
+  })
+  const projectedMoneyLeftTotalPence = projectedPeriods.reduce((total, period) => total + period.moneyLeftPence, 0)
+
+  return {
+    settingsPaycheckEstimatePence,
+    settingsPaycheckCalculation: {
+      defaultHoursWorked: snapshot.settings.defaultHoursWorked,
+      hourlyRatePence: snapshot.settings.hourlyRatePence,
+    },
+    payFrequency: snapshot.settings.payFrequency,
+    hasSavedPayPeriods: snapshot.payPeriods.length > 0,
+    seedPeriod: compactPayPeriod(seedPeriod),
+    assumptions: seedPeriod
+      ? [
+          'Uses the selected/current/next saved pay period first.',
+          'Projects missing future pay periods from the saved frequency and income.',
+          'Uses current stored payments and debts as they exist now.',
+        ]
+      : [
+          'No saved payday is available, so the first projected payday uses today as a placeholder date.',
+          'Income uses Settings default hours and hourly rate.',
+          'Exact dates will improve after one payday is saved.',
+        ],
+    automaticPotTopUps,
+    automaticPotTopUpsPerPaycheckPence: automaticPotTopUps.reduce((total, item) => total + item.amountPence, 0),
+    projectedPeriods,
+    projectedMoneyLeftTotalPence,
+    averageProjectedMoneyLeftPence:
+      projectedPeriods.length > 0 ? Math.round(projectedMoneyLeftTotalPence / projectedPeriods.length) : 0,
+  }
+}
+
+function getProjectionSeedPeriod(
+  snapshot: PlannerSnapshot,
+  selectedPayPeriod: PayPeriod | null,
+  todayIso: string,
+): PayPeriod | null {
+  if (selectedPayPeriod) {
+    return selectedPayPeriod
+  }
+
+  const sortedPeriods = sortByDate(snapshot.payPeriods, 'payday')
+  const upcomingPeriod = sortedPeriods.find((period) => period.endDate >= todayIso)
+
+  return upcomingPeriod ?? sortedPeriods.at(-1) ?? null
+}
+
+function buildProjectedPeriods({
+  snapshot,
+  seedPeriod,
+  todayIso,
+  settingsPaycheckEstimatePence,
+  count,
+}: {
+  snapshot: PlannerSnapshot
+  seedPeriod: PayPeriod | null
+  todayIso: string
+  settingsPaycheckEstimatePence: number
+  count: number
+}): PayPeriod[] {
+  const savedByPayday = new Map(snapshot.payPeriods.map((period) => [period.payday, period]))
+  const frequency = seedPeriod?.payFrequency ?? snapshot.settings.payFrequency
+  let payday = seedPeriod?.payday ?? todayIso
+  const periods: PayPeriod[] = []
+
+  for (let index = 0; index < count; index += 1) {
+    const savedPeriod = savedByPayday.get(payday)
+
+    if (savedPeriod) {
+      periods.push(savedPeriod)
+      payday = savedPeriod.nextPayday
+      continue
+    }
+
+    const periodDates = createNextPayPeriod(payday, frequency)
+
+    periods.push({
+      id: `projected-${payday}`,
+      payday,
+      startDate: periodDates.startDate,
+      endDate: periodDates.endDate,
+      nextPayday: periodDates.nextPayday,
+      payFrequency: frequency,
+      incomePence: seedPeriod?.incomePence ?? settingsPaycheckEstimatePence,
+      status: 'planned',
+      createdAt: `${payday}T00:00:00.000Z`,
+      updatedAt: `${payday}T00:00:00.000Z`,
+    })
+    payday = periodDates.nextPayday
+  }
+
+  return periods
+}
+
+function buildAssistantProjectedPotAllocations(snapshot: PlannerSnapshot, payPeriodId: string): PotAllocation[] {
+  const existingAutoPotIds = new Set(
+    snapshot.potAllocations
+      .filter((allocation) => allocation.payPeriodId === payPeriodId && allocation.source === 'pot_auto')
+      .map((allocation) => allocation.potId),
+  )
+
+  return snapshot.pots
+    .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0 && !existingAutoPotIds.has(pot.id))
+    .map((pot) => ({
+      id: `assistant-projected-pot-${payPeriodId}-${pot.id}`,
+      payPeriodId,
+      potId: pot.id,
+      amountPence: pot.targetPence ?? 0,
+      source: 'pot_auto' as const,
+      recurringPaymentId: null,
+      createdAt: `${payPeriodId}T00:00:00.000Z`,
+      updatedAt: `${payPeriodId}T00:00:00.000Z`,
+    }))
 }
 
 function buildFocusedFacts(
@@ -403,6 +598,10 @@ function buildFocusedFacts(
 
   if (activeView === 'settings' || /setting|instruction|provider|ai/.test(query)) {
     facts.settings = compactAppContext.settings
+  }
+
+  if (/future|save|savings?|goal|target|timeline|afford|invest|investment|s&p|sp500|s and p|how long|when can/.test(query)) {
+    facts.futurePlanning = compactAppContext.futurePlanning
   }
 
   return facts

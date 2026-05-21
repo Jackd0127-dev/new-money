@@ -747,6 +747,7 @@ describe('pots page', () => {
       balancePence: 12000,
       color: '#16a34a',
       name: 'Groceries',
+      targetPence: null,
       type: 'spending',
     })
 

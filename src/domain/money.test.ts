@@ -811,6 +811,31 @@ describe('pay period cost summary', () => {
           updatedAt: '2026-05-24T00:00:00.000Z',
         },
       ],
+      pots: [
+        {
+          id: 'food',
+          name: 'Food',
+          type: 'spending',
+          balancePence: 5000,
+          targetPence: 5000,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'food',
+          amountPence: 5000,
+          source: 'pot_auto',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
     })
 
     expect(summary).toMatchObject({
@@ -818,13 +843,14 @@ describe('pay period cost summary', () => {
       directRecurringPence: 25000,
       savedPaymentsPence: 3000,
       manualSpendingPence: 1250,
+      potAllocationsPence: 5000,
       debtReservesPence: 0,
       debtMinimumsPence: 75000,
       creditCardChargesPence: 7200,
       creditCardRepaymentsPence: 2000,
       creditCardNetPence: 5200,
-      totalCostsPence: 109450,
-      moneyLeftPence: -19450,
+      totalCostsPence: 114450,
+      moneyLeftPence: -24450,
       isOverCommitted: true,
     })
   })

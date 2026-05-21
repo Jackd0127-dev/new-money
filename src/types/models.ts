@@ -11,6 +11,7 @@ export type RecurringPriority = 'essential' | 'important' | 'optional'
 export type PayPeriodStatus = 'planned' | 'active' | 'closed'
 
 export type TransactionType = 'spending' | 'allocation' | 'transfer' | 'adjustment'
+export type PotAllocationSource = 'manual' | 'recurring' | 'pot_auto'
 
 export type DebtStatus = 'active' | 'paid' | 'archived'
 
@@ -87,7 +88,7 @@ export interface PotAllocation extends Timestamped {
   payPeriodId: string
   potId: string
   amountPence: number
-  source?: 'manual' | 'recurring'
+  source?: PotAllocationSource
   recurringPaymentId?: string | null
 }
 

@@ -68,7 +68,7 @@ export function hasMeaningfulPlannerData(snapshot: PlannerSnapshot): boolean {
     (snapshot.customPayments?.length ?? 0) > 0 ||
     (snapshot.creditCardRepayments?.length ?? 0) > 0 ||
     (snapshot.dailyBriefs?.length ?? 0) > 0 ||
-    snapshot.pots.some((pot) => pot.balancePence !== 0 || pot.archived)
+    snapshot.pots.some((pot) => pot.balancePence !== 0 || (pot.targetPence ?? 0) > 0 || pot.archived)
   )
 }
 

@@ -112,6 +112,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     transactions: snapshot.transactions,
     creditCardRepayments: snapshot.creditCardRepayments,
     debtReserves: snapshot.debtReserves,
+    pots: snapshot.pots,
+    potAllocations: snapshot.potAllocations,
   })
   const fallback = createFallbackResponse(plans)
   const provider = snapshot.settings.aiProvider

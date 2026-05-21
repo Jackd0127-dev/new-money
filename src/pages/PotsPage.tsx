@@ -17,7 +17,8 @@ export function PotsPage({
 }) {
   const [name, setName] = useState('')
   const [type, setType] = useState<PotType>('spending')
-  const [amount, setAmount] = useState('')
+  const [paycheckAmount, setPaycheckAmount] = useState('')
+  const [balance, setBalance] = useState('')
   const [color, setColor] = useState(colors[0])
   const [openPotId, setOpenPotId] = useState<string | null>(null)
   const [editingPotId, setEditingPotId] = useState<string | null>(null)
@@ -34,7 +35,8 @@ export function PotsPage({
     const payload = {
       name: name.trim(),
       type,
-      balancePence: amount ? parsePoundsToPence(amount) : 0,
+      balancePence: balance ? parsePoundsToPence(balance) : 0,
+      targetPence: paycheckAmount ? parsePoundsToPence(paycheckAmount) : null,
       color,
     }
 
@@ -58,14 +60,16 @@ export function PotsPage({
     setEditingPotId(pot.id)
     setName(pot.name)
     setType(pot.type)
-    setAmount((pot.balancePence / 100).toFixed(2))
+    setPaycheckAmount(pot.targetPence ? (pot.targetPence / 100).toFixed(2) : '')
+    setBalance((pot.balancePence / 100).toFixed(2))
     setColor(pot.color)
   }
 
   function resetForm() {
     setEditingPotId(null)
     setName('')
-    setAmount('')
+    setPaycheckAmount('')
+    setBalance('')
     setType('spending')
     setColor(colors[0])
   }
@@ -89,8 +93,11 @@ export function PotsPage({
               <option value="buffer">Buffer</option>
             </SelectInput>
           </Field>
-          <Field label="Amount" hint="Optional starting balance for this pot.">
-            <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" />
+          <Field label="Add each paycheck" hint="This amount is automatically deducted from every confirmed paycheck and added to this pot.">
+            <TextInput inputMode="decimal" value={paycheckAmount} onChange={(event) => setPaycheckAmount(event.target.value)} placeholder="50.00" />
+          </Field>
+          <Field label="Current balance" hint="Money already inside this pot before the next paycheck top-up.">
+            <TextInput inputMode="decimal" value={balance} onChange={(event) => setBalance(event.target.value)} placeholder="0.00" />
           </Field>
           <Field label="Colour">
             <div className="flex flex-wrap gap-2">
@@ -151,8 +158,10 @@ export function PotsPage({
                       />
                     </div>
                     <p className="px-1 pb-1 pt-3 text-2xl font-semibold text-slate-950">{formatPence(pot.balancePence)}</p>
-                    {pot.targetPence && (
-                      <p className="px-1 pb-1 text-sm text-slate-500">Amount {formatPence(pot.targetPence)}</p>
+                    {(pot.targetPence ?? 0) > 0 && (
+                      <p className="px-1 pb-1 text-sm text-slate-500">
+                        Payday top-up {formatPence(pot.targetPence ?? 0)}
+                      </p>
                     )}
                   </button>
                   <div className="flex shrink-0 gap-2">
@@ -290,7 +299,11 @@ function allocationToActivityItem(allocation: PotAllocation, snapshot: PlannerSn
 
   return {
     id: `allocation-${allocation.id}`,
-    title: payment ? `Reserved for ${payment.name}` : 'Paycheck allocation',
+    title: payment
+      ? `Reserved for ${payment.name}`
+      : allocation.source === 'pot_auto'
+        ? 'Automatic payday top-up'
+        : 'Paycheck allocation',
     detail: `Allocation · ${period?.payday ?? allocation.createdAt.slice(0, 10)}`,
     amountPence: allocation.amountPence,
   }

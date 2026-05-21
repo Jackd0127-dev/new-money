@@ -61,6 +61,7 @@ export interface PotInput {
   name: string
   type: PotType
   balancePence: number
+  targetPence: number | null
   color: string
 }
 
@@ -261,7 +262,7 @@ export async function addPot(input: PotInput): Promise<void> {
     name: input.name,
     type: input.type,
     balancePence: input.balancePence,
-    targetPence: null,
+    targetPence: input.targetPence === null ? null : Math.max(0, input.targetPence),
     color: input.color,
     archived: false,
     createdAt: timestamp,
@@ -274,6 +275,7 @@ export async function updatePot(potId: string, input: PotUpdateInput): Promise<v
     name: input.name.trim(),
     type: input.type,
     balancePence: input.balancePence,
+    targetPence: input.targetPence === null ? null : Math.max(0, input.targetPence),
     color: input.color,
     updatedAt: nowIso(),
   })
@@ -905,12 +907,21 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
         source: 'recurring' as const,
         recurringPaymentId: payment.id,
       }))
+      const pots = await db.pots.toArray()
+      const automaticPotAllocations = pots
+        .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0)
+        .map((pot) => ({
+          potId: pot.id,
+          amountPence: pot.targetPence ?? 0,
+          source: 'pot_auto' as const,
+          recurringPaymentId: null,
+        }))
       const manualAllocations = input.allocations.map((allocation) => ({
         ...allocation,
         source: 'manual' as const,
         recurringPaymentId: null,
       }))
-      const allAllocations = [...reservedAllocations, ...manualAllocations].filter(
+      const allAllocations = [...reservedAllocations, ...automaticPotAllocations, ...manualAllocations].filter(
         (allocation) => allocation.amountPence > 0,
       )
 

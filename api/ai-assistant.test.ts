@@ -298,6 +298,71 @@ describe('AI assistant api', () => {
     expect(response.statusCode).toBe(200)
   })
 
+  it('sends future planning facts from settings when no paycheck is recorded', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                answer: 'Using settings, your rough paycheck estimate is available for the goal.',
+                highlights: ['Settings estimate used.'],
+                actions: ['Save a payday for exact dates.'],
+                confidence: 'medium',
+              }),
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key')
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'How much until I can invest £1000 in the S&P500?',
+          todayIso: '2026-05-20',
+          activeView: 'dashboard',
+          snapshot: createSnapshot({
+            settings: {
+              ...createSnapshot().settings,
+              aiProvider: 'openrouter',
+              hourlyRatePence: 950,
+              defaultHoursWorked: 80,
+            },
+            pots: [
+              {
+                ...createSnapshot().pots[0],
+                targetPence: 5000,
+              },
+            ],
+            payPeriods: [],
+            paychecks: [],
+          }),
+        },
+      },
+      response,
+    )
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      messages: Array<{ content: string }>
+    }
+    const prompt = requestBody.messages[1].content
+
+    expect(prompt).toContain('"futurePlanning"')
+    expect(prompt).toContain('"settingsPaycheckEstimatePence":76000')
+    expect(prompt).toContain('"automaticPotTopUpsPerPaycheckPence":5000')
+    expect(prompt).toContain('No saved payday is available')
+    expect(response.statusCode).toBe(200)
+  })
+
   it('returns an AI error instead of a deterministic local answer when the provider fails', async () => {
     mocks.generateContent.mockResolvedValueOnce({ text: 'not json' })
     const response = createResponse()

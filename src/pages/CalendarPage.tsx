@@ -380,6 +380,8 @@ function CalendarDayDetails({
         debts: snapshot.debts,
         creditCardRepayments: snapshot.creditCardRepayments,
         debtReserves: snapshot.debtReserves,
+        pots: snapshot.pots,
+        potAllocations: snapshot.potAllocations,
       })
     : null
 
@@ -717,11 +719,15 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       return [{
         id: `allocation-${allocation.id}`,
         date: period.payday,
-        title: pot ? `${pot.name} allocation` : 'Pot allocation',
+        title: pot
+          ? allocation.source === 'pot_auto'
+            ? `${pot.name} payday top-up`
+            : `${pot.name} allocation`
+          : 'Pot allocation',
         amountPence: allocation.amountPence,
         type: 'allocation' as const,
-        direction: 'info' as const,
-        description: `${allocation.source === 'recurring' ? 'Automatic' : 'Manual'} allocation for ${period.startDate} to ${period.endDate}.`,
+        direction: allocation.source === 'recurring' ? 'info' as const : 'out' as const,
+        description: `${allocation.source === 'recurring' ? 'Bill reserve' : allocation.source === 'pot_auto' ? 'Automatic payday top-up' : 'Manual allocation'} for ${period.startDate} to ${period.endDate}.`,
       }]
     })
   const spendingEvents: CalendarEvent[] = snapshot.transactions

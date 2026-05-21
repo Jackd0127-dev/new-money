@@ -23,14 +23,14 @@ const navItems: Array<{
   icon: typeof Gauge
 }> = [
   { key: 'dashboard', label: 'Dashboard', icon: Gauge },
-  { key: 'aiPlan', label: 'AI Plan', icon: Sparkles },
   { key: 'payday', label: 'Payday', icon: Banknote },
-  { key: 'pots', label: 'Pots', icon: PiggyBank },
   { key: 'spending', label: 'Spending', icon: WalletCards },
   { key: 'allocatingPayments', label: 'Allocating Payments', icon: ListChecks },
-  { key: 'debts', label: 'Debts', icon: CreditCard },
   { key: 'recurring', label: 'Recurring', icon: CalendarClock },
+  { key: 'pots', label: 'Pots', icon: PiggyBank },
+  { key: 'debts', label: 'Debts', icon: CreditCard },
   { key: 'calendar', label: 'Calendar', icon: CalendarClock },
+  { key: 'aiPlan', label: 'AI Plan', icon: Sparkles },
   { key: 'history', label: 'History', icon: Clock3 },
   { key: 'settings', label: 'Settings', icon: Settings },
 ]

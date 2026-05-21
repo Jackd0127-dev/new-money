@@ -7,11 +7,13 @@ import { DebtsPage } from './DebtsPage'
 import { HistoryPage } from './HistoryPage'
 import { AiPlanPage } from './AiPlanPage'
 import { AllocatingPaymentsPage } from './AllocatingPaymentsPage'
+import { CalendarPage } from './CalendarPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { PotsPage } from './PotsPage'
 import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
+import { AppShell } from '../components/AppShell'
 import { toIsoDate } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { RecurringPayment, Transaction } from '../types/models'
@@ -36,6 +38,188 @@ type TestActions = PlannerActions & {
   skipDebtReserve: ReturnType<typeof vi.fn>
   applyDebtReserve: ReturnType<typeof vi.fn>
 }
+
+describe('app shell navigation', () => {
+  it('orders tabs around the main paycheck workflow', () => {
+    render(
+      <AppShell activeView="dashboard" onViewChange={vi.fn()}>
+        <div>Page content</div>
+      </AppShell>,
+    )
+
+    const sidebarNav = screen.getAllByRole('navigation')[0]
+    const labels = within(sidebarNav).getAllByRole('button').map((button) => button.textContent)
+
+    expect(labels).toEqual([
+      'Dashboard',
+      'Payday',
+      'Spending',
+      'Allocating Payments',
+      'Recurring',
+      'Pots',
+      'Debts',
+      'Calendar',
+      'AI Plan',
+      'History',
+      'Settings',
+    ])
+  })
+})
+
+describe('calendar page', () => {
+  it('opens a day overview with every money event attached to the clicked date', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 22,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: null,
+          dueDate: '2026-05-22',
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'custom-mot',
+          name: 'MOT',
+          amountPence: 4500,
+          dueDate: '2026-05-22',
+          creditCardId: 'card-amex',
+          status: 'unpaid',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Card balance',
+          lender: 'Card Provider',
+          originalAmountPence: 30000,
+          currentBalancePence: 30000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-05-22',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debtReserves: [
+        {
+          id: 'reserve-card',
+          debtId: 'debt-card',
+          payPeriodId: 'period-current',
+          payday: '2026-05-22',
+          periodStartDate: '2026-05-16',
+          periodEndDate: '2026-05-29',
+          amountPence: 10000,
+          status: 'planned',
+          source: 'assistant',
+          note: 'Set aside before due date',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debtPayments: [
+        {
+          id: 'payment-card',
+          debtId: 'debt-card',
+          amountPence: 5000,
+          date: '2026-05-22',
+          note: 'Actual payment',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCardRepayments: [
+        {
+          id: 'repayment-amex',
+          creditCardId: 'card-amex',
+          amountPence: 2500,
+          date: '2026-05-22',
+          note: 'Card autopay',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'pot-food',
+          amountPence: 7500,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-lunch',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 1250,
+          type: 'spending',
+          date: '2026-05-22',
+          note: 'Lunch',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    expect(screen.getByRole('heading', { name: /Friday.*22 May 2026/ })).toBeInTheDocument()
+    expect(screen.getByText('Paycheck received')).toBeInTheDocument()
+    expect(screen.getByText('Phone')).toBeInTheDocument()
+    expect(screen.getByText('MOT')).toBeInTheDocument()
+    expect(screen.getByText('Card balance')).toBeInTheDocument()
+    expect(screen.getByText('Card balance reserve')).toBeInTheDocument()
+    expect(screen.getByText('Card balance payment')).toBeInTheDocument()
+    expect(screen.getByText('Everyday Amex repayment')).toBeInTheDocument()
+    expect(screen.getByText('Food allocation')).toBeInTheDocument()
+    expect(screen.getByText('Lunch')).toBeInTheDocument()
+    expect(screen.getAllByText('Everyday Amex').length).toBeGreaterThan(0)
+    expect(screen.getByText('Actual payment')).toBeInTheDocument()
+    expect(screen.getByText('Card autopay')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to calendar' })).toBeInTheDocument()
+  })
+})
 
 describe('settings page', () => {
   it('confirms when settings are saved', async () => {

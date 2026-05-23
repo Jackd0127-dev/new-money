@@ -67,7 +67,7 @@ function App() {
         onViewChange={setActiveView}
       />
     ),
-    aiPlan: <AiPlanPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} user={auth.user} />,
+    aiPlan: <AiPlanPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} user={auth.user} />,
     payday: <PaydayWizardPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
     pots: <PotsPage snapshot={snapshot} actions={actions} />,
     spending: <SpendingPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,

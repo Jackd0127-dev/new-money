@@ -30,7 +30,7 @@ const navItems: Array<{
   { key: 'pots', label: 'Pots', icon: PiggyBank },
   { key: 'debts', label: 'Debts', icon: CreditCard },
   { key: 'calendar', label: 'Calendar', icon: CalendarClock },
-  { key: 'aiPlan', label: 'AI Plan', icon: Sparkles },
+  { key: 'aiPlan', label: 'AI', icon: Sparkles },
   { key: 'history', label: 'History', icon: Clock3 },
   { key: 'settings', label: 'Settings', icon: Settings },
 ]

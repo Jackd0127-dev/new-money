@@ -50,7 +50,7 @@ export interface AssistantAppContext {
 
 const viewLabels: Record<ViewKey, string> = {
   dashboard: 'Dashboard',
-  aiPlan: 'AI Plan',
+  aiPlan: 'AI',
   payday: 'Payday',
   pots: 'Pots',
   spending: 'Spending',

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, CreditCard as CreditCardIcon, PenLine, PlusCircle, Trash2 } from 'lucide-react'
+import { ArrowLeft, PenLine, PlusCircle, Trash2, X } from 'lucide-react'
 
 import {
   findPayPeriodForDate,
@@ -22,7 +22,7 @@ import {
   TextInput,
   type CalculationBreakdown,
 } from '../components/ui'
-import type { CreditCardPotSource, PayPeriod, RecurringPayment, Transaction } from '../types/models'
+import type { PayPeriod, RecurringPayment, Transaction } from '../types/models'
 
 const cardColors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
 
@@ -54,12 +54,6 @@ export function AllocatingPaymentsPage({
   const [cardOpeningBalance, setCardOpeningBalance] = useState('')
   const [cardDueDay, setCardDueDay] = useState('1')
   const [cardColor, setCardColor] = useState(cardColors[0])
-  const [editingCreditCardPotId, setEditingCreditCardPotId] = useState<string | null>(null)
-  const [creditPotCardId, setCreditPotCardId] = useState(activeCards[0]?.id ?? '')
-  const [creditPotName, setCreditPotName] = useState('')
-  const [creditPotAmount, setCreditPotAmount] = useState('')
-  const [creditPotSource, setCreditPotSource] = useState<CreditCardPotSource>('paycheck')
-  const [creditPotNote, setCreditPotNote] = useState('')
   const [editingRepaymentId, setEditingRepaymentId] = useState<string | null>(null)
   const [repaymentCardId, setRepaymentCardId] = useState(activeCards[0]?.id ?? '')
   const [repaymentAmount, setRepaymentAmount] = useState('')
@@ -70,7 +64,6 @@ export function AllocatingPaymentsPage({
     () => groupPaymentRowsByPeriod(paymentRows, snapshot, viewedPeriod),
     [paymentRows, snapshot, viewedPeriod],
   )
-  const activeCreditCardPots = snapshot.creditCardPots.filter((creditCardPot) => creditCardPot.status === 'active')
   const selectedCardSummary = selectedCardId
     ? summary.cards.find((cardSummary) => cardSummary.card.id === selectedCardId) ?? null
     : null
@@ -102,36 +95,6 @@ export function AllocatingPaymentsPage({
 
     await actions.addCreditCard(payload)
     resetCardForm()
-  }
-
-  async function submitCreditCardPot() {
-    const amountPence = parsePoundsToPence(creditPotAmount)
-    const linkedCard = activeCards.find((card) => card.id === creditPotCardId) ?? activeCards[0]
-
-    if (!linkedCard || amountPence <= 0 || (creditPotSource === 'paycheck' && !viewedPeriod)) {
-      return
-    }
-
-    const payload = {
-      creditCardId: linkedCard.id,
-      payPeriodId: creditPotSource === 'paycheck' ? viewedPeriod?.id ?? null : null,
-      payday: creditPotSource === 'paycheck' ? viewedPeriod?.payday ?? null : null,
-      periodStartDate: creditPotSource === 'paycheck' ? viewedPeriod?.startDate ?? null : null,
-      periodEndDate: creditPotSource === 'paycheck' ? viewedPeriod?.endDate ?? null : null,
-      name: creditPotName.trim() || `${linkedCard.name} credit pot`,
-      amountPence,
-      source: creditPotSource,
-      note: creditPotNote.trim(),
-    }
-
-    if (editingCreditCardPotId) {
-      await actions.updateCreditCardPot(editingCreditCardPotId, payload)
-      resetCreditCardPotForm()
-      return
-    }
-
-    await actions.addCreditCardPot(payload)
-    resetCreditCardPotForm()
   }
 
   async function submitRepayment() {
@@ -220,7 +183,6 @@ export function AllocatingPaymentsPage({
       return
     }
 
-    setSelectedCardId(null)
     setEditingCardId(card.id)
     setCardName(card.name)
     setCardProvider(card.provider)
@@ -228,22 +190,6 @@ export function AllocatingPaymentsPage({
     setCardOpeningBalance(((card.openingBalancePence ?? 0) / 100).toFixed(2))
     setCardDueDay(String(card.dueDay ?? 1))
     setCardColor(card.color)
-  }
-
-  function startEditingCreditCardPot(creditCardPotId: string) {
-    const creditCardPot = snapshot.creditCardPots.find((candidate) => candidate.id === creditCardPotId)
-
-    if (!creditCardPot) {
-      return
-    }
-
-    setSelectedCardId(null)
-    setEditingCreditCardPotId(creditCardPot.id)
-    setCreditPotCardId(creditCardPot.creditCardId)
-    setCreditPotName(creditCardPot.name)
-    setCreditPotAmount((creditCardPot.amountPence / 100).toFixed(2))
-    setCreditPotSource(creditCardPot.source)
-    setCreditPotNote(creditCardPot.note)
   }
 
   function startEditingRepayment(repaymentId: string) {
@@ -271,15 +217,6 @@ export function AllocatingPaymentsPage({
     setCardColor(cardColors[0])
   }
 
-  function resetCreditCardPotForm() {
-    setEditingCreditCardPotId(null)
-    setCreditPotCardId(activeCards[0]?.id ?? '')
-    setCreditPotName('')
-    setCreditPotAmount('')
-    setCreditPotSource('paycheck')
-    setCreditPotNote('')
-  }
-
   function resetRepaymentForm() {
     setEditingRepaymentId(null)
     setRepaymentAmount('')
@@ -288,54 +225,122 @@ export function AllocatingPaymentsPage({
     setRepaymentCardId(activeCards[0]?.id ?? '')
   }
 
+  function renderCardForm(submitLabel: string, showCancel = false) {
+    return (
+      <div className="space-y-4">
+        <Field label="Card name">
+          <TextInput value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
+        </Field>
+        <Field label="Provider">
+          <TextInput value={cardProvider} onChange={(event) => setCardProvider(event.target.value)} placeholder="Amex" />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Limit">
+            <TextInput inputMode="decimal" value={cardLimit} onChange={(event) => setCardLimit(event.target.value)} placeholder="1000.00" />
+          </Field>
+          <Field label="Existing balance" hint="What you already owe on this card before tracking new payments.">
+            <TextInput
+              aria-label="Existing balance"
+              inputMode="decimal"
+              value={cardOpeningBalance}
+              onChange={(event) => setCardOpeningBalance(event.target.value)}
+              placeholder="0.00"
+            />
+          </Field>
+        </div>
+        <Field label="Due day">
+          <TextInput inputMode="numeric" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} />
+        </Field>
+        <Field label="Colour">
+          <div className="flex flex-wrap gap-2">
+            {cardColors.map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-label={`Use card colour ${option}`}
+                onClick={() => setCardColor(option)}
+                className="size-8 rounded-full border-2"
+                style={{
+                  backgroundColor: option,
+                  borderColor: option === cardColor ? '#0f172a' : 'white',
+                  boxShadow: option === cardColor ? '0 0 0 2px #cbd5e1' : '0 0 0 1px #e2e8f0',
+                }}
+              />
+            ))}
+          </div>
+        </Field>
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={submitCard}>
+            <PlusCircle size={18} />
+            {submitLabel}
+          </Button>
+          {showCancel && (
+            <Button variant="secondary" onClick={resetCardForm}>
+              Cancel
+            </Button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   if (selectedCardSummary) {
     return (
-      <CreditCardOverview
-        activeCards={activeCards}
-        cardSummary={selectedCardSummary}
-        snapshot={snapshot}
-        payPeriod={viewedPeriod}
-        onBack={() => setSelectedCardId(null)}
-        onDeleteCard={(cardId, cardNameToDelete) => {
-          if (window.confirm(`Delete ${cardNameToDelete}?`)) {
-            void actions.archiveCreditCard(cardId)
-          }
-        }}
-        onDeleteCustomPayment={(paymentId, paymentName) => {
-          if (window.confirm(`Delete ${paymentName}?`)) {
-            void actions.deleteCustomPayment(paymentId)
-          }
-        }}
-        onDeleteRepayment={(repaymentId) => {
-          if (window.confirm('Delete this card repayment?')) {
-            void actions.deleteCreditCardRepayment(repaymentId)
-          }
-        }}
-        onDeleteCreditCardPot={(creditCardPotId, creditCardPotName) => {
-          if (window.confirm(`Delete ${creditCardPotName}?`)) {
-            void actions.deleteCreditCardPot(creditCardPotId)
-          }
-        }}
-        onApplyCreditCardPot={(creditCardPotId, creditCardPotName) => {
-          if (window.confirm(`Apply ${creditCardPotName} as a card repayment?`)) {
-            void actions.applyCreditCardPot(creditCardPotId, {
-              date: toIsoDate(new Date()),
-              note: creditCardPotName,
-            })
-          }
-        }}
-        onEditCard={startEditingCard}
-        onEditCreditCardPot={startEditingCreditCardPot}
-        onEditRepayment={startEditingRepayment}
-        onLinkPayment={linkPayment}
-      />
+      <>
+        <CreditCardOverview
+          cardSummary={selectedCardSummary}
+          snapshot={snapshot}
+          onBack={() => {
+            resetCardForm()
+            setSelectedCardId(null)
+          }}
+          onDeleteCard={(cardId, cardNameToDelete) => {
+            if (window.confirm(`Delete ${cardNameToDelete}?`)) {
+              void actions.archiveCreditCard(cardId)
+            }
+          }}
+          onDeleteCustomPayment={(paymentId, paymentName) => {
+            if (window.confirm(`Delete ${paymentName}?`)) {
+              void actions.deleteCustomPayment(paymentId)
+            }
+          }}
+          onDeleteRepayment={(repaymentId) => {
+            if (window.confirm('Delete this card repayment?')) {
+              void actions.deleteCreditCardRepayment(repaymentId)
+            }
+          }}
+          onEditCard={startEditingCard}
+          onEditRepayment={startEditingRepayment}
+        />
+        {editingCardId && (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Edit credit card"
+              className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+            >
+              <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950">Edit credit card</h2>
+                  <p className="mt-1 text-sm text-slate-500">Update the card details without leaving this overview.</p>
+                </div>
+                <Button variant="ghost" onClick={resetCardForm} aria-label="Close edit card">
+                  <X size={18} />
+                </Button>
+              </div>
+              {renderCardForm('Save card', true)}
+            </div>
+          </div>
+        )}
+      </>
     )
   }
 
   return (
     <div className="space-y-6">
-      <Panel title="Credit card summary" description="Selected pay, card balances, credit pots, and card-adjusted pay." accent="cyan">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <Panel title="Credit card summary" description="Selected pay, card balances, and linked credit pots." accent="cyan">
+        <div className="grid gap-4 md:grid-cols-3">
           <MoneyMetric
             label="Selected pay"
             value={formatPence(summary.payReceivedPence)}
@@ -363,296 +368,77 @@ export function AllocatingPaymentsPage({
             tone={summary.totalCreditPotsPence > 0 ? 'good' : 'neutral'}
             breakdown={getCreditPotsBreakdown(summary.cards)}
           />
-          <MoneyMetric
-            label="Pay left after cards"
-            value={formatPence(summary.paycheckRemainingAfterCardsPence)}
-            tone={summary.paycheckRemainingAfterCardsPence < 0 ? 'bad' : 'good'}
-            breakdown={{
-              formula: 'Pay left after cards = selected pay - cards owed - paycheck-funded credit pots.',
-              lines: [
-                { label: 'Selected pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
-                { label: 'Cards owed', value: `-${formatPence(summary.totalOwedPence)}`, tone: 'subtract' },
-                { label: 'Paycheck credit pots', value: `-${formatPence(summary.totalPaycheckCreditPotsPence)}`, tone: 'subtract' },
-                {
-                  label: 'Pay left after cards',
-                  value: formatPence(summary.paycheckRemainingAfterCardsPence),
-                  tone: 'result',
-                },
-              ],
-            }}
-          />
         </div>
       </Panel>
 
       <SectionGrid variant="balanced">
-          <Panel
-            title={editingCardId ? 'Edit credit card' : 'Add credit card'}
-            description="Cards are used to group linked payments, spending, and repayments."
-            accent="blue"
-            density="compact"
-          >
-            <div className="space-y-4">
-              <Field label="Card name">
-                <TextInput value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
-              </Field>
-              <Field label="Provider">
-                <TextInput value={cardProvider} onChange={(event) => setCardProvider(event.target.value)} placeholder="Amex" />
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Limit">
-                  <TextInput inputMode="decimal" value={cardLimit} onChange={(event) => setCardLimit(event.target.value)} placeholder="1000.00" />
-                </Field>
-                <Field label="Existing balance" hint="What you already owe on this card before tracking new payments.">
-                  <TextInput
-                    aria-label="Existing balance"
-                    inputMode="decimal"
-                    value={cardOpeningBalance}
-                    onChange={(event) => setCardOpeningBalance(event.target.value)}
-                    placeholder="0.00"
-                  />
-                </Field>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Due day">
-                  <TextInput inputMode="numeric" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} />
-                </Field>
-              </div>
-              <Field label="Colour">
-                <div className="flex flex-wrap gap-2">
-                  {cardColors.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      aria-label={`Use card colour ${option}`}
-                      onClick={() => setCardColor(option)}
-                      className="size-8 rounded-full border-2"
-                      style={{
-                        backgroundColor: option,
-                        borderColor: option === cardColor ? '#0f172a' : 'white',
-                        boxShadow: option === cardColor ? '0 0 0 2px #cbd5e1' : '0 0 0 1px #e2e8f0',
-                      }}
-                    />
-                  ))}
-                </div>
-              </Field>
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={submitCard}>
-                  <PlusCircle size={18} />
-                  {editingCardId ? 'Save card' : 'Add card'}
-                </Button>
-                {editingCardId && (
-                  <Button variant="secondary" onClick={resetCardForm}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            </div>
-          </Panel>
+        <Panel
+          title="Add credit card"
+          description="Cards group linked payments, spending, and repayments."
+          accent="blue"
+          density="compact"
+        >
+          {renderCardForm('Add card')}
+        </Panel>
 
-          <Panel
-            title="Credit Pots"
-            description="Set money aside for a credit card without marking the card as paid."
-            accent="emerald"
-            density="compact"
-          >
-            <div className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Credit card">
-                  <SelectInput value={creditPotCardId} onChange={(event) => setCreditPotCardId(event.target.value)}>
-                    {activeCards.map((card) => (
-                      <option key={card.id} value={card.id}>
-                        {card.name} ({card.provider})
-                      </option>
-                    ))}
-                  </SelectInput>
-                </Field>
-                <Field label="Amount">
-                  <TextInput inputMode="decimal" value={creditPotAmount} onChange={(event) => setCreditPotAmount(event.target.value)} placeholder="200.00" />
-                </Field>
-              </div>
-              <Field label="Name">
-                <TextInput value={creditPotName} onChange={(event) => setCreditPotName(event.target.value)} placeholder="Barclays payoff pot" />
-              </Field>
-              <Field label="Funding source">
-                <SelectInput value={creditPotSource} onChange={(event) => setCreditPotSource(event.target.value as CreditCardPotSource)}>
-                  <option value="paycheck">Take from selected paycheck</option>
-                  <option value="external">External money, do not touch paycheck</option>
-                </SelectInput>
-              </Field>
-              {creditPotSource === 'paycheck' ? (
-                <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-                  {viewedPeriod
-                    ? `This will reduce dashboard money left for ${viewedPeriod.startDate} to ${viewedPeriod.endDate}.`
-                    : 'Choose a pay period on the dashboard before taking this from a paycheck.'}
-                </p>
-              ) : (
-                <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
-                  External money is tracked against the card, but it will not reduce dashboard money left.
-                </p>
-              )}
-              <Field label="Note">
-                <TextInput value={creditPotNote} onChange={(event) => setCreditPotNote(event.target.value)} placeholder="Money from this paycheck or elsewhere" />
-              </Field>
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={submitCreditCardPot} disabled={activeCards.length === 0 || (creditPotSource === 'paycheck' && !viewedPeriod)}>
-                  {editingCreditCardPotId ? 'Save credit pot' : 'Add credit pot'}
+        <Panel
+          title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
+          description="Repayments reduce the amount shown as owed."
+          accent="amber"
+          density="compact"
+        >
+          <div className="space-y-4">
+            <Field label="Credit card">
+              <SelectInput value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
+                {activeCards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.name} ({card.provider})
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field label="Amount">
+              <TextInput inputMode="decimal" value={repaymentAmount} onChange={(event) => setRepaymentAmount(event.target.value)} placeholder="100.00" />
+            </Field>
+            <Field label="Date">
+              <TextInput type="date" value={repaymentDate} onChange={(event) => setRepaymentDate(event.target.value)} />
+            </Field>
+            <Field label="Note">
+              <TextInput value={repaymentNote} onChange={(event) => setRepaymentNote(event.target.value)} placeholder="Statement payment" />
+            </Field>
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={submitRepayment} disabled={activeCards.length === 0}>
+                {editingRepaymentId ? 'Save repayment' : 'Record repayment'}
+              </Button>
+              {editingRepaymentId && (
+                <Button variant="secondary" onClick={resetRepaymentForm}>
+                  Cancel
                 </Button>
-                {editingCreditCardPotId && (
-                  <Button variant="secondary" onClick={resetCreditCardPotForm}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
-          </Panel>
+          </div>
+        </Panel>
       </SectionGrid>
+
+      <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan" density="compact">
+        <div className="grid justify-items-center gap-5 md:grid-cols-2 2xl:grid-cols-3">
+          {summary.cards.length > 0 ? (
+            summary.cards.map((cardSummary) => (
+              <CreditCardPreviewButton
+                key={cardSummary.card.id}
+                cardSummary={cardSummary}
+                onClick={() => setSelectedCardId(cardSummary.card.id)}
+              />
+            ))
+          ) : (
+            <p className="w-full rounded-lg bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 2xl:col-span-3">
+              No credit cards yet.
+            </p>
+          )}
+        </div>
+      </Panel>
 
       <SectionGrid variant="balanced">
-          <Panel
-            title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
-            description="Repayments reduce the amount shown as owed."
-            accent="amber"
-            density="compact"
-          >
-            <div className="space-y-4">
-              <Field label="Credit card">
-                <SelectInput value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
-                  {activeCards.map((card) => (
-                    <option key={card.id} value={card.id}>
-                      {card.name} ({card.provider})
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Amount">
-                <TextInput inputMode="decimal" value={repaymentAmount} onChange={(event) => setRepaymentAmount(event.target.value)} placeholder="100.00" />
-              </Field>
-              <Field label="Date">
-                <TextInput type="date" value={repaymentDate} onChange={(event) => setRepaymentDate(event.target.value)} />
-              </Field>
-              <Field label="Note">
-                <TextInput value={repaymentNote} onChange={(event) => setRepaymentNote(event.target.value)} placeholder="Statement payment" />
-              </Field>
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={submitRepayment} disabled={activeCards.length === 0}>
-                  {editingRepaymentId ? 'Save repayment' : 'Record repayment'}
-                </Button>
-                {editingRepaymentId && (
-                  <Button variant="secondary" onClick={resetRepaymentForm}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            </div>
-          </Panel>
-          <Panel
-            title="Credit pots"
-            description="Paycheck pots reduce dashboard money left; external pots are tracked only against the card."
-            accent="emerald"
-            density="compact"
-          >
-            <div className="space-y-3 xl:max-h-[520px] xl:overflow-y-auto xl:pr-1">
-              {activeCreditCardPots.length > 0 ? (
-                activeCreditCardPots.map((creditCardPot) => {
-                  const card = snapshot.creditCards.find((candidate) => candidate.id === creditCardPot.creditCardId)
-
-                  return (
-                    <CreditCardPotRow
-                      key={creditCardPot.id}
-                      creditCardPot={creditCardPot}
-                      cardName={card?.name ?? 'Archived card'}
-                      onApply={(creditCardPotId, creditCardPotName) => {
-                        if (window.confirm(`Apply ${creditCardPotName} as a card repayment?`)) {
-                          void actions.applyCreditCardPot(creditCardPotId, {
-                            date: toIsoDate(new Date()),
-                            note: creditCardPotName,
-                          })
-                        }
-                      }}
-                      onDelete={(creditCardPotId, creditCardPotName) => {
-                        if (window.confirm(`Delete ${creditCardPotName}?`)) {
-                          void actions.deleteCreditCardPot(creditCardPotId)
-                        }
-                      }}
-                      onEdit={startEditingCreditCardPot}
-                    />
-                  )
-                })
-              ) : (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No credit pots yet.</p>
-              )}
-            </div>
-          </Panel>
-      </SectionGrid>
-
-          <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan" density="compact">
-            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              {summary.cards.length > 0 ? (
-                summary.cards.map((cardSummary) => (
-                  <button
-                    key={cardSummary.card.id}
-                    type="button"
-                    onClick={() => setSelectedCardId(cardSummary.card.id)}
-                    className="rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-950"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="size-3 rounded-full" style={{ backgroundColor: cardSummary.card.color }} />
-                          <h3 className="truncate text-sm font-semibold text-slate-950">{cardSummary.card.name}</h3>
-                        </div>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {cardSummary.card.provider} · due {cardSummary.dueLabel}
-                        </p>
-                      </div>
-                      <CreditCardIcon size={20} className="text-slate-400" />
-                    </div>
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owed</p>
-                        <p className="mt-1 text-2xl font-semibold text-slate-950">{formatPence(cardSummary.owedPence)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Available</p>
-                        <p className="mt-1 text-2xl font-semibold text-slate-950">{formatPence(cardSummary.availableCreditPence)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">In credit pots</p>
-                        <p className="mt-1 text-2xl font-semibold text-emerald-700">{formatPence(cardSummary.creditPotPence)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Left after pots</p>
-                        <p className="mt-1 text-2xl font-semibold text-slate-950">{formatPence(cardSummary.remainingAfterCreditPotsPence)}</p>
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${Math.min(100, cardSummary.utilisationPercent)}%`,
-                            backgroundColor: cardSummary.card.color,
-                          }}
-                        />
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
-                          {cardSummary.utilisationPercent}% of {formatPence(cardSummary.card.limitPence)}
-                        </span>
-                        <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
-                          {cardSummary.items.length} linked items
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No credit cards yet.</p>
-              )}
-            </div>
-          </Panel>
-
-      <SectionGrid variant="wideLeft">
           <Panel
             title="Payment allocation list"
             description="Link payments and card spending into cards by pay period."
@@ -760,6 +546,83 @@ export function AllocatingPaymentsPage({
   )
 }
 
+type CreditCardVisualDetails = {
+  balance: string
+  limit: string
+  available: string
+  cardNumber: string
+  name: string
+  dueDate: string
+}
+
+const cardAssetPath = '/figma-assets'
+
+function CreditCardPreviewButton({
+  cardSummary,
+  onClick,
+}: {
+  cardSummary: CreditCardAllocationCardSummary
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Open ${cardSummary.card.name} card details`}
+      className="figma-card-button"
+    >
+      <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} />
+    </button>
+  )
+}
+
+function FigmaCreditCard({ details }: { details: CreditCardVisualDetails }) {
+  return (
+    <div
+      className="figma-credit-card"
+      aria-label={`${details.name} credit card`}
+      data-figma-file="IM8pUThhZaULAtixfqj42D"
+      data-node-id="3111:68"
+    >
+      <img className="figma-credit-card__panel figma-credit-card__panel-left" src={`${cardAssetPath}/left-panel.svg`} alt="" />
+      <img className="figma-credit-card__panel figma-credit-card__panel-right" src={`${cardAssetPath}/right-panel.svg`} alt="" />
+      <img className="figma-credit-card__circles" src={`${cardAssetPath}/circle.svg`} alt="" />
+      <div className="figma-credit-card__noise" aria-hidden="true" />
+
+      <div className="figma-credit-card__values">
+        <p>{details.balance}</p>
+        <p>{details.limit}</p>
+        <p>{details.available}</p>
+      </div>
+
+      <p className="figma-credit-card__number">{details.cardNumber}</p>
+
+      <div className="figma-credit-card__footer">
+        <p className="figma-credit-card__holder">{details.name}</p>
+        <p className="figma-credit-card__due">{details.dueDate}</p>
+      </div>
+    </div>
+  )
+}
+
+function getCreditCardVisualDetails(cardSummary: CreditCardAllocationCardSummary): CreditCardVisualDetails {
+  return {
+    balance: formatPence(cardSummary.owedPence),
+    limit: formatPence(cardSummary.card.limitPence),
+    available: formatPence(cardSummary.availableCreditPence),
+    cardNumber: getDisplayCardNumber(cardSummary.card.id),
+    name: cardSummary.card.name,
+    dueDate: cardSummary.dueLabel,
+  }
+}
+
+function getDisplayCardNumber(cardId: string): string {
+  const seed = [...cardId].reduce((total, character) => total + character.charCodeAt(0), 0)
+  const lastFour = String(seed % 10000).padStart(4, '0')
+
+  return `**** **** **** ${lastFour}`
+}
+
 type PaymentRowSource = 'recurring' | 'custom' | 'transaction'
 
 interface PaymentRow {
@@ -845,81 +708,24 @@ function PaymentAllocationRow({
   )
 }
 
-function CreditCardPotRow({
-  creditCardPot,
-  cardName,
-  onApply,
-  onDelete,
-  onEdit,
-}: {
-  creditCardPot: PlannerSnapshot['creditCardPots'][number]
-  cardName: string
-  onApply: (creditCardPotId: string, creditCardPotName: string) => void
-  onDelete: (creditCardPotId: string, creditCardPotName: string) => void
-  onEdit: (creditCardPotId: string) => void
-}) {
-  return (
-    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-[1fr_auto] md:items-center">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-slate-950">{creditCardPot.name}</p>
-          <span className={creditPotSourceBadgeClass(creditCardPot.source)}>
-            {creditCardPot.source === 'paycheck' ? 'Paycheck' : 'External'}
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">
-          {cardName} · {creditCardPot.source === 'paycheck' && creditCardPot.periodStartDate && creditCardPot.periodEndDate
-            ? `${creditCardPot.periodStartDate} to ${creditCardPot.periodEndDate}`
-            : 'Not deducted from paycheck'}
-        </p>
-        {creditCardPot.note && <p className="mt-2 text-xs text-slate-500">{creditCardPot.note}</p>}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 md:justify-end">
-        <p className="mr-1 text-sm font-semibold text-emerald-700">{formatPence(creditCardPot.amountPence)}</p>
-        <Button variant="secondary" onClick={() => onEdit(creditCardPot.id)} aria-label={`Edit ${creditCardPot.name}`}>
-          <PenLine size={16} />
-        </Button>
-        <Button variant="secondary" onClick={() => onApply(creditCardPot.id, creditCardPot.name)}>
-          Apply payment
-        </Button>
-        <Button variant="danger" onClick={() => onDelete(creditCardPot.id, creditCardPot.name)} aria-label={`Delete ${creditCardPot.name}`}>
-          <Trash2 size={16} />
-        </Button>
-      </div>
-    </div>
-  )
-}
-
 function CreditCardOverview({
-  activeCards,
   cardSummary,
   snapshot,
-  payPeriod,
   onBack,
   onDeleteCard,
   onDeleteCustomPayment,
   onDeleteRepayment,
-  onDeleteCreditCardPot,
-  onApplyCreditCardPot,
   onEditCard,
-  onEditCreditCardPot,
   onEditRepayment,
-  onLinkPayment,
 }: {
-  activeCards: PlannerSnapshot['creditCards']
   cardSummary: CreditCardAllocationCardSummary
   snapshot: PlannerSnapshot
-  payPeriod: PayPeriod | null
   onBack: () => void
   onDeleteCard: (cardId: string, cardName: string) => void
   onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
   onDeleteRepayment: (repaymentId: string) => void
-  onDeleteCreditCardPot: (creditCardPotId: string, creditCardPotName: string) => void
-  onApplyCreditCardPot: (creditCardPotId: string, creditCardPotName: string) => void
   onEditCard: (cardId: string) => void
-  onEditCreditCardPot: (creditCardPotId: string) => void
   onEditRepayment: (repaymentId: string) => void
-  onLinkPayment: (row: PaymentRow, creditCardId: string) => Promise<void>
 }) {
   const chargedPence = cardSummary.items
     .filter((item) => item.source !== 'repayment')
@@ -929,159 +735,163 @@ function CreditCardOverview({
       .filter((item) => item.source === 'repayment')
       .reduce((total, item) => total + item.amountPence, 0),
   )
-  const balanceChargedPence = cardSummary.balanceItems
-    .filter((item) => item.source !== 'repayment')
-    .reduce((total, item) => total + item.amountPence, 0)
-  const balanceRepaidPence = Math.abs(
-    cardSummary.balanceItems
-      .filter((item) => item.source === 'repayment')
-      .reduce((total, item) => total + item.amountPence, 0),
-  )
-  const cardCreditPots = snapshot.creditCardPots.filter(
-    (creditCardPot) =>
-      creditCardPot.creditCardId === cardSummary.card.id &&
-      creditCardPot.status === 'active' &&
-      isCreditCardPotVisibleInPeriod(creditCardPot, payPeriod),
-  )
 
   return (
     <div className="space-y-6">
-      <Panel accent="cyan" density="compact">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <Button variant="secondary" onClick={onBack}>
-              <ArrowLeft size={18} />
-              Back
-            </Button>
-            <div className="mt-5 flex items-center gap-3">
-              <span className="size-4 rounded-full" style={{ backgroundColor: cardSummary.card.color }} />
-              <div>
-                <h2 className="text-2xl font-semibold text-slate-950">{cardSummary.card.name}</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {cardSummary.card.provider} · due {cardSummary.dueLabel}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => onEditCard(cardSummary.card.id)}>
-              <PenLine size={16} />
-              Edit card
-            </Button>
-            <Button variant="danger" onClick={() => onDeleteCard(cardSummary.card.id, cardSummary.card.name)}>
-              <Trash2 size={16} />
-              Delete card
-            </Button>
-          </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button variant="secondary" onClick={onBack}>
+          <ArrowLeft size={18} />
+          Back
+        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => onEditCard(cardSummary.card.id)}>
+            <PenLine size={16} />
+            Edit card
+          </Button>
+          <Button variant="danger" onClick={() => onDeleteCard(cardSummary.card.id, cardSummary.card.name)}>
+            <Trash2 size={16} />
+            Delete card
+          </Button>
         </div>
-      </Panel>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MoneyMetric
-          label="Owed now"
-          value={formatPence(cardSummary.owedPence)}
-          tone={cardSummary.owedPence > 0 ? 'warning' : 'good'}
-          breakdown={getCardOwedBreakdown(cardSummary, balanceChargedPence, balanceRepaidPence)}
-        />
-        <MoneyMetric
-          label="Existing balance"
-          value={formatPence(cardSummary.openingBalancePence)}
-          tone={cardSummary.openingBalancePence > 0 ? 'warning' : 'neutral'}
-          breakdown={{
-            formula: 'Existing balance is the balance entered when the card was created or edited.',
-            lines: [
-              {
-                label: 'Existing balance',
-                value: formatPence(cardSummary.openingBalancePence),
-                detail: 'This starts the running card balance before tracked charges and repayments.',
-                tone: cardSummary.openingBalancePence > 0 ? 'add' : 'muted',
-              },
-            ],
-          }}
-        />
-        <MoneyMetric
-          label="Left on card"
-          value={formatPence(cardSummary.availableCreditPence)}
-          breakdown={{
-            formula: 'Left on card = card limit - owed now.',
-            lines: [
-              { label: 'Card limit', value: formatPence(cardSummary.card.limitPence), tone: 'add' },
-              { label: 'Owed now', value: `-${formatPence(cardSummary.owedPence)}`, tone: 'subtract' },
-              { label: 'Left on card', value: formatPence(cardSummary.availableCreditPence), tone: 'result' },
-            ],
-          }}
-        />
-        <MoneyMetric
-          label="In credit pots"
-          value={formatPence(cardSummary.creditPotPence)}
-          tone={cardSummary.creditPotPence > 0 ? 'good' : 'neutral'}
-          breakdown={getSingleCardCreditPotsBreakdown(cardSummary, cardCreditPots)}
-        />
-        <MoneyMetric
-          label="Taken this period"
-          value={formatPence(chargedPence)}
-          tone={chargedPence > 0 ? 'warning' : 'neutral'}
-          breakdown={getCardChargesBreakdown(cardSummary)}
-        />
-        <MoneyMetric
-          label="Repaid this period"
-          value={formatPence(repaidPence)}
-          tone={repaidPence > 0 ? 'good' : 'neutral'}
-          breakdown={getCardRepaymentsBreakdown(cardSummary, repaidPence)}
-        />
       </div>
 
-      <SectionGrid variant="wideRight">
-        <Panel
-          title="Credit pots for this card"
-          description="Set-aside money is separate from real repayments until you apply it."
-          accent="emerald"
-          density="compact"
-        >
-          <div className="space-y-3 xl:max-h-[620px] xl:overflow-y-auto xl:pr-1">
-            {cardCreditPots.length > 0 ? (
-              cardCreditPots.map((creditCardPot) => (
-                <CreditCardPotRow
-                  key={creditCardPot.id}
-                  creditCardPot={creditCardPot}
-                  cardName={cardSummary.card.name}
-                  onApply={onApplyCreditCardPot}
-                  onDelete={onDeleteCreditCardPot}
-                  onEdit={onEditCreditCardPot}
-                />
-              ))
-            ) : (
-              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No credit pots set aside for this card.</p>
-            )}
+      <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.05fr)]">
+        <div className="space-y-4">
+          <div className="max-w-[561px]">
+            <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} />
           </div>
-        </Panel>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <CreditCardStat label="Balance" value={formatPence(cardSummary.owedPence)} tone={cardSummary.owedPence > 0 ? 'warning' : 'good'} />
+            <CreditCardStat label="Available" value={formatPence(cardSummary.availableCreditPence)} tone="good" />
+            <CreditCardStat label="Due" value={cardSummary.dueLabel} tone="neutral" />
+            <CreditCardStat
+              label="Used"
+              value={`${cardSummary.utilisationPercent}%`}
+              detail={`${formatPence(cardSummary.card.limitPence)} limit`}
+              tone={cardSummary.utilisationPercent >= 80 ? 'bad' : cardSummary.utilisationPercent >= 50 ? 'warning' : 'neutral'}
+            />
+          </div>
+        </div>
 
         <Panel
-          title="What changed this card"
-          description="Every linked charge and repayment in the selected pay period."
+          title="Card activity"
+          description="Charges and repayments in the selected pay period."
           accent="violet"
           density="compact"
         >
+          <div className="mb-4 grid gap-3 sm:grid-cols-2">
+            <CreditCardStat label="Charged" value={formatPence(chargedPence)} tone={chargedPence > 0 ? 'bad' : 'neutral'} />
+            <CreditCardStat label="Repaid" value={formatPence(repaidPence)} tone={repaidPence > 0 ? 'good' : 'neutral'} />
+          </div>
           <div className="space-y-3 xl:max-h-[620px] xl:overflow-y-auto xl:pr-1">
             {cardSummary.items.length > 0 ? (
               cardSummary.items.map((item) => (
-                <CreditCardOverviewItem
+                <CreditCardActivityRow
                   key={item.id}
-                  activeCards={activeCards}
                   item={item}
                   snapshot={snapshot}
                   onDeleteCustomPayment={onDeleteCustomPayment}
                   onDeleteRepayment={onDeleteRepayment}
                   onEditRepayment={onEditRepayment}
-                  onLinkPayment={onLinkPayment}
                 />
               ))
             ) : (
-              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No linked charges in this pay period.</p>
+              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No card activity in this pay period.</p>
             )}
           </div>
         </Panel>
-      </SectionGrid>
+      </div>
+    </div>
+  )
+}
+
+function CreditCardStat({
+  label,
+  value,
+  detail,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  detail?: string
+  tone?: 'neutral' | 'good' | 'warning' | 'bad'
+}) {
+  return (
+    <div className={creditCardStatClass(tone)}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-slate-950">{value}</p>
+      {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
+    </div>
+  )
+}
+
+function creditCardStatClass(tone: 'neutral' | 'good' | 'warning' | 'bad'): string {
+  if (tone === 'good') {
+    return 'rounded-lg border border-emerald-200 bg-emerald-50 p-4'
+  }
+
+  if (tone === 'warning') {
+    return 'rounded-lg border border-amber-200 bg-amber-50 p-4'
+  }
+
+  if (tone === 'bad') {
+    return 'rounded-lg border border-red-200 bg-red-50 p-4'
+  }
+
+  return 'rounded-lg border border-slate-200 bg-white p-4'
+}
+
+function CreditCardActivityRow({
+  item,
+  snapshot,
+  onDeleteCustomPayment,
+  onDeleteRepayment,
+  onEditRepayment,
+}: {
+  item: CreditCardAllocationItem
+  snapshot: PlannerSnapshot
+  onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
+  onDeleteRepayment: (repaymentId: string) => void
+  onEditRepayment: (repaymentId: string) => void
+}) {
+  const isRepayment = item.source === 'repayment'
+  const repaymentId = isRepayment ? item.id.replace('repayment-', '') : null
+  const customPaymentId = item.source === 'custom' ? item.id.replace('custom-', '') : null
+  const amountClassName = item.amountPence < 0 ? 'text-emerald-700' : 'text-red-700'
+
+  return (
+    <div className={`grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-[1fr_auto] ${overviewBorderClass(item.source)}`}>
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-slate-950">{item.label}</p>
+          <span className={overviewBadgeClass(item.source)}>{overviewSourceLabel(item.source)}</span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {item.date} · {whereFromLabel(item, snapshot)}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <p className={`text-sm font-semibold ${amountClassName}`}>
+          {item.amountPence < 0 ? '-' : ''}
+          {formatPence(Math.abs(item.amountPence))}
+        </p>
+        {customPaymentId && (
+          <Button variant="danger" onClick={() => onDeleteCustomPayment(customPaymentId, item.label)} aria-label={`Delete ${item.label}`}>
+            <Trash2 size={16} />
+          </Button>
+        )}
+        {repaymentId && (
+          <>
+            <Button variant="secondary" onClick={() => onEditRepayment(repaymentId)} aria-label={`Edit ${item.label}`}>
+              <PenLine size={16} />
+            </Button>
+            <Button variant="danger" onClick={() => onDeleteRepayment(repaymentId)} aria-label={`Delete ${item.label}`}>
+              <Trash2 size={16} />
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -1132,190 +942,6 @@ function getCreditPotsBreakdown(cards: CreditCardAllocationCardSummary[]): Calcu
         : [{ label: 'No active cards', value: formatPence(0), tone: 'result' }],
     note: 'These do not reduce card owed until you apply or record an actual card repayment.',
   }
-}
-
-function getSingleCardCreditPotsBreakdown(
-  cardSummary: CreditCardAllocationCardSummary,
-  creditCardPots: PlannerSnapshot['creditCardPots'],
-): CalculationBreakdown {
-  return {
-    formula: 'In credit pots = active set-aside money linked to this card.',
-    lines:
-      creditCardPots.length > 0
-        ? [
-            ...creditCardPots.map((creditCardPot) => ({
-              label: creditCardPot.name,
-              value: formatPence(creditCardPot.amountPence),
-              detail:
-                creditCardPot.source === 'paycheck'
-                  ? `Deducted from paycheck${creditCardPot.payday ? ` on ${creditCardPot.payday}` : ''}.`
-                  : 'External money, not deducted from paycheck.',
-              tone: 'add' as const,
-            })),
-            {
-              label: 'In credit pots',
-              value: formatPence(cardSummary.creditPotPence),
-              tone: 'result' as const,
-            },
-          ]
-        : [{ label: 'No active credit pots', value: formatPence(0), tone: 'result' }],
-    note: `${formatPence(cardSummary.remainingAfterCreditPotsPence)} would remain after applying these pots to the card balance shown here.`,
-  }
-}
-
-function getCardOwedBreakdown(
-  cardSummary: CreditCardAllocationCardSummary,
-  chargedPence: number,
-  repaidPence: number,
-): CalculationBreakdown {
-  return {
-    formula: 'Owed now = existing balance + tracked charges - repayments, never below zero.',
-    lines: [
-      {
-        label: 'Existing balance',
-        value: formatPence(cardSummary.openingBalancePence),
-        detail: 'The balance already owed when this card was added.',
-        tone: cardSummary.openingBalancePence > 0 ? 'add' : 'muted',
-      },
-      {
-        label: 'Tracked charges',
-        value: formatPence(chargedPence),
-        detail: 'Recurring, saved payments, and credit-card spending linked to this card up to the selected period end.',
-        tone: 'add',
-      },
-      {
-        label: 'Repayments',
-        value: `-${formatPence(repaidPence)}`,
-        detail: 'Repayments recorded against this card up to the selected period end.',
-        tone: 'subtract',
-      },
-      {
-        label: 'Owed now',
-        value: formatPence(cardSummary.owedPence),
-        tone: 'result',
-      },
-    ],
-  }
-}
-
-function getCardChargesBreakdown(cardSummary: CreditCardAllocationCardSummary): CalculationBreakdown {
-  const chargeItems = cardSummary.items.filter((item) => item.source !== 'repayment')
-  const chargedPence = chargeItems.reduce((total, item) => total + item.amountPence, 0)
-
-  return {
-    formula: 'Taken this period = every non-repayment item linked to this card.',
-    lines:
-      chargeItems.length > 0
-        ? [
-            ...chargeItems.map((item) => ({
-              label: item.label,
-              value: formatPence(item.amountPence),
-              detail: `${item.date} · ${overviewSourceLabel(item.source)}`,
-              tone: 'add' as const,
-            })),
-            {
-              label: 'Taken this period',
-              value: formatPence(chargedPence),
-              tone: 'result' as const,
-            },
-          ]
-        : [{ label: 'No linked charges', value: formatPence(0), tone: 'result' }],
-  }
-}
-
-function getCardRepaymentsBreakdown(
-  cardSummary: CreditCardAllocationCardSummary,
-  repaidPence: number,
-): CalculationBreakdown {
-  const repaymentItems = cardSummary.items.filter((item) => item.source === 'repayment')
-
-  return {
-    formula: 'Repaid this period = repayments recorded against this card.',
-    lines:
-      repaymentItems.length > 0
-        ? [
-            ...repaymentItems.map((item) => ({
-              label: item.label,
-              value: formatPence(Math.abs(item.amountPence)),
-              detail: item.date,
-              tone: 'subtract' as const,
-            })),
-            {
-              label: 'Repaid this period',
-              value: formatPence(repaidPence),
-              tone: 'result' as const,
-            },
-          ]
-        : [{ label: 'No repayments', value: formatPence(0), tone: 'result' }],
-  }
-}
-
-function CreditCardOverviewItem({
-  activeCards,
-  item,
-  snapshot,
-  onDeleteCustomPayment,
-  onDeleteRepayment,
-  onEditRepayment,
-  onLinkPayment,
-}: {
-  activeCards: PlannerSnapshot['creditCards']
-  item: CreditCardAllocationItem
-  snapshot: PlannerSnapshot
-  onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
-  onDeleteRepayment: (repaymentId: string) => void
-  onEditRepayment: (repaymentId: string) => void
-  onLinkPayment: (row: PaymentRow, creditCardId: string) => Promise<void>
-}) {
-  const row = creditCardItemToPaymentRow(item)
-  const isRepayment = item.source === 'repayment'
-  const repaymentId = isRepayment ? item.id.replace('repayment-', '') : null
-  const amountClassName = item.amountPence < 0 ? 'text-emerald-700' : 'text-red-700'
-
-  return (
-    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-[1fr_180px_auto]">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-slate-950">{item.label}</p>
-          <span className={overviewBadgeClass(item.source)}>{overviewSourceLabel(item.source)}</span>
-        </div>
-        <p className="mt-1 text-xs text-slate-500">
-          {item.date} · {whereFromLabel(item, snapshot)}
-        </p>
-      </div>
-      <p className={`self-center text-sm font-semibold ${amountClassName}`}>
-        {item.amountPence < 0 ? '-' : ''}
-        {formatPence(Math.abs(item.amountPence))}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {row && (
-          <SelectInput value={row.creditCardId ?? ''} onChange={(event) => void onLinkPayment(row, event.target.value)}>
-            <option value="">Unlinked</option>
-            {activeCards.map((card) => (
-              <option key={card.id} value={card.id}>
-                {card.name} ({card.provider})
-              </option>
-            ))}
-          </SelectInput>
-        )}
-        {item.source === 'custom' && row && (
-          <Button variant="danger" onClick={() => onDeleteCustomPayment(row.entityId, item.label)} aria-label={`Delete ${item.label}`}>
-            <Trash2 size={16} />
-          </Button>
-        )}
-        {isRepayment && repaymentId && (
-          <>
-            <Button variant="secondary" onClick={() => onEditRepayment(repaymentId)} aria-label={`Edit ${item.label}`}>
-              <PenLine size={16} />
-            </Button>
-            <Button variant="danger" onClick={() => onDeleteRepayment(repaymentId)} aria-label={`Delete ${item.label}`}>
-              <Trash2 size={16} />
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
-  )
 }
 
 function getPaymentRows(snapshot: PlannerSnapshot): PaymentRow[] {
@@ -1416,55 +1042,6 @@ function transactionToRow(transaction: Transaction): PaymentRow {
   }
 }
 
-function creditCardItemToPaymentRow(item: CreditCardAllocationItem): PaymentRow | null {
-  if (item.source === 'repayment') {
-    return null
-  }
-
-  if (item.source === 'recurring') {
-    const entityId = item.id.slice('recurring-'.length, -11)
-
-    return {
-      id: `recurring-${entityId}`,
-      entityId,
-      source: 'recurring',
-      sourceLabel: 'Recurring',
-      label: item.label,
-      amountPence: item.amountPence,
-      date: item.date,
-      creditCardId: item.creditCardId ?? null,
-    }
-  }
-
-  if (item.source === 'custom') {
-    const entityId = item.id.replace('custom-', '')
-
-    return {
-      id: `custom-${entityId}`,
-      entityId,
-      source: 'custom',
-      sourceLabel: 'Saved payment',
-      label: item.label,
-      amountPence: item.amountPence,
-      date: item.date,
-      creditCardId: item.creditCardId ?? null,
-    }
-  }
-
-  const entityId = item.id.replace('transaction-', '')
-
-  return {
-    id: `transaction-${entityId}`,
-    entityId,
-    source: 'transaction',
-    sourceLabel: 'Spending',
-    label: item.label,
-    amountPence: item.amountPence,
-    date: item.date,
-    creditCardId: item.creditCardId ?? null,
-  }
-}
-
 function whereFromLabel(item: CreditCardAllocationItem, snapshot: PlannerSnapshot): string {
   if (item.source === 'repayment') {
     return 'Card repayment'
@@ -1493,29 +1070,6 @@ function sourceBadgeClass(source: PaymentRowSource): string {
   return 'rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700'
 }
 
-function creditPotSourceBadgeClass(source: CreditCardPotSource): string {
-  if (source === 'paycheck') {
-    return 'rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white'
-  }
-
-  return 'rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700'
-}
-
-function isCreditCardPotVisibleInPeriod(
-  creditCardPot: PlannerSnapshot['creditCardPots'][number],
-  payPeriod: PayPeriod | null,
-): boolean {
-  if (!payPeriod || creditCardPot.source === 'external') {
-    return true
-  }
-
-  if (creditCardPot.payPeriodId) {
-    return creditCardPot.payPeriodId === payPeriod.id
-  }
-
-  return creditCardPot.periodStartDate === payPeriod.startDate && creditCardPot.periodEndDate === payPeriod.endDate
-}
-
 function overviewBadgeClass(source: CreditCardAllocationItem['source']): string {
   if (source === 'recurring') {
     return 'rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700'
@@ -1530,6 +1084,22 @@ function overviewBadgeClass(source: CreditCardAllocationItem['source']): string 
   }
 
   return 'rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700'
+}
+
+function overviewBorderClass(source: CreditCardAllocationItem['source']): string {
+  if (source === 'recurring') {
+    return 'border-indigo-200 border-l-indigo-500 border-l-4'
+  }
+
+  if (source === 'custom') {
+    return 'border-amber-200 border-l-amber-500 border-l-4'
+  }
+
+  if (source === 'repayment') {
+    return 'border-emerald-200 border-l-emerald-500 border-l-4'
+  }
+
+  return 'border-rose-200 border-l-rose-500 border-l-4'
 }
 
 function overviewSourceLabel(source: CreditCardAllocationItem['source']): string {

@@ -63,7 +63,7 @@ describe('app shell navigation', () => {
       'Pots',
       'Debts',
       'Calendar',
-      'AI Plan',
+      'AI',
       'History',
       'Settings',
     ])
@@ -284,68 +284,40 @@ describe('settings page', () => {
   })
 })
 
-describe('AI plan page', () => {
-  it('shows a deterministic debt reserve recommendation and reserves it without paying the debt', async () => {
-    const user = userEvent.setup()
-    const actions = createActions()
-    const selectedPayPeriod = createPayPeriod({
-      id: 'period-jan-02',
-      payday: '2026-01-02',
-      startDate: '2026-01-02',
-      endDate: '2026-01-15',
-      nextPayday: '2026-01-16',
-      incomePence: 80000,
-    })
-    const snapshot = createSnapshot({
-      payPeriods: [selectedPayPeriod],
-      debts: [
-        {
-          id: 'debt-card',
-          name: 'Card balance',
-          lender: 'Card Provider',
-          originalAmountPence: 20000,
-          currentBalancePence: 20000,
-          minimumPaymentPence: 0,
-          dueDate: '2026-01-20',
-          interestRateApr: null,
-          note: '',
-          status: 'active',
-          createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-    })
+describe('AI page', () => {
+  it('shows one long Ask the AI surface without debt-plan controls', () => {
+    const selectedPayPeriod = createPayPeriod()
 
     render(
       <AiPlanPage
-        snapshot={snapshot}
-        actions={actions}
+        snapshot={createSnapshot({ payPeriods: [selectedPayPeriod] })}
         selectedPayPeriod={selectedPayPeriod}
         user={null}
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'AI debt plan' })).toBeInTheDocument()
-    expect(screen.getByText('Set aside this paycheck')).toBeInTheDocument()
-    expect(screen.getAllByText('£100.00').length).toBeGreaterThan(0)
-
-    await user.click(screen.getByRole('button', { name: 'Reserve £100.00 for Card balance' }))
-
-    expect(actions.addDebtReserve).toHaveBeenCalledWith({
-      debtId: 'debt-card',
-      payPeriodId: 'period-jan-02',
-      payday: '2026-01-02',
-      periodStartDate: '2026-01-02',
-      periodEndDate: '2026-01-15',
-      amountPence: 10000,
-      source: 'assistant',
-      note: 'AI Plan reserve for Card balance',
-    })
-    expect(actions.addDebtPayment).not.toHaveBeenCalled()
+    expect(screen.getByRole('region', { name: 'Ask the AI' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Ask the AI' })).toHaveClass('min-h-[260px]')
+    expect(screen.getByRole('button', { name: 'Ask the AI' })).toBeDisabled()
+    expect(screen.queryByRole('region', { name: 'Debt recommendations' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Set aside this paycheck')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Reserve £/)).not.toBeInTheDocument()
   })
 
-  it('shows AI planner guidance without metadata blocks', async () => {
+  it('sends any user question to the AI endpoint and shows the answer only', async () => {
     const user = userEvent.setup()
+    const fetchSpy = vi.spyOn(window, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        answer: 'Use the spare cash for the highest-impact move first.',
+        risks: ['Hidden fees'],
+        actions: ['Check balances'],
+        confidence: 'high',
+      }),
+    } as Response)
+    const authUser = {
+      getIdToken: vi.fn(async () => 'test-token'),
+    }
     const selectedPayPeriod = createPayPeriod({
       id: 'period-jan-02',
       payday: '2026-01-02',
@@ -354,43 +326,31 @@ describe('AI plan page', () => {
       nextPayday: '2026-01-16',
       incomePence: 80000,
     })
-    const snapshot = createSnapshot({
-      payPeriods: [selectedPayPeriod],
-      debts: [
-        {
-          id: 'debt-card',
-          name: 'Card balance',
-          lender: 'Card Provider',
-          originalAmountPence: 20000,
-          currentBalancePence: 20000,
-          minimumPaymentPence: 0,
-          dueDate: '2026-01-20',
-          interestRateApr: null,
-          note: '',
-          status: 'active',
-          createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-    })
+    const snapshot = createSnapshot({ payPeriods: [selectedPayPeriod] })
 
     render(
       <AiPlanPage
         snapshot={snapshot}
-        actions={createActions()}
         selectedPayPeriod={selectedPayPeriod}
-        user={null}
+        user={authUser}
       />,
     )
 
-    await user.type(screen.getByPlaceholderText('What should I do next with my debts?'), 'What should I do?')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByRole('textbox', { name: 'Ask the AI' }), 'Can I afford my cards this month?')
+    await user.click(screen.getByRole('button', { name: 'Ask the AI' }))
 
-    expect(screen.getByText(/Card balance needs/)).toBeInTheDocument()
-    expect(screen.getByText(/What I’d do next: Reserve/)).toBeInTheDocument()
+    expect(authUser.getIdToken).toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalledWith('/api/ai-planner', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+      body: expect.stringContaining('Can I afford my cards this month?'),
+    }))
+    expect(screen.getByText('Use the spare cash for the highest-impact move first.')).toBeInTheDocument()
     expect(screen.queryByText('Risks')).not.toBeInTheDocument()
     expect(screen.queryByText('Actions')).not.toBeInTheDocument()
     expect(screen.queryByText(/Confidence:/)).not.toBeInTheDocument()
+
+    fetchSpy.mockRestore()
   })
 })
 
@@ -586,7 +546,7 @@ describe('spending page', () => {
 })
 
 describe('allocating payments page', () => {
-  it('creates a credit card, credit pot, and card repayment', async () => {
+  it('creates a credit card and records a card repayment without showing credit pot controls', async () => {
     const user = userEvent.setup()
     const actions = createActions()
     const selectedPayPeriod = createPayPeriod({
@@ -638,22 +598,8 @@ describe('allocating payments page', () => {
 
     expect(screen.queryByRole('region', { name: 'Add saved payment' })).not.toBeInTheDocument()
 
-    const creditPotPanel = screen.getByRole('region', { name: 'Credit Pots' })
-    await user.type(within(creditPotPanel).getByLabelText('Amount'), '200')
-    await user.type(within(creditPotPanel).getByLabelText('Name'), 'Amex payoff')
-    await user.click(within(creditPotPanel).getByRole('button', { name: 'Add credit pot' }))
-
-    expect(actions.addCreditCardPot).toHaveBeenCalledWith({
-      amountPence: 20000,
-      creditCardId: 'card-amex',
-      name: 'Amex payoff',
-      note: '',
-      payday: '2026-05-22',
-      payPeriodId: 'period-current',
-      periodEndDate: '2026-06-04',
-      periodStartDate: '2026-05-22',
-      source: 'paycheck',
-    })
+    expect(screen.queryByRole('region', { name: 'Credit Pots' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Credit pots' })).not.toBeInTheDocument()
 
     const repaymentPanel = screen.getByRole('region', { name: 'Record card repayment' })
     await user.type(within(repaymentPanel).getByLabelText('Amount'), '12.50')
@@ -666,6 +612,7 @@ describe('allocating payments page', () => {
       date: toIsoDate(new Date()),
       note: 'Part payment',
     })
+    expect(actions.addCreditCardPot).not.toHaveBeenCalled()
   })
 
   it('shows credit card diagrams and paycheck impact from linked payments', () => {
@@ -737,13 +684,78 @@ describe('allocating payments page', () => {
       />,
     )
 
+    expect(screen.getByRole('button', { name: 'Open Everyday Amex card details' })).toBeInTheDocument()
     expect(screen.getAllByText('Everyday Amex').length).toBeGreaterThan(0)
-    expect(screen.getByText('Owed')).toBeInTheDocument()
+    expect(screen.getByText('Day 12')).toBeInTheDocument()
     expect(screen.getAllByText('£72.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Pay left after cards').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('£828.00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('£928.00').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Pay left after cards')).not.toBeInTheDocument()
     expect(screen.getAllByText('Groceries').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
+  })
+
+  it('uses a simplified card details view with a card edit dialog', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      payPeriods: [createPayPeriod()],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          openingBalancePence: 20000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-card',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 5000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-amex',
+          date: '2026-05-18',
+          note: 'Groceries',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={snapshot.payPeriods[0]} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open Everyday Amex card details' }))
+
+    expect(screen.getByRole('region', { name: 'Card activity' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Credit pots for this card' })).not.toBeInTheDocument()
+    expect(screen.getByText('Balance')).toBeInTheDocument()
+    expect(screen.getByText('Available')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Edit card' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit credit card' })
+    await user.clear(within(dialog).getByLabelText('Card name'))
+    await user.type(within(dialog).getByLabelText('Card name'), 'Updated Amex')
+    await user.click(within(dialog).getByRole('button', { name: 'Save card' }))
+
+    expect(actions.updateCreditCard).toHaveBeenCalledWith('card-amex', {
+      color: '#2563eb',
+      dueDate: null,
+      dueDay: 12,
+      limitPence: 100000,
+      name: 'Updated Amex',
+      openingBalancePence: 20000,
+      provider: 'Amex',
+    })
   })
 })
 

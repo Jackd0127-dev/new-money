@@ -41,6 +41,7 @@ export function AllocatingPaymentsPage({
   const [cardName, setCardName] = useState('')
   const [cardProvider, setCardProvider] = useState('')
   const [cardLimit, setCardLimit] = useState('')
+  const [cardOpeningBalance, setCardOpeningBalance] = useState('')
   const [cardDueDay, setCardDueDay] = useState('1')
   const [cardColor, setCardColor] = useState(cardColors[0])
   const [editingCreditCardPotId, setEditingCreditCardPotId] = useState<string | null>(null)
@@ -66,9 +67,10 @@ export function AllocatingPaymentsPage({
 
   async function submitCard() {
     const limitPence = parsePoundsToPence(cardLimit)
+    const openingBalancePence = parsePoundsToPence(cardOpeningBalance)
     const dueDay = Number.parseInt(cardDueDay, 10)
 
-    if (!cardName.trim() || !cardProvider.trim() || limitPence <= 0 || dueDay < 1 || dueDay > 31) {
+    if (!cardName.trim() || !cardProvider.trim() || limitPence <= 0 || openingBalancePence < 0 || dueDay < 1 || dueDay > 31) {
       return
     }
 
@@ -76,6 +78,7 @@ export function AllocatingPaymentsPage({
       name: cardName.trim(),
       provider: cardProvider.trim(),
       limitPence,
+      openingBalancePence,
       dueDay,
       dueDate: null,
       color: cardColor,
@@ -212,6 +215,7 @@ export function AllocatingPaymentsPage({
     setCardName(card.name)
     setCardProvider(card.provider)
     setCardLimit((card.limitPence / 100).toFixed(2))
+    setCardOpeningBalance(((card.openingBalancePence ?? 0) / 100).toFixed(2))
     setCardDueDay(String(card.dueDay ?? 1))
     setCardColor(card.color)
   }
@@ -252,6 +256,7 @@ export function AllocatingPaymentsPage({
     setCardName('')
     setCardProvider('')
     setCardLimit('')
+    setCardOpeningBalance('')
     setCardDueDay('1')
     setCardColor(cardColors[0])
   }
@@ -386,6 +391,17 @@ export function AllocatingPaymentsPage({
                 <Field label="Limit">
                   <TextInput inputMode="decimal" value={cardLimit} onChange={(event) => setCardLimit(event.target.value)} placeholder="1000.00" />
                 </Field>
+                <Field label="Existing balance" hint="What you already owe on this card before tracking new payments.">
+                  <TextInput
+                    aria-label="Existing balance"
+                    inputMode="decimal"
+                    value={cardOpeningBalance}
+                    onChange={(event) => setCardOpeningBalance(event.target.value)}
+                    placeholder="0.00"
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Due day">
                   <TextInput inputMode="numeric" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} />
                 </Field>
@@ -894,6 +910,14 @@ function CreditCardOverview({
       .filter((item) => item.source === 'repayment')
       .reduce((total, item) => total + item.amountPence, 0),
   )
+  const balanceChargedPence = cardSummary.balanceItems
+    .filter((item) => item.source !== 'repayment')
+    .reduce((total, item) => total + item.amountPence, 0)
+  const balanceRepaidPence = Math.abs(
+    cardSummary.balanceItems
+      .filter((item) => item.source === 'repayment')
+      .reduce((total, item) => total + item.amountPence, 0),
+  )
   const cardCreditPots = snapshot.creditCardPots.filter(
     (creditCardPot) =>
       creditCardPot.creditCardId === cardSummary.card.id &&
@@ -938,7 +962,23 @@ function CreditCardOverview({
           label="Owed now"
           value={formatPence(cardSummary.owedPence)}
           tone={cardSummary.owedPence > 0 ? 'warning' : 'good'}
-          breakdown={getCardOwedBreakdown(cardSummary, chargedPence, repaidPence)}
+          breakdown={getCardOwedBreakdown(cardSummary, balanceChargedPence, balanceRepaidPence)}
+        />
+        <MoneyMetric
+          label="Existing balance"
+          value={formatPence(cardSummary.openingBalancePence)}
+          tone={cardSummary.openingBalancePence > 0 ? 'warning' : 'neutral'}
+          breakdown={{
+            formula: 'Existing balance is the balance entered when the card was created or edited.',
+            lines: [
+              {
+                label: 'Existing balance',
+                value: formatPence(cardSummary.openingBalancePence),
+                detail: 'This starts the running card balance before tracked charges and repayments.',
+                tone: cardSummary.openingBalancePence > 0 ? 'add' : 'muted',
+              },
+            ],
+          }}
         />
         <MoneyMetric
           label="Left on card"
@@ -1025,14 +1065,14 @@ function CreditCardOverview({
 
 function getCardsOwedBreakdown(cards: CreditCardAllocationCardSummary[]): CalculationBreakdown {
   return {
-    formula: 'Cards owed = the sum of each active card balance for this pay period.',
+    formula: 'Cards owed = existing balances + tracked card charges - repayments, up to the selected period end.',
     lines:
       cards.length > 0
         ? [
             ...cards.map((cardSummary) => ({
               label: cardSummary.card.name,
               value: formatPence(cardSummary.owedPence),
-              detail: `${cardSummary.items.length} linked items after repayments.`,
+              detail: `${formatPence(cardSummary.openingBalancePence)} existing balance · ${cardSummary.balanceItems.length} tracked balance movements.`,
               tone: cardSummary.owedPence > 0 ? ('add' as const) : ('muted' as const),
             })),
             {
@@ -1106,18 +1146,24 @@ function getCardOwedBreakdown(
   repaidPence: number,
 ): CalculationBreakdown {
   return {
-    formula: 'Owed now = linked charges - repayments, never below zero.',
+    formula: 'Owed now = existing balance + tracked charges - repayments, never below zero.',
     lines: [
       {
-        label: 'Linked charges',
+        label: 'Existing balance',
+        value: formatPence(cardSummary.openingBalancePence),
+        detail: 'The balance already owed when this card was added.',
+        tone: cardSummary.openingBalancePence > 0 ? 'add' : 'muted',
+      },
+      {
+        label: 'Tracked charges',
         value: formatPence(chargedPence),
-        detail: 'Recurring, saved payments, and credit-card spending linked to this card.',
+        detail: 'Recurring, saved payments, and credit-card spending linked to this card up to the selected period end.',
         tone: 'add',
       },
       {
         label: 'Repayments',
         value: `-${formatPence(repaidPence)}`,
-        detail: 'Repayments recorded against this card in the selected pay period.',
+        detail: 'Repayments recorded against this card up to the selected period end.',
         tone: 'subtract',
       },
       {

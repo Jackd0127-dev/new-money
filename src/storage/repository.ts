@@ -106,6 +106,7 @@ export interface CreditCardInput {
   name: string
   provider: string
   limitPence: number
+  openingBalancePence?: number
   dueDay?: number | null
   dueDate?: string | null
   color: string
@@ -344,6 +345,7 @@ export async function addCreditCard(input: CreditCardInput): Promise<void> {
     name: input.name.trim(),
     provider: input.provider.trim(),
     limitPence: Math.max(0, input.limitPence),
+    openingBalancePence: Math.max(0, input.openingBalancePence ?? 0),
     dueDay: input.dueDay ?? null,
     dueDate: input.dueDate ?? null,
     color: input.color,
@@ -358,6 +360,7 @@ export async function updateCreditCard(cardId: string, input: CreditCardUpdateIn
     name: input.name.trim(),
     provider: input.provider.trim(),
     limitPence: Math.max(0, input.limitPence),
+    openingBalancePence: Math.max(0, input.openingBalancePence ?? 0),
     dueDay: input.dueDay ?? null,
     dueDate: input.dueDate ?? null,
     color: input.color,

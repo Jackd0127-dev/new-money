@@ -167,6 +167,7 @@ export interface CreditCardAllocationItem {
 
 export interface CreditCardAllocationCardSummary {
   card: CreditCard
+  openingBalancePence: number
   owedPence: number
   creditPotPence: number
   paycheckCreditPotPence: number
@@ -176,6 +177,7 @@ export interface CreditCardAllocationCardSummary {
   utilisationPercent: number
   dueLabel: string
   items: CreditCardAllocationItem[]
+  balanceItems: CreditCardAllocationItem[]
 }
 
 export interface CreditCardAllocationSummary {
@@ -666,8 +668,20 @@ export function getCreditCardAllocationSummary({
     return a.label.localeCompare(b.label)
   })
   const cards = activeCards.map((card) => {
+    const openingBalancePence = getCreditCardOpeningBalancePence(card)
     const cardItems = items.filter((item) => item.creditCardId === card.id)
-    const owedPence = Math.max(0, cardItems.reduce((total, item) => total + item.amountPence, 0))
+    const balanceItems = getCreditCardBalanceItems({
+      card,
+      recurringPayments,
+      customPayments,
+      transactions,
+      repayments,
+      rangeEnd,
+    })
+    const owedPence = Math.max(
+      0,
+      openingBalancePence + balanceItems.reduce((total, item) => total + item.amountPence, 0),
+    )
     const activeCreditPots = creditCardPots.filter(
       (creditCardPot) =>
         creditCardPot.creditCardId === card.id &&
@@ -682,6 +696,7 @@ export function getCreditCardAllocationSummary({
 
     return {
       card,
+      openingBalancePence,
       owedPence,
       creditPotPence,
       paycheckCreditPotPence,
@@ -691,6 +706,7 @@ export function getCreditCardAllocationSummary({
       utilisationPercent: card.limitPence > 0 ? Math.round((owedPence / card.limitPence) * 100) : 0,
       dueLabel: getCreditCardDueLabel(card),
       items: cardItems,
+      balanceItems,
     }
   })
   const totalOwedPence = cards.reduce((total, card) => total + card.owedPence, 0)
@@ -708,6 +724,110 @@ export function getCreditCardAllocationSummary({
     payReceivedPence: payPeriod?.incomePence ?? 0,
     paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalOwedPence - totalPaycheckCreditPotsPence,
   }
+}
+
+function getCreditCardBalanceItems({
+  card,
+  recurringPayments,
+  customPayments,
+  transactions,
+  repayments,
+  rangeEnd,
+}: {
+  card: CreditCard
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  repayments: CreditCardRepayment[]
+  rangeEnd: string
+}): CreditCardAllocationItem[] {
+  const cardStart = card.createdAt.slice(0, 10)
+
+  return [
+    ...recurringPayments
+      .filter((payment) => payment.creditCardId === card.id)
+      .flatMap((payment) =>
+        getRecurringPaymentOccurrences(
+          [payment],
+          maxIsoDate(cardStart, payment.createdAt.slice(0, 10)),
+          rangeEnd,
+        ).map((occurrence) => ({
+          id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+          creditCardId: card.id,
+          potId: occurrence.payment.potId,
+          label: occurrence.payment.name,
+          amountPence: occurrence.amountPence,
+          date: occurrence.dueDate,
+          source: 'recurring' as const,
+        })),
+      ),
+    ...customPayments
+      .filter(
+        (payment) =>
+          payment.creditCardId === card.id &&
+          payment.status === 'unpaid' &&
+          payment.dueDate <= rangeEnd,
+      )
+      .map((payment) => ({
+        id: `custom-${payment.id}`,
+        creditCardId: card.id,
+        potId: null,
+        label: payment.name,
+        amountPence: payment.amountPence,
+        date: payment.dueDate,
+        source: 'custom' as const,
+      })),
+    ...transactions
+      .filter(
+        (transaction) =>
+          transaction.type === 'spending' &&
+          transaction.paymentMethod === 'credit_card' &&
+          transaction.creditCardId === card.id &&
+          transaction.date <= rangeEnd,
+      )
+      .map((transaction) => ({
+        id: `transaction-${transaction.id}`,
+        creditCardId: card.id,
+        potId: transaction.potId ?? null,
+        label: transaction.note,
+        amountPence: transaction.amountPence,
+        date: transaction.date,
+        source: 'spending' as const,
+      })),
+    ...repayments
+      .filter(
+        (repayment) =>
+          repayment.creditCardId === card.id &&
+          repayment.date <= rangeEnd,
+      )
+      .map((repayment) => ({
+        id: `repayment-${repayment.id}`,
+        creditCardId: card.id,
+        potId: null,
+        label: repayment.note || 'Card repayment',
+        amountPence: -repayment.amountPence,
+        date: repayment.date,
+        source: 'repayment' as const,
+      })),
+  ].sort(sortCreditCardItems)
+}
+
+function getCreditCardOpeningBalancePence(card: CreditCard): number {
+  return Math.max(0, card.openingBalancePence ?? 0)
+}
+
+function maxIsoDate(left: string, right: string): string {
+  return left > right ? left : right
+}
+
+function sortCreditCardItems(a: CreditCardAllocationItem, b: CreditCardAllocationItem): number {
+  const dateSort = a.date.localeCompare(b.date)
+
+  if (dateSort !== 0) {
+    return dateSort
+  }
+
+  return a.label.localeCompare(b.label)
 }
 
 export function getDaysInclusive(startDate: string, endDate: string): number {

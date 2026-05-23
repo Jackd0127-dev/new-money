@@ -621,6 +621,7 @@ describe('allocating payments page', () => {
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Card')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Capital One')
     await user.type(within(cardPanel).getByLabelText('Limit'), '1200')
+    await user.type(within(cardPanel).getByLabelText('Existing balance'), '250')
     await user.clear(within(cardPanel).getByLabelText('Due day'))
     await user.type(within(cardPanel).getByLabelText('Due day'), '9')
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
@@ -631,6 +632,7 @@ describe('allocating payments page', () => {
       dueDay: 9,
       limitPence: 120000,
       name: 'Gold Card',
+      openingBalancePence: 25000,
       provider: 'Capital One',
     })
 

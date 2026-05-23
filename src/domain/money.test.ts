@@ -668,19 +668,20 @@ describe('credit card allocation', () => {
       payPeriod,
     })
 
-    expect(summary.totalOwedPence).toBe(10600)
+    expect(summary.totalOwedPence).toBe(13000)
     expect(summary.totalCreditPotsPence).toBe(7000)
     expect(summary.totalPaycheckCreditPotsPence).toBe(4000)
     expect(summary.totalExternalCreditPotsPence).toBe(3000)
-    expect(summary.paycheckRemainingAfterCardsPence).toBe(75400)
+    expect(summary.paycheckRemainingAfterCardsPence).toBe(73000)
     expect(summary.cards[0]).toMatchObject({
-      owedPence: 10600,
+      openingBalancePence: 0,
+      owedPence: 13000,
       creditPotPence: 7000,
       paycheckCreditPotPence: 4000,
       externalCreditPotPence: 3000,
-      remainingAfterCreditPotsPence: 3600,
-      availableCreditPence: 89400,
-      utilisationPercent: 11,
+      remainingAfterCreditPotsPence: 6000,
+      availableCreditPence: 87000,
+      utilisationPercent: 13,
       dueLabel: 'Day 12',
     })
     expect(summary.cards[0].items.map((item) => item.label)).toEqual([
@@ -691,6 +692,30 @@ describe('credit card allocation', () => {
       'Part payment',
       'Travel card',
     ])
+  })
+
+  it('starts card owed from an existing opening balance', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          ...cards[0],
+          openingBalancePence: 60000,
+        },
+      ],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      payPeriod,
+    })
+
+    expect(summary.totalOwedPence).toBe(60000)
+    expect(summary.cards[0]).toMatchObject({
+      openingBalancePence: 60000,
+      owedPence: 60000,
+      availableCreditPence: 40000,
+      utilisationPercent: 60,
+    })
   })
 
   it('lists unlinked payments separately from card balances', () => {

@@ -75,10 +75,11 @@ export function PotsPage({
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
+    <div className="space-y-6">
       <Panel
         title={editingPot ? 'Edit pot' : 'Create pot'}
         description="Pots carry balances forward until you spend or move the money."
+        accent="emerald"
       >
         <div className="space-y-4">
           <Field label="Pot name">
@@ -128,8 +129,12 @@ export function PotsPage({
         </div>
       </Panel>
 
-      <Panel title="Pots" description="Click a pot to see spending, recurring payments, and allocations tied to it.">
-        <div className="grid gap-4 md:grid-cols-2">
+      <Panel
+        title="Pots"
+        description="Click a pot to see spending, recurring payments, and allocations tied to it."
+        accent="blue"
+      >
+        <div className="space-y-4">
           {activePots.map((pot) => {
             const isOpen = openPotId === pot.id
             const activityItems = getPotActivityItems(pot.id, snapshot)

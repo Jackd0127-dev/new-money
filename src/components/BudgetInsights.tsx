@@ -52,7 +52,7 @@ export function BudgetInsights({
   const spendDirection = latestPeriod && projectedSpendPence > latestPeriod.incomePence ? 'bad' : 'good'
 
   return (
-    <Panel title="Budget insights" description={`${rangeStart} to ${rangeEnd}`}>
+    <Panel title="Budget insights" description={`${rangeStart} to ${rangeEnd}`} accent="fuchsia">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <InsightMetric label="Spent this period" value={formatPence(spentPence)} />
         <InsightMetric
@@ -68,7 +68,7 @@ export function BudgetInsights({
         <InsightMetric label="Next 30 days recurring" value={formatPence(next30RecurringPence)} tone="warning" />
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
+      <div className="mt-5 space-y-5">
         <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>

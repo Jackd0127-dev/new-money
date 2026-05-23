@@ -155,6 +155,7 @@ export function AiPlanPage({
     <div className="space-y-6">
       <Panel
         title="AI debt plan"
+        accent="violet"
         description={
           viewedPeriod
             ? `Calculated from ${viewedPeriod.startDate} to ${viewedPeriod.endDate}.`
@@ -180,8 +181,12 @@ export function AiPlanPage({
         </div>
       </Panel>
 
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel title="Debt recommendations" description="Reserve money first. Apply it only once the debt is actually paid.">
+      <div className="space-y-6">
+        <Panel
+          title="Debt recommendations"
+          description="Reserve money first. Apply it only once the debt is actually paid."
+          accent="amber"
+        >
           <div className="space-y-4">
             {plans.length > 0 ? (
               plans.map((plan) => (
@@ -204,7 +209,11 @@ export function AiPlanPage({
           </div>
         </Panel>
 
-        <Panel title="Ask AI planner" description="The selected AI provider explains the calculated plan. It does not invent or change the maths.">
+        <Panel
+          title="Ask AI planner"
+          description="The selected AI provider explains the calculated plan. It does not invent or change the maths."
+          accent="blue"
+        >
           <div className="space-y-4">
             <TextArea
               value={question}

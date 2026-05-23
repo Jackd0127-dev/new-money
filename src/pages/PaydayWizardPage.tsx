@@ -85,8 +85,8 @@ export function PaydayWizardPage({
   }
 
   return (
-    <div className="max-w-3xl">
-      <Panel title="Payday wizard" description="Enter pay details for this payday.">
+    <div className="space-y-6">
+      <Panel title="Payday wizard" description="Enter pay details for this payday." accent="emerald">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Payday">
             <TextInput

@@ -117,10 +117,11 @@ export function SpendingPage({
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
+    <div className="space-y-6">
       <Panel
         title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
         description="Choose whether the money came from a pot or a credit card."
+        accent="blue"
       >
         <div className="space-y-4">
           <Field label="Amount">
@@ -222,7 +223,11 @@ export function SpendingPage({
         </div>
       </Panel>
 
-      <Panel title="Spending by pay period" description="Manual spending is grouped into the pay period containing its date.">
+      <Panel
+        title="Spending by pay period"
+        description="Manual spending is grouped into the pay period containing its date."
+        accent="rose"
+      >
         <div className="space-y-3">
           {groupedTransactions.length > 0 ? (
             groupedTransactions.map((group, index) => (

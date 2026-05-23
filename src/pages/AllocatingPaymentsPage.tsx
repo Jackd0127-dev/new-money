@@ -319,59 +319,61 @@ export function AllocatingPaymentsPage({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MoneyMetric
-          label="Selected pay"
-          value={formatPence(summary.payReceivedPence)}
-          breakdown={{
-            formula: 'Selected pay is the income saved on the pay period currently selected on the dashboard.',
-            lines: [
-              {
-                label: viewedPeriod ? 'Selected pay period' : 'No selected pay period',
-                value: formatPence(summary.payReceivedPence),
-                detail: viewedPeriod ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate}` : undefined,
-                tone: 'result',
-              },
-            ],
-          }}
-        />
-        <MoneyMetric
-          label="Cards owed"
-          value={formatPence(summary.totalOwedPence)}
-          tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
-          breakdown={getCardsOwedBreakdown(summary.cards)}
-        />
-        <MoneyMetric
-          label="Credit pots"
-          value={formatPence(summary.totalCreditPotsPence)}
-          tone={summary.totalCreditPotsPence > 0 ? 'good' : 'neutral'}
-          breakdown={getCreditPotsBreakdown(summary.cards)}
-        />
-        <MoneyMetric
-          label="Pay left after cards"
-          value={formatPence(summary.paycheckRemainingAfterCardsPence)}
-          tone={summary.paycheckRemainingAfterCardsPence < 0 ? 'bad' : 'good'}
-          breakdown={{
-            formula: 'Pay left after cards = selected pay - cards owed - paycheck-funded credit pots.',
-            lines: [
-              { label: 'Selected pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
-              { label: 'Cards owed', value: `-${formatPence(summary.totalOwedPence)}`, tone: 'subtract' },
-              { label: 'Paycheck credit pots', value: `-${formatPence(summary.totalPaycheckCreditPotsPence)}`, tone: 'subtract' },
-              {
-                label: 'Pay left after cards',
-                value: formatPence(summary.paycheckRemainingAfterCardsPence),
-                tone: 'result',
-              },
-            ],
-          }}
-        />
-      </div>
+      <Panel title="Credit card summary" description="Selected pay, card balances, credit pots, and card-adjusted pay." accent="cyan">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MoneyMetric
+            label="Selected pay"
+            value={formatPence(summary.payReceivedPence)}
+            breakdown={{
+              formula: 'Selected pay is the income saved on the pay period currently selected on the dashboard.',
+              lines: [
+                {
+                  label: viewedPeriod ? 'Selected pay period' : 'No selected pay period',
+                  value: formatPence(summary.payReceivedPence),
+                  detail: viewedPeriod ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate}` : undefined,
+                  tone: 'result',
+                },
+              ],
+            }}
+          />
+          <MoneyMetric
+            label="Cards owed"
+            value={formatPence(summary.totalOwedPence)}
+            tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
+            breakdown={getCardsOwedBreakdown(summary.cards)}
+          />
+          <MoneyMetric
+            label="Credit pots"
+            value={formatPence(summary.totalCreditPotsPence)}
+            tone={summary.totalCreditPotsPence > 0 ? 'good' : 'neutral'}
+            breakdown={getCreditPotsBreakdown(summary.cards)}
+          />
+          <MoneyMetric
+            label="Pay left after cards"
+            value={formatPence(summary.paycheckRemainingAfterCardsPence)}
+            tone={summary.paycheckRemainingAfterCardsPence < 0 ? 'bad' : 'good'}
+            breakdown={{
+              formula: 'Pay left after cards = selected pay - cards owed - paycheck-funded credit pots.',
+              lines: [
+                { label: 'Selected pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
+                { label: 'Cards owed', value: `-${formatPence(summary.totalOwedPence)}`, tone: 'subtract' },
+                { label: 'Paycheck credit pots', value: `-${formatPence(summary.totalPaycheckCreditPotsPence)}`, tone: 'subtract' },
+                {
+                  label: 'Pay left after cards',
+                  value: formatPence(summary.paycheckRemainingAfterCardsPence),
+                  tone: 'result',
+                },
+              ],
+            }}
+          />
+        </div>
+      </Panel>
 
-      <div className="grid gap-6 xl:grid-cols-[0.72fr_1.28fr]">
-        <div className="space-y-6">
+      <div className="space-y-6">
           <Panel
             title={editingCardId ? 'Edit credit card' : 'Add credit card'}
             description="Cards are used to group linked payments, spending, and repayments."
+            accent="blue"
           >
             <div className="space-y-4">
               <Field label="Card name">
@@ -423,6 +425,7 @@ export function AllocatingPaymentsPage({
           <Panel
             title="Credit Pots"
             description="Set money aside for a credit card without marking the card as paid."
+            accent="emerald"
           >
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -478,6 +481,7 @@ export function AllocatingPaymentsPage({
           <Panel
             title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
             description="Repayments reduce the amount shown as owed."
+            accent="amber"
           >
             <div className="space-y-4">
               <Field label="Credit card">
@@ -510,10 +514,11 @@ export function AllocatingPaymentsPage({
               </div>
             </div>
           </Panel>
-        </div>
-
-        <div className="space-y-6">
-          <Panel title="Credit pots" description="Paycheck pots reduce dashboard money left; external pots are tracked only against the card.">
+          <Panel
+            title="Credit pots"
+            description="Paycheck pots reduce dashboard money left; external pots are tracked only against the card."
+            accent="emerald"
+          >
             <div className="space-y-3">
               {activeCreditCardPots.length > 0 ? (
                 activeCreditCardPots.map((creditCardPot) => {
@@ -547,7 +552,7 @@ export function AllocatingPaymentsPage({
             </div>
           </Panel>
 
-          <Panel title="Credit cards" description="Tap a card for the full editable overview.">
+          <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan">
             <div className="grid gap-4 lg:grid-cols-2">
               {summary.cards.length > 0 ? (
                 summary.cards.map((cardSummary) => (
@@ -614,7 +619,11 @@ export function AllocatingPaymentsPage({
             </div>
           </Panel>
 
-          <Panel title="Payment allocation list" description="Link payments and card spending into cards by pay period.">
+          <Panel
+            title="Payment allocation list"
+            description="Link payments and card spending into cards by pay period."
+            accent="violet"
+          >
             <div className="space-y-3">
               {paymentGroups.length > 0 ? (
                 paymentGroups.map((group, index) => (
@@ -669,7 +678,7 @@ export function AllocatingPaymentsPage({
             </div>
           </Panel>
 
-          <Panel title="Card repayments" description="Edit or delete repayments already recorded.">
+          <Panel title="Card repayments" description="Edit or delete repayments already recorded." accent="amber">
             <div className="space-y-3">
               {snapshot.creditCardRepayments.length > 0 ? (
                 snapshot.creditCardRepayments.map((repayment) => {
@@ -711,7 +720,6 @@ export function AllocatingPaymentsPage({
               )}
             </div>
           </Panel>
-        </div>
       </div>
     </div>
   )
@@ -895,7 +903,7 @@ function CreditCardOverview({
 
   return (
     <div className="space-y-6">
-      <Panel>
+      <Panel accent="cyan">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <Button variant="secondary" onClick={onBack}>
@@ -964,7 +972,11 @@ function CreditCardOverview({
         />
       </div>
 
-      <Panel title="Credit pots for this card" description="Set-aside money is separate from real repayments until you apply it.">
+      <Panel
+        title="Credit pots for this card"
+        description="Set-aside money is separate from real repayments until you apply it."
+        accent="emerald"
+      >
         <div className="space-y-3">
           {cardCreditPots.length > 0 ? (
             cardCreditPots.map((creditCardPot) => (
@@ -983,7 +995,11 @@ function CreditCardOverview({
         </div>
       </Panel>
 
-      <Panel title="What changed this card" description="Every linked charge and repayment in the selected pay period.">
+      <Panel
+        title="What changed this card"
+        description="Every linked charge and repayment in the selected pay period."
+        accent="violet"
+      >
         <div className="space-y-3">
           {cardSummary.items.length > 0 ? (
             cardSummary.items.map((item) => (

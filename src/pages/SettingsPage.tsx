@@ -42,8 +42,8 @@ export function SettingsPage({
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-      <Panel title="Pay defaults" description="These defaults speed up each payday plan.">
+    <div className="space-y-6">
+      <Panel title="Pay defaults" description="These defaults speed up each payday plan." accent="blue">
         <div className="space-y-4">
           <Field label="Currency">
             <TextInput value={snapshot.settings.currency} disabled />
@@ -128,7 +128,11 @@ export function SettingsPage({
 
       {auth && sync && <CloudSyncPanel auth={auth} sync={sync} />}
 
-      <Panel title="Planner data" description="Signed-in data syncs automatically with Firebase in the background.">
+      <Panel
+        title="Planner data"
+        description="Signed-in data syncs automatically with Firebase in the background."
+        accent="emerald"
+      >
         <div className="grid gap-4 md:grid-cols-3">
           <MoneyMetric
             label="Pots"

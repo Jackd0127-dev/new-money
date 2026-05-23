@@ -37,6 +37,7 @@ export function DashboardPage({
     <div className="space-y-6">
       <Panel
         title="Selected pay period"
+        accent="blue"
         description={
           viewedPeriod
             ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate} · next payday ${viewedPeriod.nextPayday}`

@@ -32,7 +32,7 @@ export function CloudSyncPanel({
 
   if (!auth.isConfigured) {
     return (
-      <Panel title="Cloud sync" description="Firebase config is missing for this build.">
+      <Panel title="Cloud sync" description="Firebase config is missing for this build." accent="amber">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
           Add the Firebase environment values, rebuild, and this panel will enable sign-in and Firestore sync.
         </div>
@@ -42,7 +42,7 @@ export function CloudSyncPanel({
 
   if (auth.isLoading) {
     return (
-      <Panel title="Cloud sync" description="Checking your sign-in state.">
+      <Panel title="Cloud sync" description="Checking your sign-in state." accent="cyan">
         <div className="flex items-center gap-2 text-sm text-slate-600">
           <RefreshCw className="animate-spin" size={18} />
           Loading Firebase Auth
@@ -53,7 +53,7 @@ export function CloudSyncPanel({
 
   if (!auth.user) {
     return (
-      <Panel title="Cloud sync" description="Sign in to keep this planner synced across devices.">
+      <Panel title="Cloud sync" description="Sign in to keep this planner synced across devices." accent="cyan">
         <div className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <Button variant="secondary" onClick={auth.signInWithGoogle}>
@@ -123,6 +123,7 @@ export function CloudSyncPanel({
       title="Cloud sync"
       description="Signed-in planner data syncs with Firestore automatically."
       action={<StatusBadge status={sync.status} />}
+      accent="cyan"
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">

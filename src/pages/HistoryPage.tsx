@@ -18,7 +18,7 @@ export function HistoryPage({
   }
 
   return (
-    <Panel title="Pay period history" description="Previous paycheck plans and their allocations.">
+    <Panel title="Pay period history" description="Previous paycheck plans and their allocations." accent="blue">
       <div className="overflow-hidden rounded-lg border border-slate-200">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">

@@ -194,7 +194,7 @@ export function CalendarPage({
 
   return (
     <div className="space-y-6">
-      <Panel>
+      <Panel accent="cyan">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-lg bg-slate-950 text-white">
@@ -223,36 +223,38 @@ export function CalendarPage({
         </div>
       </Panel>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <MoneyMetric
-          label="Pay shown"
-          value={formatPence(payPence)}
-          tone={payPence > 0 ? 'good' : 'neutral'}
-          breakdown={{
-            formula: 'Pay shown = incoming payday events visible in this month.',
-            lines: getCalendarBreakdownLines(events.filter((event) => event.direction === 'in' && event.amountPence > 0), 'Pay shown'),
-          }}
-        />
-        <MoneyMetric
-          label="Costs shown"
-          value={formatPence(duePence)}
-          tone={duePence > 0 ? 'warning' : 'neutral'}
-          breakdown={{
-            formula: 'Costs shown = outgoing calendar events with a positive amount.',
-            lines: getCalendarBreakdownLines(events.filter((event) => event.direction === 'out' && event.amountPence > 0), 'Costs shown'),
-          }}
-        />
-        <MoneyMetric
-          label="Calendar items"
-          value={String(events.length)}
-          breakdown={{
-            formula: 'Calendar items = every sign rendered in the visible month.',
-            lines: getCalendarItemCountLines(events),
-          }}
-        />
-      </div>
+      <Panel title="Month summary" description="Incoming pay, outgoing costs, and visible calendar signals." accent="cyan">
+        <div className="grid gap-4 md:grid-cols-3">
+          <MoneyMetric
+            label="Pay shown"
+            value={formatPence(payPence)}
+            tone={payPence > 0 ? 'good' : 'neutral'}
+            breakdown={{
+              formula: 'Pay shown = incoming payday events visible in this month.',
+              lines: getCalendarBreakdownLines(events.filter((event) => event.direction === 'in' && event.amountPence > 0), 'Pay shown'),
+            }}
+          />
+          <MoneyMetric
+            label="Costs shown"
+            value={formatPence(duePence)}
+            tone={duePence > 0 ? 'warning' : 'neutral'}
+            breakdown={{
+              formula: 'Costs shown = outgoing calendar events with a positive amount.',
+              lines: getCalendarBreakdownLines(events.filter((event) => event.direction === 'out' && event.amountPence > 0), 'Costs shown'),
+            }}
+          />
+          <MoneyMetric
+            label="Calendar items"
+            value={String(events.length)}
+            breakdown={{
+              formula: 'Calendar items = every sign rendered in the visible month.',
+              lines: getCalendarItemCountLines(events),
+            }}
+          />
+        </div>
+      </Panel>
 
-      <Panel title="Calendar" description="Click any day to open the full day overview.">
+      <Panel title="Calendar" description="Click any day to open the full day overview." accent="violet">
         <div className="mb-4 flex flex-wrap gap-2">
           {Object.entries(eventStyles).map(([type, style]) => {
             const Icon = style.icon
@@ -424,8 +426,12 @@ function CalendarDayDetails({
         <DayMetric label="Info items" value={String(infoCount)} tone="neutral" />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.45fr_0.8fr]">
-        <Panel title="Timeline" description={events.length > 0 ? `${events.length} calendar item${events.length === 1 ? '' : 's'} on this day.` : 'No saved activity is attached to this date yet.'}>
+      <div className="space-y-4">
+        <Panel
+          title="Timeline"
+          description={events.length > 0 ? `${events.length} calendar item${events.length === 1 ? '' : 's'} on this day.` : 'No saved activity is attached to this date yet.'}
+          accent="violet"
+        >
           {events.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
               <p className="text-sm font-semibold text-slate-950">Nothing scheduled</p>
@@ -440,7 +446,11 @@ function CalendarDayDetails({
           )}
         </Panel>
 
-        <Panel title="Pay period context" description={payPeriod ? `${payPeriod.startDate} to ${payPeriod.endDate}` : 'No saved pay period covers this date.'}>
+        <Panel
+          title="Pay period context"
+          description={payPeriod ? `${payPeriod.startDate} to ${payPeriod.endDate}` : 'No saved pay period covers this date.'}
+          accent="blue"
+        >
           {payPeriod && costSummary ? (
             <div className="space-y-3">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -448,7 +458,7 @@ function CalendarDayDetails({
                 <p className="mt-2 text-2xl font-semibold text-slate-950">{formatPence(payPeriod.incomePence)}</p>
                 <p className="mt-1 text-xs text-slate-500">Payday {payPeriod.payday}</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <CompactMoneyLine label="Period costs" value={formatPence(costSummary.totalCostsPence)} />
                 <CompactMoneyLine label="Money left" value={formatPence(costSummary.moneyLeftPence)} emphasized={costSummary.moneyLeftPence >= 0} />
                 <CompactMoneyLine label="Debt reserves" value={formatPence(costSummary.debtReservesPence)} />

@@ -149,129 +149,132 @@ export function DebtsPage({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MoneyMetric
-          label="Active debt"
-          value={formatPence(summary.totalCurrentBalancePence)}
-          tone={summary.totalCurrentBalancePence > 0 ? 'warning' : 'good'}
-          breakdown={{
-            formula: 'Active debt = current balances for active debts above zero.',
-            lines:
-              activeDebts.length > 0
-                ? [
-                    ...activeDebts.map((debt) => ({
-                      label: debt.name,
-                      value: formatPence(debt.currentBalancePence),
-                      detail: debt.lender,
-                      tone: 'add' as const,
-                    })),
-                    {
-                      label: 'Active debt',
-                      value: formatPence(summary.totalCurrentBalancePence),
-                      tone: 'result' as const,
-                    },
-                  ]
-                : [{ label: 'No active debts', value: formatPence(0), tone: 'result' }],
-          }}
-        />
-        <MoneyMetric
-          label="Paid off"
-          value={formatPence(summary.totalPaidPence)}
-          tone="good"
-          breakdown={{
-            formula: 'Paid off uses the larger of recorded payments or balance reduction.',
-            lines: [
-              {
-                label: 'Recorded payments',
-                value: formatPence(recordedDebtPaymentPence),
-                detail: 'Debt payment entries linked to currently active debts.',
-                tone: 'add',
-              },
-              {
-                label: 'Balance reduction',
-                value: formatPence(balanceReductionPence),
-                detail: 'Original active debt total minus current active balance.',
-                tone: 'add',
-              },
-              {
-                label: 'Paid off shown',
-                value: formatPence(summary.totalPaidPence),
-                detail: 'The app shows whichever is higher so imported balance edits still count.',
-                tone: 'result',
-              },
-            ],
-          }}
-        />
-        <MoneyMetric
-          label="Debt due this pay period"
-          value={formatPence(debtDueThisPayPeriodPence)}
-          tone={debtDueThisPayPeriodPence > 0 ? 'warning' : 'neutral'}
-          breakdown={{
-            formula: currentPayPeriod
-              ? `Debt due this pay period = full outstanding balance for active debts due by ${currentPayPeriod.endDate}.`
-              : `Debt due this pay period needs a saved pay period that includes ${today}.`,
-            lines:
-              dueThisPayPeriod.length > 0
-                ? [
-                    ...dueThisPayPeriod.map((debt) => ({
-                      label: debt.name,
-                      value: formatPence(getDebtDueAmountAfterReservesPence(debt, snapshot.debtReserves)),
-                      detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
-                      tone: 'add' as const,
-                    })),
-                    {
-                      label: 'Debt due this pay period',
-                      value: formatPence(debtDueThisPayPeriodPence),
-                      detail: currentPayPeriod
-                        ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
-                        : undefined,
-                      tone: 'result' as const,
-                    },
-                  ]
-                : [
-                    {
-                      label: currentPayPeriod ? 'No debts due this pay period' : 'No active pay period today',
-                      value: formatPence(0),
-                      detail: currentPayPeriod
-                        ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
-                        : nextPayPeriod
-                          ? `Next saved period starts ${nextPayPeriod.startDate}; next payday is ${nextPayPeriod.nextPayday}.`
-                          : 'Create a paycheck plan to set the pay-period window.',
-                      tone: 'result',
-                    },
-                  ],
-          }}
-        />
-        <MoneyMetric
-          label="Overdue debts"
-          value={String(summary.overdueDebtCount)}
-          tone={summary.overdueDebtCount > 0 ? 'bad' : 'neutral'}
-          breakdown={{
-            formula: `Overdue debts = active debts with a due date before ${today}.`,
-            lines:
-              overdueDebts.length > 0
-                ? [
-                    ...overdueDebts.map((debt) => ({
-                      label: debt.name,
-                      value: debt.dueDate,
-                      detail: `${debt.lender} · ${formatPence(debt.currentBalancePence)} balance`,
-                      tone: 'subtract' as const,
-                    })),
-                    {
-                      label: 'Overdue debts',
-                      value: String(summary.overdueDebtCount),
-                      tone: 'result' as const,
-                    },
-                  ]
-                : [{ label: 'No overdue debts', value: '0', tone: 'result' }],
-          }}
-        />
-      </div>
+      <Panel title="Debt summary" description="Balances, paid-off progress, debts due in the selected pay period, and overdue items." accent="rose">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MoneyMetric
+            label="Active debt"
+            value={formatPence(summary.totalCurrentBalancePence)}
+            tone={summary.totalCurrentBalancePence > 0 ? 'warning' : 'good'}
+            breakdown={{
+              formula: 'Active debt = current balances for active debts above zero.',
+              lines:
+                activeDebts.length > 0
+                  ? [
+                      ...activeDebts.map((debt) => ({
+                        label: debt.name,
+                        value: formatPence(debt.currentBalancePence),
+                        detail: debt.lender,
+                        tone: 'add' as const,
+                      })),
+                      {
+                        label: 'Active debt',
+                        value: formatPence(summary.totalCurrentBalancePence),
+                        tone: 'result' as const,
+                      },
+                    ]
+                  : [{ label: 'No active debts', value: formatPence(0), tone: 'result' }],
+            }}
+          />
+          <MoneyMetric
+            label="Paid off"
+            value={formatPence(summary.totalPaidPence)}
+            tone="good"
+            breakdown={{
+              formula: 'Paid off uses the larger of recorded payments or balance reduction.',
+              lines: [
+                {
+                  label: 'Recorded payments',
+                  value: formatPence(recordedDebtPaymentPence),
+                  detail: 'Debt payment entries linked to currently active debts.',
+                  tone: 'add',
+                },
+                {
+                  label: 'Balance reduction',
+                  value: formatPence(balanceReductionPence),
+                  detail: 'Original active debt total minus current active balance.',
+                  tone: 'add',
+                },
+                {
+                  label: 'Paid off shown',
+                  value: formatPence(summary.totalPaidPence),
+                  detail: 'The app shows whichever is higher so imported balance edits still count.',
+                  tone: 'result',
+                },
+              ],
+            }}
+          />
+          <MoneyMetric
+            label="Debt due this pay period"
+            value={formatPence(debtDueThisPayPeriodPence)}
+            tone={debtDueThisPayPeriodPence > 0 ? 'warning' : 'neutral'}
+            breakdown={{
+              formula: currentPayPeriod
+                ? `Debt due this pay period = full outstanding balance for active debts due by ${currentPayPeriod.endDate}.`
+                : `Debt due this pay period needs a saved pay period that includes ${today}.`,
+              lines:
+                dueThisPayPeriod.length > 0
+                  ? [
+                      ...dueThisPayPeriod.map((debt) => ({
+                        label: debt.name,
+                        value: formatPence(getDebtDueAmountAfterReservesPence(debt, snapshot.debtReserves)),
+                        detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
+                        tone: 'add' as const,
+                      })),
+                      {
+                        label: 'Debt due this pay period',
+                        value: formatPence(debtDueThisPayPeriodPence),
+                        detail: currentPayPeriod
+                          ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
+                          : undefined,
+                        tone: 'result' as const,
+                      },
+                    ]
+                  : [
+                      {
+                        label: currentPayPeriod ? 'No debts due this pay period' : 'No active pay period today',
+                        value: formatPence(0),
+                        detail: currentPayPeriod
+                          ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}`
+                          : nextPayPeriod
+                            ? `Next saved period starts ${nextPayPeriod.startDate}; next payday is ${nextPayPeriod.nextPayday}.`
+                            : 'Create a paycheck plan to set the pay-period window.',
+                        tone: 'result',
+                      },
+                    ],
+            }}
+          />
+          <MoneyMetric
+            label="Overdue debts"
+            value={String(summary.overdueDebtCount)}
+            tone={summary.overdueDebtCount > 0 ? 'bad' : 'neutral'}
+            breakdown={{
+              formula: `Overdue debts = active debts with a due date before ${today}.`,
+              lines:
+                overdueDebts.length > 0
+                  ? [
+                      ...overdueDebts.map((debt) => ({
+                        label: debt.name,
+                        value: debt.dueDate,
+                        detail: `${debt.lender} · ${formatPence(debt.currentBalancePence)} balance`,
+                        tone: 'subtract' as const,
+                      })),
+                      {
+                        label: 'Overdue debts',
+                        value: String(summary.overdueDebtCount),
+                        tone: 'result' as const,
+                      },
+                    ]
+                  : [{ label: 'No overdue debts', value: '0', tone: 'result' }],
+            }}
+          />
+        </div>
+      </Panel>
 
-      <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+      <div className="space-y-6">
         <Panel
           title={editingDebtId ? 'Edit debt' : 'Add debt'}
           description="Track what is owed, when the next payment is due, and the running balance."
+          accent="rose"
         >
           <div className="space-y-4">
             <Field label="Debt name">
@@ -363,7 +366,7 @@ export function DebtsPage({
           </div>
         </Panel>
 
-        <Panel title="Record debt payment" description="Payments reduce the selected debt balance immediately.">
+        <Panel title="Record debt payment" description="Payments reduce the selected debt balance immediately." accent="emerald">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Debt">
               <SelectInput
@@ -437,7 +440,11 @@ export function DebtsPage({
         </Panel>
       </div>
 
-      <Panel title="Debt list" description="Use this to keep payoff progress visible without mixing debts into pots.">
+      <Panel
+        title="Debt list"
+        description="Use this to keep payoff progress visible without mixing debts into pots."
+        accent="amber"
+      >
         <div className="space-y-4">
           {visibleDebts.length > 0 ? (
             visibleDebts.map((debt) => {
@@ -536,7 +543,11 @@ export function DebtsPage({
         </div>
       </Panel>
 
-      <Panel title="Payment history" description="Delete a mistaken payment to restore it to the debt balance.">
+      <Panel
+        title="Payment history"
+        description="Delete a mistaken payment to restore it to the debt balance."
+        accent="blue"
+      >
         <div className="space-y-3">
           {snapshot.debtPayments.length > 0 ? (
             snapshot.debtPayments.slice(0, 12).map((payment) => {

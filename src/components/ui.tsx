@@ -15,24 +15,35 @@ export interface CalculationBreakdown {
   note?: string
 }
 
+type PanelAccent = 'slate' | 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'fuchsia'
+
 export function Panel({
   title,
   description,
   action,
   children,
   className,
+  accent = 'slate',
 }: {
   title?: string
   description?: string
   action?: ReactNode
   children: ReactNode
   className?: string
+  accent?: PanelAccent
 }) {
   return (
-    <section aria-label={title} className={clsx('rounded-lg border border-slate-200 bg-white p-5 shadow-sm', className)}>
+    <section
+      aria-label={title}
+      className={clsx(
+        'rounded-lg border bg-white p-5 shadow-sm',
+        panelAccentClassName(accent),
+        className,
+      )}
+    >
       {(title || description || action) && (
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
+        <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="min-w-0">
             {title && <h2 className="text-base font-semibold text-slate-950">{title}</h2>}
             {description && <p className="mt-1 text-sm leading-5 text-slate-500">{description}</p>}
           </div>
@@ -42,6 +53,38 @@ export function Panel({
       {children}
     </section>
   )
+}
+
+function panelAccentClassName(accent: PanelAccent): string {
+  if (accent === 'blue') {
+    return 'border-blue-200 border-t-blue-500 border-t-4'
+  }
+
+  if (accent === 'emerald') {
+    return 'border-emerald-200 border-t-emerald-500 border-t-4'
+  }
+
+  if (accent === 'amber') {
+    return 'border-amber-200 border-t-amber-500 border-t-4'
+  }
+
+  if (accent === 'rose') {
+    return 'border-rose-200 border-t-rose-500 border-t-4'
+  }
+
+  if (accent === 'violet') {
+    return 'border-violet-200 border-t-violet-500 border-t-4'
+  }
+
+  if (accent === 'cyan') {
+    return 'border-cyan-200 border-t-cyan-500 border-t-4'
+  }
+
+  if (accent === 'fuchsia') {
+    return 'border-fuchsia-200 border-t-fuchsia-500 border-t-4'
+  }
+
+  return 'border-slate-200 border-t-slate-300 border-t-4'
 }
 
 export function Button({

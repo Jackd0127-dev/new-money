@@ -129,10 +129,11 @@ export function RecurringPage({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
+      <div className="space-y-6">
         <Panel
           title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
           description="Bills reserve during the pay period that contains their due day."
+          accent="violet"
         >
         <div className="space-y-4">
           <Field label="Name">
@@ -193,7 +194,7 @@ export function RecurringPage({
         </div>
         </Panel>
 
-        <Panel title="Recurring payments" description="Inactive payments are ignored by payday planning.">
+        <Panel title="Recurring payments" description="Inactive payments are ignored by payday planning." accent="blue">
         <div className="space-y-3">
           {snapshot.recurringPayments.length > 0 ? (
             snapshot.recurringPayments.map((payment) => {
@@ -262,6 +263,7 @@ function NextPaydayOwedPanel({
   return (
     <Panel
       title="What you owe next payday"
+      accent="amber"
       description={
         period
           ? `${period.startDate} to ${period.endDate}`

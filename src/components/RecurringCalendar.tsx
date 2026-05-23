@@ -40,11 +40,12 @@ export function RecurringCalendar({
       title="Recurring calendar"
       description={`Next ${horizonDays} days of bills, subscriptions, insurance, debt payments, and investment commitments.`}
       action={<CalendarDays className="text-slate-500" size={20} />}
+      accent="cyan"
     >
-      <div className="grid gap-4 lg:grid-cols-[0.72fr_1.28fr]">
+      <div className="space-y-4">
         <div className="space-y-3">
           <MoneyMetric
-              label="Before next payday"
+            label="Before next payday"
             value={formatPence(dueBeforeNextPaydayPence)}
             tone={dueBeforeNextPaydayPence > 0 ? 'warning' : 'neutral'}
             breakdown={{

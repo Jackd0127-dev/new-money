@@ -10,7 +10,16 @@ import {
 } from '../domain/money'
 import { RecurringCalendar } from '../components/RecurringCalendar'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, MoneyMetric, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
+import {
+  Button,
+  Field,
+  MoneyMetric,
+  Panel,
+  SectionGrid,
+  SelectInput,
+  TextInput,
+  type CalculationBreakdown,
+} from '../components/ui'
 import type { PayFrequency, PayPeriod, PotAllocation, RecurringFrequency, RecurringPriority } from '../types/models'
 
 export function RecurringPage({
@@ -129,11 +138,12 @@ export function RecurringPage({
 
   return (
     <div className="space-y-6">
-      <div className="space-y-6">
+      <SectionGrid variant="wideRight">
         <Panel
           title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
           description="Bills reserve during the pay period that contains their due day."
           accent="violet"
+          density="compact"
         >
         <div className="space-y-4">
           <Field label="Name">
@@ -194,8 +204,13 @@ export function RecurringPage({
         </div>
         </Panel>
 
-        <Panel title="Recurring payments" description="Inactive payments are ignored by payday planning." accent="blue">
-        <div className="space-y-3">
+        <Panel
+          title="Recurring payments"
+          description="Inactive payments are ignored by payday planning."
+          accent="blue"
+          density="compact"
+        >
+        <div className="space-y-3 xl:max-h-[680px] xl:overflow-y-auto xl:pr-1">
           {snapshot.recurringPayments.length > 0 ? (
             snapshot.recurringPayments.map((payment) => {
               const pot = snapshot.pots.find((candidate) => candidate.id === payment.potId)
@@ -245,10 +260,12 @@ export function RecurringPage({
           )}
         </div>
         </Panel>
-      </div>
+      </SectionGrid>
 
-      <RecurringCalendar snapshot={snapshot} payPeriod={viewedPeriod} />
-      <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
+      <SectionGrid variant="balanced">
+        <RecurringCalendar snapshot={snapshot} payPeriod={viewedPeriod} />
+        <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
+      </SectionGrid>
     </div>
   )
 }
@@ -264,6 +281,7 @@ function NextPaydayOwedPanel({
     <Panel
       title="What you owe next payday"
       accent="amber"
+      density="compact"
       description={
         period
           ? `${period.startDate} to ${period.endDate}`

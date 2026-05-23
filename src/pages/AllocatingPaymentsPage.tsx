@@ -11,7 +11,17 @@ import {
   type CreditCardAllocationItem,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, CalculationDetails, Field, MoneyMetric, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
+import {
+  Button,
+  CalculationDetails,
+  Field,
+  MoneyMetric,
+  Panel,
+  SectionGrid,
+  SelectInput,
+  TextInput,
+  type CalculationBreakdown,
+} from '../components/ui'
 import type { CreditCardPotSource, PayPeriod, RecurringPayment, Transaction } from '../types/models'
 
 const cardColors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
@@ -374,11 +384,12 @@ export function AllocatingPaymentsPage({
         </div>
       </Panel>
 
-      <div className="space-y-6">
+      <SectionGrid variant="balanced">
           <Panel
             title={editingCardId ? 'Edit credit card' : 'Add credit card'}
             description="Cards are used to group linked payments, spending, and repayments."
             accent="blue"
+            density="compact"
           >
             <div className="space-y-4">
               <Field label="Card name">
@@ -442,6 +453,7 @@ export function AllocatingPaymentsPage({
             title="Credit Pots"
             description="Set money aside for a credit card without marking the card as paid."
             accent="emerald"
+            density="compact"
           >
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -493,11 +505,14 @@ export function AllocatingPaymentsPage({
               </div>
             </div>
           </Panel>
+      </SectionGrid>
 
+      <SectionGrid variant="balanced">
           <Panel
             title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
             description="Repayments reduce the amount shown as owed."
             accent="amber"
+            density="compact"
           >
             <div className="space-y-4">
               <Field label="Credit card">
@@ -534,8 +549,9 @@ export function AllocatingPaymentsPage({
             title="Credit pots"
             description="Paycheck pots reduce dashboard money left; external pots are tracked only against the card."
             accent="emerald"
+            density="compact"
           >
-            <div className="space-y-3">
+            <div className="space-y-3 xl:max-h-[520px] xl:overflow-y-auto xl:pr-1">
               {activeCreditCardPots.length > 0 ? (
                 activeCreditCardPots.map((creditCardPot) => {
                   const card = snapshot.creditCards.find((candidate) => candidate.id === creditCardPot.creditCardId)
@@ -567,9 +583,10 @@ export function AllocatingPaymentsPage({
               )}
             </div>
           </Panel>
+      </SectionGrid>
 
-          <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan">
-            <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan" density="compact">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {summary.cards.length > 0 ? (
                 summary.cards.map((cardSummary) => (
                   <button
@@ -635,12 +652,14 @@ export function AllocatingPaymentsPage({
             </div>
           </Panel>
 
+      <SectionGrid variant="wideLeft">
           <Panel
             title="Payment allocation list"
             description="Link payments and card spending into cards by pay period."
             accent="violet"
+            density="compact"
           >
-            <div className="space-y-3">
+            <div className="space-y-3 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
               {paymentGroups.length > 0 ? (
                 paymentGroups.map((group, index) => (
                   <details
@@ -694,8 +713,8 @@ export function AllocatingPaymentsPage({
             </div>
           </Panel>
 
-          <Panel title="Card repayments" description="Edit or delete repayments already recorded." accent="amber">
-            <div className="space-y-3">
+          <Panel title="Card repayments" description="Edit or delete repayments already recorded." accent="amber" density="compact">
+            <div className="space-y-3 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
               {snapshot.creditCardRepayments.length > 0 ? (
                 snapshot.creditCardRepayments.map((repayment) => {
                   const card = snapshot.creditCards.find((candidate) => candidate.id === repayment.creditCardId)
@@ -736,7 +755,7 @@ export function AllocatingPaymentsPage({
               )}
             </div>
           </Panel>
-      </div>
+      </SectionGrid>
     </div>
   )
 }
@@ -927,7 +946,7 @@ function CreditCardOverview({
 
   return (
     <div className="space-y-6">
-      <Panel accent="cyan">
+      <Panel accent="cyan" density="compact">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <Button variant="secondary" onClick={onBack}>
@@ -1012,53 +1031,57 @@ function CreditCardOverview({
         />
       </div>
 
-      <Panel
-        title="Credit pots for this card"
-        description="Set-aside money is separate from real repayments until you apply it."
-        accent="emerald"
-      >
-        <div className="space-y-3">
-          {cardCreditPots.length > 0 ? (
-            cardCreditPots.map((creditCardPot) => (
-              <CreditCardPotRow
-                key={creditCardPot.id}
-                creditCardPot={creditCardPot}
-                cardName={cardSummary.card.name}
-                onApply={onApplyCreditCardPot}
-                onDelete={onDeleteCreditCardPot}
-                onEdit={onEditCreditCardPot}
-              />
-            ))
-          ) : (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No credit pots set aside for this card.</p>
-          )}
-        </div>
-      </Panel>
+      <SectionGrid variant="wideRight">
+        <Panel
+          title="Credit pots for this card"
+          description="Set-aside money is separate from real repayments until you apply it."
+          accent="emerald"
+          density="compact"
+        >
+          <div className="space-y-3 xl:max-h-[620px] xl:overflow-y-auto xl:pr-1">
+            {cardCreditPots.length > 0 ? (
+              cardCreditPots.map((creditCardPot) => (
+                <CreditCardPotRow
+                  key={creditCardPot.id}
+                  creditCardPot={creditCardPot}
+                  cardName={cardSummary.card.name}
+                  onApply={onApplyCreditCardPot}
+                  onDelete={onDeleteCreditCardPot}
+                  onEdit={onEditCreditCardPot}
+                />
+              ))
+            ) : (
+              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No credit pots set aside for this card.</p>
+            )}
+          </div>
+        </Panel>
 
-      <Panel
-        title="What changed this card"
-        description="Every linked charge and repayment in the selected pay period."
-        accent="violet"
-      >
-        <div className="space-y-3">
-          {cardSummary.items.length > 0 ? (
-            cardSummary.items.map((item) => (
-              <CreditCardOverviewItem
-                key={item.id}
-                activeCards={activeCards}
-                item={item}
-                snapshot={snapshot}
-                onDeleteCustomPayment={onDeleteCustomPayment}
-                onDeleteRepayment={onDeleteRepayment}
-                onEditRepayment={onEditRepayment}
-                onLinkPayment={onLinkPayment}
-              />
-            ))
-          ) : (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No linked charges in this pay period.</p>
-          )}
-        </div>
-      </Panel>
+        <Panel
+          title="What changed this card"
+          description="Every linked charge and repayment in the selected pay period."
+          accent="violet"
+          density="compact"
+        >
+          <div className="space-y-3 xl:max-h-[620px] xl:overflow-y-auto xl:pr-1">
+            {cardSummary.items.length > 0 ? (
+              cardSummary.items.map((item) => (
+                <CreditCardOverviewItem
+                  key={item.id}
+                  activeCards={activeCards}
+                  item={item}
+                  snapshot={snapshot}
+                  onDeleteCustomPayment={onDeleteCustomPayment}
+                  onDeleteRepayment={onDeleteRepayment}
+                  onEditRepayment={onEditRepayment}
+                  onLinkPayment={onLinkPayment}
+                />
+              ))
+            ) : (
+              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No linked charges in this pay period.</p>
+            )}
+          </div>
+        </Panel>
+      </SectionGrid>
     </div>
   )
 }

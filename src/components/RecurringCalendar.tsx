@@ -41,9 +41,10 @@ export function RecurringCalendar({
       description={`Next ${horizonDays} days of bills, subscriptions, insurance, debt payments, and investment commitments.`}
       action={<CalendarDays className="text-slate-500" size={20} />}
       accent="cyan"
+      density="compact"
     >
       <div className="space-y-4">
-        <div className="space-y-3">
+        <div className="space-y-3 xl:max-h-[620px] xl:overflow-y-auto xl:pr-1">
           <MoneyMetric
             label="Before next payday"
             value={formatPence(dueBeforeNextPaydayPence)}

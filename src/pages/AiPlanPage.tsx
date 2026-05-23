@@ -4,7 +4,7 @@ import { CheckCircle2, CircleAlert, Send, Sparkles } from 'lucide-react'
 import { getDebtReservePlans, type DebtReservePlan } from '../domain/debtPlanner'
 import { formatPence, toIsoDate } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, CalculationDetails, MoneyMetric, Panel, TextArea } from '../components/ui'
+import { Button, CalculationDetails, MoneyMetric, Panel, SectionGrid, TextArea } from '../components/ui'
 import type { DebtReserve, PayPeriod } from '../types/models'
 
 type AiPlanUser = {
@@ -181,13 +181,14 @@ export function AiPlanPage({
         </div>
       </Panel>
 
-      <div className="space-y-6">
+      <SectionGrid variant="wideLeft">
         <Panel
           title="Debt recommendations"
           description="Reserve money first. Apply it only once the debt is actually paid."
           accent="amber"
+          density="compact"
         >
-          <div className="space-y-4">
+          <div className="space-y-4 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
             {plans.length > 0 ? (
               plans.map((plan) => (
                 <DebtPlanCard
@@ -213,6 +214,7 @@ export function AiPlanPage({
           title="Ask AI planner"
           description="The selected AI provider explains the calculated plan. It does not invent or change the maths."
           accent="blue"
+          density="compact"
         >
           <div className="space-y-4">
             <TextArea
@@ -239,7 +241,7 @@ export function AiPlanPage({
             )}
           </div>
         </Panel>
-      </div>
+      </SectionGrid>
     </div>
   )
 }

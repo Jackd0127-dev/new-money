@@ -24,7 +24,7 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
-import { Button, MoneyMetric, Panel } from '../components/ui'
+import { Button, MoneyMetric, Panel, SectionGrid } from '../components/ui'
 
 type CalendarEventType =
   | 'payday'
@@ -223,7 +223,7 @@ export function CalendarPage({
         </div>
       </Panel>
 
-      <Panel title="Month summary" description="Incoming pay, outgoing costs, and visible calendar signals." accent="cyan">
+      <Panel title="Month summary" description="Incoming pay, outgoing costs, and visible calendar signals." accent="cyan" density="compact">
         <div className="grid gap-4 md:grid-cols-3">
           <MoneyMetric
             label="Pay shown"
@@ -254,7 +254,7 @@ export function CalendarPage({
         </div>
       </Panel>
 
-      <Panel title="Calendar" description="Click any day to open the full day overview." accent="violet">
+      <Panel title="Calendar" description="Click any day to open the full day overview." accent="violet" density="compact">
         <div className="mb-4 flex flex-wrap gap-2">
           {Object.entries(eventStyles).map(([type, style]) => {
             const Icon = style.icon
@@ -426,11 +426,12 @@ function CalendarDayDetails({
         <DayMetric label="Info items" value={String(infoCount)} tone="neutral" />
       </div>
 
-      <div className="space-y-4">
+      <SectionGrid variant="wideLeft">
         <Panel
           title="Timeline"
           description={events.length > 0 ? `${events.length} calendar item${events.length === 1 ? '' : 's'} on this day.` : 'No saved activity is attached to this date yet.'}
           accent="violet"
+          density="compact"
         >
           {events.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
@@ -450,6 +451,7 @@ function CalendarDayDetails({
           title="Pay period context"
           description={payPeriod ? `${payPeriod.startDate} to ${payPeriod.endDate}` : 'No saved pay period covers this date.'}
           accent="blue"
+          density="compact"
         >
           {payPeriod && costSummary ? (
             <div className="space-y-3">
@@ -472,7 +474,7 @@ function CalendarDayDetails({
             </div>
           )}
         </Panel>
-      </div>
+      </SectionGrid>
     </div>
   )
 }

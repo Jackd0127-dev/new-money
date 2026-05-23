@@ -10,7 +10,16 @@ import {
   toIsoDate,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, CalculationDetails, Field, MoneyMetric, Panel, SelectInput, TextInput } from '../components/ui'
+import {
+  Button,
+  CalculationDetails,
+  Field,
+  MoneyMetric,
+  Panel,
+  SectionGrid,
+  SelectInput,
+  TextInput,
+} from '../components/ui'
 import type { Debt, DebtStatus, PayPeriod } from '../types/models'
 
 interface DebtFormState {
@@ -270,11 +279,12 @@ export function DebtsPage({
         </div>
       </Panel>
 
-      <div className="space-y-6">
+      <SectionGrid variant="balanced">
         <Panel
           title={editingDebtId ? 'Edit debt' : 'Add debt'}
           description="Track what is owed, when the next payment is due, and the running balance."
           accent="rose"
+          density="compact"
         >
           <div className="space-y-4">
             <Field label="Debt name">
@@ -366,7 +376,12 @@ export function DebtsPage({
           </div>
         </Panel>
 
-        <Panel title="Record debt payment" description="Payments reduce the selected debt balance immediately." accent="emerald">
+        <Panel
+          title="Record debt payment"
+          description="Payments reduce the selected debt balance immediately."
+          accent="emerald"
+          density="compact"
+        >
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Debt">
               <SelectInput
@@ -438,16 +453,18 @@ export function DebtsPage({
             )}
           </div>
         </Panel>
-      </div>
+      </SectionGrid>
 
-      <Panel
-        title="Debt list"
-        description="Use this to keep payoff progress visible without mixing debts into pots."
-        accent="amber"
-      >
-        <div className="space-y-4">
-          {visibleDebts.length > 0 ? (
-            visibleDebts.map((debt) => {
+      <SectionGrid variant="wideLeft">
+        <Panel
+          title="Debt list"
+          description="Use this to keep payoff progress visible without mixing debts into pots."
+          accent="amber"
+          density="compact"
+        >
+          <div className="space-y-4 xl:max-h-[820px] xl:overflow-y-auto xl:pr-1">
+            {visibleDebts.length > 0 ? (
+              visibleDebts.map((debt) => {
               const paidPence = Math.max(0, debt.originalAmountPence - debt.currentBalancePence)
               const progressPercent =
                 debt.originalAmountPence > 0
@@ -536,19 +553,20 @@ export function DebtsPage({
                   </div>
                 </div>
               )
-            })
-          ) : (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debts tracked yet.</p>
-          )}
-        </div>
-      </Panel>
+              })
+            ) : (
+              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debts tracked yet.</p>
+            )}
+          </div>
+        </Panel>
 
-      <Panel
-        title="Payment history"
-        description="Delete a mistaken payment to restore it to the debt balance."
-        accent="blue"
-      >
-        <div className="space-y-3">
+        <Panel
+          title="Payment history"
+          description="Delete a mistaken payment to restore it to the debt balance."
+          accent="blue"
+          density="compact"
+        >
+          <div className="space-y-3 xl:max-h-[820px] xl:overflow-y-auto xl:pr-1">
           {snapshot.debtPayments.length > 0 ? (
             snapshot.debtPayments.slice(0, 12).map((payment) => {
               const debt = snapshot.debts.find((candidate) => candidate.id === payment.debtId)
@@ -588,8 +606,9 @@ export function DebtsPage({
           ) : (
             <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debt payments yet.</p>
           )}
-        </div>
-      </Panel>
+          </div>
+        </Panel>
+      </SectionGrid>
     </div>
   )
 }

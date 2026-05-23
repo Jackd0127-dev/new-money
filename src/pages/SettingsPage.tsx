@@ -6,7 +6,7 @@ import { CloudSyncPanel } from '../components/CloudSyncPanel'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { CloudSyncController } from '../hooks/useCloudSync'
 import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
-import { Button, Field, MoneyMetric, Panel, SelectInput, TextArea, TextInput } from '../components/ui'
+import { Button, Field, MoneyMetric, Panel, SectionGrid, SelectInput, TextArea, TextInput } from '../components/ui'
 import type { AiProvider, PayFrequency } from '../types/models'
 
 export function SettingsPage({
@@ -43,90 +43,92 @@ export function SettingsPage({
 
   return (
     <div className="space-y-6">
-      <Panel title="Pay defaults" description="These defaults speed up each payday plan." accent="blue">
-        <div className="space-y-4">
-          <Field label="Currency">
-            <TextInput value={snapshot.settings.currency} disabled />
-          </Field>
-          <Field label="Hourly rate">
-            <TextInput
-              inputMode="decimal"
-              value={hourlyRate}
-              onChange={(event) => {
-                setHourlyRate(event.target.value)
-                setSaved(false)
-              }}
-            />
-          </Field>
-          <Field label="Default hours worked">
-            <TextInput
-              inputMode="decimal"
-              value={defaultHoursWorked}
-              onChange={(event) => {
-                setDefaultHoursWorked(event.target.value)
-                setSaved(false)
-              }}
-            />
-          </Field>
-          <Field label="Pay frequency">
-            <SelectInput
-              value={payFrequency}
-              onChange={(event) => {
-                setPayFrequency(event.target.value as PayFrequency)
-                setSaved(false)
-              }}
+      <SectionGrid variant="balanced">
+        <Panel title="Pay defaults" description="These defaults speed up each payday plan." accent="blue" density="compact">
+          <div className="space-y-4">
+            <Field label="Currency">
+              <TextInput value={snapshot.settings.currency} disabled />
+            </Field>
+            <Field label="Hourly rate">
+              <TextInput
+                inputMode="decimal"
+                value={hourlyRate}
+                onChange={(event) => {
+                  setHourlyRate(event.target.value)
+                  setSaved(false)
+                }}
+              />
+            </Field>
+            <Field label="Default hours worked">
+              <TextInput
+                inputMode="decimal"
+                value={defaultHoursWorked}
+                onChange={(event) => {
+                  setDefaultHoursWorked(event.target.value)
+                  setSaved(false)
+                }}
+              />
+            </Field>
+            <Field label="Pay frequency">
+              <SelectInput
+                value={payFrequency}
+                onChange={(event) => {
+                  setPayFrequency(event.target.value as PayFrequency)
+                  setSaved(false)
+                }}
+              >
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Biweekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="custom">Custom</option>
+              </SelectInput>
+            </Field>
+            <Field
+              label="AI provider"
+              hint="Gemini stays as the default. OpenRouter uses openai/gpt-oss-120b:free on the server."
             >
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="custom">Custom</option>
-            </SelectInput>
-          </Field>
-          <Field
-            label="AI provider"
-            hint="Gemini stays as the default. OpenRouter uses openai/gpt-oss-120b:free on the server."
-          >
-            <SelectInput
-              aria-label="AI provider"
-              value={aiProvider}
-              onChange={(event) => {
-                setAiProvider(event.target.value as AiProvider)
-                setSaved(false)
-              }}
+              <SelectInput
+                aria-label="AI provider"
+                value={aiProvider}
+                onChange={(event) => {
+                  setAiProvider(event.target.value as AiProvider)
+                  setSaved(false)
+                }}
+              >
+                <option value="gemini">Gemini</option>
+                <option value="openrouter">OpenRouter gpt-oss-120b</option>
+              </SelectInput>
+            </Field>
+            <Field
+              label="Custom AI instructions"
+              hint="Used for tone and preferences only. The app still owns all money calculations."
             >
-              <option value="gemini">Gemini</option>
-              <option value="openrouter">OpenRouter gpt-oss-120b</option>
-            </SelectInput>
-          </Field>
-          <Field
-            label="Custom AI instructions"
-            hint="Used for tone and preferences only. The app still owns all money calculations."
-          >
-            <TextArea
-              aria-label="Custom AI instructions"
-              value={aiInstructions}
-              onChange={(event) => {
-                setAiInstructions(event.target.value)
-                setSaved(false)
-              }}
-              placeholder="Example: be direct, prioritise debts due soon, keep answers short."
-            />
-          </Field>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={saveSettings} disabled={saved}>
-              Save settings
-            </Button>
-            {saved && (
-              <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
-                <CheckCircle2 size={18} />
-                Settings saved
-              </span>
-            )}
+              <TextArea
+                aria-label="Custom AI instructions"
+                value={aiInstructions}
+                onChange={(event) => {
+                  setAiInstructions(event.target.value)
+                  setSaved(false)
+                }}
+                placeholder="Example: be direct, prioritise debts due soon, keep answers short."
+              />
+            </Field>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={saveSettings} disabled={saved}>
+                Save settings
+              </Button>
+              {saved && (
+                <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
+                  <CheckCircle2 size={18} />
+                  Settings saved
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
 
-      {auth && sync && <CloudSyncPanel auth={auth} sync={sync} />}
+        {auth && sync && <CloudSyncPanel auth={auth} sync={sync} />}
+      </SectionGrid>
 
       <Panel
         title="Planner data"

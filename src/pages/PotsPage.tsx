@@ -3,7 +3,16 @@ import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, CalculationDetails, Field, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
+import {
+  Button,
+  CalculationDetails,
+  Field,
+  Panel,
+  SectionGrid,
+  SelectInput,
+  TextInput,
+  type CalculationBreakdown,
+} from '../components/ui'
 import type { PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
@@ -76,12 +85,14 @@ export function PotsPage({
 
   return (
     <div className="space-y-6">
-      <Panel
-        title={editingPot ? 'Edit pot' : 'Create pot'}
-        description="Pots carry balances forward until you spend or move the money."
-        accent="emerald"
-      >
-        <div className="space-y-4">
+      <SectionGrid variant="wideRight">
+        <Panel
+          title={editingPot ? 'Edit pot' : 'Create pot'}
+          description="Pots carry balances forward until you spend or move the money."
+          accent="emerald"
+          density="compact"
+        >
+          <div className="space-y-4">
           <Field label="Pot name">
             <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Car insurance" />
           </Field>
@@ -126,15 +137,16 @@ export function PotsPage({
               </Button>
             )}
           </div>
-        </div>
-      </Panel>
+          </div>
+        </Panel>
 
-      <Panel
-        title="Pots"
-        description="Click a pot to see spending, recurring payments, and allocations tied to it."
-        accent="blue"
-      >
-        <div className="space-y-4">
+        <Panel
+          title="Pots"
+          description="Click a pot to see spending, recurring payments, and allocations tied to it."
+          accent="blue"
+          density="compact"
+        >
+          <div className="space-y-4 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
           {activePots.map((pot) => {
             const isOpen = openPotId === pot.id
             const activityItems = getPotActivityItems(pot.id, snapshot)
@@ -225,8 +237,9 @@ export function PotsPage({
               </div>
             )
           })}
-        </div>
-      </Panel>
+          </div>
+        </Panel>
+      </SectionGrid>
     </div>
   )
 }

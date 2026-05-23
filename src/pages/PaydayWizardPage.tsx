@@ -14,6 +14,7 @@ import {
   Field,
   MoneyMetric,
   Panel,
+  SectionGrid,
   SelectInput,
   TextInput,
   type CalculationBreakdown,
@@ -87,95 +88,97 @@ export function PaydayWizardPage({
   return (
     <div className="space-y-6">
       <Panel title="Payday wizard" description="Enter pay details for this payday." accent="emerald">
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Payday">
-            <TextInput
-              type="date"
-              value={payday}
-              onChange={(event) => {
-                loadPayday(event.target.value)
-              }}
-            />
-          </Field>
-          <Field label="Pay frequency">
-            <SelectInput
-              value={payFrequency}
-              onChange={(event) => {
-                setPayFrequency(event.target.value as PayFrequency)
-                setSaved(false)
-              }}
-            >
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="custom">Custom</option>
-            </SelectInput>
-          </Field>
-          <Field label="Hours worked">
-            <TextInput
-              inputMode="decimal"
-              value={hoursWorked}
-              onChange={(event) => {
-                setHoursWorked(event.target.value)
-                setSaved(false)
-              }}
-            />
-          </Field>
-          <Field label="Hourly rate">
-            <TextInput
-              inputMode="decimal"
-              value={hourlyRate}
-              onChange={(event) => {
-                setHourlyRate(event.target.value)
-                setSaved(false)
-              }}
-            />
-          </Field>
-          <Field label="Actual received" hint="Optional. If payroll differs, this overrides the estimate.">
-            <TextInput
-              inputMode="decimal"
-              placeholder="Leave blank"
-              value={actualReceived}
-              onChange={(event) => {
-                setActualReceived(event.target.value)
-                setSaved(false)
-              }}
-            />
-          </Field>
-          <Field label="Pay period">
-            <TextInput value={`${period.startDate} to ${period.endDate}`} disabled />
-          </Field>
-        </div>
+        <SectionGrid variant="wideLeft" className="items-start">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Payday">
+              <TextInput
+                type="date"
+                value={payday}
+                onChange={(event) => {
+                  loadPayday(event.target.value)
+                }}
+              />
+            </Field>
+            <Field label="Pay frequency">
+              <SelectInput
+                value={payFrequency}
+                onChange={(event) => {
+                  setPayFrequency(event.target.value as PayFrequency)
+                  setSaved(false)
+                }}
+              >
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Biweekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="custom">Custom</option>
+              </SelectInput>
+            </Field>
+            <Field label="Hours worked">
+              <TextInput
+                inputMode="decimal"
+                value={hoursWorked}
+                onChange={(event) => {
+                  setHoursWorked(event.target.value)
+                  setSaved(false)
+                }}
+              />
+            </Field>
+            <Field label="Hourly rate">
+              <TextInput
+                inputMode="decimal"
+                value={hourlyRate}
+                onChange={(event) => {
+                  setHourlyRate(event.target.value)
+                  setSaved(false)
+                }}
+              />
+            </Field>
+            <Field label="Actual received" hint="Optional. If payroll differs, this overrides the estimate.">
+              <TextInput
+                inputMode="decimal"
+                placeholder="Leave blank"
+                value={actualReceived}
+                onChange={(event) => {
+                  setActualReceived(event.target.value)
+                  setSaved(false)
+                }}
+              />
+            </Field>
+            <Field label="Pay period">
+              <TextInput value={`${period.startDate} to ${period.endDate}`} disabled />
+            </Field>
+          </div>
 
-        <div className="mt-5">
-          <MoneyMetric
-            label="Pay to plan"
-            value={formatPence(incomePence)}
-            tone="primary"
-            breakdown={getPayToPlanBreakdown({
-              actualAmountPence,
-              calculatedPence,
-              hourlyRatePence,
-              hours,
-              incomePence,
-            })}
-          />
-        </div>
+          <div className="space-y-5">
+            <MoneyMetric
+              label="Pay to plan"
+              value={formatPence(incomePence)}
+              tone="primary"
+              breakdown={getPayToPlanBreakdown({
+                actualAmountPence,
+                calculatedPence,
+                hourlyRatePence,
+                hours,
+                incomePence,
+              })}
+            />
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button disabled={!canSubmit || saved} onClick={submitPlan}>
-            {existingPeriod ? 'Update paycheck plan' : 'Confirm paycheck plan'}
-          </Button>
-          <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium capitalize text-slate-700">
-            {payFrequency} plan
-          </span>
-          {saved && (
-            <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
-              <CheckCircle2 size={18} />
-              Saved locally
-            </span>
-          )}
-        </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button disabled={!canSubmit || saved} onClick={submitPlan}>
+                {existingPeriod ? 'Update paycheck plan' : 'Confirm paycheck plan'}
+              </Button>
+              <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium capitalize text-slate-700">
+                {payFrequency} plan
+              </span>
+              {saved && (
+                <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
+                  <CheckCircle2 size={18} />
+                  Saved locally
+                </span>
+              )}
+            </div>
+          </div>
+        </SectionGrid>
       </Panel>
     </div>
   )

@@ -24,6 +24,7 @@ export function Panel({
   children,
   className,
   accent = 'slate',
+  density = 'normal',
 }: {
   title?: string
   description?: string
@@ -31,18 +32,25 @@ export function Panel({
   children: ReactNode
   className?: string
   accent?: PanelAccent
+  density?: 'normal' | 'compact'
 }) {
   return (
     <section
       aria-label={title}
       className={clsx(
-        'rounded-lg border bg-white p-5 shadow-sm',
+        'rounded-lg border bg-white shadow-sm',
+        density === 'compact' ? 'p-4' : 'p-5',
         panelAccentClassName(accent),
         className,
       )}
     >
       {(title || description || action) && (
-        <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+        <div
+          className={clsx(
+            'flex items-start justify-between gap-4 border-b border-slate-100',
+            density === 'compact' ? 'mb-3 pb-3' : 'mb-4 pb-4',
+          )}
+        >
           <div className="min-w-0">
             {title && <h2 className="text-base font-semibold text-slate-950">{title}</h2>}
             {description && <p className="mt-1 text-sm leading-5 text-slate-500">{description}</p>}
@@ -52,6 +60,32 @@ export function Panel({
       )}
       {children}
     </section>
+  )
+}
+
+export function SectionGrid({
+  children,
+  variant = 'balanced',
+  className,
+}: {
+  children: ReactNode
+  variant?: 'balanced' | 'wideLeft' | 'wideRight' | 'compactLeft' | 'three'
+  className?: string
+}) {
+  return (
+    <div
+      className={clsx(
+        'grid items-start gap-6',
+        variant === 'balanced' && 'xl:grid-cols-2',
+        variant === 'wideLeft' && 'xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]',
+        variant === 'wideRight' && 'xl:grid-cols-[minmax(320px,0.65fr)_minmax(0,1.35fr)]',
+        variant === 'compactLeft' && 'xl:grid-cols-[minmax(280px,0.55fr)_minmax(0,1.45fr)]',
+        variant === 'three' && 'xl:grid-cols-3',
+        className,
+      )}
+    >
+      {children}
+    </div>
   )
 }
 

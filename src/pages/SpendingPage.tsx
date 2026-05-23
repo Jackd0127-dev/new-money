@@ -8,7 +8,16 @@ import type {
   TransactionInput,
   TransactionUpdateInput,
 } from '../hooks/usePlannerData'
-import { Button, CalculationDetails, Field, Panel, SelectInput, TextInput, type CalculationBreakdown } from '../components/ui'
+import {
+  Button,
+  CalculationDetails,
+  Field,
+  Panel,
+  SectionGrid,
+  SelectInput,
+  TextInput,
+  type CalculationBreakdown,
+} from '../components/ui'
 import type { PaymentMethod, PayPeriod } from '../types/models'
 
 const quickAmounts = ['3.00', '5.00', '10.00', '20.00', '50.00']
@@ -118,12 +127,14 @@ export function SpendingPage({
 
   return (
     <div className="space-y-6">
-      <Panel
-        title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
-        description="Choose whether the money came from a pot or a credit card."
-        accent="blue"
-      >
-        <div className="space-y-4">
+      <SectionGrid variant="wideRight">
+        <Panel
+          title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
+          description="Choose whether the money came from a pot or a credit card."
+          accent="blue"
+          density="compact"
+        >
+          <div className="space-y-4">
           <Field label="Amount">
             <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="12.50" />
           </Field>
@@ -220,15 +231,16 @@ export function SpendingPage({
               </Button>
             </div>
           </div>
-        </div>
-      </Panel>
+          </div>
+        </Panel>
 
-      <Panel
-        title="Spending by pay period"
-        description="Manual spending is grouped into the pay period containing its date."
-        accent="rose"
-      >
-        <div className="space-y-3">
+        <Panel
+          title="Spending by pay period"
+          description="Manual spending is grouped into the pay period containing its date."
+          accent="rose"
+          density="compact"
+        >
+          <div className="space-y-3 xl:max-h-[720px] xl:overflow-y-auto xl:pr-1">
           {groupedTransactions.length > 0 ? (
             groupedTransactions.map((group, index) => (
               <details
@@ -305,8 +317,9 @@ export function SpendingPage({
           ) : (
             <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No spending entries yet.</p>
           )}
-        </div>
-      </Panel>
+          </div>
+        </Panel>
+      </SectionGrid>
     </div>
   )
 }

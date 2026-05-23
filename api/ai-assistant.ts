@@ -471,7 +471,7 @@ function getProjectionSeedPeriod(
   const sortedPeriods = sortByDate(snapshot.payPeriods, 'payday')
   const upcomingPeriod = sortedPeriods.find((period) => period.endDate >= todayIso)
 
-  return upcomingPeriod ?? sortedPeriods.at(-1) ?? null
+  return upcomingPeriod ?? sortedPeriods[sortedPeriods.length - 1] ?? null
 }
 
 function buildProjectedPeriods({

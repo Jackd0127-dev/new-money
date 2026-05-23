@@ -148,6 +148,7 @@ export interface CreditCard extends Timestamped {
   provider: string
   limitPence: number
   openingBalancePence?: number
+  designId?: string | null
   dueDay?: number | null
   dueDate?: string | null
   color: string

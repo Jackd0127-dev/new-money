@@ -1,6 +1,13 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, PenLine, PlusCircle, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, PenLine, PlusCircle, Trash2, X } from 'lucide-react'
 
+import {
+  creditCardDesigns,
+  defaultCreditCardDesignId,
+  getCreditCardDesign,
+  normalizeCreditCardDesignId,
+  type CreditCardDesign,
+} from '../domain/creditCardDesigns'
 import {
   findPayPeriodForDate,
   formatPence,
@@ -54,6 +61,7 @@ export function AllocatingPaymentsPage({
   const [cardOpeningBalance, setCardOpeningBalance] = useState('')
   const [cardDueDay, setCardDueDay] = useState('1')
   const [cardColor, setCardColor] = useState(cardColors[0])
+  const [cardDesignId, setCardDesignId] = useState(defaultCreditCardDesignId)
   const [editingRepaymentId, setEditingRepaymentId] = useState<string | null>(null)
   const [repaymentCardId, setRepaymentCardId] = useState(activeCards[0]?.id ?? '')
   const [repaymentAmount, setRepaymentAmount] = useState('')
@@ -82,6 +90,7 @@ export function AllocatingPaymentsPage({
       provider: cardProvider.trim(),
       limitPence,
       openingBalancePence,
+      designId: cardDesignId,
       dueDay,
       dueDate: null,
       color: cardColor,
@@ -190,6 +199,7 @@ export function AllocatingPaymentsPage({
     setCardOpeningBalance(((card.openingBalancePence ?? 0) / 100).toFixed(2))
     setCardDueDay(String(card.dueDay ?? 1))
     setCardColor(card.color)
+    setCardDesignId(normalizeCreditCardDesignId(card.designId))
   }
 
   function startEditingRepayment(repaymentId: string) {
@@ -215,6 +225,7 @@ export function AllocatingPaymentsPage({
     setCardOpeningBalance('')
     setCardDueDay('1')
     setCardColor(cardColors[0])
+    setCardDesignId(defaultCreditCardDesignId)
   }
 
   function resetRepaymentForm() {
@@ -250,6 +261,9 @@ export function AllocatingPaymentsPage({
         </div>
         <Field label="Due day">
           <TextInput inputMode="numeric" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} />
+        </Field>
+        <Field label="Card design">
+          <CreditCardDesignPicker selectedDesignId={cardDesignId} onChange={setCardDesignId} />
         </Field>
         <Field label="Colour">
           <div className="flex flex-wrap gap-2">
@@ -548,14 +562,42 @@ export function AllocatingPaymentsPage({
 
 type CreditCardVisualDetails = {
   balance: string
-  limit: string
+  owed: string
   available: string
-  cardNumber: string
   name: string
+  provider: string
   dueDate: string
 }
 
-const cardAssetPath = '/figma-assets'
+function CreditCardDesignPicker({
+  selectedDesignId,
+  onChange,
+}: {
+  selectedDesignId: string
+  onChange: (designId: string) => void
+}) {
+  return (
+    <div className="credit-card-design-picker">
+      {creditCardDesigns.map((design) => {
+        const isSelected = normalizeCreditCardDesignId(selectedDesignId) === design.id
+
+        return (
+          <button
+            key={design.id}
+            type="button"
+            aria-pressed={isSelected}
+            className="credit-card-design-picker__option"
+            onClick={() => onChange(design.id)}
+          >
+            <img src={`${design.assetPath}/reference.png`} alt="" />
+            <span>{design.label}</span>
+            {isSelected && <Check size={16} aria-hidden="true" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 function CreditCardPreviewButton({
   cardSummary,
@@ -564,6 +606,8 @@ function CreditCardPreviewButton({
   cardSummary: CreditCardAllocationCardSummary
   onClick: () => void
 }) {
+  const design = getCreditCardDesign(cardSummary.card.designId)
+
   return (
     <button
       type="button"
@@ -571,36 +615,136 @@ function CreditCardPreviewButton({
       aria-label={`Open ${cardSummary.card.name} card details`}
       className="figma-card-button"
     >
-      <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} />
+      <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} design={design} />
+      <div className="figma-card-button__summary">
+        <p className="figma-card-button__name">{cardSummary.card.name}</p>
+        <p className="figma-card-button__meta">
+          <span><strong>{formatPence(cardSummary.owedPence)}</strong> owed</span>
+          <span><strong>{formatPence(cardSummary.availableCreditPence)}</strong> available</span>
+          <span>{cardSummary.dueLabel}</span>
+        </p>
+      </div>
     </button>
   )
 }
 
-function FigmaCreditCard({ details }: { details: CreditCardVisualDetails }) {
+function FigmaCreditCard({ details, design }: { details: CreditCardVisualDetails; design: CreditCardDesign }) {
   return (
     <div
-      className="figma-credit-card"
+      className={`figma-credit-card figma-credit-card--${design.id}`}
       aria-label={`${details.name} credit card`}
       data-figma-file="IM8pUThhZaULAtixfqj42D"
-      data-node-id="3111:68"
+      data-figma-design={design.id}
+      data-node-id={design.nodeId}
     >
-      <img className="figma-credit-card__panel figma-credit-card__panel-left" src={`${cardAssetPath}/left-panel.svg`} alt="" />
-      <img className="figma-credit-card__panel figma-credit-card__panel-right" src={`${cardAssetPath}/right-panel.svg`} alt="" />
-      <img className="figma-credit-card__circles" src={`${cardAssetPath}/circle.svg`} alt="" />
-      <div className="figma-credit-card__noise" aria-hidden="true" />
-
-      <div className="figma-credit-card__values">
-        <p>{details.balance}</p>
-        <p>{details.limit}</p>
-        <p>{details.available}</p>
+      <CreditCardArtwork design={design} />
+      <div className="figma-credit-card__content">
+        <div className="figma-credit-card__identity">
+          <span>{details.provider}</span>
+          <strong>{details.name}</strong>
+        </div>
+        <div className="figma-credit-card__due">
+          <span>Due date</span>
+          <strong>{details.dueDate}</strong>
+        </div>
+        <dl className="figma-credit-card__metrics">
+          <div>
+            <dt>Balance</dt>
+            <dd>{details.balance}</dd>
+          </div>
+          <div>
+            <dt>Owed</dt>
+            <dd>{details.owed}</dd>
+          </div>
+          <div>
+            <dt>Available</dt>
+            <dd>{details.available}</dd>
+          </div>
+        </dl>
       </div>
+      <span className="sr-only">
+        {details.name}, due {details.dueDate}, {details.balance} balance, {details.owed} owed after credit pots, {details.available} available.
+      </span>
+    </div>
+  )
+}
 
-      <p className="figma-credit-card__number">{details.cardNumber}</p>
+function CreditCardArtwork({ design }: { design: CreditCardDesign }) {
+  const assetPath = design.assetPath
 
-      <div className="figma-credit-card__footer">
-        <p className="figma-credit-card__holder">{details.name}</p>
-        <p className="figma-credit-card__due">{details.dueDate}</p>
+  if (design.id === 'cart-minimal-11') {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <div className="figma-credit-card__stripe" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--contactless" src={`${assetPath}/contactless-logo.svg`} alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--visa" src={`${assetPath}/visa-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
       </div>
+    )
+  }
+
+  if (design.id === 'cart-minimal-13') {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/card-mask.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/contour-lines.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--bottom" src={`${assetPath}/bottom-panel.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--mastercard" src={`${assetPath}/mastercard-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
+      </div>
+    )
+  }
+
+  if (design.id === 'cart-gradient-11' || design.id === 'cart-gradient-12') {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/mask-vector.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--oversized" src={`${assetPath}/background-vector.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--visa" src={`${assetPath}/visa-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
+      </div>
+    )
+  }
+
+  if (design.id === 'cart-geometric-11') {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/mask-vector.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--circle" src={`${assetPath}/circle.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--visa" src={`${assetPath}/visa-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
+      </div>
+    )
+  }
+
+  if (design.id === 'cart-geometric-15') {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/mask-rectangle.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--left-panel" src={`${assetPath}/green-panel.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--right-panel" src={`${assetPath}/right-panel.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--geometric" src={`${assetPath}/geometric-vector.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--visa" src={`${assetPath}/visa-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="figma-credit-card__art" aria-hidden="true">
+      <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/background-panel.svg`} alt="" />
+      <img className="figma-credit-card__layer figma-credit-card__layer--corner-circle" src={`${assetPath}/corner-circle.svg`} alt="" />
+      <img className="figma-credit-card__layer figma-credit-card__layer--chevron-back" src={`${assetPath}/chevron-back.svg`} alt="" />
+      <img className="figma-credit-card__layer figma-credit-card__layer--chevron-front" src={`${assetPath}/chevron-front.svg`} alt="" />
+      <img className="figma-credit-card__layer figma-credit-card__layer--right-panel" src={`${assetPath}/right-panel.svg`} alt="" />
+      <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+      <img className="figma-credit-card__logo figma-credit-card__logo--visa" src={`${assetPath}/visa-logo.svg`} alt="" />
+      <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
     </div>
   )
 }
@@ -608,19 +752,12 @@ function FigmaCreditCard({ details }: { details: CreditCardVisualDetails }) {
 function getCreditCardVisualDetails(cardSummary: CreditCardAllocationCardSummary): CreditCardVisualDetails {
   return {
     balance: formatPence(cardSummary.owedPence),
-    limit: formatPence(cardSummary.card.limitPence),
+    owed: formatPence(cardSummary.remainingAfterCreditPotsPence),
     available: formatPence(cardSummary.availableCreditPence),
-    cardNumber: getDisplayCardNumber(cardSummary.card.id),
     name: cardSummary.card.name,
+    provider: cardSummary.card.provider,
     dueDate: cardSummary.dueLabel,
   }
-}
-
-function getDisplayCardNumber(cardId: string): string {
-  const seed = [...cardId].reduce((total, character) => total + character.charCodeAt(0), 0)
-  const lastFour = String(seed % 10000).padStart(4, '0')
-
-  return `**** **** **** ${lastFour}`
 }
 
 type PaymentRowSource = 'recurring' | 'custom' | 'transaction'
@@ -727,6 +864,7 @@ function CreditCardOverview({
   onEditCard: (cardId: string) => void
   onEditRepayment: (repaymentId: string) => void
 }) {
+  const design = getCreditCardDesign(cardSummary.card.designId)
   const chargedPence = cardSummary.items
     .filter((item) => item.source !== 'repayment')
     .reduce((total, item) => total + item.amountPence, 0)
@@ -758,7 +896,7 @@ function CreditCardOverview({
       <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.05fr)]">
         <div className="space-y-4">
           <div className="max-w-[561px]">
-            <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} />
+            <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} design={design} />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">

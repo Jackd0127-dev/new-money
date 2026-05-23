@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 
+import { defaultCreditCardDesignId } from '../domain/creditCardDesigns'
 import type {
   CreditCard,
   CreditCardPot,
@@ -131,6 +132,30 @@ export class PlannerDatabase extends Dexie {
       transaction.table('creditCards').toCollection().modify((card) => {
         if (typeof card.openingBalancePence !== 'number') {
           card.openingBalancePence = 0
+        }
+      }),
+    )
+
+    this.version(7).stores({
+      settings: 'id',
+      pots: 'id, type, archived',
+      recurringPayments: 'id, potId, creditCardId, active, frequency',
+      payPeriods: 'id, payday, status',
+      paychecks: 'id, payPeriodId',
+      potAllocations: 'id, payPeriodId, potId',
+      transactions: 'id, potId, payPeriodId, creditCardId, date, type, paymentMethod',
+      debts: 'id, status, dueDate',
+      debtPayments: 'id, debtId, date',
+      debtReserves: 'id, debtId, payPeriodId, payday, status',
+      creditCards: 'id, archived',
+      creditCardPots: 'id, creditCardId, payPeriodId, payday, source, status',
+      customPayments: 'id, creditCardId, dueDate, status',
+      creditCardRepayments: 'id, creditCardId, date',
+      dailyBriefs: 'id, date',
+    }).upgrade((transaction) =>
+      transaction.table('creditCards').toCollection().modify((card) => {
+        if (typeof card.designId !== 'string') {
+          card.designId = defaultCreditCardDesignId
         }
       }),
     )

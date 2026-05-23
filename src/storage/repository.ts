@@ -1,4 +1,5 @@
 import { defaultPots, defaultSettings } from '../data/defaults'
+import { normalizeCreditCardDesignId } from '../domain/creditCardDesigns'
 import {
   calculatePaycheckAmount,
   createNextPayPeriod,
@@ -107,6 +108,7 @@ export interface CreditCardInput {
   provider: string
   limitPence: number
   openingBalancePence?: number
+  designId?: string | null
   dueDay?: number | null
   dueDate?: string | null
   color: string
@@ -261,7 +263,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     debts,
     debtPayments,
     debtReserves,
-    creditCards: creditCards.sort((a, b) => a.name.localeCompare(b.name)),
+    creditCards: creditCards.map(normalizeCreditCard).sort((a, b) => a.name.localeCompare(b.name)),
     creditCardPots: creditCardPots.sort(sortCreditCardPots),
     customPayments,
     creditCardRepayments,
@@ -346,6 +348,7 @@ export async function addCreditCard(input: CreditCardInput): Promise<void> {
     provider: input.provider.trim(),
     limitPence: Math.max(0, input.limitPence),
     openingBalancePence: Math.max(0, input.openingBalancePence ?? 0),
+    designId: normalizeCreditCardDesignId(input.designId),
     dueDay: input.dueDay ?? null,
     dueDate: input.dueDate ?? null,
     color: input.color,
@@ -361,6 +364,7 @@ export async function updateCreditCard(cardId: string, input: CreditCardUpdateIn
     provider: input.provider.trim(),
     limitPence: Math.max(0, input.limitPence),
     openingBalancePence: Math.max(0, input.openingBalancePence ?? 0),
+    designId: normalizeCreditCardDesignId(input.designId),
     dueDay: input.dueDay ?? null,
     dueDate: input.dueDate ?? null,
     color: input.color,
@@ -1353,6 +1357,14 @@ function normalizeSettings(settings?: Settings): Settings {
     defaultHoursWorked: settings?.defaultHoursWorked ?? defaultSettings.defaultHoursWorked,
     aiInstructions: settings?.aiInstructions ?? defaultSettings.aiInstructions,
     aiProvider: settings?.aiProvider ?? defaultSettings.aiProvider,
+  }
+}
+
+function normalizeCreditCard(card: CreditCard): CreditCard {
+  return {
+    ...card,
+    openingBalancePence: Math.max(0, card.openingBalancePence ?? 0),
+    designId: normalizeCreditCardDesignId(card.designId),
   }
 }
 

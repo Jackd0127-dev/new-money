@@ -584,10 +584,12 @@ describe('allocating payments page', () => {
     await user.type(within(cardPanel).getByLabelText('Existing balance'), '250')
     await user.clear(within(cardPanel).getByLabelText('Due day'))
     await user.type(within(cardPanel).getByLabelText('Due day'), '9')
+    await user.click(within(cardPanel).getByRole('button', { name: 'Gradient 12' }))
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
 
     expect(actions.addCreditCard).toHaveBeenCalledWith({
       color: '#2563eb',
+      designId: 'cart-gradient-12',
       dueDate: null,
       dueDay: 9,
       limitPence: 120000,
@@ -685,8 +687,11 @@ describe('allocating payments page', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Open Everyday Amex card details' })).toBeInTheDocument()
+    const cardVisual = screen.getByLabelText('Everyday Amex credit card')
+    expect(cardVisual).toHaveAttribute('data-figma-design', 'cart-minimal-11')
+    expect(cardVisual).toHaveAttribute('data-node-id', '3114:376')
     expect(screen.getAllByText('Everyday Amex').length).toBeGreaterThan(0)
-    expect(screen.getByText('Day 12')).toBeInTheDocument()
+    expect(screen.getAllByText('Day 12').length).toBeGreaterThan(0)
     expect(screen.getAllByText('£72.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('£928.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('Pay left after cards')).not.toBeInTheDocument()
@@ -706,6 +711,7 @@ describe('allocating payments page', () => {
           provider: 'Amex',
           limitPence: 100000,
           openingBalancePence: 20000,
+          designId: 'cart-geometric-15',
           dueDay: 12,
           dueDate: null,
           color: '#2563eb',
@@ -737,8 +743,8 @@ describe('allocating payments page', () => {
 
     expect(screen.getByRole('region', { name: 'Card activity' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Credit pots for this card' })).not.toBeInTheDocument()
-    expect(screen.getByText('Balance')).toBeInTheDocument()
-    expect(screen.getByText('Available')).toBeInTheDocument()
+    expect(screen.getAllByText('Balance').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Available').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Edit card' }))
 
@@ -749,6 +755,7 @@ describe('allocating payments page', () => {
 
     expect(actions.updateCreditCard).toHaveBeenCalledWith('card-amex', {
       color: '#2563eb',
+      designId: 'cart-geometric-15',
       dueDate: null,
       dueDay: 12,
       limitPence: 100000,

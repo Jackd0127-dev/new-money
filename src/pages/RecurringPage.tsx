@@ -43,6 +43,7 @@ export function RecurringPage({
     transactions: snapshot.transactions,
     debts: snapshot.debts,
     creditCardRepayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
     debtReserves: snapshot.debtReserves,
     pots: snapshot.pots,
     potAllocations: [
@@ -356,7 +357,7 @@ function getNextPaydayOwedBreakdown(
   period: PayPeriod,
 ): CalculationBreakdown {
   return {
-    formula: 'Total owed next payday = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit-card net.',
+    formula: 'Total owed next payday = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit pots + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -392,6 +393,12 @@ function getNextPaydayOwedBreakdown(
         label: 'Debt due',
         value: formatPence(summary.debtMinimumsPence),
         detail: 'Remaining outstanding balances overdue or due by this next period end.',
+        tone: 'add',
+      },
+      {
+        label: 'Credit card pots',
+        value: formatPence(summary.creditCardPotsPence),
+        detail: 'Paycheck-funded credit pots planned inside this next pay period.',
         tone: 'add',
       },
       {
@@ -483,6 +490,10 @@ function formatCostSource(source: PayPeriodCostSummary['items'][number]['source'
 
   if (source === 'debt_reserve') {
     return 'Debt reserve'
+  }
+
+  if (source === 'credit_card_pot') {
+    return 'Credit pot'
   }
 
   return 'Card repayment'

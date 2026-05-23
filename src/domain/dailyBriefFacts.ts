@@ -6,6 +6,7 @@ import {
 } from './money.js'
 import type {
   CreditCard,
+  CreditCardPot,
   CreditCardRepayment,
   CustomPayment,
   Debt,
@@ -42,6 +43,7 @@ export interface DailyBriefSnapshotInput {
   debts?: Debt[]
   debtPayments?: DebtPayment[]
   creditCards?: CreditCard[]
+  creditCardPots?: CreditCardPot[]
   customPayments?: CustomPayment[]
   creditCardRepayments?: CreditCardRepayment[]
   dailyBriefs?: unknown[]
@@ -152,6 +154,7 @@ export function getDailyBriefFacts(
   const customPayments = snapshot.customPayments ?? []
   const debts = snapshot.debts ?? []
   const creditCards = snapshot.creditCards ?? []
+  const creditCardPots = snapshot.creditCardPots ?? []
   const transactions = snapshot.transactions ?? []
   const creditCardRepayments = snapshot.creditCardRepayments ?? []
   const payPeriod = getCurrentPayPeriod(payPeriods, todayIso)
@@ -215,6 +218,7 @@ export function getDailyBriefFacts(
     customPayments,
     transactions,
     repayments: creditCardRepayments,
+    creditCardPots,
     payPeriod,
   })
   const cardLinkedPaymentsPence = duePayments

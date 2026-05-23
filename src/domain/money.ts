@@ -1,5 +1,6 @@
 import type {
   CreditCard,
+  CreditCardPot,
   CreditCardRepayment,
   CustomPayment,
   Debt,
@@ -69,6 +70,7 @@ interface PayPeriodCostSummaryInput {
   transactions: Transaction[]
   debts: Debt[]
   creditCardRepayments: CreditCardRepayment[]
+  creditCardPots?: CreditCardPot[]
   debtReserves?: DebtReserve[]
   pots?: Pot[]
   potAllocations?: PotAllocation[]
@@ -90,6 +92,7 @@ export type PeriodCostItemSource =
   | 'pot_allocation'
   | 'debt_minimum'
   | 'debt_reserve'
+  | 'credit_card_pot'
   | 'credit_card_repayment'
 
 export interface PeriodCostItem {
@@ -110,6 +113,7 @@ export interface PayPeriodCostSummary {
   potAllocationsPence: number
   debtMinimumsPence: number
   debtReservesPence: number
+  creditCardPotsPence: number
   creditCardChargesPence: number
   creditCardRepaymentsPence: number
   creditCardNetPence: number
@@ -147,6 +151,7 @@ interface CreditCardAllocationInput {
   customPayments: CustomPayment[]
   transactions: Transaction[]
   repayments: CreditCardRepayment[]
+  creditCardPots?: CreditCardPot[]
   payPeriod: PayPeriod | null
 }
 
@@ -163,6 +168,10 @@ export interface CreditCardAllocationItem {
 export interface CreditCardAllocationCardSummary {
   card: CreditCard
   owedPence: number
+  creditPotPence: number
+  paycheckCreditPotPence: number
+  externalCreditPotPence: number
+  remainingAfterCreditPotsPence: number
   availableCreditPence: number
   utilisationPercent: number
   dueLabel: string
@@ -173,6 +182,9 @@ export interface CreditCardAllocationSummary {
   cards: CreditCardAllocationCardSummary[]
   unlinkedItems: CreditCardAllocationItem[]
   totalOwedPence: number
+  totalCreditPotsPence: number
+  totalPaycheckCreditPotsPence: number
+  totalExternalCreditPotsPence: number
   payReceivedPence: number
   paycheckRemainingAfterCardsPence: number
 }
@@ -374,6 +386,7 @@ export function getPayPeriodCostSummary({
   transactions,
   debts,
   creditCardRepayments,
+  creditCardPots = [],
   debtReserves = [],
   pots = [],
   potAllocations = [],
@@ -489,6 +502,23 @@ export function getPayPeriodCostSummary({
       potId: null,
     }))
     .filter((item) => item.amountPence > 0)
+  const creditCardPotItems = creditCardPots
+    .filter(
+      (creditCardPot) =>
+        creditCardPot.status === 'active' &&
+        creditCardPot.source === 'paycheck' &&
+        creditCardPot.amountPence > 0 &&
+        isCreditCardPotInPayPeriod(creditCardPot, payPeriod),
+    )
+    .map((creditCardPot) => ({
+      id: `credit-card-pot-${creditCardPot.id}`,
+      label: creditCardPot.name,
+      amountPence: creditCardPot.amountPence,
+      date: creditCardPot.payday ?? payPeriod.payday,
+      source: 'credit_card_pot' as const,
+      creditCardId: creditCardPot.creditCardId,
+      potId: null,
+    }))
   const repaymentItems = creditCardRepayments
     .filter((repayment) => isIsoDateBetweenInclusive(repayment.date, payPeriod.startDate, payPeriod.endDate))
     .map((repayment) => ({
@@ -507,6 +537,7 @@ export function getPayPeriodCostSummary({
     ...potAllocationItems,
     ...debtReserveItems,
     ...debtMinimumItems,
+    ...creditCardPotItems,
     ...repaymentItems,
   ].sort(sortPeriodCostItems)
   const directRecurringPence = sumPositive(
@@ -521,6 +552,7 @@ export function getPayPeriodCostSummary({
   const potAllocationsPence = sumPositive(potAllocationItems)
   const debtReservesPence = sumPositive(debtReserveItems)
   const debtMinimumsPence = sumPositive(debtMinimumItems)
+  const creditCardPotsPence = sumPositive(creditCardPotItems)
   const creditCardChargesPence = sumPositive(
     [...recurringItems, ...savedPaymentItems, ...manualSpendItems].filter((item) => item.creditCardId),
   )
@@ -535,6 +567,7 @@ export function getPayPeriodCostSummary({
     potAllocationsPence +
     debtReservesPence +
     debtMinimumsPence +
+    creditCardPotsPence +
     creditCardNetPence
   const moneyLeftPence = payPeriod.incomePence - totalCostsPence
 
@@ -546,6 +579,7 @@ export function getPayPeriodCostSummary({
     potAllocationsPence,
     debtMinimumsPence,
     debtReservesPence,
+    creditCardPotsPence,
     creditCardChargesPence,
     creditCardRepaymentsPence,
     creditCardNetPence,
@@ -562,6 +596,7 @@ export function getCreditCardAllocationSummary({
   customPayments,
   transactions,
   repayments,
+  creditCardPots = [],
   payPeriod,
 }: CreditCardAllocationInput): CreditCardAllocationSummary {
   const rangeStart = payPeriod?.startDate ?? '0000-01-01'
@@ -633,11 +668,25 @@ export function getCreditCardAllocationSummary({
   const cards = activeCards.map((card) => {
     const cardItems = items.filter((item) => item.creditCardId === card.id)
     const owedPence = Math.max(0, cardItems.reduce((total, item) => total + item.amountPence, 0))
+    const activeCreditPots = creditCardPots.filter(
+      (creditCardPot) =>
+        creditCardPot.creditCardId === card.id &&
+        creditCardPot.status === 'active' &&
+        creditCardPot.amountPence > 0 &&
+        (!payPeriod || creditCardPot.source === 'external' || isCreditCardPotInPayPeriod(creditCardPot, payPeriod)),
+    )
+    const creditPotPence = sumCreditCardPots(activeCreditPots)
+    const paycheckCreditPotPence = sumCreditCardPots(activeCreditPots.filter((creditCardPot) => creditCardPot.source === 'paycheck'))
+    const externalCreditPotPence = sumCreditCardPots(activeCreditPots.filter((creditCardPot) => creditCardPot.source === 'external'))
     const availableCreditPence = Math.max(0, card.limitPence - owedPence)
 
     return {
       card,
       owedPence,
+      creditPotPence,
+      paycheckCreditPotPence,
+      externalCreditPotPence,
+      remainingAfterCreditPotsPence: Math.max(0, owedPence - creditPotPence),
       availableCreditPence,
       utilisationPercent: card.limitPence > 0 ? Math.round((owedPence / card.limitPence) * 100) : 0,
       dueLabel: getCreditCardDueLabel(card),
@@ -645,13 +694,19 @@ export function getCreditCardAllocationSummary({
     }
   })
   const totalOwedPence = cards.reduce((total, card) => total + card.owedPence, 0)
+  const totalCreditPotsPence = cards.reduce((total, card) => total + card.creditPotPence, 0)
+  const totalPaycheckCreditPotsPence = cards.reduce((total, card) => total + card.paycheckCreditPotPence, 0)
+  const totalExternalCreditPotsPence = cards.reduce((total, card) => total + card.externalCreditPotPence, 0)
 
   return {
     cards,
     unlinkedItems: items.filter((item) => !item.creditCardId),
     totalOwedPence,
+    totalCreditPotsPence,
+    totalPaycheckCreditPotsPence,
+    totalExternalCreditPotsPence,
     payReceivedPence: payPeriod?.incomePence ?? 0,
-    paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalOwedPence,
+    paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalOwedPence - totalPaycheckCreditPotsPence,
   }
 }
 
@@ -770,6 +825,7 @@ function createEmptyPayPeriodCostSummary(): PayPeriodCostSummary {
     potAllocationsPence: 0,
     debtMinimumsPence: 0,
     debtReservesPence: 0,
+    creditCardPotsPence: 0,
     creditCardChargesPence: 0,
     creditCardRepaymentsPence: 0,
     creditCardNetPence: 0,
@@ -791,8 +847,27 @@ function isDebtReserveInPayPeriod(
   return reserve.periodStartDate === payPeriod.startDate && reserve.periodEndDate === payPeriod.endDate
 }
 
+function isCreditCardPotInPayPeriod(
+  creditCardPot: Pick<CreditCardPot, 'payPeriodId' | 'periodStartDate' | 'periodEndDate' | 'payday'>,
+  payPeriod: PayPeriod,
+): boolean {
+  if (creditCardPot.payPeriodId) {
+    return creditCardPot.payPeriodId === payPeriod.id
+  }
+
+  if (creditCardPot.periodStartDate && creditCardPot.periodEndDate) {
+    return creditCardPot.periodStartDate === payPeriod.startDate && creditCardPot.periodEndDate === payPeriod.endDate
+  }
+
+  return Boolean(creditCardPot.payday && isIsoDateBetweenInclusive(creditCardPot.payday, payPeriod.startDate, payPeriod.endDate))
+}
+
 function sumPositive(items: Array<{ amountPence: number }>): number {
   return items.reduce((total, item) => total + Math.max(0, item.amountPence), 0)
+}
+
+function sumCreditCardPots(creditCardPots: CreditCardPot[]): number {
+  return creditCardPots.reduce((total, creditCardPot) => total + Math.max(0, creditCardPot.amountPence), 0)
 }
 
 function sortPeriodCostItems(a: PeriodCostItem, b: PeriodCostItem): number {

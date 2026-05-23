@@ -273,6 +273,7 @@ function createSnapshot(overrides: Partial<DailyBriefSnapshotInput> = {}): Daily
         updatedAt: timestamp,
       },
     ],
+    creditCardPots: [],
     customPayments: [
       {
         id: 'custom-tyres',

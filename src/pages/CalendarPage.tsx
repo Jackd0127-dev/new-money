@@ -37,6 +37,7 @@ type CalendarEventType =
   | 'debtReserve'
   | 'debtPayment'
   | 'cardRepayment'
+  | 'creditCardPot'
   | 'allocation'
   | 'spending'
 
@@ -102,6 +103,11 @@ const eventStyles: Record<CalendarEventType, { label: string; className: string;
     label: 'Card repayment',
     className: 'border-cyan-200 bg-cyan-50 text-cyan-800',
     icon: CreditCard,
+  },
+  creditCardPot: {
+    label: 'Credit pot',
+    className: 'border-lime-200 bg-lime-50 text-lime-800',
+    icon: PiggyBank,
   },
   allocation: {
     label: 'Pot allocation',
@@ -379,6 +385,7 @@ function CalendarDayDetails({
         transactions: snapshot.transactions,
         debts: snapshot.debts,
         creditCardRepayments: snapshot.creditCardRepayments,
+        creditCardPots: snapshot.creditCardPots,
         debtReserves: snapshot.debtReserves,
         pots: snapshot.pots,
         potAllocations: snapshot.potAllocations,
@@ -707,6 +714,26 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         description: repayment.note || 'Recorded credit card repayment.',
       }
     })
+  const creditCardPotEvents: CalendarEvent[] = snapshot.creditCardPots
+    .filter((creditCardPot) => {
+      const date = creditCardPot.payday ?? creditCardPot.createdAt.slice(0, 10)
+
+      return creditCardPot.status === 'active' && date >= startDate && date <= endDate
+    })
+    .map((creditCardPot) => {
+      const card = cardById.get(creditCardPot.creditCardId)
+      const date = creditCardPot.payday ?? creditCardPot.createdAt.slice(0, 10)
+
+      return {
+        id: `credit-card-pot-${creditCardPot.id}`,
+        date,
+        title: creditCardPot.name,
+        amountPence: creditCardPot.amountPence,
+        type: 'creditCardPot' as const,
+        direction: creditCardPot.source === 'paycheck' ? 'out' as const : 'info' as const,
+        description: `${creditCardPot.source === 'paycheck' ? 'Paycheck-funded' : 'External'} set-aside for ${card?.name ?? 'credit card'}${creditCardPot.note ? ` · ${creditCardPot.note}` : ''}.`,
+      }
+    })
   const allocationEvents: CalendarEvent[] = snapshot.potAllocations
     .flatMap((allocation): CalendarEvent[] => {
       const period = periodById.get(allocation.payPeriodId)
@@ -756,6 +783,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
     ...reserveEvents,
     ...debtPaymentEvents,
     ...cardRepaymentEvents,
+    ...creditCardPotEvents,
     ...allocationEvents,
     ...spendingEvents,
   ].sort((a, b) => {
@@ -841,8 +869,9 @@ function getEventRank(type: CalendarEventType): number {
     debt: 7,
     debtPayment: 8,
     cardRepayment: 9,
-    allocation: 10,
-    spending: 11,
+    creditCardPot: 10,
+    allocation: 11,
+    spending: 12,
   }
 
   return ranks[type]

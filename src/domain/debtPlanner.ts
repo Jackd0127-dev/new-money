@@ -5,6 +5,7 @@ import {
 } from './money.js'
 import type {
   CreditCardRepayment,
+  CreditCardPot,
   CustomPayment,
   Debt,
   DebtReserve,
@@ -25,6 +26,7 @@ export interface DebtReservePlanInput {
   recurringPayments: RecurringPayment[]
   customPayments: CustomPayment[]
   transactions: Transaction[]
+  creditCardPots?: CreditCardPot[]
   creditCardRepayments: CreditCardRepayment[]
   debtReserves: DebtReserve[]
   pots?: Pot[]
@@ -169,6 +171,7 @@ function toPlanPeriod(
     transactions: input.transactions,
     debts: input.allDebts.filter((debt) => debt.id !== input.debt.id),
     creditCardRepayments: input.creditCardRepayments,
+    creditCardPots: input.creditCardPots ?? [],
     debtReserves: input.debtReserves,
     pots: input.pots ?? [],
     potAllocations: [

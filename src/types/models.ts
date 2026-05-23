@@ -19,6 +19,10 @@ export type PaymentMethod = 'pot' | 'credit_card'
 
 export type CustomPaymentStatus = 'unpaid' | 'paid' | 'archived'
 
+export type CreditCardPotSource = 'paycheck' | 'external'
+
+export type CreditCardPotStatus = 'active' | 'applied' | 'cancelled'
+
 export type DebtReserveStatus = 'planned' | 'skipped' | 'applied' | 'cancelled'
 
 export type DebtReserveSource = 'assistant' | 'manual'
@@ -163,6 +167,20 @@ export interface CreditCardRepayment extends Timestamped {
   creditCardId: string
   amountPence: number
   date: string
+  note: string
+}
+
+export interface CreditCardPot extends Timestamped {
+  id: string
+  creditCardId: string
+  payPeriodId: string | null
+  payday: string | null
+  periodStartDate: string | null
+  periodEndDate: string | null
+  name: string
+  amountPence: number
+  source: CreditCardPotSource
+  status: CreditCardPotStatus
   note: string
 }
 

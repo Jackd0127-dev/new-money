@@ -44,6 +44,7 @@ export function AiPlanPage({
         recurringPayments: snapshot.recurringPayments,
         customPayments: snapshot.customPayments,
         transactions: snapshot.transactions,
+        creditCardPots: snapshot.creditCardPots,
         creditCardRepayments: snapshot.creditCardRepayments,
         debtReserves: snapshot.debtReserves,
         pots: snapshot.pots,

@@ -661,6 +661,7 @@ function createSnapshot(overrides: Record<string, unknown> = {}) {
     debtPayments: [],
     debtReserves: [],
     creditCards: [],
+    creditCardPots: [],
     customPayments: [],
     creditCardRepayments: [],
     dailyBriefs: [

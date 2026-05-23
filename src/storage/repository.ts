@@ -9,6 +9,8 @@ import {
 } from '../domain/money'
 import type {
   CreditCard,
+  CreditCardPot,
+  CreditCardPotSource,
   CreditCardRepayment,
   CustomPayment,
   DailyBrief,
@@ -43,6 +45,7 @@ export interface PlannerSnapshot {
   debtPayments: DebtPayment[]
   debtReserves: DebtReserve[]
   creditCards: CreditCard[]
+  creditCardPots: CreditCardPot[]
   customPayments: CustomPayment[]
   creditCardRepayments: CreditCardRepayment[]
   dailyBriefs: DailyBrief[]
@@ -109,6 +112,25 @@ export interface CreditCardInput {
 }
 
 export type CreditCardUpdateInput = CreditCardInput
+
+export interface CreditCardPotInput {
+  creditCardId: string
+  payPeriodId: string | null
+  payday: string | null
+  periodStartDate: string | null
+  periodEndDate: string | null
+  name: string
+  amountPence: number
+  source: CreditCardPotSource
+  note: string
+}
+
+export type CreditCardPotUpdateInput = CreditCardPotInput
+
+export interface CreditCardPotApplyInput {
+  date: string
+  note: string
+}
 
 export interface CustomPaymentInput {
   name: string
@@ -204,6 +226,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     debtPayments,
     debtReserves,
     creditCards,
+    creditCardPots,
     customPayments,
     creditCardRepayments,
     dailyBriefs,
@@ -220,6 +243,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
       db.debtPayments.orderBy('date').reverse().toArray(),
       db.debtReserves.orderBy('payday').toArray(),
       db.creditCards.toArray(),
+      db.creditCardPots.toArray(),
       db.customPayments.orderBy('dueDate').toArray(),
       db.creditCardRepayments.orderBy('date').reverse().toArray(),
       db.dailyBriefs.orderBy('date').reverse().toArray(),
@@ -237,6 +261,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     debtPayments,
     debtReserves,
     creditCards: creditCards.sort((a, b) => a.name.localeCompare(b.name)),
+    creditCardPots: creditCardPots.sort(sortCreditCardPots),
     customPayments,
     creditCardRepayments,
     dailyBriefs,
@@ -344,6 +369,90 @@ export async function archiveCreditCard(cardId: string): Promise<void> {
   await db.creditCards.update(cardId, {
     archived: true,
     updatedAt: nowIso(),
+  })
+}
+
+export async function addCreditCardPot(input: CreditCardPotInput): Promise<void> {
+  const timestamp = nowIso()
+  const amountPence = Math.max(0, input.amountPence)
+
+  if (!input.creditCardId || amountPence <= 0) {
+    return
+  }
+
+  await db.creditCardPots.add({
+    id: crypto.randomUUID(),
+    creditCardId: input.creditCardId,
+    payPeriodId: input.source === 'paycheck' ? input.payPeriodId : null,
+    payday: input.source === 'paycheck' ? input.payday : null,
+    periodStartDate: input.source === 'paycheck' ? input.periodStartDate : null,
+    periodEndDate: input.source === 'paycheck' ? input.periodEndDate : null,
+    name: input.name.trim() || 'Credit pot',
+    amountPence,
+    source: input.source,
+    status: 'active',
+    note: input.note.trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+}
+
+export async function updateCreditCardPot(
+  creditCardPotId: string,
+  input: CreditCardPotUpdateInput,
+): Promise<void> {
+  const amountPence = Math.max(0, input.amountPence)
+
+  if (!input.creditCardId || amountPence <= 0) {
+    return
+  }
+
+  await db.creditCardPots.update(creditCardPotId, {
+    creditCardId: input.creditCardId,
+    payPeriodId: input.source === 'paycheck' ? input.payPeriodId : null,
+    payday: input.source === 'paycheck' ? input.payday : null,
+    periodStartDate: input.source === 'paycheck' ? input.periodStartDate : null,
+    periodEndDate: input.source === 'paycheck' ? input.periodEndDate : null,
+    name: input.name.trim() || 'Credit pot',
+    amountPence,
+    source: input.source,
+    status: 'active',
+    note: input.note.trim(),
+    updatedAt: nowIso(),
+  })
+}
+
+export async function deleteCreditCardPot(creditCardPotId: string): Promise<void> {
+  await db.creditCardPots.delete(creditCardPotId)
+}
+
+export async function applyCreditCardPot(
+  creditCardPotId: string,
+  input: CreditCardPotApplyInput,
+): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', db.creditCardPots, db.creditCardRepayments, async () => {
+    const creditCardPot = await db.creditCardPots.get(creditCardPotId)
+
+    if (!creditCardPot || creditCardPot.status !== 'active' || creditCardPot.amountPence <= 0) {
+      return
+    }
+
+    await db.creditCardRepayments.add({
+      id: crypto.randomUUID(),
+      creditCardId: creditCardPot.creditCardId,
+      amountPence: creditCardPot.amountPence,
+      date: input.date,
+      note: input.note.trim() || creditCardPot.note || creditCardPot.name,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+
+    await db.creditCardPots.update(creditCardPot.id, {
+      status: 'applied',
+      updatedAt: timestamp,
+    })
   })
 }
 
@@ -1022,7 +1131,7 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
 export async function deletePayPeriod(payPeriodId: string): Promise<void> {
   await db.transaction(
     'rw',
-    [db.payPeriods, db.paychecks, db.potAllocations, db.pots, db.transactions, db.debtReserves],
+    [db.payPeriods, db.paychecks, db.potAllocations, db.pots, db.transactions, db.debtReserves, db.creditCardPots],
     async () => {
       await deletePayPeriodRecords(payPeriodId, nowIso())
     },
@@ -1044,6 +1153,7 @@ export async function resetPlannerData(): Promise<void> {
       db.debtPayments,
       db.debtReserves,
       db.creditCards,
+      db.creditCardPots,
       db.customPayments,
       db.creditCardRepayments,
       db.dailyBriefs,
@@ -1061,6 +1171,7 @@ export async function resetPlannerData(): Promise<void> {
         db.debtPayments.clear(),
         db.debtReserves.clear(),
         db.creditCards.clear(),
+        db.creditCardPots.clear(),
         db.customPayments.clear(),
         db.creditCardRepayments.clear(),
         db.dailyBriefs.clear(),
@@ -1085,6 +1196,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       db.debtPayments,
       db.debtReserves,
       db.creditCards,
+      db.creditCardPots,
       db.customPayments,
       db.creditCardRepayments,
       db.dailyBriefs,
@@ -1102,6 +1214,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
         db.debtPayments.clear(),
         db.debtReserves.clear(),
         db.creditCards.clear(),
+        db.creditCardPots.clear(),
         db.customPayments.clear(),
         db.creditCardRepayments.clear(),
         db.dailyBriefs.clear(),
@@ -1118,6 +1231,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       await putAll(db.debtPayments, snapshot.debtPayments)
       await putAll(db.debtReserves, snapshot.debtReserves ?? [])
       await putAll(db.creditCards, snapshot.creditCards)
+      await putAll(db.creditCardPots, snapshot.creditCardPots ?? [])
       await putAll(db.customPayments, snapshot.customPayments)
       await putAll(db.creditCardRepayments, snapshot.creditCardRepayments)
       await putAll(db.dailyBriefs, snapshot.dailyBriefs)
@@ -1211,6 +1325,22 @@ function sortNewestAllocationFirst(a: PotAllocation, b: PotAllocation): number {
   }
 
   return b.id.localeCompare(a.id)
+}
+
+function sortCreditCardPots(a: CreditCardPot, b: CreditCardPot): number {
+  const statusSort = a.status.localeCompare(b.status)
+
+  if (statusSort !== 0) {
+    return statusSort
+  }
+
+  const dateSort = (b.payday ?? b.createdAt).localeCompare(a.payday ?? a.createdAt)
+
+  if (dateSort !== 0) {
+    return dateSort
+  }
+
+  return a.name.localeCompare(b.name)
 }
 
 function normalizeSettings(settings?: Settings): Settings {
@@ -1362,6 +1492,10 @@ async function deletePayPeriodRecords(payPeriodId: string, timestamp: string): P
     updatedAt: timestamp,
   })
   await db.debtReserves.where('payPeriodId').equals(payPeriodId).modify({
+    payPeriodId: null,
+    updatedAt: timestamp,
+  })
+  await db.creditCardPots.where('payPeriodId').equals(payPeriodId).modify({
     payPeriodId: null,
     updatedAt: timestamp,
   })

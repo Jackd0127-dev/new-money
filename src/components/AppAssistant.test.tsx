@@ -188,6 +188,7 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
     debtPayments: [],
     debtReserves: [],
     creditCards: [],
+    creditCardPots: [],
     customPayments: [],
     creditCardRepayments: [],
     dailyBriefs: [],

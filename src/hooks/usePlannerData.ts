@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   addCreditCard,
+  addCreditCardPot,
   addCreditCardRepayment,
   addCustomPayment,
   addDailyBrief,
@@ -12,10 +13,12 @@ import {
   addRecurringPayment,
   addTransaction,
   archiveCreditCard,
+  applyCreditCardPot,
   applyDebtReserve,
   cancelDebtReserve,
   createPaycheckPlan,
   deleteCustomPayment,
+  deleteCreditCardPot,
   deleteDebt,
   deleteDebtPayment,
   deleteCreditCardRepayment,
@@ -28,6 +31,7 @@ import {
   skipDebtReserve,
   toggleRecurringPayment,
   updateCreditCard,
+  updateCreditCardPot,
   updateCreditCardRepayment,
   updateDebt,
   updateDebtReserve,
@@ -37,6 +41,9 @@ import {
   updateSettings,
   updateTransaction,
   type CreditCardInput,
+  type CreditCardPotApplyInput,
+  type CreditCardPotInput,
+  type CreditCardPotUpdateInput,
   type CreditCardRepaymentUpdateInput,
   type CreditCardUpdateInput,
   type CreditCardRepaymentInput,
@@ -70,6 +77,10 @@ export interface PlannerActions {
   addCreditCard: typeof addCreditCard
   updateCreditCard: typeof updateCreditCard
   archiveCreditCard: typeof archiveCreditCard
+  addCreditCardPot: typeof addCreditCardPot
+  updateCreditCardPot: typeof updateCreditCardPot
+  deleteCreditCardPot: typeof deleteCreditCardPot
+  applyCreditCardPot: typeof applyCreditCardPot
   addCustomPayment: typeof addCustomPayment
   updateCustomPayment: typeof updateCustomPayment
   deleteCustomPayment: typeof deleteCustomPayment
@@ -132,6 +143,10 @@ export function usePlannerData() {
       addCreditCard: withRefresh(addCreditCard, refresh),
       updateCreditCard: withRefresh(updateCreditCard, refresh),
       archiveCreditCard: withRefresh(archiveCreditCard, refresh),
+      addCreditCardPot: withRefresh(addCreditCardPot, refresh),
+      updateCreditCardPot: withRefresh(updateCreditCardPot, refresh),
+      deleteCreditCardPot: withRefresh(deleteCreditCardPot, refresh),
+      applyCreditCardPot: withRefresh(applyCreditCardPot, refresh),
       addCustomPayment: withRefresh(addCustomPayment, refresh),
       updateCustomPayment: withRefresh(updateCustomPayment, refresh),
       deleteCustomPayment: withRefresh(deleteCustomPayment, refresh),
@@ -183,6 +198,9 @@ function withRefresh<Args extends unknown[]>(
 
 export type {
   CreditCardInput,
+  CreditCardPotApplyInput,
+  CreditCardPotInput,
+  CreditCardPotUpdateInput,
   CreditCardRepaymentInput,
   CreditCardRepaymentUpdateInput,
   CreditCardUpdateInput,

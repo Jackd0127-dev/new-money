@@ -22,11 +22,15 @@ type TestActions = PlannerActions & {
   addDebt: ReturnType<typeof vi.fn>
   addDebtPayment: ReturnType<typeof vi.fn>
   addCreditCard: ReturnType<typeof vi.fn>
+  addCreditCardPot: ReturnType<typeof vi.fn>
   addCustomPayment: ReturnType<typeof vi.fn>
   addCreditCardRepayment: ReturnType<typeof vi.fn>
+  applyCreditCardPot: ReturnType<typeof vi.fn>
   deletePot: ReturnType<typeof vi.fn>
+  deleteCreditCardPot: ReturnType<typeof vi.fn>
   deletePayPeriod: ReturnType<typeof vi.fn>
   updateCreditCard: ReturnType<typeof vi.fn>
+  updateCreditCardPot: ReturnType<typeof vi.fn>
   updateCreditCardRepayment: ReturnType<typeof vi.fn>
   updateCustomPayment: ReturnType<typeof vi.fn>
   updatePot: ReturnType<typeof vi.fn>
@@ -582,10 +586,19 @@ describe('spending page', () => {
 })
 
 describe('allocating payments page', () => {
-  it('creates a credit card, custom card payment, and card repayment', async () => {
+  it('creates a credit card, credit pot, and card repayment', async () => {
     const user = userEvent.setup()
     const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      payday: '2026-05-22',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      nextPayday: '2026-06-05',
+      incomePence: 80000,
+    })
     const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
       creditCards: [
         {
           id: 'card-amex',
@@ -602,7 +615,7 @@ describe('allocating payments page', () => {
       ],
     })
 
-    render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} />)
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />)
 
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Card')
@@ -621,19 +634,23 @@ describe('allocating payments page', () => {
       provider: 'Capital One',
     })
 
-    const customPanel = screen.getByRole('region', { name: 'Add saved payment' })
-    await user.type(within(customPanel).getByLabelText('Payment name'), 'Tyres')
-    await user.type(within(customPanel).getByLabelText('Amount'), '30')
-    await user.clear(within(customPanel).getByLabelText('Due date'))
-    await user.type(within(customPanel).getByLabelText('Due date'), '2026-05-20')
-    await user.selectOptions(within(customPanel).getByLabelText('Credit card'), 'card-amex')
-    await user.click(within(customPanel).getByRole('button', { name: 'Add payment' }))
+    expect(screen.queryByRole('region', { name: 'Add saved payment' })).not.toBeInTheDocument()
 
-    expect(actions.addCustomPayment).toHaveBeenCalledWith({
-      amountPence: 3000,
+    const creditPotPanel = screen.getByRole('region', { name: 'Credit Pots' })
+    await user.type(within(creditPotPanel).getByLabelText('Amount'), '200')
+    await user.type(within(creditPotPanel).getByLabelText('Name'), 'Amex payoff')
+    await user.click(within(creditPotPanel).getByRole('button', { name: 'Add credit pot' }))
+
+    expect(actions.addCreditCardPot).toHaveBeenCalledWith({
+      amountPence: 20000,
       creditCardId: 'card-amex',
-      dueDate: '2026-05-20',
-      name: 'Tyres',
+      name: 'Amex payoff',
+      note: '',
+      payday: '2026-05-22',
+      payPeriodId: 'period-current',
+      periodEndDate: '2026-06-04',
+      periodStartDate: '2026-05-22',
+      source: 'paycheck',
     })
 
     const repaymentPanel = screen.getByRole('region', { name: 'Record card repayment' })
@@ -721,7 +738,7 @@ describe('allocating payments page', () => {
     expect(screen.getAllByText('Everyday Amex').length).toBeGreaterThan(0)
     expect(screen.getByText('Owed')).toBeInTheDocument()
     expect(screen.getAllByText('£72.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Remaining after cards').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Pay left after cards').length).toBeGreaterThan(0)
     expect(screen.getAllByText('£828.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Groceries').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
@@ -1451,10 +1468,10 @@ describe('debts page', () => {
           payPeriods: [
             {
               id: 'period-next',
-              startDate: '2026-05-22',
-              endDate: '2026-06-04',
-              payday: '2026-05-22',
-              nextPayday: '2026-06-05',
+              startDate: '2026-06-05',
+              endDate: '2026-06-18',
+              payday: '2026-06-05',
+              nextPayday: '2026-06-19',
               payFrequency: 'biweekly',
               incomePence: 90000,
               status: 'planned',
@@ -1470,7 +1487,7 @@ describe('debts page', () => {
               originalAmountPence: 30000,
               currentBalancePence: 30000,
               minimumPaymentPence: 0,
-              dueDate: '2026-05-23',
+              dueDate: '2026-06-06',
               interestRateApr: null,
               note: '',
               status: 'active',
@@ -1488,7 +1505,7 @@ describe('debts page', () => {
     expect(debtDueMetric).not.toBeNull()
     expect(within(debtDueMetric as HTMLElement).getAllByText('£0.00').length).toBeGreaterThan(0)
     expect(within(debtDueMetric as HTMLElement).getByText('No active pay period today')).toBeInTheDocument()
-    expect(within(debtDueMetric as HTMLElement).getByText(/Next saved period starts 2026-05-22/)).toBeInTheDocument()
+    expect(within(debtDueMetric as HTMLElement).getByText(/Next saved period starts 2026-06-05/)).toBeInTheDocument()
     expect(within(debtDueMetric as HTMLElement).queryByText('Future period debt')).not.toBeInTheDocument()
   })
 })
@@ -1503,6 +1520,10 @@ function createActions(): TestActions {
     addCreditCard: vi.fn(async () => {}),
     updateCreditCard: vi.fn(async () => {}),
     archiveCreditCard: vi.fn(async () => {}),
+    addCreditCardPot: vi.fn(async () => {}),
+    updateCreditCardPot: vi.fn(async () => {}),
+    deleteCreditCardPot: vi.fn(async () => {}),
+    applyCreditCardPot: vi.fn(async () => {}),
     addCustomPayment: vi.fn(async () => {}),
     updateCustomPayment: vi.fn(async () => {}),
     deleteCustomPayment: vi.fn(async () => {}),
@@ -1584,6 +1605,7 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
     debtPayments: [],
     debtReserves: [],
     creditCards: [],
+    creditCardPots: [],
     customPayments: [],
     creditCardRepayments: [],
     dailyBriefs: [],

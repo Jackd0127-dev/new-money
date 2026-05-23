@@ -27,6 +27,7 @@ export function DashboardPage({
     transactions: snapshot.transactions,
     debts: snapshot.debts,
     creditCardRepayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
     debtReserves: snapshot.debtReserves,
     pots: snapshot.pots,
     potAllocations: snapshot.potAllocations,
@@ -130,7 +131,7 @@ function getTotalPayBreakdown(
 
 function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
   return {
-    formula: 'Total costs = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit-card net.',
+    formula: 'Total costs = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit pots + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -166,6 +167,12 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
         label: 'Debt due',
         value: formatPence(summary.debtMinimumsPence),
         detail: 'Outstanding debt due by the end of this period after planned reserves are subtracted.',
+        tone: 'add',
+      },
+      {
+        label: 'Credit card pots',
+        value: formatPence(summary.creditCardPotsPence),
+        detail: 'Money set aside from this paycheck for credit cards. External credit pots are excluded.',
         tone: 'add',
       },
       {

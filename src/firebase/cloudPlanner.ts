@@ -65,6 +65,7 @@ export function hasMeaningfulPlannerData(snapshot: PlannerSnapshot): boolean {
     snapshot.debtPayments.length > 0 ||
     (snapshot.debtReserves?.length ?? 0) > 0 ||
     (snapshot.creditCards?.length ?? 0) > 0 ||
+    (snapshot.creditCardPots?.length ?? 0) > 0 ||
     (snapshot.customPayments?.length ?? 0) > 0 ||
     (snapshot.creditCardRepayments?.length ?? 0) > 0 ||
     (snapshot.dailyBriefs?.length ?? 0) > 0 ||
@@ -85,6 +86,7 @@ export function getPlannerSnapshotUpdatedAtIso(snapshot: PlannerSnapshot): strin
     ...snapshot.debtPayments.map((item) => item.updatedAt),
     ...snapshot.debtReserves.map((item) => item.updatedAt),
     ...snapshot.creditCards.map((item) => item.updatedAt),
+    ...(snapshot.creditCardPots ?? []).map((item) => item.updatedAt),
     ...snapshot.customPayments.map((item) => item.updatedAt),
     ...snapshot.creditCardRepayments.map((item) => item.updatedAt),
     ...snapshot.dailyBriefs.map((item) => item.updatedAt),
@@ -125,6 +127,7 @@ function normalizePlannerSnapshot(snapshot: Partial<PlannerSnapshot>): PlannerSn
     debtPayments: snapshot.debtPayments ?? [],
     debtReserves: snapshot.debtReserves ?? [],
     creditCards: snapshot.creditCards ?? [],
+    creditCardPots: snapshot.creditCardPots ?? [],
     customPayments: snapshot.customPayments ?? [],
     creditCardRepayments: snapshot.creditCardRepayments ?? [],
     dailyBriefs: snapshot.dailyBriefs ?? [],

@@ -16,6 +16,7 @@ import {
 } from './money'
 import type {
   CreditCard,
+  CreditCardPot,
   CreditCardRepayment,
   CustomPayment,
   Debt,
@@ -624,6 +625,38 @@ describe('credit card allocation', () => {
         updatedAt: '2026-05-24T00:00:00.000Z',
       },
     ]
+    const creditCardPots: CreditCardPot[] = [
+      {
+        id: 'credit-pot-paycheck',
+        creditCardId: 'card-amex',
+        payPeriodId: 'period-current',
+        payday: '2026-05-16',
+        periodStartDate: '2026-05-16',
+        periodEndDate: '2026-05-29',
+        name: 'Amex payoff',
+        amountPence: 4000,
+        source: 'paycheck',
+        status: 'active',
+        note: '',
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+      {
+        id: 'credit-pot-external',
+        creditCardId: 'card-amex',
+        payPeriodId: null,
+        payday: null,
+        periodStartDate: null,
+        periodEndDate: null,
+        name: 'Sold item',
+        amountPence: 3000,
+        source: 'external',
+        status: 'active',
+        note: '',
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+    ]
 
     const summary = getCreditCardAllocationSummary({
       creditCards: cards,
@@ -631,13 +664,21 @@ describe('credit card allocation', () => {
       customPayments,
       transactions,
       repayments,
+      creditCardPots,
       payPeriod,
     })
 
     expect(summary.totalOwedPence).toBe(10600)
-    expect(summary.paycheckRemainingAfterCardsPence).toBe(79400)
+    expect(summary.totalCreditPotsPence).toBe(7000)
+    expect(summary.totalPaycheckCreditPotsPence).toBe(4000)
+    expect(summary.totalExternalCreditPotsPence).toBe(3000)
+    expect(summary.paycheckRemainingAfterCardsPence).toBe(75400)
     expect(summary.cards[0]).toMatchObject({
       owedPence: 10600,
+      creditPotPence: 7000,
+      paycheckCreditPotPence: 4000,
+      externalCreditPotPence: 3000,
+      remainingAfterCreditPotsPence: 3600,
       availableCreditPence: 89400,
       utilisationPercent: 11,
       dueLabel: 'Day 12',
@@ -811,6 +852,38 @@ describe('pay period cost summary', () => {
           updatedAt: '2026-05-24T00:00:00.000Z',
         },
       ],
+      creditCardPots: [
+        {
+          id: 'credit-pot-paycheck',
+          creditCardId: 'card-amex',
+          payPeriodId: 'period-current',
+          payday: '2026-05-16',
+          periodStartDate: '2026-05-16',
+          periodEndDate: '2026-05-29',
+          name: 'Amex payoff pot',
+          amountPence: 10000,
+          source: 'paycheck',
+          status: 'active',
+          note: '',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'credit-pot-external',
+          creditCardId: 'card-amex',
+          payPeriodId: null,
+          payday: null,
+          periodStartDate: null,
+          periodEndDate: null,
+          name: 'External card money',
+          amountPence: 3000,
+          source: 'external',
+          status: 'active',
+          note: '',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
       pots: [
         {
           id: 'food',
@@ -846,11 +919,12 @@ describe('pay period cost summary', () => {
       potAllocationsPence: 5000,
       debtReservesPence: 0,
       debtMinimumsPence: 75000,
+      creditCardPotsPence: 10000,
       creditCardChargesPence: 7200,
       creditCardRepaymentsPence: 2000,
       creditCardNetPence: 5200,
-      totalCostsPence: 114450,
-      moneyLeftPence: -24450,
+      totalCostsPence: 124450,
+      moneyLeftPence: -34450,
       isOverCommitted: true,
     })
   })

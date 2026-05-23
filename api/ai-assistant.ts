@@ -19,7 +19,7 @@ You have access to the user's compact whole-app planner context, computed summar
 Use only the provided app data. Never invent balances, dates, payments, debts, pots, cards, reserves, or settings.
 Prioritise the current tab and selected pay period when the user asks an ambiguous question.
 Money calculations should come from the computed summaries first. If you do simple arithmetic from compact app facts, show the inputs clearly.
-For future saving, affordability, or investment-target questions, use the projected cash-flow facts based on settings, recurring payments, saved payments, debts, credit-card costs, debt reserves, and automatic pot top-ups. If no payday is recorded, clearly say the calendar timing is an estimate based on settings.
+For future saving, affordability, or investment-target questions, use the projected cash-flow facts based on settings, recurring payments, saved payments, debts, credit-card costs, credit-card pots, debt reserves, and automatic pot top-ups. If no payday is recorded, clearly say the calendar timing is an estimate based on settings.
 Do not treat missing recorded paychecks as zero future income when Settings contains default hours and hourly rate.
 Treat investment questions as cash-flow target questions only. Do not recommend buying, selling, or choosing investments.
 You may explain what changed, where money went, what is due, which app tab to use, and what action the user can take next.
@@ -101,6 +101,7 @@ interface CompactPromptAppContext {
   debtPayments: unknown
   debtReserves: unknown
   creditCards: unknown
+  creditCardPots: unknown
   customPayments: unknown
   creditCardRepayments: unknown
   dailyBriefs: unknown
@@ -290,6 +291,9 @@ function buildCompactPromptContext(context: ReturnType<typeof buildAssistantAppC
       compactDebtReserve(reserve, lookups),
     ),
     creditCards: limitList(snapshot.creditCards, 100, compactCreditCard),
+    creditCardPots: limitList(sortByDate(snapshot.creditCardPots, 'createdAt', 'desc'), 250, (creditCardPot) =>
+      compactCreditCardPot(creditCardPot, lookups),
+    ),
     customPayments: limitList(sortByDate(snapshot.customPayments, 'dueDate'), 250, (payment) =>
       compactCustomPayment(payment, lookups),
     ),
@@ -388,6 +392,7 @@ function buildFuturePlanningFacts(
       transactions: snapshot.transactions,
       debts: snapshot.debts,
       creditCardRepayments: snapshot.creditCardRepayments,
+      creditCardPots: snapshot.creditCardPots,
       debtReserves: snapshot.debtReserves,
       pots: snapshot.pots,
       potAllocations,
@@ -413,6 +418,7 @@ function buildFuturePlanningFacts(
       potTopUpsPence: summary.potAllocationsPence,
       debtReservesPence: summary.debtReservesPence,
       debtDuePence: summary.debtMinimumsPence,
+      creditCardPotsPence: summary.creditCardPotsPence,
       creditCardNetPence: summary.creditCardNetPence,
       costItems: limitList(summary.items, 80, (item) => ({
         ...item,
@@ -581,10 +587,12 @@ function buildFocusedFacts(
   if (activeView === 'pots' || /pot|saving|balance/.test(query)) {
     facts.pots = compactAppContext.pots
     facts.potAllocations = compactAppContext.potAllocations
+    facts.creditCardPots = compactAppContext.creditCardPots
   }
 
   if (activeView === 'allocatingPayments' || /card|credit|repayment|allocation/.test(query)) {
     facts.creditCards = compactAppContext.creditCards
+    facts.creditCardPots = compactAppContext.creditCardPots
     facts.customPayments = compactAppContext.customPayments
     facts.creditCardRepayments = compactAppContext.creditCardRepayments
     facts.creditCardSummary = compactComputedSummaries(context, lookups).summaries.creditCards
@@ -799,6 +807,23 @@ function compactCreditCard(card: PlannerSnapshot['creditCards'][number]) {
   }
 }
 
+function compactCreditCardPot(creditCardPot: PlannerSnapshot['creditCardPots'][number], lookups: ReturnType<typeof buildLookups>) {
+  return {
+    id: creditCardPot.id,
+    creditCardId: creditCardPot.creditCardId,
+    creditCardName: getLookupName(lookups.creditCards, creditCardPot.creditCardId),
+    payPeriodId: creditCardPot.payPeriodId,
+    payday: creditCardPot.payday,
+    periodStartDate: creditCardPot.periodStartDate,
+    periodEndDate: creditCardPot.periodEndDate,
+    name: truncateText(creditCardPot.name, 140),
+    amountPence: creditCardPot.amountPence,
+    source: creditCardPot.source,
+    status: creditCardPot.status,
+    note: truncateText(creditCardPot.note, 180),
+  }
+}
+
 function compactCustomPayment(payment: PlannerSnapshot['customPayments'][number], lookups: ReturnType<typeof buildLookups>) {
   return {
     id: payment.id,
@@ -937,6 +962,7 @@ function normalizePlannerSnapshot(snapshot: unknown): PlannerSnapshot {
     debtPayments: input.debtPayments ?? [],
     debtReserves: input.debtReserves ?? [],
     creditCards: input.creditCards ?? [],
+    creditCardPots: input.creditCardPots ?? [],
     customPayments: input.customPayments ?? [],
     creditCardRepayments: input.creditCardRepayments ?? [],
     dailyBriefs: input.dailyBriefs ?? [],

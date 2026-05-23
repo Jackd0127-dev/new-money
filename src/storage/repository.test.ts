@@ -4,19 +4,23 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   addCreditCard,
+  addCreditCardPot,
   addCreditCardRepayment,
   addCustomPayment,
   addDailyBrief,
   addDebt,
   addDebtReserve,
+  applyCreditCardPot,
   applyDebtReserve,
   cancelDebtReserve,
   createPaycheckPlan,
   deletePot,
+  deleteCreditCardPot,
   deletePayPeriod,
   getPlannerSnapshot,
   resetPlannerData,
   skipDebtReserve,
+  updateCreditCardPot,
   updateDebtReserve,
   updatePot,
 } from './repository'
@@ -276,6 +280,103 @@ describe('paycheck plan storage', () => {
       snapshotSignature: 'snapshot-signature',
       content: 'Today: check your card balances.',
     })
+  })
+
+  it('stores, updates, applies, and deletes credit card pots', async () => {
+    await createPaycheckPlan({
+      payday: '2026-05-22',
+      payFrequency: 'biweekly',
+      hoursWorked: 80,
+      hourlyRatePence: 1000,
+      actualAmountPence: null,
+      allocations: [],
+    })
+    await addCreditCard({
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      dueDay: 12,
+      dueDate: null,
+      color: '#2563eb',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const card = snapshot.creditCards[0]
+    const period = snapshot.payPeriods[0]
+
+    await addCreditCardPot({
+      creditCardId: card.id,
+      payPeriodId: period.id,
+      payday: period.payday,
+      periodStartDate: period.startDate,
+      periodEndDate: period.endDate,
+      name: 'Barclays payoff',
+      amountPence: 20000,
+      source: 'paycheck',
+      note: 'From wages',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.creditCardPots[0]).toMatchObject({
+      creditCardId: card.id,
+      payPeriodId: period.id,
+      amountPence: 20000,
+      source: 'paycheck',
+      status: 'active',
+    })
+
+    await updateCreditCardPot(snapshot.creditCardPots[0].id, {
+      creditCardId: card.id,
+      payPeriodId: null,
+      payday: null,
+      periodStartDate: null,
+      periodEndDate: null,
+      name: 'External Barclays payoff',
+      amountPence: 15000,
+      source: 'external',
+      note: 'Sold item',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.creditCardPots[0]).toMatchObject({
+      payPeriodId: null,
+      amountPence: 15000,
+      source: 'external',
+    })
+
+    await applyCreditCardPot(snapshot.creditCardPots[0].id, {
+      date: '2026-05-23',
+      note: 'Paid card',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.creditCardPots[0]).toMatchObject({ status: 'applied' })
+    expect(snapshot.creditCardRepayments[0]).toMatchObject({
+      creditCardId: card.id,
+      amountPence: 15000,
+      date: '2026-05-23',
+      note: 'Paid card',
+    })
+
+    await addCreditCardPot({
+      creditCardId: card.id,
+      payPeriodId: period.id,
+      payday: period.payday,
+      periodStartDate: period.startDate,
+      periodEndDate: period.endDate,
+      name: 'Delete me',
+      amountPence: 5000,
+      source: 'paycheck',
+      note: '',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    const deletablePot = snapshot.creditCardPots.find((creditCardPot) => creditCardPot.name === 'Delete me')
+    expect(deletablePot).toBeDefined()
+
+    await deleteCreditCardPot(deletablePot?.id ?? '')
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.creditCardPots.some((creditCardPot) => creditCardPot.name === 'Delete me')).toBe(false)
   })
 
   it('stores, updates, skips, cancels, and applies debt reserves without paying until applied', async () => {

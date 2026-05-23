@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie'
 
 import type {
   CreditCard,
+  CreditCardPot,
   CreditCardRepayment,
   CustomPayment,
   DailyBrief,
@@ -29,6 +30,7 @@ export class PlannerDatabase extends Dexie {
   debtPayments!: Table<DebtPayment, string>
   debtReserves!: Table<DebtReserve, string>
   creditCards!: Table<CreditCard, string>
+  creditCardPots!: Table<CreditCardPot, string>
   customPayments!: Table<CustomPayment, string>
   creditCardRepayments!: Table<CreditCardRepayment, string>
   dailyBriefs!: Table<DailyBrief, string>
@@ -86,6 +88,24 @@ export class PlannerDatabase extends Dexie {
       debtPayments: 'id, debtId, date',
       debtReserves: 'id, debtId, payPeriodId, payday, status',
       creditCards: 'id, archived',
+      customPayments: 'id, creditCardId, dueDate, status',
+      creditCardRepayments: 'id, creditCardId, date',
+      dailyBriefs: 'id, date',
+    })
+
+    this.version(5).stores({
+      settings: 'id',
+      pots: 'id, type, archived',
+      recurringPayments: 'id, potId, creditCardId, active, frequency',
+      payPeriods: 'id, payday, status',
+      paychecks: 'id, payPeriodId',
+      potAllocations: 'id, payPeriodId, potId',
+      transactions: 'id, potId, payPeriodId, creditCardId, date, type, paymentMethod',
+      debts: 'id, status, dueDate',
+      debtPayments: 'id, debtId, date',
+      debtReserves: 'id, debtId, payPeriodId, payday, status',
+      creditCards: 'id, archived',
+      creditCardPots: 'id, creditCardId, payPeriodId, payday, source, status',
       customPayments: 'id, creditCardId, dueDate, status',
       creditCardRepayments: 'id, creditCardId, date',
       dailyBriefs: 'id, date',

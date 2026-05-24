@@ -8,6 +8,28 @@ export interface CreditCardDesign {
 
 export const defaultCreditCardDesignId = 'cart-minimal-11'
 
+const cartGeometric4Colorways: CreditCardDesign[] = [
+  'blue',
+  'red',
+  'black',
+  'orange',
+  'gray',
+  'gold',
+  'light-blue',
+  'teal',
+  'maroon',
+  'violet',
+].map((colorway) => ({
+  id: `cart-geometric-4-${colorway}`,
+  label: `Geometric 4 ${colorway
+    .split('-')
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(' ')}`,
+  nodeId: '1730:4631',
+  assetPath: `/figma-assets/cart-geometric-4-${colorway}`,
+  network: 'mastercard' as const,
+}))
+
 export const creditCardDesigns: CreditCardDesign[] = [
   {
     id: 'cart-minimal-11',
@@ -37,6 +59,21 @@ export const creditCardDesigns: CreditCardDesign[] = [
     assetPath: '/figma-assets/cart-gradient-12',
     network: 'visa',
   },
+  {
+    id: 'cart-geometric-1',
+    label: 'Geometric 1',
+    nodeId: '1730:3774',
+    assetPath: '/figma-assets/cart-geometric-1',
+    network: 'visa',
+  },
+  {
+    id: 'cart-geometric-4',
+    label: 'Geometric 4',
+    nodeId: '1730:4631',
+    assetPath: '/figma-assets/cart-geometric-4',
+    network: 'mastercard',
+  },
+  ...cartGeometric4Colorways,
   {
     id: 'cart-geometric-11',
     label: 'Geometric 11',

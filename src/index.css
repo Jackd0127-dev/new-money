@@ -85,9 +85,9 @@ select {
 
 .figma-card-button {
   width: 100%;
-  max-width: 561px;
+  max-width: 360px;
   border: 0;
-  border-radius: 30px 30px 8px 8px;
+  border-radius: 20px 20px 8px 8px;
   background: transparent;
   padding: 0;
   text-align: left;
@@ -111,7 +111,7 @@ select {
 .figma-card-button__summary {
   display: grid;
   gap: 3px;
-  padding: 12px 2px 0;
+  padding: 9px 2px 0;
 }
 
 .figma-card-button__summary p {
@@ -121,7 +121,7 @@ select {
 .figma-card-button__name {
   overflow: hidden;
   color: #0f172a;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -131,9 +131,9 @@ select {
 .figma-card-button__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 3px 8px;
   color: #64748b;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.25;
 }
@@ -155,6 +155,8 @@ select {
   --cc-bottom-text: #ffffff;
   --cc-bottom-muted: rgba(255, 255, 255, 0.7);
   --cc-shadow: 0 1px 14px rgba(0, 0, 0, 0.32);
+  --cc-panel: rgba(15, 23, 42, 0.54);
+  --cc-panel-border: rgba(255, 255, 255, 0.22);
 
   position: relative;
   width: 100%;
@@ -177,6 +179,100 @@ select {
   --cc-bottom-text: #ffffff;
   --cc-bottom-muted: rgba(255, 255, 255, 0.7);
   --cc-shadow: none;
+}
+
+.figma-credit-card--cart-geometric-1 {
+  --cc-text: #ffffff;
+  --cc-muted: rgba(255, 255, 255, 0.78);
+  --cc-bottom-text: #ffffff;
+  --cc-bottom-muted: rgba(255, 255, 255, 0.78);
+  --cc-shadow: 0 1px 4px rgba(18, 109, 177, 0.58);
+
+  background: #0e8bff;
+}
+
+.figma-credit-card--cart-geometric-4,
+.figma-credit-card--cart-geometric-4-blue,
+.figma-credit-card--cart-geometric-4-red,
+.figma-credit-card--cart-geometric-4-black,
+.figma-credit-card--cart-geometric-4-orange,
+.figma-credit-card--cart-geometric-4-gray,
+.figma-credit-card--cart-geometric-4-gold,
+.figma-credit-card--cart-geometric-4-light-blue,
+.figma-credit-card--cart-geometric-4-teal,
+.figma-credit-card--cart-geometric-4-maroon,
+.figma-credit-card--cart-geometric-4-violet {
+  --cc-bottom-text: #ffffff;
+  --cc-bottom-muted: rgba(255, 255, 255, 0.72);
+  --cc-shadow: 0 2px 5px rgba(32, 32, 32, 0.16);
+
+  background: var(--cc-body);
+}
+
+.figma-credit-card--cart-geometric-4 {
+  --cc-body: #2ae8c6;
+  --cc-text: #202020;
+  --cc-muted: rgba(32, 32, 32, 0.68);
+}
+
+.figma-credit-card--cart-geometric-4-blue {
+  --cc-body: #2563eb;
+  --cc-text: #f8fbff;
+  --cc-muted: rgba(248, 251, 255, 0.76);
+}
+
+.figma-credit-card--cart-geometric-4-red {
+  --cc-body: #dc2626;
+  --cc-text: #fff7f7;
+  --cc-muted: rgba(255, 247, 247, 0.76);
+}
+
+.figma-credit-card--cart-geometric-4-black {
+  --cc-body: #111827;
+  --cc-text: #f8fafc;
+  --cc-muted: rgba(248, 250, 252, 0.74);
+}
+
+.figma-credit-card--cart-geometric-4-orange {
+  --cc-body: #f97316;
+  --cc-text: #1f2937;
+  --cc-muted: rgba(31, 41, 55, 0.7);
+}
+
+.figma-credit-card--cart-geometric-4-gray {
+  --cc-body: #64748b;
+  --cc-text: #f8fafc;
+  --cc-muted: rgba(248, 250, 252, 0.74);
+}
+
+.figma-credit-card--cart-geometric-4-gold {
+  --cc-body: #d4af37;
+  --cc-text: #1c1917;
+  --cc-muted: rgba(28, 25, 23, 0.7);
+}
+
+.figma-credit-card--cart-geometric-4-light-blue {
+  --cc-body: #7dd3fc;
+  --cc-text: #0f172a;
+  --cc-muted: rgba(15, 23, 42, 0.68);
+}
+
+.figma-credit-card--cart-geometric-4-teal {
+  --cc-body: #14b8a6;
+  --cc-text: #0f172a;
+  --cc-muted: rgba(15, 23, 42, 0.68);
+}
+
+.figma-credit-card--cart-geometric-4-maroon {
+  --cc-body: #7f1d1d;
+  --cc-text: #fff7ed;
+  --cc-muted: rgba(255, 247, 237, 0.76);
+}
+
+.figma-credit-card--cart-geometric-4-violet {
+  --cc-body: #6d28d9;
+  --cc-text: #faf5ff;
+  --cc-muted: rgba(250, 245, 255, 0.76);
 }
 
 .figma-credit-card--cart-geometric-15,
@@ -234,6 +330,25 @@ select {
   left: auto;
   width: 72%;
   height: 115%;
+}
+
+.figma-credit-card__layer--geometric-1-circle {
+  top: -47.23%;
+  left: 30.56%;
+  width: 101.41%;
+  height: 114.94%;
+}
+
+.figma-credit-card__layer--geometric-4-circle {
+  top: -76.62%;
+  left: -26.74%;
+  width: 163.46%;
+  height: 186.48%;
+}
+
+.figma-credit-card__layer--geometric-4-bottom {
+  top: 69.14%;
+  height: 30.89%;
 }
 
 .figma-credit-card__layer--left-panel {
@@ -321,9 +436,24 @@ select {
   height: 6.54%;
 }
 
+.figma-credit-card__logo--split {
+  top: 8.45%;
+  left: 5.88%;
+  width: 86.27%;
+  height: 10.27%;
+}
+
 .figma-credit-card__logo--mastercard {
   top: 8.2%;
   right: 7.3%;
+  width: 14.8%;
+  height: 10.6%;
+}
+
+.figma-credit-card[class*='figma-credit-card--cart-geometric-4'] .figma-credit-card__logo--mastercard {
+  top: 8.2%;
+  right: 7.3%;
+  left: auto;
   width: 14.8%;
   height: 10.6%;
 }
@@ -335,6 +465,28 @@ select {
   height: 12.45%;
 }
 
+.figma-credit-card[class*='figma-credit-card--cart-geometric-4'] .figma-credit-card__chip {
+  right: 6.38%;
+  bottom: 8.2%;
+  width: 8.83%;
+  height: 10.63%;
+}
+
+.figma-credit-card--cart-geometric-1 .figma-credit-card__chip {
+  right: 7.66%;
+  bottom: 12.45%;
+  width: 10.34%;
+  height: 12.45%;
+}
+
+.figma-credit-card--cart-geometric-1 .figma-credit-card__noise {
+  opacity: 0.2;
+}
+
+.figma-credit-card[class*='figma-credit-card--cart-geometric-4'] .figma-credit-card__noise {
+  opacity: 0.2;
+}
+
 .figma-credit-card__content {
   position: absolute;
   inset: 0;
@@ -344,13 +496,20 @@ select {
   grid-template-rows: auto 1fr auto;
   gap: 12px;
   padding: 7.8% 7.7% 7.4%;
-  color: var(--cc-text);
-  text-shadow: var(--cc-shadow);
+  color: #ffffff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.34);
   pointer-events: none;
 }
 
-.figma-credit-card--cart-minimal-11 .figma-credit-card__identity {
-  padding-left: 7%;
+.figma-credit-card__content::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.26) 0%, rgba(2, 6, 23, 0.04) 42%, rgba(2, 6, 23, 0.48) 100%),
+    linear-gradient(90deg, rgba(2, 6, 23, 0.22) 0%, rgba(2, 6, 23, 0) 62%);
+  pointer-events: none;
 }
 
 .figma-credit-card__identity,
@@ -364,13 +523,36 @@ select {
   gap: 3px;
 }
 
+.figma-credit-card__identity,
+.figma-credit-card__due,
+.figma-credit-card__metrics {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--cc-panel-border);
+  border-radius: clamp(6px, 1.45cqw, 8px);
+  background: var(--cc-panel);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.14);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+}
+
+.figma-credit-card__identity,
+.figma-credit-card__due {
+  padding: clamp(5px, 1.4cqw, 8px) clamp(6px, 1.75cqw, 10px);
+}
+
+.figma-credit-card--cart-minimal-11 .figma-credit-card__identity,
+.figma-credit-card--cart-geometric-1 .figma-credit-card__identity {
+  margin-left: 7%;
+}
+
 .figma-credit-card__identity span,
 .figma-credit-card__due span,
 .figma-credit-card__metrics dt {
   display: block;
   margin: 0;
-  color: var(--cc-muted);
-  font-size: 11px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: clamp(7px, 2cqw, 11px);
   font-weight: 800;
   letter-spacing: 0;
   line-height: 1.1;
@@ -379,8 +561,8 @@ select {
 
 .figma-credit-card__identity strong {
   overflow: hidden;
-  color: var(--cc-text);
-  font-size: 20px;
+  color: #ffffff;
+  font-size: clamp(12px, 3.6cqw, 20px);
   font-weight: 800;
   line-height: 1.05;
   text-overflow: ellipsis;
@@ -400,13 +582,13 @@ select {
 }
 
 .figma-credit-card--cart-minimal-11 .figma-credit-card__due {
-  padding-left: 7%;
+  margin-left: 7%;
 }
 
 .figma-credit-card__due strong {
   overflow: hidden;
-  color: var(--cc-text);
-  font-size: 13px;
+  color: #ffffff;
+  font-size: clamp(9px, 2.4cqw, 13px);
   font-weight: 800;
   line-height: 1.1;
   text-overflow: ellipsis;
@@ -421,8 +603,9 @@ select {
   width: min(76%, 410px);
   margin: 0;
   gap: 12px;
-  color: var(--cc-bottom-text);
-  text-shadow: var(--cc-shadow);
+  padding: clamp(6px, 1.7cqw, 10px);
+  color: #ffffff;
+  text-shadow: inherit;
 }
 
 .figma-credit-card__metrics div,
@@ -432,13 +615,13 @@ select {
 }
 
 .figma-credit-card__metrics dt {
-  color: var(--cc-bottom-muted);
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .figma-credit-card__metrics dd {
   overflow: hidden;
-  color: var(--cc-bottom-text);
-  font-size: 15px;
+  color: #ffffff;
+  font-size: clamp(9px, 2.65cqw, 15px);
   font-weight: 800;
   line-height: 1.16;
   text-overflow: ellipsis;
@@ -452,13 +635,13 @@ select {
   }
 
   .figma-credit-card__identity strong {
-    font-size: 17px;
+    font-size: clamp(12px, 3.6cqw, 17px);
   }
 
   .figma-credit-card__identity span,
   .figma-credit-card__due span,
   .figma-credit-card__metrics dt {
-    font-size: 9px;
+    font-size: clamp(7px, 2cqw, 9px);
   }
 
   .figma-credit-card__due {
@@ -471,6 +654,6 @@ select {
   }
 
   .figma-credit-card__metrics dd {
-    font-size: 12px;
+    font-size: clamp(9px, 2.65cqw, 12px);
   }
 }

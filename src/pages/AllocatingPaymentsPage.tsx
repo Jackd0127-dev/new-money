@@ -435,7 +435,7 @@ export function AllocatingPaymentsPage({
       </SectionGrid>
 
       <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan" density="compact">
-        <div className="grid justify-items-center gap-5 md:grid-cols-2 2xl:grid-cols-3">
+        <div className="grid justify-items-center gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {summary.cards.length > 0 ? (
             summary.cards.map((cardSummary) => (
               <CreditCardPreviewButton
@@ -445,7 +445,7 @@ export function AllocatingPaymentsPage({
               />
             ))
           ) : (
-            <p className="w-full rounded-lg bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 2xl:col-span-3">
+            <p className="w-full rounded-lg bg-slate-50 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">
               No credit cards yet.
             </p>
           )}
@@ -721,6 +721,31 @@ function CreditCardArtwork({ design }: { design: CreditCardDesign }) {
     )
   }
 
+  if (design.id === 'cart-geometric-1') {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/mask-vector.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--geometric-1-circle" src={`${assetPath}/circle.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--split" src={`${assetPath}/visa-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
+      </div>
+    )
+  }
+
+  if (isCartGeometric4Design(design.id)) {
+    return (
+      <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/card-mask.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--geometric-4-circle" src={`${assetPath}/circle.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__layer--geometric-4-bottom" src={`${assetPath}/bottom-panel.svg`} alt="" />
+        <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
+        <img className="figma-credit-card__logo figma-credit-card__logo--mastercard" src={`${assetPath}/mastercard-logo.svg`} alt="" />
+        <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
+      </div>
+    )
+  }
+
   if (design.id === 'cart-geometric-15') {
     return (
       <div className="figma-credit-card__art" aria-hidden="true">
@@ -747,6 +772,10 @@ function CreditCardArtwork({ design }: { design: CreditCardDesign }) {
       <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
     </div>
   )
+}
+
+function isCartGeometric4Design(designId: string): boolean {
+  return designId === 'cart-geometric-4' || designId.startsWith('cart-geometric-4-')
 }
 
 function getCreditCardVisualDetails(cardSummary: CreditCardAllocationCardSummary): CreditCardVisualDetails {

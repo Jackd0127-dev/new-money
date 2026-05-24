@@ -14,6 +14,7 @@ import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
 import { AppShell } from '../components/AppShell'
+import { creditCardDesigns } from '../domain/creditCardDesigns'
 import { toIsoDate } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { RecurringPayment, Transaction } from '../types/models'
@@ -699,6 +700,165 @@ describe('allocating payments page', () => {
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
   })
 
+  it('offers and renders the Cart Geometric 4 credit card design', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-mint',
+          name: 'Mint Travel',
+          provider: 'Mastercard',
+          limitPence: 200000,
+          openingBalancePence: 34550,
+          designId: 'cart-geometric-4',
+          dueDay: 2,
+          dueDate: null,
+          color: '#14b8a6',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    const { container } = render(
+      <AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    )
+
+    const cardVisual = screen.getByLabelText('Mint Travel credit card')
+    expect(cardVisual).toHaveAttribute('data-figma-design', 'cart-geometric-4')
+    expect(cardVisual).toHaveAttribute('data-node-id', '1730:4631')
+    expect(container.querySelector('img[src="/figma-assets/cart-geometric-4/mastercard-logo.svg"]')).not.toBeNull()
+
+    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    await user.type(within(cardPanel).getByLabelText('Card name'), 'Mint Reserve')
+    await user.type(within(cardPanel).getByLabelText('Provider'), 'Mastercard')
+    await user.type(within(cardPanel).getByLabelText('Limit'), '900')
+    await user.click(within(cardPanel).getByRole('button', { name: 'Geometric 4' }))
+    await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
+
+    expect(actions.addCreditCard).toHaveBeenCalledWith(expect.objectContaining({ designId: 'cart-geometric-4' }))
+  })
+
+  it('offers Cart Geometric 4 colorway variants as separate card designs', async () => {
+    const geometric4Colorways = [
+      ['cart-geometric-4-blue', 'Geometric 4 Blue'],
+      ['cart-geometric-4-red', 'Geometric 4 Red'],
+      ['cart-geometric-4-black', 'Geometric 4 Black'],
+      ['cart-geometric-4-orange', 'Geometric 4 Orange'],
+      ['cart-geometric-4-gray', 'Geometric 4 Gray'],
+      ['cart-geometric-4-gold', 'Geometric 4 Gold'],
+      ['cart-geometric-4-light-blue', 'Geometric 4 Light Blue'],
+      ['cart-geometric-4-teal', 'Geometric 4 Teal'],
+      ['cart-geometric-4-maroon', 'Geometric 4 Maroon'],
+      ['cart-geometric-4-violet', 'Geometric 4 Violet'],
+    ]
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-maroon',
+          name: 'Maroon Travel',
+          provider: 'Mastercard',
+          limitPence: 180000,
+          openingBalancePence: 0,
+          designId: 'cart-geometric-4-maroon',
+          dueDay: 11,
+          dueDate: null,
+          color: '#7f1d1d',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    for (const [id, label] of geometric4Colorways) {
+      expect(creditCardDesigns).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            assetPath: `/figma-assets/${id}`,
+            id,
+            label,
+            network: 'mastercard',
+            nodeId: '1730:4631',
+          }),
+        ]),
+      )
+    }
+
+    const { container } = render(
+      <AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    )
+
+    const cardVisual = screen.getByLabelText('Maroon Travel credit card')
+    expect(cardVisual).toHaveAttribute('data-figma-design', 'cart-geometric-4-maroon')
+    expect(container.querySelector('img[src="/figma-assets/cart-geometric-4-maroon/mastercard-logo.svg"]')).not.toBeNull()
+
+    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+
+    for (const [, label] of geometric4Colorways) {
+      expect(within(cardPanel).getByRole('button', { name: label })).toBeInTheDocument()
+    }
+
+    await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Reserve')
+    await user.type(within(cardPanel).getByLabelText('Provider'), 'Mastercard')
+    await user.type(within(cardPanel).getByLabelText('Limit'), '900')
+    await user.click(within(cardPanel).getByRole('button', { name: 'Geometric 4 Gold' }))
+    await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
+
+    expect(actions.addCreditCard).toHaveBeenCalledWith(expect.objectContaining({ designId: 'cart-geometric-4-gold' }))
+  })
+
+  it('offers and renders the Cart Geometric 1 credit card design', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-blue',
+          name: 'Blue Travel',
+          provider: 'Visa',
+          limitPence: 150000,
+          openingBalancePence: 20000,
+          designId: 'cart-geometric-1',
+          dueDay: 5,
+          dueDate: null,
+          color: '#0e8bff',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    const { container } = render(
+      <AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    )
+
+    const cardVisual = screen.getByLabelText('Blue Travel credit card')
+    expect(cardVisual).toHaveAttribute('data-figma-design', 'cart-geometric-1')
+    expect(cardVisual).toHaveAttribute('data-node-id', '1730:3774')
+    expect(container.querySelector('img[src="/figma-assets/cart-geometric-1/visa-logo.svg"]')).not.toBeNull()
+
+    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    await user.type(within(cardPanel).getByLabelText('Card name'), 'Blue Reserve')
+    await user.type(within(cardPanel).getByLabelText('Provider'), 'Visa')
+    await user.type(within(cardPanel).getByLabelText('Limit'), '900')
+    await user.click(within(cardPanel).getByRole('button', { name: 'Geometric 1' }))
+    await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
+
+    expect(actions.addCreditCard).toHaveBeenCalledWith(expect.objectContaining({ designId: 'cart-geometric-1' }))
+  })
+
   it('uses a simplified card details view with a card edit dialog', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -886,6 +1046,9 @@ describe('pots page', () => {
 
 describe('recurring page', () => {
   it('shows a dated recurring calendar', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-20T12:00:00.000Z'))
+
     const snapshot = createSnapshot({
       recurringPayments: [
         {
@@ -916,12 +1079,16 @@ describe('recurring page', () => {
       ],
     })
 
-    render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={snapshot.payPeriods[0]} />)
+    try {
+      render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={snapshot.payPeriods[0]} />)
 
-    expect(screen.getByRole('region', { name: 'Recurring calendar' })).toBeInTheDocument()
-    expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
-    expect(screen.getByText(/23 May/)).toBeInTheDocument()
-    expect(screen.getByText('Before payday')).toBeInTheDocument()
+      expect(screen.getByRole('region', { name: 'Recurring calendar' })).toBeInTheDocument()
+      expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
+      expect(screen.getByText(/23 May/)).toBeInTheDocument()
+      expect(screen.getByText('Before payday')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows a next payday owed dropdown with the next pay period costs', () => {

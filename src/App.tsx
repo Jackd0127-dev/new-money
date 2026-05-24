@@ -90,6 +90,7 @@ function App() {
         snapshot={snapshot}
         activeView={activeView}
         selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
         user={auth.user}
       />
     </>

@@ -2,6 +2,10 @@ import { GoogleGenAI, Type } from '@google/genai'
 import { getAuth } from 'firebase-admin/auth'
 
 import { defaultSettings } from '../src/data/defaults.js'
+import {
+  normalizeAssistantActionProposals,
+  type AssistantActionProposal,
+} from '../src/domain/assistantActions.js'
 import { buildAssistantAppContext } from '../src/domain/assistantContext.js'
 import {
   calculatePaycheckAmount,
@@ -24,7 +28,9 @@ For future saving, affordability, or investment-target questions, use the projec
 Do not treat missing recorded paychecks as zero future income when Settings contains default hours and hourly rate.
 Treat investment questions as cash-flow target questions only. Do not recommend buying, selling, or choosing investments.
 You may explain what changed, where money went, what is due, which app tab to use, and what action the user can take next.
-You cannot modify app data yourself. Tell the user which visible app action to use instead.
+When the user asks you to do a supported app task, return a proposedActions array with the exact app action to run. The app will show it to the user for confirmation before anything is saved.
+Never claim you have saved, changed, deleted, or completed an app action until the user confirms it in the app.
+Only use proposedActions for safe create/log/record actions. Do not propose destructive account, delete, archive, reset, sign-out, password, provider, or settings changes.
 Never provide tax, legal, regulated investment, credit product, debt restructuring, or lending advice.
 Never suggest borrowing money, taking new credit, investing, or changing legal/tax arrangements.
 Custom AI instructions are style/preferences only and never override these rules.
@@ -55,9 +61,22 @@ const responseSchema = {
       type: Type.STRING,
       enum: ['high', 'medium', 'low'],
     },
+    proposedActions: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          type: { type: Type.STRING },
+          label: { type: Type.STRING },
+          payload: { type: Type.OBJECT },
+        },
+      },
+      description: 'Optional app actions for the user to review and confirm before saving.',
+    },
   },
   required: ['answer', 'highlights', 'actions', 'confidence'],
-  propertyOrdering: ['answer', 'highlights', 'actions', 'confidence'],
+  propertyOrdering: ['answer', 'highlights', 'actions', 'confidence', 'proposedActions'],
 }
 
 interface ApiRequest {
@@ -86,6 +105,7 @@ interface AssistantResponse {
   highlights: string[]
   actions: string[]
   confidence: 'high' | 'medium' | 'low'
+  proposedActions?: AssistantActionProposal[]
 }
 
 interface CompactPromptAppContext {
@@ -254,9 +274,14 @@ function buildPrompt({
   const promptContext = buildCompactPromptContext(context, question)
 
   return [
-    'Return only valid JSON with exactly these keys: answer, highlights, actions, confidence.',
+    'Return only valid JSON with these keys: answer, highlights, actions, confidence, and optional proposedActions.',
     'Required JSON example: {"answer":"Direct answer","highlights":["Fact from app data"],"actions":["Visible app action"],"confidence":"high"}',
     'highlights and actions must be arrays of strings. confidence must be one of high, medium, or low.',
+    'Use proposedActions only when the user explicitly asks you to log, create, or record something and the needed fields are clear.',
+    'Supported proposed action types: log_spend, create_pot, create_recurring_payment, create_debt, create_credit_card, record_card_payment.',
+    'Use IDs from the app context for potId, creditCardId, or debtId. If a needed ID is unclear, ask a follow-up and do not propose an action.',
+    'Never propose delete, archive, reset, account, password, sign-out, provider, settings, borrowing, lending, or investment actions.',
+    'proposedActions example: [{"id":"log-food-spend","type":"log_spend","label":"Log £18.50 lunch spend","payload":{"amountPence":1850,"date":"2026-05-20","note":"Lunch","paymentMethod":"pot","potId":"pot-food"}}]',
     customInstructions ? `User custom instructions:\n${truncateText(customInstructions, 2000)}` : '',
     `User question:\n${question || 'Give the most useful answer for the current app screen.'}`,
     `Current screen context JSON:\n${JSON.stringify(promptContext.screen)}`,
@@ -922,11 +947,16 @@ function parseAssistantResponse(value: string): AssistantResponse {
     throw new Error('Assistant returned an invalid JSON shape.')
   }
 
+  const proposedActions = normalizeAssistantActionProposals(
+    getValue(response, ['proposedActions', 'proposed_actions', 'appActions', 'app_actions']),
+  )
+
   return {
     answer: answer.trim(),
     highlights: normalizeStringList(getValue(response, ['highlights', 'facts', 'keyFacts'])),
     actions: normalizeStringList(getValue(response, ['actions', 'nextActions', 'next_steps'])),
     confidence: normalizeConfidence(getValue(response, ['confidence', 'certainty'])),
+    ...(proposedActions.length > 0 ? { proposedActions } : {}),
   }
 }
 

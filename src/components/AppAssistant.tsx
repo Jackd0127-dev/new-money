@@ -2,9 +2,17 @@ import { type FormEvent, useState } from 'react'
 import { Loader2, Send, Sparkles, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
+import {
+  getAssistantActionDetails,
+  getAssistantActionValidationError,
+  normalizeAssistantActionProposals,
+  runAssistantAction,
+  type AssistantActionProposal,
+  type AssistantActionStatus,
+} from '../domain/assistantActions'
 import { getViewLabel } from '../domain/assistantContext'
 import { toIsoDate } from '../domain/money'
-import type { PlannerSnapshot } from '../hooks/usePlannerData'
+import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
@@ -17,6 +25,7 @@ interface AssistantResponse {
   highlights: string[]
   actions: string[]
   confidence: 'high' | 'medium' | 'low'
+  proposedActions?: AssistantActionProposal[]
 }
 
 interface ChatMessage extends AssistantResponse {
@@ -28,19 +37,63 @@ export function AppAssistant({
   snapshot,
   activeView,
   selectedPayPeriod,
+  actions,
   user,
 }: {
   snapshot: PlannerSnapshot
   activeView: ViewKey
   selectedPayPeriod?: PayPeriod | null
+  actions: PlannerActions
   user: AppAssistantUser
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isSending, setIsSending] = useState(false)
+  const [actionStatuses, setActionStatuses] = useState<Record<string, AssistantActionStatus>>({})
   const todayIso = toIsoDate(new Date())
   const viewLabel = getViewLabel(activeView)
+
+  async function confirmAssistantAction(action: AssistantActionProposal) {
+    const validationError = getAssistantActionValidationError(action, snapshot)
+
+    if (validationError) {
+      setActionStatuses((current) => ({
+        ...current,
+        [action.id]: { state: 'error', error: validationError },
+      }))
+      return
+    }
+
+    setActionStatuses((current) => ({
+      ...current,
+      [action.id]: { state: 'running' },
+    }))
+
+    try {
+      await runAssistantAction(action, actions)
+      setActionStatuses((current) => ({
+        ...current,
+        [action.id]: { state: 'done' },
+      }))
+    } catch (error) {
+      setActionStatuses((current) => ({
+        ...current,
+        [action.id]: {
+          state: 'error',
+          error: error instanceof Error ? error.message : 'Unable to run this action.',
+        },
+      }))
+    }
+  }
+
+  function cancelAssistantAction(actionId: string) {
+    setActionStatuses((current) => ({
+      ...current,
+      [actionId]: { state: 'cancelled' },
+    }))
+  }
+
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -59,6 +112,7 @@ export function AppAssistant({
         highlights: [],
         actions: [],
         confidence: 'high',
+        proposedActions: [],
       }),
     ])
 
@@ -151,7 +205,14 @@ export function AppAssistant({
         </div>
 
         {messages.map((message) => (
-          <ChatBubble key={message.id} message={message} />
+          <ChatBubble
+            key={message.id}
+            message={message}
+            snapshot={snapshot}
+            actionStatuses={actionStatuses}
+            onConfirmAction={confirmAssistantAction}
+            onCancelAction={cancelAssistantAction}
+          />
         ))}
 
         {isSending && (
@@ -190,7 +251,19 @@ export function AppAssistant({
   )
 }
 
-function ChatBubble({ message }: { message: ChatMessage }) {
+function ChatBubble({
+  message,
+  snapshot,
+  actionStatuses,
+  onConfirmAction,
+  onCancelAction,
+}: {
+  message: ChatMessage
+  snapshot: PlannerSnapshot
+  actionStatuses: Record<string, AssistantActionStatus>
+  onConfirmAction: (action: AssistantActionProposal) => void
+  onCancelAction: (actionId: string) => void
+}) {
   const isUser = message.role === 'user'
 
   return (
@@ -202,8 +275,90 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         )}
       >
         <p className={clsx('whitespace-pre-wrap', isUser ? 'text-white' : 'text-slate-800')}>{message.answer}</p>
+        {!isUser && message.proposedActions && message.proposedActions.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {message.proposedActions.map((action) => (
+              <AssistantActionCard
+                key={action.id}
+                action={action}
+                snapshot={snapshot}
+                status={actionStatuses[action.id] ?? { state: 'pending' }}
+                onConfirm={() => onConfirmAction(action)}
+                onCancel={() => onCancelAction(action.id)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </article>
+  )
+}
+
+function AssistantActionCard({
+  action,
+  snapshot,
+  status,
+  onConfirm,
+  onCancel,
+}: {
+  action: AssistantActionProposal
+  snapshot: PlannerSnapshot
+  status: AssistantActionStatus
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const validationError = getAssistantActionValidationError(action, snapshot)
+  const isTerminal = status.state === 'done' || status.state === 'cancelled'
+  const isRunning = status.state === 'running'
+  const details = getAssistantActionDetails(action, snapshot)
+
+  return (
+    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-slate-800">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Suggested action</p>
+          <p className="mt-1 text-sm font-semibold text-slate-950">{action.label}</p>
+        </div>
+        {status.state === 'done' && (
+          <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">Done</span>
+        )}
+        {status.state === 'cancelled' && (
+          <span className="rounded-full bg-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">Cancelled</span>
+        )}
+      </div>
+      <ul className="mt-2 space-y-1">
+        {details.map((detail) => (
+          <li key={detail} className="text-xs leading-5 text-slate-600">
+            {detail}
+          </li>
+        ))}
+      </ul>
+      {(validationError || status.error) && (
+        <p className="mt-2 rounded-md bg-red-50 px-2 py-1.5 text-xs font-medium text-red-700">
+          {status.error ?? validationError}
+        </p>
+      )}
+      {!isTerminal && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={Boolean(validationError) || isRunning}
+            className="inline-flex min-h-8 items-center justify-center rounded-md bg-slate-950 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isRunning ? 'Running...' : 'Confirm action'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isRunning}
+            className="inline-flex min-h-8 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -220,6 +375,7 @@ function createUnavailableResponse(answer: string, reason: string, action = 'Che
     highlights: [reason],
     actions: [action],
     confidence: 'low',
+    proposedActions: [],
   }
 }
 
@@ -227,6 +383,7 @@ function createVisibleAssistantResponse(response: AssistantResponse): AssistantR
   return {
     ...response,
     answer: ensureNextStepGuidance(response.answer, response.actions),
+    proposedActions: normalizeAssistantActionProposals(response.proposedActions),
   }
 }
 

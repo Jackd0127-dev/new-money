@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { AppAssistant } from './AppAssistant'
-import type { PlannerSnapshot } from '../hooks/usePlannerData'
+import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
 
 describe('AppAssistant', () => {
@@ -25,6 +25,7 @@ describe('AppAssistant', () => {
         snapshot={createSnapshot()}
         activeView="spending"
         selectedPayPeriod={createPayPeriod()}
+        actions={createActions()}
         user={{
           getIdToken: async () => 'firebase-token',
         }}
@@ -82,6 +83,7 @@ describe('AppAssistant', () => {
         snapshot={createSnapshot()}
         activeView="dashboard"
         selectedPayPeriod={createPayPeriod()}
+        actions={createActions()}
         user={null}
       />,
     )
@@ -116,6 +118,7 @@ describe('AppAssistant', () => {
         snapshot={createSnapshot()}
         activeView="history"
         selectedPayPeriod={null}
+        actions={createActions()}
         user={{
           getIdToken: async () => 'firebase-token',
         }}
@@ -138,7 +141,187 @@ describe('AppAssistant', () => {
     expect(within(dialog).queryByText(/I can see History/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/Create or select a pay period/)).not.toBeInTheDocument()
   })
+
+  it('confirms an AI-proposed spend before logging it', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        answer: 'I can log that lunch spend.',
+        highlights: ['Food pot matched.'],
+        actions: ['Confirm the suggested spend.'],
+        confidence: 'high',
+        proposedActions: [
+          {
+            id: 'action-log-lunch',
+            type: 'log_spend',
+            label: 'Log £18.50 lunch spend',
+            payload: {
+              amountPence: 1850,
+              date: '2026-05-20',
+              note: 'Lunch',
+              paymentMethod: 'pot',
+              potId: 'pot-food',
+              creditCardId: null,
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AppAssistant
+        snapshot={createSnapshot()}
+        activeView="spending"
+        selectedPayPeriod={createPayPeriod()}
+        actions={actions}
+        user={{
+          getIdToken: async () => 'firebase-token',
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
+    await user.type(screen.getByLabelText('Ask AI'), 'I spent £18.50 on lunch today from Food')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+
+    await waitFor(() => expect(within(dialog).getByText('Suggested action')).toBeInTheDocument())
+    expect(within(dialog).getByText('Log £18.50 lunch spend')).toBeInTheDocument()
+    expect(within(dialog).getByText('Pot: Food')).toBeInTheDocument()
+    expect(actions.addTransaction).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm action' }))
+
+    await waitFor(() =>
+      expect(actions.addTransaction).toHaveBeenCalledWith({
+        amountPence: 1850,
+        date: '2026-05-20',
+        note: 'Lunch',
+        paymentMethod: 'pot',
+        potId: 'pot-food',
+        creditCardId: null,
+        recurringPaymentId: null,
+        type: 'spending',
+      }),
+    )
+    expect(within(dialog).getByText('Done')).toBeInTheDocument()
+  })
+
+  it('confirms an AI-proposed pot before creating it', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        answer: 'I can create that pot.',
+        highlights: ['Pot details are complete.'],
+        actions: ['Confirm the suggested pot.'],
+        confidence: 'high',
+        proposedActions: [
+          {
+            id: 'action-create-car-pot',
+            type: 'create_pot',
+            label: 'Create Car Insurance pot',
+            payload: {
+              name: 'Car Insurance',
+              type: 'reserved',
+              balancePence: 8711,
+              targetPence: 8711,
+              color: '#2563eb',
+              linkedCreditCardId: null,
+              linkedDebtId: null,
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AppAssistant
+        snapshot={createSnapshot()}
+        activeView="pots"
+        selectedPayPeriod={createPayPeriod()}
+        actions={actions}
+        user={{
+          getIdToken: async () => 'firebase-token',
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
+    await user.type(screen.getByLabelText('Ask AI'), 'Make me a car insurance pot with £87.11')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+
+    await waitFor(() => expect(within(dialog).getByText('Create Car Insurance pot')).toBeInTheDocument())
+    expect(actions.addPot).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm action' }))
+
+    await waitFor(() =>
+      expect(actions.addPot).toHaveBeenCalledWith({
+        name: 'Car Insurance',
+        type: 'reserved',
+        balancePence: 8711,
+        targetPence: 8711,
+        color: '#2563eb',
+        linkedCreditCardId: null,
+        linkedDebtId: null,
+      }),
+    )
+    expect(within(dialog).getByText('Done')).toBeInTheDocument()
+  })
 })
+
+function createActions(): PlannerActions {
+  return {
+    refresh: vi.fn(async () => {}),
+    updateSettings: vi.fn(async () => {}),
+    addPot: vi.fn(async () => {}),
+    updatePot: vi.fn(async () => {}),
+    deletePot: vi.fn(async () => {}),
+    addCreditCard: vi.fn(async () => {}),
+    updateCreditCard: vi.fn(async () => {}),
+    archiveCreditCard: vi.fn(async () => {}),
+    addCreditCardPot: vi.fn(async () => {}),
+    updateCreditCardPot: vi.fn(async () => {}),
+    deleteCreditCardPot: vi.fn(async () => {}),
+    applyCreditCardPot: vi.fn(async () => {}),
+    addCustomPayment: vi.fn(async () => {}),
+    updateCustomPayment: vi.fn(async () => {}),
+    deleteCustomPayment: vi.fn(async () => {}),
+    addCreditCardRepayment: vi.fn(async () => {}),
+    updateCreditCardRepayment: vi.fn(async () => {}),
+    deleteCreditCardRepayment: vi.fn(async () => {}),
+    addDailyBrief: vi.fn(async () => {}),
+    addRecurringPayment: vi.fn(async () => {}),
+    updateRecurringPayment: vi.fn(async () => {}),
+    toggleRecurringPayment: vi.fn(async () => {}),
+    deleteRecurringPayment: vi.fn(async () => {}),
+    addTransaction: vi.fn(async () => {}),
+    updateTransaction: vi.fn(async () => {}),
+    deleteTransaction: vi.fn(async () => {}),
+    addDebt: vi.fn(async () => {}),
+    updateDebt: vi.fn(async () => {}),
+    deleteDebt: vi.fn(async () => {}),
+    addDebtPayment: vi.fn(async () => {}),
+    deleteDebtPayment: vi.fn(async () => {}),
+    addDebtReserve: vi.fn(async () => {}),
+    updateDebtReserve: vi.fn(async () => {}),
+    cancelDebtReserve: vi.fn(async () => {}),
+    skipDebtReserve: vi.fn(async () => {}),
+    applyDebtReserve: vi.fn(async () => {}),
+    createPaycheckPlan: vi.fn(async () => {}),
+    deletePayPeriod: vi.fn(async () => {}),
+    resetPlannerData: vi.fn(async () => {}),
+  }
+}
 
 function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapshot {
   const timestamp = '2026-05-20T00:00:00.000Z'

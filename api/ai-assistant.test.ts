@@ -244,6 +244,92 @@ describe('AI assistant api', () => {
     })
   })
 
+  it('returns AI-proposed app actions without applying them server-side', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                answer: 'I can set that up after you confirm it.',
+                highlights: ['Food pot matched.'],
+                actions: ['Review and confirm the suggested action.'],
+                confidence: 'high',
+                proposedActions: [
+                  {
+                    id: 'log-food-spend',
+                    type: 'log_spend',
+                    label: 'Log £18.50 lunch spend',
+                    payload: {
+                      amountPence: 1850,
+                      date: '2026-05-20',
+                      note: 'Lunch',
+                      paymentMethod: 'pot',
+                      potId: 'pot-food',
+                    },
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key')
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'I spent £18.50 on lunch from Food today. Log it.',
+          todayIso: '2026-05-20',
+          activeView: 'spending',
+          snapshot: createSnapshot({
+            settings: {
+              ...createSnapshot().settings,
+              aiProvider: 'openrouter',
+            },
+          }),
+        },
+      },
+      response,
+    )
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      messages: Array<{ content: string }>
+    }
+
+    expect(requestBody.messages[0].content).toContain('proposedActions')
+    expect(requestBody.messages[1].content).toContain('Supported proposed action types')
+    expect(response.payload).toEqual({
+      answer: 'I can set that up after you confirm it.',
+      highlights: ['Food pot matched.'],
+      actions: ['Review and confirm the suggested action.'],
+      confidence: 'high',
+      proposedActions: [
+        {
+          id: 'log-food-spend',
+          type: 'log_spend',
+          label: 'Log £18.50 lunch spend',
+          payload: {
+            amountPence: 1850,
+            date: '2026-05-20',
+            note: 'Lunch',
+            paymentMethod: 'pot',
+            potId: 'pot-food',
+            creditCardId: null,
+          },
+        },
+      ],
+    })
+  })
+
   it('compresses large app snapshots while preserving paycheck history for OpenRouter', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

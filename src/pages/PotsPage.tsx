@@ -9,7 +9,6 @@ import {
   Gift,
   Heart,
   Home,
-  MoreHorizontal,
   PenLine,
   Phone,
   PiggyBank,
@@ -253,7 +252,7 @@ export function PotsPage({
               </div>
             )}
 
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
               {visiblePots.map((pot) => {
                 const isOpen = openPotId === pot.id
                 const activityItems = getPotActivityItems(pot.id, snapshot)
@@ -280,7 +279,7 @@ export function PotsPage({
               })}
 
               {visiblePots.length === 0 && (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 sm:col-span-2 xl:col-span-4">
+                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3 2xl:col-span-4">
                   No pots in this section yet.
                 </p>
               )}
@@ -392,10 +391,18 @@ function PotCard({
   const Icon = icon.Icon
   const dueLabel = getPotDueLabel(progress)
   const progressWidth = `${Math.min(100, Math.max(0, progress.percent))}%`
+  const sourceLabels = progress.sourceLabels.slice(0, 2)
+  const hiddenSourceLabelCount = Math.max(0, progress.sourceLabels.length - sourceLabels.length)
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      <div className="flex items-start justify-between gap-3">
+    <div
+      data-testid="pot-card"
+      className={clsx(
+        'flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md',
+        isOpen ? 'min-h-[330px]' : 'h-[330px]',
+      )}
+    >
+      <div className="flex min-h-[64px] items-start justify-between gap-3">
         <button
           type="button"
           onClick={onToggle}
@@ -437,7 +444,6 @@ function PotCard({
           >
             <Trash2 size={14} />
           </button>
-          <MoreHorizontal size={16} className="text-slate-400" aria-hidden="true" />
         </div>
       </div>
 
@@ -457,31 +463,45 @@ function PotCard({
           <span className="font-semibold" style={{ color: pot.color }}>
             {progress.targetPence > 0 ? `${progress.percent}%` : '0%'}
           </span>
-          <span className="text-right text-slate-500">{progress.targetLabel}</span>
+          <span className="min-w-0 truncate text-right text-slate-500" title={progress.targetLabel}>
+            {progress.targetLabel}
+          </span>
         </div>
       </div>
 
-      {dueLabel && (
-        <div
-          className="mt-4 rounded-lg px-3 py-2 text-sm font-medium"
-          style={{
-            backgroundColor: withAlpha(pot.color, 0.1),
-            color: pot.color,
-          }}
-        >
-          {dueLabel}
+      <div className="mt-auto pt-4">
+        <div className="min-h-12">
+          {dueLabel && (
+            <div
+              className="truncate rounded-lg px-3 py-2 text-sm font-medium"
+              style={{
+                backgroundColor: withAlpha(pot.color, 0.1),
+                color: pot.color,
+              }}
+              title={dueLabel}
+            >
+              {dueLabel}
+            </div>
+          )}
         </div>
-      )}
 
-      {progress.sourceLabels.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {progress.sourceLabels.map((label) => (
-            <span key={label} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+        <div className="mt-2 flex min-h-7 flex-nowrap gap-1.5 overflow-hidden">
+          {sourceLabels.map((label) => (
+            <span
+              key={label}
+              className="max-w-[9rem] truncate rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"
+              title={label}
+            >
               {label}
             </span>
           ))}
+          {hiddenSourceLabelCount > 0 && (
+            <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+              +{hiddenSourceLabelCount}
+            </span>
+          )}
         </div>
-      )}
+      </div>
 
       {isOpen && (
         <div role="region" aria-label={`${pot.name} activity`} className="mt-4 border-t border-slate-100 pt-4">

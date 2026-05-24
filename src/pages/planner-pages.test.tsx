@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './DashboardPage'
 import { DebtsPage } from './DebtsPage'
@@ -259,7 +259,9 @@ describe('settings page', () => {
 
     render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
 
-    await user.type(screen.getByLabelText('Custom AI instructions'), 'Be blunt and prioritise debt deadlines.')
+    fireEvent.change(screen.getByLabelText('Custom AI instructions'), {
+      target: { value: 'Be blunt and prioritise debt deadlines.' },
+    })
     await user.click(screen.getByRole('button', { name: 'Save settings' }))
 
     expect(actions.updateSettings).toHaveBeenCalledWith({
@@ -325,6 +327,17 @@ describe('settings page', () => {
 })
 
 describe('AI page', () => {
+  let restoreLocalStorage: (() => void) | null = null
+
+  beforeEach(() => {
+    restoreLocalStorage = mockLocalStorage()
+  })
+
+  afterEach(() => {
+    restoreLocalStorage?.()
+    restoreLocalStorage = null
+  })
+
   it('shows the messaging surface without debt-plan controls', () => {
     const selectedPayPeriod = createPayPeriod()
 
@@ -337,9 +350,11 @@ describe('AI page', () => {
       />,
     )
 
-    expect(screen.getByRole('textbox', { name: 'Message AI' })).toHaveClass('min-h-20')
+    expect(screen.getByRole('textbox', { name: 'Message AI' })).toHaveClass('min-h-12')
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    expect(screen.getByText('Message your money agent, confirm actions, and keep the conversation going.')).toBeInTheDocument()
+    expect(screen.getByText('Saved money chats with confirmable actions.')).toBeInTheDocument()
+    expect(screen.getByText('Chats')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Debt recommendations' })).not.toBeInTheDocument()
     expect(screen.queryByText('Set aside this paycheck')).not.toBeInTheDocument()
     expect(screen.queryByText(/Reserve £/)).not.toBeInTheDocument()
@@ -391,6 +406,39 @@ describe('AI page', () => {
     expect(screen.queryByText(/Confidence:/)).not.toBeInTheDocument()
 
     fetchSpy.mockRestore()
+  })
+
+  it('saves conversations and lets users reopen them after leaving the AI page', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot()
+    const actions = createActions()
+    const { unmount } = render(
+      <AiPlanPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} user={null} actions={actions} />,
+    )
+
+    await user.type(screen.getByRole('textbox', { name: 'Message AI' }), 'How much can I move to savings?')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const messages = screen.getByRole('log', { name: 'AI conversation messages' })
+
+    expect(within(messages).getByText('How much can I move to savings?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open conversation How much can I move to savings?' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'New' }))
+
+    const newMessages = screen.getByRole('log', { name: 'AI conversation messages' })
+
+    expect(within(newMessages).queryByText('How much can I move to savings?')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Open conversation How much can I move to savings?' }))
+
+    expect(within(screen.getByRole('log', { name: 'AI conversation messages' })).getByText('How much can I move to savings?')).toBeInTheDocument()
+
+    unmount()
+
+    render(<AiPlanPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} user={null} actions={actions} />)
+
+    expect(within(screen.getByRole('log', { name: 'AI conversation messages' })).getByText('How much can I move to savings?')).toBeInTheDocument()
   })
 
   it('customizes the AI name and avatar across the AI page and floating assistant', async () => {
@@ -2494,6 +2542,9 @@ function mockLocalStorage(): () => void {
       }),
       removeItem: vi.fn((key: string) => {
         storedItems.delete(key)
+      }),
+      clear: vi.fn(() => {
+        storedItems.clear()
       }),
     },
   })

@@ -11,6 +11,14 @@ import {
   type AssistantActionStatus,
 } from '../domain/assistantActions'
 import { toIsoDate } from '../domain/money'
+import {
+  createAssistantMessage,
+  createConversationHistory,
+  type AssistantChatMessage,
+  type AssistantConversation,
+  type AssistantResponse,
+  useAssistantConversations,
+} from '../hooks/useAssistantConversations'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { useAssistantProfile } from '../hooks/useAssistantProfile'
 import { Button, Field, TextInput } from '../components/ui'
@@ -19,24 +27,6 @@ import type { PayPeriod } from '../types/models'
 type AiPlanUser = {
   getIdToken: () => Promise<string>
 } | null
-
-interface AssistantConversationMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-interface AssistantResponse {
-  answer: string
-  highlights: string[]
-  actions: string[]
-  confidence: 'high' | 'medium' | 'low'
-  proposedActions?: AssistantActionProposal[]
-}
-
-interface ChatMessage extends AssistantResponse {
-  id: string
-  role: 'user' | 'assistant'
-}
 
 export function AiPlanPage({
   snapshot,
@@ -50,11 +40,19 @@ export function AiPlanPage({
   actions: PlannerActions
 }) {
   const [draft, setDraft] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isAsking, setIsAsking] = useState(false)
   const [isCustomizing, setIsCustomizing] = useState(false)
-  const [actionStatuses, setActionStatuses] = useState<Record<string, AssistantActionStatus>>({})
   const { profile, setProfile } = useAssistantProfile()
+  const {
+    conversations,
+    activeConversation,
+    messages,
+    actionStatuses,
+    appendMessage,
+    setActionStatuses,
+    selectConversation,
+    createConversation,
+  } = useAssistantConversations()
   const viewedPeriod = selectedPayPeriod ?? null
 
   async function confirmAssistantAction(action: AssistantActionProposal) {
@@ -107,9 +105,8 @@ export function AiPlanPage({
     }
 
     setDraft('')
-    setMessages((current) => [
-      ...current,
-      createMessage({
+    appendMessage(
+      createAssistantMessage({
         role: 'user',
         answer: question,
         highlights: [],
@@ -117,19 +114,18 @@ export function AiPlanPage({
         confidence: 'high',
         proposedActions: [],
       }),
-    ])
+    )
 
     if (!user) {
-      setMessages((current) => [
-        ...current,
-        createMessage({
+      appendMessage(
+        createAssistantMessage({
           role: 'assistant',
           ...createUnavailableResponse(
             'Sign in from Settings to ask AI.',
             'Authentication is required before any planner data is sent to an AI provider.',
           ),
         }),
-      ])
+      )
       return
     }
 
@@ -158,113 +154,168 @@ export function AiPlanPage({
       }
 
       const assistantResponse = (await response.json()) as AssistantResponse
-      setMessages((current) => [
-        ...current,
-        createMessage({ role: 'assistant', ...createVisibleAssistantResponse(assistantResponse) }),
-      ])
+      appendMessage(createAssistantMessage({ role: 'assistant', ...createVisibleAssistantResponse(assistantResponse) }))
       playAssistantDing()
     } catch (error) {
-      setMessages((current) => [
-        ...current,
-        createMessage({
+      appendMessage(
+        createAssistantMessage({
           role: 'assistant',
           ...createUnavailableResponse(
             'AI provider failed.',
             error instanceof Error ? error.message : 'Unknown AI provider error.',
           ),
         }),
-      ])
+      )
     } finally {
       setIsAsking(false)
     }
   }
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="ai-assistant-header p-5 text-white">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-white/95 text-sm font-black text-slate-950 shadow-lg shadow-slate-950/20">
-                {profile.avatar}
-              </span>
-              <div className="min-w-0">
-                <h2 className="truncate text-2xl font-semibold">{profile.name}</h2>
-                <p className="mt-1 text-sm text-white/75">
-                  Message your money agent, confirm actions, and keep the conversation going.
-                </p>
+    <div className="mx-auto max-w-4xl">
+      <section className="grid h-[min(700px,calc(100vh-9rem))] min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:grid-cols-[210px_1fr]">
+        <ConversationSidebar
+          conversations={conversations}
+          activeConversationId={activeConversation.id}
+          onSelectConversation={selectConversation}
+          onCreateConversation={createConversation}
+        />
+
+        <div className="flex min-h-0 flex-col">
+          <div className="ai-assistant-header p-4 text-white">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex min-w-0 items-center gap-4">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/95 text-xs font-black text-slate-950 shadow-lg shadow-slate-950/20">
+                  {profile.avatar}
+                </span>
+                <div className="min-w-0">
+                  <h2 className="truncate text-xl font-semibold">{profile.name}</h2>
+                  <p className="mt-1 text-sm text-white/75">Saved money chats with confirmable actions.</p>
+                </div>
               </div>
+              <Button variant="secondary" onClick={() => setIsCustomizing((current) => !current)}>
+                {isCustomizing ? <X size={17} /> : <Settings2 size={17} />}
+                Customize
+              </Button>
             </div>
-            <Button variant="secondary" onClick={() => setIsCustomizing((current) => !current)}>
-              {isCustomizing ? <X size={17} /> : <Settings2 size={17} />}
-              Customize
-            </Button>
           </div>
-        </div>
 
-        {isCustomizing && (
-          <div className="grid gap-3 border-b border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_160px]">
-            <Field label="AI name">
-              <TextInput
-                value={profile.name}
-                onChange={(event) => setProfile({ ...profile, name: event.target.value })}
-                placeholder="AI"
+          {isCustomizing && (
+            <div className="grid gap-3 border-b border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_140px]">
+              <Field label="AI name">
+                <TextInput
+                  value={profile.name}
+                  onChange={(event) => setProfile({ ...profile, name: event.target.value })}
+                  placeholder="AI"
+                />
+              </Field>
+              <Field label="PFP / initials">
+                <TextInput
+                  value={profile.avatar}
+                  onChange={(event) => setProfile({ ...profile, avatar: event.target.value })}
+                  placeholder="AI"
+                />
+              </Field>
+            </div>
+          )}
+
+          <div
+            role="log"
+            aria-label="AI conversation messages"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3 md:p-4"
+          >
+            <AssistantIntroBubble name={profile.name} avatar={profile.avatar} />
+
+            {messages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                avatar={profile.avatar}
+                snapshot={snapshot}
+                actionStatuses={actionStatuses}
+                onConfirmAction={confirmAssistantAction}
+                onCancelAction={cancelAssistantAction}
               />
-            </Field>
-            <Field label="PFP / initials">
-              <TextInput
-                value={profile.avatar}
-                onChange={(event) => setProfile({ ...profile, avatar: event.target.value })}
-                placeholder="AI"
+            ))}
+
+            {isAsking && <TypingBubble name={profile.name} avatar={profile.avatar} />}
+          </div>
+
+          <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-3">
+            <label htmlFor="ai-plan-chat-input" className="sr-only">
+              Message AI
+            </label>
+            <div className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner shadow-slate-200/60 focus-within:border-slate-400 focus-within:ring-4 focus-within:ring-slate-100">
+              <textarea
+                id="ai-plan-chat-input"
+                aria-label="Message AI"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                rows={2}
+                placeholder={`Message ${profile.name} about spending, pots, debts, cards...`}
+                className="max-h-32 min-h-12 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-slate-950 outline-none placeholder:text-slate-400"
               />
-            </Field>
-          </div>
-        )}
-
-        <div className="min-h-[620px] space-y-4 bg-slate-50 p-4 md:p-6">
-          <AssistantIntroBubble name={profile.name} avatar={profile.avatar} />
-
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              avatar={profile.avatar}
-              snapshot={snapshot}
-              actionStatuses={actionStatuses}
-              onConfirmAction={confirmAssistantAction}
-              onCancelAction={cancelAssistantAction}
-            />
-          ))}
-
-          {isAsking && <TypingBubble name={profile.name} avatar={profile.avatar} />}
+              <button
+                type="submit"
+                aria-label="Send message"
+                disabled={!draft.trim() || isAsking}
+                className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isAsking ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+              </button>
+            </div>
+          </form>
         </div>
-
-        <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-4">
-          <label htmlFor="ai-plan-chat-input" className="sr-only">
-            Message AI
-          </label>
-          <div className="flex items-end gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-inner shadow-slate-200/60 focus-within:border-slate-400 focus-within:ring-4 focus-within:ring-slate-100">
-            <textarea
-              id="ai-plan-chat-input"
-              aria-label="Message AI"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              rows={3}
-              placeholder={`Message ${profile.name} about spending, pots, debts, cards...`}
-              className="max-h-48 min-h-20 flex-1 resize-none bg-transparent px-2 py-2 text-base leading-6 text-slate-950 outline-none placeholder:text-slate-400"
-            />
-            <button
-              type="submit"
-              aria-label="Send message"
-              disabled={!draft.trim() || isAsking}
-              className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isAsking ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
-            </button>
-          </div>
-        </form>
       </section>
     </div>
+  )
+}
+
+function ConversationSidebar({
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onCreateConversation,
+}: {
+  conversations: AssistantConversation[]
+  activeConversationId: string
+  onSelectConversation: (conversationId: string) => void
+  onCreateConversation: () => void
+}) {
+  return (
+    <aside className="flex max-h-36 min-h-0 flex-col border-b border-slate-200 bg-white md:max-h-none md:border-b-0 md:border-r">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Chats</p>
+        <button
+          type="button"
+          onClick={onCreateConversation}
+          className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+        >
+          New
+        </button>
+      </div>
+      <div className="flex min-h-0 gap-2 overflow-x-auto p-2 md:flex-1 md:flex-col md:overflow-y-auto md:overflow-x-hidden">
+        {conversations.map((conversation) => (
+          <button
+            key={conversation.id}
+            type="button"
+            aria-label={`Open conversation ${conversation.title}`}
+            onClick={() => onSelectConversation(conversation.id)}
+            className={clsx(
+              'min-w-44 rounded-xl border px-3 py-2 text-left text-sm transition md:min-w-0',
+              conversation.id === activeConversationId
+                ? 'border-slate-950 bg-slate-950 text-white'
+                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white',
+            )}
+          >
+            <span className="block truncate font-semibold">{conversation.title}</span>
+            <span className={clsx('mt-1 block truncate text-xs', conversation.id === activeConversationId ? 'text-white/65' : 'text-slate-500')}>
+              {conversation.messages.length === 0 ? 'Empty chat' : `${conversation.messages.length} messages`}
+            </span>
+          </button>
+        ))}
+      </div>
+    </aside>
   )
 }
 
@@ -309,7 +360,7 @@ function MessageBubble({
   onConfirmAction,
   onCancelAction,
 }: {
-  message: ChatMessage
+  message: AssistantChatMessage
   avatar: string
   snapshot: PlannerSnapshot
   actionStatuses: Record<string, AssistantActionStatus>
@@ -424,13 +475,6 @@ function AssistantActionCard({
   )
 }
 
-function createMessage(input: Omit<ChatMessage, 'id'>): ChatMessage {
-  return {
-    ...input,
-    id: crypto.randomUUID(),
-  }
-}
-
 function createUnavailableResponse(
   answer: string,
   reason: string,
@@ -451,27 +495,6 @@ function createVisibleAssistantResponse(response: AssistantResponse): AssistantR
     answer: ensureNextStepGuidance(response.answer, response.actions),
     proposedActions: normalizeAssistantActionProposals(response.proposedActions),
   }
-}
-
-function createConversationHistory(messages: ChatMessage[]): AssistantConversationMessage[] {
-  return messages
-    .filter((message) => message.answer.trim())
-    .slice(-8)
-    .map((message) => ({
-      role: message.role,
-      content: truncateConversationText(message.answer),
-    }))
-}
-
-function truncateConversationText(value: string): string {
-  const trimmed = value.trim()
-  const maxLength = 1_500
-
-  if (trimmed.length <= maxLength) {
-    return trimmed
-  }
-
-  return `${trimmed.slice(0, maxLength - 1).trimEnd()}...`
 }
 
 function ensureNextStepGuidance(answer: string, actions: string[]): string {

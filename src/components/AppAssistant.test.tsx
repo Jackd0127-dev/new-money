@@ -1,12 +1,23 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppAssistant } from './AppAssistant'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
 
 describe('AppAssistant', () => {
+  let restoreLocalStorage: (() => void) | null = null
+
+  beforeEach(() => {
+    restoreLocalStorage = mockLocalStorage()
+  })
+
+  afterEach(() => {
+    restoreLocalStorage?.()
+    restoreLocalStorage = null
+  })
+
   it('opens as a pinned helper and sends the current tab, selected period, and full snapshot', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn(async () => ({
@@ -342,6 +353,33 @@ describe('AppAssistant', () => {
     expect(within(dialog).getByText('Done')).toBeInTheDocument()
   })
 })
+
+function mockLocalStorage(): () => void {
+  const storedItems = new Map<string, string>()
+  const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage')
+
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: vi.fn((key: string) => storedItems.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storedItems.set(key, value)
+      }),
+      removeItem: vi.fn((key: string) => {
+        storedItems.delete(key)
+      }),
+      clear: vi.fn(() => {
+        storedItems.clear()
+      }),
+    },
+  })
+
+  return () => {
+    if (originalDescriptor) {
+      Object.defineProperty(window, 'localStorage', originalDescriptor)
+    }
+  }
+}
 
 function createActions(): PlannerActions {
   return {

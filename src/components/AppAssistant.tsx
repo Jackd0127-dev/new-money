@@ -12,6 +12,13 @@ import {
 } from '../domain/assistantActions'
 import { getViewLabel } from '../domain/assistantContext'
 import { toIsoDate } from '../domain/money'
+import {
+  createAssistantMessage,
+  createConversationHistory,
+  type AssistantChatMessage,
+  type AssistantResponse,
+  useAssistantConversations,
+} from '../hooks/useAssistantConversations'
 import { useAssistantProfile } from '../hooks/useAssistantProfile'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
@@ -20,24 +27,6 @@ import type { ViewKey } from '../types/navigation'
 type AppAssistantUser = {
   getIdToken: () => Promise<string>
 } | null
-
-interface AssistantConversationMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-interface AssistantResponse {
-  answer: string
-  highlights: string[]
-  actions: string[]
-  confidence: 'high' | 'medium' | 'low'
-  proposedActions?: AssistantActionProposal[]
-}
-
-interface ChatMessage extends AssistantResponse {
-  id: string
-  role: 'user' | 'assistant'
-}
 
 export function AppAssistant({
   snapshot,
@@ -54,9 +43,8 @@ export function AppAssistant({
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [draft, setDraft] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isSending, setIsSending] = useState(false)
-  const [actionStatuses, setActionStatuses] = useState<Record<string, AssistantActionStatus>>({})
+  const { messages, actionStatuses, appendMessage, setActionStatuses } = useAssistantConversations()
   const { profile } = useAssistantProfile()
   const todayIso = toIsoDate(new Date())
   const viewLabel = getViewLabel(activeView)
@@ -111,9 +99,8 @@ export function AppAssistant({
     }
 
     setDraft('')
-    setMessages((current) => [
-      ...current,
-      createMessage({
+    appendMessage(
+      createAssistantMessage({
         role: 'user',
         answer: question,
         highlights: [],
@@ -121,12 +108,11 @@ export function AppAssistant({
         confidence: 'high',
         proposedActions: [],
       }),
-    ])
+    )
 
     if (!user) {
-      setMessages((current) => [
-        ...current,
-        createMessage({
+      appendMessage(
+        createAssistantMessage({
           role: 'assistant',
           ...createUnavailableResponse(
             'Sign in from Settings to ask AI.',
@@ -134,7 +120,7 @@ export function AppAssistant({
             'Sign in from Settings, then ask again so I can use your synced planner data.',
           ),
         }),
-      ])
+      )
       return
     }
 
@@ -163,9 +149,17 @@ export function AppAssistant({
       }
 
       const assistantResponse = (await response.json()) as AssistantResponse
-      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createVisibleAssistantResponse(assistantResponse) })])
+      appendMessage(createAssistantMessage({ role: 'assistant', ...createVisibleAssistantResponse(assistantResponse) }))
     } catch (error) {
-      setMessages((current) => [...current, createMessage({ role: 'assistant', ...createUnavailableResponse('AI provider failed.', error instanceof Error ? error.message : 'Unknown AI provider error.') })])
+      appendMessage(
+        createAssistantMessage({
+          role: 'assistant',
+          ...createUnavailableResponse(
+            'AI provider failed.',
+            error instanceof Error ? error.message : 'Unknown AI provider error.',
+          ),
+        }),
+      )
     } finally {
       setIsSending(false)
     }
@@ -191,9 +185,9 @@ export function AppAssistant({
     <section
       role="dialog"
       aria-label="AI helper"
-      className="fixed bottom-5 right-5 z-40 flex max-h-[min(780px,calc(100vh-2.5rem))] w-[min(540px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
+      className="fixed bottom-5 right-5 z-40 flex max-h-[min(620px,calc(100vh-2.5rem))] w-[min(420px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
     >
-      <div className="ai-assistant-header border-b border-white/15 p-5 text-white">
+      <div className="ai-assistant-header border-b border-white/15 p-3.5 text-white">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/95 text-xs font-black text-slate-950">
@@ -212,8 +206,12 @@ export function AppAssistant({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
+      <div
+        role="log"
+        aria-label="AI conversation messages"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3"
+      >
+        <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm leading-5 text-slate-700">
           <p>I can access all of your payments and give you a detailed plan depending on your needs.</p>
         </div>
 
@@ -236,7 +234,7 @@ export function AppAssistant({
         )}
       </div>
 
-      <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-3">
+      <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-2.5">
         <label htmlFor="app-assistant-input" className="sr-only">
           Ask AI
         </label>
@@ -246,9 +244,9 @@ export function AppAssistant({
             aria-label="Ask AI"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            rows={3}
+            rows={2}
             placeholder={`Ask ${profile.name} about ${viewLabel.toLowerCase()}, costs, pots, debts...`}
-            className="max-h-40 min-h-16 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-slate-950 outline-none placeholder:text-slate-400"
+            className="max-h-28 min-h-12 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-slate-950 outline-none placeholder:text-slate-400"
           />
           <button
             type="submit"
@@ -271,7 +269,7 @@ function ChatBubble({
   onConfirmAction,
   onCancelAction,
 }: {
-  message: ChatMessage
+  message: AssistantChatMessage
   snapshot: PlannerSnapshot
   actionStatuses: Record<string, AssistantActionStatus>
   onConfirmAction: (action: AssistantActionProposal) => void
@@ -375,13 +373,6 @@ function AssistantActionCard({
   )
 }
 
-function createMessage(input: Omit<ChatMessage, 'id'>): ChatMessage {
-  return {
-    ...input,
-    id: crypto.randomUUID(),
-  }
-}
-
 function createUnavailableResponse(answer: string, reason: string, action = 'Check Settings, confirm you are signed in, and verify the selected AI provider has a working server key.'): AssistantResponse {
   return {
     answer: `${answer}\n\n${reason}\n\nWhat I’d do next: ${action}`,
@@ -398,27 +389,6 @@ function createVisibleAssistantResponse(response: AssistantResponse): AssistantR
     answer: ensureNextStepGuidance(response.answer, response.actions),
     proposedActions: normalizeAssistantActionProposals(response.proposedActions),
   }
-}
-
-function createConversationHistory(messages: ChatMessage[]): AssistantConversationMessage[] {
-  return messages
-    .filter((message) => message.answer.trim())
-    .slice(-8)
-    .map((message) => ({
-      role: message.role,
-      content: truncateConversationText(message.answer),
-    }))
-}
-
-function truncateConversationText(value: string): string {
-  const trimmed = value.trim()
-  const maxLength = 1_500
-
-  if (trimmed.length <= maxLength) {
-    return trimmed
-  }
-
-  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`
 }
 
 function ensureNextStepGuidance(answer: string, actions: string[]): string {

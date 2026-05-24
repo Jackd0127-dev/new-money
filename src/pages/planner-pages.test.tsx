@@ -1766,6 +1766,111 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('ignores a checklist payment for the selected paycheck maths', async () => {
+    const user = userEvent.setup()
+    const restoreLocalStorage = mockLocalStorage()
+    const snapshot = createSnapshot({
+      payPeriods: [createPayPeriod({ id: 'period-current', incomePence: 100000 })],
+      recurringPayments: [
+        {
+          id: 'council-tax',
+          name: 'Council Tax',
+          amountPence: 6000,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    const { unmount } = render(
+      <DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />,
+    )
+
+    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
+
+    expect(within(currentPeriod).getAllByText('£60.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('£940.00').length).toBeGreaterThan(0)
+
+    await user.click(within(todoList).getByRole('button', { name: 'Ignore Payment for Council Tax' }))
+
+    expect(within(todoList).getByRole('button', { name: 'Ignore Payment for Council Tax' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(within(todoList).getByText('Ignored for this paycheck')).toBeInTheDocument()
+    expect(within(currentPeriod).getAllByText('£0.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('£1,000.00').length).toBeGreaterThan(0)
+
+    unmount()
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: 'Ignore Payment for Council Tax' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByText('Ignored for this paycheck')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Selected pay period' })).getAllByText('£1,000.00').length,
+    ).toBeGreaterThan(0)
+    restoreLocalStorage()
+  })
+
+  it('shows linked credit card amounts owed as pot set-asides', () => {
+    const selectedPayPeriod = createPayPeriod({ incomePence: 100000 })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-card-reserve',
+          name: 'Card Reserve',
+          type: 'reserved',
+          balancePence: 40000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          linkedCreditCardId: 'card-amex',
+          linkedDebtId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          openingBalancePence: 60000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
+
+    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
+
+    expect(within(currentPeriod).getAllByText('£200.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('£800.00').length).toBeGreaterThan(0)
+    expect(
+      within(todoList).getByText('Set aside £200.00 into "Card Reserve" pot for "Everyday Amex" card amount owed'),
+    ).toBeInTheDocument()
+    expect(within(todoList).getByText('Linked card balance still owed')).toBeInTheDocument()
+  })
+
   it('expands only one dashboard summary card at a time', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
@@ -2084,6 +2189,54 @@ describe('debts page', () => {
     expect(within(debtDueMetric as HTMLElement).queryByText('Next period debt')).not.toBeInTheDocument()
     expect(screen.getAllByText('Due amount').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Optional').length).toBeGreaterThan(0)
+  })
+
+  it('counts linked debt pot balances in each debt card progress bar', () => {
+    render(
+      <DebtsPage
+        snapshot={createSnapshot({
+          pots: [
+            {
+              id: 'pot-airbnb',
+              name: 'AIRBNB pot',
+              type: 'reserved',
+              balancePence: 34678,
+              targetPence: null,
+              color: '#f59e0b',
+              linkedDebtId: 'debt-airbnb',
+              archived: false,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+          debts: [
+            {
+              id: 'debt-airbnb',
+              name: 'AIRBNB',
+              lender: 'AIRBNB',
+              originalAmountPence: 55741,
+              currentBalancePence: 55741,
+              minimumPaymentPence: 0,
+              dueDate: '2026-06-05',
+              interestRateApr: null,
+              note: '',
+              status: 'active',
+              createdAt: '2026-05-20T00:00:00.000Z',
+              updatedAt: '2026-05-20T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={createActions()}
+      />,
+    )
+
+    const debtList = screen.getByRole('region', { name: 'Debt list' })
+
+    expect(within(debtList).getAllByText('£346.78').length).toBeGreaterThan(0)
+    expect(within(debtList).getByText('£346.78 covered')).toBeInTheDocument()
+    expect(within(debtList).getAllByText('62%').length).toBeGreaterThan(0)
+    expect(debtList.querySelector('.bg-emerald-500')).toHaveStyle({ width: '62%' })
+    expect(within(debtList).queryByText('£0.00 paid')).not.toBeInTheDocument()
   })
 
   it('does not treat a future paycheck plan as the current pay period', () => {

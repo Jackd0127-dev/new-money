@@ -469,13 +469,16 @@ export function DebtsPage({
             {visibleDebts.length > 0 ? (
               visibleDebts.map((debt) => {
               const paidPence = Math.max(0, debt.originalAmountPence - debt.currentBalancePence)
+              const linkedPotPence = getLinkedDebtPotPence(snapshot.pots, debt.id)
+              const coveredPence = Math.min(debt.originalAmountPence, paidPence + linkedPotPence)
               const progressPercent =
                 debt.originalAmountPence > 0
-                  ? Math.round((paidPence / debt.originalAmountPence) * 100)
+                  ? Math.round((coveredPence / debt.originalAmountPence) * 100)
                   : 100
               const isOverdue = debt.status === 'active' && debt.dueDate < today
-              const linkedPotPence = getLinkedDebtPotPence(snapshot.pots, debt.id)
               const debtDueAmountPence = getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots)
+              const progressLabel =
+                linkedPotPence > 0 ? `${formatPence(coveredPence)} covered` : `${formatPence(paidPence)} paid`
 
               return (
                 <div key={debt.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -530,7 +533,7 @@ export function DebtsPage({
                     <details>
                       <summary className="cursor-pointer list-none">
                         <div className="mb-2 flex items-center justify-between text-xs font-semibold text-slate-500">
-                          <span>{formatPence(paidPence)} paid</span>
+                          <span>{progressLabel}</span>
                           <span>{progressPercent}%</span>
                         </div>
                         <div className="h-2 overflow-hidden rounded-full bg-slate-100">
@@ -542,11 +545,19 @@ export function DebtsPage({
                       </summary>
                       <CalculationDetails
                         breakdown={{
-                          formula: 'Progress = paid amount ÷ original debt amount.',
+                          formula: linkedPotPence > 0
+                            ? 'Progress = paid amount plus linked pot balance ÷ original debt amount.'
+                            : 'Progress = paid amount ÷ original debt amount.',
                           lines: [
                             { label: 'Original debt', value: formatPence(debt.originalAmountPence), tone: 'add' },
                             { label: 'Current balance', value: `-${formatPence(debt.currentBalancePence)}`, tone: 'subtract' },
                             { label: 'Paid amount', value: formatPence(paidPence), tone: 'result' },
+                            ...(linkedPotPence > 0
+                              ? [
+                                  { label: 'In linked pots', value: formatPence(linkedPotPence), tone: 'add' as const },
+                                  { label: 'Covered amount', value: formatPence(coveredPence), tone: 'result' as const },
+                                ]
+                              : []),
                             { label: 'Progress', value: `${progressPercent}%`, tone: 'result' },
                           ],
                         }}

@@ -65,6 +65,7 @@ interface PayPeriodMoneySummaryInput {
 
 interface PayPeriodCostSummaryInput {
   payPeriod: PayPeriod | null
+  creditCards?: CreditCard[]
   recurringPayments: RecurringPayment[]
   customPayments: CustomPayment[]
   transactions: Transaction[]
@@ -93,6 +94,7 @@ export type PeriodCostItemSource =
   | 'debt_minimum'
   | 'debt_reserve'
   | 'credit_card_pot'
+  | 'linked_credit_card_pot'
   | 'credit_card_repayment'
 
 export interface PeriodCostItem {
@@ -424,6 +426,7 @@ export function getPayPeriodMoneySummary({
 
 export function getPayPeriodCostSummary({
   payPeriod,
+  creditCards = [],
   recurringPayments,
   customPayments,
   transactions,
@@ -577,35 +580,111 @@ export function getPayPeriodCostSummary({
       creditCardId: repayment.creditCardId,
       potId: null,
     }))
+  const activeCreditCardIds = new Set(creditCards.filter((card) => !card.archived).map((card) => card.id))
+  const linkedCreditCardPots = activeCreditCardIds.size > 0
+    ? pots.filter((pot) => !pot.archived && pot.linkedCreditCardId)
+    : []
+  const linkedCreditCardIds = new Set(
+    linkedCreditCardPots
+      .map((pot) => pot.linkedCreditCardId)
+      .filter((cardId): cardId is string => typeof cardId === 'string' && activeCreditCardIds.has(cardId)),
+  )
+  const linkedCreditCardPotItems = linkedCreditCardIds.size > 0
+    ? getCreditCardAllocationSummary({
+        creditCards,
+        recurringPayments,
+        customPayments,
+        transactions,
+        repayments: creditCardRepayments,
+        creditCardPots,
+        pots,
+        payPeriod,
+      }).cards.flatMap((cardSummary) => {
+        if (!linkedCreditCardIds.has(cardSummary.card.id) || cardSummary.remainingAfterCreditPotsPence <= 0) {
+          return []
+        }
+
+        const linkedPot = linkedCreditCardPots.find((pot) => pot.linkedCreditCardId === cardSummary.card.id)
+
+        if (!linkedPot) {
+          return []
+        }
+
+        return [
+          {
+            id: `linked-credit-card-pot-${cardSummary.card.id}`,
+            label: `${cardSummary.card.name} amount owed`,
+            amountPence: cardSummary.remainingAfterCreditPotsPence,
+            date: payPeriod.payday,
+            source: 'linked_credit_card_pot' as const,
+            creditCardId: cardSummary.card.id,
+            potId: linkedPot.id,
+          },
+        ]
+      })
+    : []
   const allItems = [
     ...directRecurringItems,
-    ...creditCardRecurringItems,
-    ...savedPaymentItems,
-    ...manualSpendItems,
+    ...creditCardRecurringItems.filter((item) => !linkedCreditCardIds.has(item.creditCardId ?? '')),
+    ...savedPaymentItems.filter((item) => !linkedCreditCardIds.has(item.creditCardId ?? '')),
+    ...manualSpendItems.filter((item) => !linkedCreditCardIds.has(item.creditCardId ?? '')),
     ...potAllocationItems,
     ...debtReserveItems,
     ...debtMinimumItems,
     ...creditCardPotItems,
-    ...repaymentItems,
+    ...linkedCreditCardPotItems,
+    ...repaymentItems.filter((item) => !linkedCreditCardIds.has(item.creditCardId ?? '')),
   ].sort(sortPeriodCostItems)
+
+  return createPayPeriodCostSummaryFromItems(payPeriod.incomePence, allItems)
+}
+
+export function filterPayPeriodCostSummary(
+  summary: PayPeriodCostSummary,
+  ignoredItemIds: Iterable<string>,
+): PayPeriodCostSummary {
+  const ignoredIds = new Set(ignoredItemIds)
+
+  if (ignoredIds.size === 0) {
+    return summary
+  }
+
+  return createPayPeriodCostSummaryFromItems(
+    summary.payReceivedPence,
+    summary.items.filter((item) => !ignoredIds.has(item.id)),
+  )
+}
+
+function createPayPeriodCostSummaryFromItems(
+  payReceivedPence: number,
+  items: PeriodCostItem[],
+): PayPeriodCostSummary {
   const directRecurringPence = sumPositive(
-    directRecurringItems,
+    items.filter((item) => item.source === 'recurring' && !item.creditCardId),
   )
   const savedPaymentsPence = sumPositive(
-    savedPaymentItems.filter((item) => !item.creditCardId),
+    items.filter((item) => item.source === 'saved_payment' && !item.creditCardId),
   )
   const manualSpendingPence = sumPositive(
-    manualSpendItems.filter((item) => !item.creditCardId),
+    items.filter((item) => item.source === 'manual_spend' && !item.creditCardId),
   )
-  const potAllocationsPence = sumPositive(potAllocationItems)
-  const debtReservesPence = sumPositive(debtReserveItems)
-  const debtMinimumsPence = sumPositive(debtMinimumItems)
-  const creditCardPotsPence = sumPositive(creditCardPotItems)
+  const potAllocationsPence = sumPositive(items.filter((item) => item.source === 'pot_allocation'))
+  const debtReservesPence = sumPositive(items.filter((item) => item.source === 'debt_reserve'))
+  const debtMinimumsPence = sumPositive(items.filter((item) => item.source === 'debt_minimum'))
+  const creditCardPotsPence = sumPositive(
+    items.filter((item) => item.source === 'credit_card_pot' || item.source === 'linked_credit_card_pot'),
+  )
   const creditCardChargesPence = sumPositive(
-    [...creditCardRecurringItems, ...savedPaymentItems, ...manualSpendItems].filter((item) => item.creditCardId),
+    items.filter(
+      (item) =>
+        item.creditCardId &&
+        ['recurring', 'saved_payment', 'manual_spend'].includes(item.source),
+    ),
   )
   const creditCardRepaymentsPence = Math.abs(
-    repaymentItems.reduce((total, item) => total + item.amountPence, 0),
+    items
+      .filter((item) => item.source === 'credit_card_repayment')
+      .reduce((total, item) => total + item.amountPence, 0),
   )
   const creditCardNetPence = Math.max(0, creditCardChargesPence - creditCardRepaymentsPence)
   const totalCostsPence =
@@ -617,10 +696,10 @@ export function getPayPeriodCostSummary({
     debtMinimumsPence +
     creditCardPotsPence +
     creditCardNetPence
-  const moneyLeftPence = payPeriod.incomePence - totalCostsPence
+  const moneyLeftPence = payReceivedPence - totalCostsPence
 
   return {
-    payReceivedPence: payPeriod.incomePence,
+    payReceivedPence,
     directRecurringPence,
     savedPaymentsPence,
     manualSpendingPence,
@@ -634,7 +713,7 @@ export function getPayPeriodCostSummary({
     totalCostsPence,
     moneyLeftPence,
     isOverCommitted: moneyLeftPence < 0,
-    items: allItems,
+    items,
   }
 }
 

@@ -857,6 +857,74 @@ describe('credit card allocation', () => {
 })
 
 describe('pay period cost summary', () => {
+  it('adds linked credit card amounts still owed to dashboard costs', () => {
+    const payPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 100000,
+      status: 'active',
+      createdAt: '2026-05-16T00:00:00.000Z',
+      updatedAt: '2026-05-16T00:00:00.000Z',
+    }
+
+    const summary = getPayPeriodCostSummary({
+      payPeriod,
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          openingBalancePence: 60000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      debts: [],
+      creditCardRepayments: [],
+      pots: [
+        {
+          id: 'pot-card-reserve',
+          name: 'Card Reserve',
+          type: 'reserved',
+          balancePence: 40000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          linkedCreditCardId: 'card-amex',
+          linkedDebtId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    expect(summary.creditCardPotsPence).toBe(20000)
+    expect(summary.creditCardChargesPence).toBe(0)
+    expect(summary.totalCostsPence).toBe(20000)
+    expect(summary.moneyLeftPence).toBe(80000)
+    expect(summary.items).toEqual([
+      expect.objectContaining({
+        id: 'linked-credit-card-pot-card-amex',
+        label: 'Everyday Amex amount owed',
+        amountPence: 20000,
+        source: 'linked_credit_card_pot',
+        creditCardId: 'card-amex',
+        potId: 'pot-card-reserve',
+      }),
+    ])
+  })
+
   it('calculates dashboard costs from due payments, saved payments, manual spending, debts, and net card costs', () => {
     const payPeriod: PayPeriod = {
       id: 'period-current',

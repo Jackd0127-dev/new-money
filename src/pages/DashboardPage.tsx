@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import {
+  filterPayPeriodCostSummary,
   formatPence,
   getPayPeriodCostSummary,
   type PeriodCostItem,
@@ -12,9 +13,12 @@ import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
 const dashboardTodoStorageKey = 'new-money.dashboard-todos.v1'
+const dashboardIgnoredPaymentsStorageKey = 'new-money.dashboard-ignored-payments.v1'
 
 interface PaycheckTodoItem {
   id: string
+  ignoreId: string
+  ignoreLabel: string
   label: string
   detail: string
   amountPence: number
@@ -35,9 +39,13 @@ export function DashboardPage({
   const [completedTodosByPeriod, setCompletedTodosByPeriod] = useState<Record<string, string[]>>(
     () => readCompletedTodos(),
   )
+  const [ignoredPaymentsByPeriod, setIgnoredPaymentsByPeriod] = useState<Record<string, string[]>>(
+    () => readIgnoredPayments(),
+  )
   const viewedPeriod = selectedPayPeriod ?? null
-  const summary = getPayPeriodCostSummary({
+  const baseSummary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
+    creditCards: snapshot.creditCards,
     recurringPayments: snapshot.recurringPayments,
     customPayments: snapshot.customPayments,
     transactions: snapshot.transactions,
@@ -48,12 +56,13 @@ export function DashboardPage({
     pots: snapshot.pots,
     potAllocations: snapshot.potAllocations,
   })
-  const todoItems = useMemo(
-    () => viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod, summary) : [],
-    [snapshot, summary, viewedPeriod],
-  )
+  const ignoredPaymentIds = new Set(viewedPeriod ? ignoredPaymentsByPeriod[viewedPeriod.id] ?? [] : [])
+  const summary = filterPayPeriodCostSummary(baseSummary, ignoredPaymentIds)
+  const todoItems = viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod, baseSummary) : []
   const completedTodoIds = new Set(viewedPeriod ? completedTodosByPeriod[viewedPeriod.id] ?? [] : [])
-  const completedTodoCount = todoItems.filter((item) => completedTodoIds.has(item.id)).length
+  const activeTodoItems = todoItems.filter((item) => !ignoredPaymentIds.has(item.ignoreId))
+  const completedTodoCount = activeTodoItems.filter((item) => completedTodoIds.has(item.id)).length
+  const ignoredTodoCount = todoItems.length - activeTodoItems.length
 
   function toggleTodo(itemId: string, done: boolean) {
     if (!viewedPeriod) {
@@ -77,6 +86,48 @@ export function DashboardPage({
       writeCompletedTodos(next)
       return next
     })
+  }
+
+  function toggleIgnoredPayment(item: PaycheckTodoItem, ignored: boolean) {
+    if (!viewedPeriod) {
+      return
+    }
+
+    setIgnoredPaymentsByPeriod((current) => {
+      const currentIds = new Set(current[viewedPeriod.id] ?? [])
+
+      if (ignored) {
+        currentIds.add(item.ignoreId)
+      } else {
+        currentIds.delete(item.ignoreId)
+      }
+
+      const next = {
+        ...current,
+        [viewedPeriod.id]: [...currentIds],
+      }
+
+      writeIgnoredPayments(next)
+      return next
+    })
+
+    if (ignored) {
+      setCompletedTodosByPeriod((current) => {
+        const currentIds = new Set(current[viewedPeriod.id] ?? [])
+
+        if (!currentIds.delete(item.id)) {
+          return current
+        }
+
+        const next = {
+          ...current,
+          [viewedPeriod.id]: [...currentIds],
+        }
+
+        writeCompletedTodos(next)
+        return next
+      })
+    }
   }
 
   return (
@@ -165,47 +216,84 @@ export function DashboardPage({
         <Panel
           title="Paycheck to-do list"
           accent="emerald"
-          description={`Tick off where this paycheck needs to go. ${completedTodoCount} of ${todoItems.length} done.`}
+          description={`Tick off where this paycheck needs to go. ${completedTodoCount} of ${activeTodoItems.length} done.${ignoredTodoCount > 0 ? ` ${ignoredTodoCount} ignored.` : ''}`}
         >
           {todoItems.length > 0 ? (
             <ul className="space-y-2">
               {todoItems.map((item) => {
                 const isDone = completedTodoIds.has(item.id)
+                const isIgnored = ignoredPaymentIds.has(item.ignoreId)
 
                 return (
                   <li
                     key={item.id}
                     className={
-                      isDone
-                        ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3'
-                        : 'rounded-lg border border-slate-200 bg-white px-3 py-3'
+                      isIgnored
+                        ? 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 opacity-75'
+                        : isDone
+                          ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3'
+                          : 'rounded-lg border border-slate-200 bg-white px-3 py-3'
                     }
                   >
-                    <label className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-start gap-3">
+                    <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto] sm:items-start">
                       <input
+                        id={`dashboard-todo-${item.id}`}
                         type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500"
-                        checked={isDone}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={item.label}
+                        checked={isDone && !isIgnored}
+                        disabled={isIgnored}
                         onChange={(event) => toggleTodo(item.id, event.target.checked)}
                       />
-                      <span className="min-w-0">
+                      <label htmlFor={`dashboard-todo-${item.id}`} className={isIgnored ? 'min-w-0 cursor-default' : 'min-w-0 cursor-pointer'}>
                         <span
                           className={
-                            isDone
-                              ? 'block text-sm font-semibold text-emerald-900 line-through decoration-2'
-                              : 'block text-sm font-semibold text-slate-950'
+                            isIgnored
+                              ? 'block text-sm font-semibold text-slate-500 line-through decoration-2'
+                              : isDone
+                                ? 'block text-sm font-semibold text-emerald-900 line-through decoration-2'
+                                : 'block text-sm font-semibold text-slate-950'
                           }
                         >
                           {item.label}
                         </span>
-                        <span className={isDone ? 'mt-1 block text-xs text-emerald-700' : 'mt-1 block text-xs text-slate-500'}>
-                          {item.detail}
+                        <span
+                          className={
+                            isIgnored
+                              ? 'mt-1 block text-xs font-semibold text-slate-500'
+                              : isDone
+                                ? 'mt-1 block text-xs text-emerald-700'
+                                : 'mt-1 block text-xs text-slate-500'
+                          }
+                        >
+                          {isIgnored ? 'Ignored for this paycheck' : item.detail}
                         </span>
-                      </span>
-                      <span className={isDone ? 'text-sm font-semibold text-emerald-800' : 'text-sm font-semibold text-slate-950'}>
+                      </label>
+                      <span
+                        className={
+                          isIgnored
+                            ? 'text-sm font-semibold text-slate-500 line-through decoration-2 sm:text-right'
+                            : isDone
+                              ? 'text-sm font-semibold text-emerald-800 sm:text-right'
+                              : 'text-sm font-semibold text-slate-950 sm:text-right'
+                        }
+                      >
                         {formatPence(item.amountPence)}
                       </span>
-                    </label>
+                      <button
+                        type="button"
+                        aria-label={`Ignore Payment for ${item.ignoreLabel}`}
+                        aria-pressed={isIgnored}
+                        onClick={() => toggleIgnoredPayment(item, !isIgnored)}
+                        className={
+                          isIgnored
+                            ? 'inline-flex min-h-8 items-center justify-center rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
+                            : 'inline-flex min-h-8 items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                        }
+                      >
+                        Ignore Payment
+                      </button>
+                    </div>
                   </li>
                 )
               })}
@@ -290,7 +378,7 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
       {
         label: 'Credit card pots',
         value: formatPence(summary.creditCardPotsPence),
-        detail: 'Money set aside from this paycheck for credit cards. External credit pots are excluded.',
+        detail: 'Money set aside from this paycheck for cards, including linked card pot shortfalls.',
         tone: 'add',
       },
       {
@@ -419,6 +507,10 @@ function periodCostItemToTodoItems(item: PeriodCostItem, snapshot: PlannerSnapsh
     return [creditCardPotCostToTodoItem(item, snapshot)]
   }
 
+  if (item.source === 'linked_credit_card_pot') {
+    return [linkedCreditCardPotCostToTodoItem(item, snapshot)]
+  }
+
   if (item.source === 'credit_card_repayment') {
     return []
   }
@@ -437,6 +529,8 @@ function recurringAllocationToTodoItem(
 
   return {
     id: `pot-allocation-${allocation.id}-todo`,
+    ignoreId: `pot-allocation-${allocation.id}`,
+    ignoreLabel: payment?.name ?? potName,
     label: payment
       ? `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot for "${payment.name}"`
       : `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot`,
@@ -452,6 +546,8 @@ function recurringCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot
 
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: item.label,
     label: item.potId
       ? `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${item.label}"`
       : `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
@@ -467,6 +563,8 @@ function savedPaymentCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnaps
 
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: item.label,
     label: `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
     detail: `Saved payment due ${item.date}`,
     amountPence: item.amountPence,
@@ -480,6 +578,8 @@ function manualSpendCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
 
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: item.label,
     label: item.potId
       ? `Cover ${formatPence(item.amountPence)} from "${getPotName(snapshot, item.potId)}" pot for "${item.label}"`
       : `Cover ${formatPence(item.amountPence)} for "${item.label}"`,
@@ -491,6 +591,8 @@ function manualSpendCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
 function potAllocationCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: item.label,
     label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot`,
     detail: item.label.toLowerCase().includes('payday top-up') ? 'Automatic payday top-up' : 'Manual pot allocation',
     amountPence: item.amountPence,
@@ -504,6 +606,8 @@ function debtReserveCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
 
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: debtName,
     label: `Set aside ${formatPence(item.amountPence)} for "${debtName}" debt`,
     detail: reserve?.note || 'Debt reserve',
     amountPence: item.amountPence,
@@ -513,6 +617,8 @@ function debtReserveCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
 function debtMinimumCostToTodoItem(item: PeriodCostItem): PaycheckTodoItem {
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: item.label,
     label: `Pay ${formatPence(item.amountPence)} toward "${item.label}" debt`,
     detail: `Debt due ${item.date}`,
     amountPence: item.amountPence,
@@ -525,8 +631,23 @@ function creditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnap
 
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: cardName,
     label: `Set aside ${formatPence(item.amountPence)} for "${cardName}" card`,
     detail: creditCardPot?.note || item.label,
+    amountPence: item.amountPence,
+  }
+}
+
+function linkedCreditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  const cardName = getCardName(snapshot, item.creditCardId)
+
+  return {
+    id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: cardName,
+    label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" card amount owed`,
+    detail: 'Linked card balance still owed',
     amountPence: item.amountPence,
   }
 }
@@ -534,6 +655,8 @@ function creditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnap
 function cardChargeCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot, detail: string): PaycheckTodoItem {
   return {
     id: `${item.id}-todo`,
+    ignoreId: item.id,
+    ignoreLabel: item.label,
     label: `Set aside ${formatPence(item.amountPence)} for "${getCardName(snapshot, item.creditCardId)}" card charge "${item.label}"`,
     detail,
     amountPence: item.amountPence,
@@ -557,12 +680,28 @@ function getCardName(snapshot: PlannerSnapshot, creditCardId?: string | null): s
 }
 
 function readCompletedTodos(): Record<string, string[]> {
+  return readStoredStringArrayRecord(dashboardTodoStorageKey)
+}
+
+function writeCompletedTodos(completedTodos: Record<string, string[]>): void {
+  writeStoredStringArrayRecord(dashboardTodoStorageKey, completedTodos)
+}
+
+function readIgnoredPayments(): Record<string, string[]> {
+  return readStoredStringArrayRecord(dashboardIgnoredPaymentsStorageKey)
+}
+
+function writeIgnoredPayments(ignoredPayments: Record<string, string[]>): void {
+  writeStoredStringArrayRecord(dashboardIgnoredPaymentsStorageKey, ignoredPayments)
+}
+
+function readStoredStringArrayRecord(storageKey: string): Record<string, string[]> {
   if (typeof window === 'undefined') {
     return {}
   }
 
   try {
-    const stored = window.localStorage.getItem(dashboardTodoStorageKey)
+    const stored = window.localStorage.getItem(storageKey)
 
     if (!stored) {
       return {}
@@ -584,13 +723,13 @@ function readCompletedTodos(): Record<string, string[]> {
   }
 }
 
-function writeCompletedTodos(completedTodos: Record<string, string[]>): void {
+function writeStoredStringArrayRecord(storageKey: string, value: Record<string, string[]>): void {
   if (typeof window === 'undefined') {
     return
   }
 
   try {
-    window.localStorage.setItem(dashboardTodoStorageKey, JSON.stringify(completedTodos))
+    window.localStorage.setItem(storageKey, JSON.stringify(value))
   } catch {
     // The checklist still works for the current session if storage is unavailable.
   }

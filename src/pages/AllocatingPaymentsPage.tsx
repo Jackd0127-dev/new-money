@@ -675,6 +675,7 @@ function CreditCardArtwork({ design }: { design: CreditCardDesign }) {
   if (design.id === 'cart-minimal-11') {
     return (
       <div className="figma-credit-card__art" aria-hidden="true">
+        <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/mask-vector.svg`} alt="" />
         <div className="figma-credit-card__stripe" />
         <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
         <img className="figma-credit-card__logo figma-credit-card__logo--contactless" src={`${assetPath}/contactless-logo.svg`} alt="" />

@@ -1625,6 +1625,18 @@ describe('dashboard page', () => {
           createdAt: '2026-05-16T00:00:00.000Z',
           updatedAt: '2026-05-16T00:00:00.000Z',
         },
+        {
+          id: 'council-tax',
+          name: 'Council Tax',
+          amountPence: 6000,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
       ],
       potAllocations: [
         {
@@ -1644,6 +1656,16 @@ describe('dashboard page', () => {
           amountPence: 8500,
           source: 'recurring',
           recurringPaymentId: 'insurance',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'allocation-savings-topup',
+          payPeriodId: 'period-current',
+          potId: 'pot-bills',
+          amountPence: 2211,
+          source: 'pot_auto',
+          recurringPaymentId: null,
           createdAt: '2026-05-16T00:00:00.000Z',
           updatedAt: '2026-05-16T00:00:00.000Z',
         },
@@ -1718,10 +1740,13 @@ describe('dashboard page', () => {
     )
 
     const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
-    expect(within(todoList).getByText('0 of 4 done.', { exact: false })).toBeInTheDocument()
+    expect(within(todoList).getByText('0 of 7 done.', { exact: false })).toBeInTheDocument()
     expect(within(todoList).getByText('Set aside £140.00 into "Food" pot')).toBeInTheDocument()
     expect(within(todoList).getByText('Set aside £85.00 into "Bills" pot for "Car Insurance"')).toBeInTheDocument()
+    expect(within(todoList).getByText('Set aside £60.00 into "Bills" pot for "Council Tax"')).toBeInTheDocument()
+    expect(within(todoList).getByText('Set aside £22.11 into "Bills" pot')).toBeInTheDocument()
     expect(within(todoList).getByText('Set aside £200.00 for "Loan" debt')).toBeInTheDocument()
+    expect(within(todoList).getByText('Pay £600.00 toward "Loan" debt')).toBeInTheDocument()
     expect(within(todoList).getByText('Set aside £50.00 for "Everyday Amex" card')).toBeInTheDocument()
 
     const foodCheckbox = within(todoList).getByRole('checkbox', {
@@ -1731,7 +1756,7 @@ describe('dashboard page', () => {
 
     expect(foodCheckbox).toBeChecked()
     expect(foodCheckbox.closest('li')).toHaveClass('bg-emerald-50')
-    expect(within(todoList).getByText('1 of 4 done.', { exact: false })).toBeInTheDocument()
+    expect(within(todoList).getByText('1 of 7 done.', { exact: false })).toBeInTheDocument()
 
     unmount()
 

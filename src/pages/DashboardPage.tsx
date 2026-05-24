@@ -3,11 +3,12 @@ import { useMemo, useState } from 'react'
 import {
   formatPence,
   getPayPeriodCostSummary,
+  type PeriodCostItem,
   type PayPeriodCostSummary,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, MoneyMetric, Panel, SelectInput, type CalculationBreakdown } from '../components/ui'
-import type { CreditCardPot, DebtReserve, PayPeriod, PotAllocation } from '../types/models'
+import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
 const dashboardTodoStorageKey = 'new-money.dashboard-todos.v1'
@@ -48,8 +49,8 @@ export function DashboardPage({
     potAllocations: snapshot.potAllocations,
   })
   const todoItems = useMemo(
-    () => viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod) : [],
-    [snapshot, viewedPeriod],
+    () => viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod, summary) : [],
+    [snapshot, summary, viewedPeriod],
   )
   const completedTodoIds = new Set(viewedPeriod ? completedTodosByPeriod[viewedPeriod.id] ?? [] : [])
   const completedTodoCount = todoItems.filter((item) => completedTodoIds.has(item.id)).length
@@ -344,29 +345,32 @@ function getMoneyLeftBreakdown(summary: PayPeriodCostSummary): CalculationBreakd
   }
 }
 
-function getPaycheckTodoItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod): PaycheckTodoItem[] {
-  const potItems = snapshot.potAllocations
-    .filter((allocation) => allocation.payPeriodId === payPeriod.id && allocation.amountPence > 0)
-    .map((allocation) => potAllocationToTodoItem(allocation, snapshot))
-  const debtItems = snapshot.debtReserves
+function getPaycheckTodoItems(
+  snapshot: PlannerSnapshot,
+  payPeriod: PayPeriod,
+  summary: PayPeriodCostSummary,
+): PaycheckTodoItem[] {
+  const recurringPaymentIdsInSummary = new Set(
+    summary.items
+      .filter((item) => item.source === 'recurring')
+      .map((item) => getRecurringPaymentIdFromCostItem(item))
+      .filter((paymentId): paymentId is string => Boolean(paymentId)),
+  )
+  const recurringAllocationTodos = snapshot.potAllocations
     .filter(
-      (reserve) =>
-        reserve.status === 'planned' &&
-        reserve.amountPence > 0 &&
-        isDebtReserveInPayPeriod(reserve, payPeriod),
+      (allocation) =>
+        allocation.payPeriodId === payPeriod.id &&
+        allocation.amountPence > 0 &&
+        allocation.recurringPaymentId &&
+        !recurringPaymentIdsInSummary.has(allocation.recurringPaymentId),
     )
-    .map((reserve) => debtReserveToTodoItem(reserve, snapshot))
-  const creditCardItems = snapshot.creditCardPots
-    .filter(
-      (creditCardPot) =>
-        creditCardPot.status === 'active' &&
-        creditCardPot.source === 'paycheck' &&
-        creditCardPot.amountPence > 0 &&
-        isCreditCardPotInPayPeriod(creditCardPot, payPeriod),
-    )
-    .map((creditCardPot) => creditCardPotToTodoItem(creditCardPot, snapshot))
+    .map((allocation) => recurringAllocationToTodoItem(allocation, snapshot))
+  const todoItems = [
+    ...summary.items.flatMap((item) => periodCostItemToTodoItems(item, snapshot)),
+    ...recurringAllocationTodos,
+  ]
 
-  return [...potItems, ...debtItems, ...creditCardItems].sort((a, b) => {
+  return todoItems.sort((a, b) => {
     const detailSort = a.detail.localeCompare(b.detail)
 
     if (detailSort !== 0) {
@@ -377,75 +381,179 @@ function getPaycheckTodoItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod): 
   })
 }
 
-function potAllocationToTodoItem(allocation: PotAllocation, snapshot: PlannerSnapshot): PaycheckTodoItem {
-  const pot = snapshot.pots.find((candidate) => candidate.id === allocation.potId)
+function getRecurringPaymentIdFromCostItem(item: PeriodCostItem): string | null {
+  const match = item.id.match(/^recurring-(.+)-\d{4}-\d{2}-\d{2}$/)
+  return match?.[1] ?? null
+}
+
+function periodCostItemToTodoItems(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem[] {
+  if (item.amountPence <= 0) {
+    return []
+  }
+
+  if (item.source === 'recurring') {
+    return [recurringCostToTodoItem(item, snapshot)]
+  }
+
+  if (item.source === 'saved_payment') {
+    return [savedPaymentCostToTodoItem(item, snapshot)]
+  }
+
+  if (item.source === 'manual_spend') {
+    return [manualSpendCostToTodoItem(item, snapshot)]
+  }
+
+  if (item.source === 'pot_allocation') {
+    return [potAllocationCostToTodoItem(item, snapshot)]
+  }
+
+  if (item.source === 'debt_reserve') {
+    return [debtReserveCostToTodoItem(item, snapshot)]
+  }
+
+  if (item.source === 'debt_minimum') {
+    return [debtMinimumCostToTodoItem(item)]
+  }
+
+  if (item.source === 'credit_card_pot') {
+    return [creditCardPotCostToTodoItem(item, snapshot)]
+  }
+
+  if (item.source === 'credit_card_repayment') {
+    return []
+  }
+
+  return []
+}
+
+function recurringAllocationToTodoItem(
+  allocation: PlannerSnapshot['potAllocations'][number],
+  snapshot: PlannerSnapshot,
+): PaycheckTodoItem {
   const payment = allocation.recurringPaymentId
     ? snapshot.recurringPayments.find((candidate) => candidate.id === allocation.recurringPaymentId)
     : null
-  const potName = pot?.name ?? 'Unknown'
+  const potName = getPotName(snapshot, allocation.potId)
 
   return {
-    id: `pot-allocation-${allocation.id}-${allocation.amountPence}`,
+    id: `pot-allocation-${allocation.id}-todo`,
     label: payment
       ? `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot for "${payment.name}"`
       : `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot`,
-    detail: allocation.source === 'recurring'
-      ? 'Recurring bill reserve'
-      : allocation.source === 'pot_auto'
-        ? 'Automatic payday top-up'
-        : 'Manual pot allocation',
+    detail: 'Recurring bill reserve',
     amountPence: allocation.amountPence,
   }
 }
 
-function debtReserveToTodoItem(reserve: DebtReserve, snapshot: PlannerSnapshot): PaycheckTodoItem {
-  const debt = snapshot.debts.find((candidate) => candidate.id === reserve.debtId)
-  const debtName = debt?.name ?? 'Unknown debt'
+function recurringCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  if (item.creditCardId) {
+    return cardChargeCostToTodoItem(item, snapshot, 'Recurring card charge')
+  }
 
   return {
-    id: `debt-reserve-${reserve.id}-${reserve.amountPence}`,
-    label: `Set aside ${formatPence(reserve.amountPence)} for "${debtName}" debt`,
-    detail: reserve.note || 'Debt reserve',
-    amountPence: reserve.amountPence,
+    id: `${item.id}-todo`,
+    label: item.potId
+      ? `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${item.label}"`
+      : `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
+    detail: `Recurring bill due ${item.date}`,
+    amountPence: item.amountPence,
   }
 }
 
-function creditCardPotToTodoItem(creditCardPot: CreditCardPot, snapshot: PlannerSnapshot): PaycheckTodoItem {
-  const card = snapshot.creditCards.find((candidate) => candidate.id === creditCardPot.creditCardId)
-  const cardName = card?.name ?? 'Unknown card'
+function savedPaymentCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  if (item.creditCardId) {
+    return cardChargeCostToTodoItem(item, snapshot, 'Saved card payment')
+  }
 
   return {
-    id: `credit-card-pot-${creditCardPot.id}-${creditCardPot.amountPence}`,
-    label: `Set aside ${formatPence(creditCardPot.amountPence)} for "${cardName}" card`,
-    detail: creditCardPot.note || creditCardPot.name,
-    amountPence: creditCardPot.amountPence,
+    id: `${item.id}-todo`,
+    label: `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
+    detail: `Saved payment due ${item.date}`,
+    amountPence: item.amountPence,
   }
 }
 
-function isDebtReserveInPayPeriod(
-  reserve: Pick<DebtReserve, 'payPeriodId' | 'periodStartDate' | 'periodEndDate'>,
-  payPeriod: PayPeriod,
-): boolean {
-  if (reserve.payPeriodId) {
-    return reserve.payPeriodId === payPeriod.id
+function manualSpendCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  if (item.creditCardId) {
+    return cardChargeCostToTodoItem(item, snapshot, 'Logged card spend')
   }
 
-  return reserve.periodStartDate === payPeriod.startDate && reserve.periodEndDate === payPeriod.endDate
+  return {
+    id: `${item.id}-todo`,
+    label: item.potId
+      ? `Cover ${formatPence(item.amountPence)} from "${getPotName(snapshot, item.potId)}" pot for "${item.label}"`
+      : `Cover ${formatPence(item.amountPence)} for "${item.label}"`,
+    detail: item.potId ? `Logged pot spend on ${item.date}` : `Logged spend on ${item.date}`,
+    amountPence: item.amountPence,
+  }
 }
 
-function isCreditCardPotInPayPeriod(
-  creditCardPot: Pick<CreditCardPot, 'payPeriodId' | 'periodStartDate' | 'periodEndDate' | 'payday'>,
-  payPeriod: PayPeriod,
-): boolean {
-  if (creditCardPot.payPeriodId) {
-    return creditCardPot.payPeriodId === payPeriod.id
+function potAllocationCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  return {
+    id: `${item.id}-todo`,
+    label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot`,
+    detail: item.label.toLowerCase().includes('payday top-up') ? 'Automatic payday top-up' : 'Manual pot allocation',
+    amountPence: item.amountPence,
+  }
+}
+
+function debtReserveCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  const reserve = snapshot.debtReserves.find((candidate) => item.id === `debt-reserve-${candidate.id}`)
+  const debt = reserve ? snapshot.debts.find((candidate) => candidate.id === reserve.debtId) : null
+  const debtName = debt?.name ?? item.label.replace(/\s+reserve$/i, '')
+
+  return {
+    id: `${item.id}-todo`,
+    label: `Set aside ${formatPence(item.amountPence)} for "${debtName}" debt`,
+    detail: reserve?.note || 'Debt reserve',
+    amountPence: item.amountPence,
+  }
+}
+
+function debtMinimumCostToTodoItem(item: PeriodCostItem): PaycheckTodoItem {
+  return {
+    id: `${item.id}-todo`,
+    label: `Pay ${formatPence(item.amountPence)} toward "${item.label}" debt`,
+    detail: `Debt due ${item.date}`,
+    amountPence: item.amountPence,
+  }
+}
+
+function creditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  const creditCardPot = snapshot.creditCardPots.find((candidate) => item.id === `credit-card-pot-${candidate.id}`)
+  const cardName = getCardName(snapshot, item.creditCardId)
+
+  return {
+    id: `${item.id}-todo`,
+    label: `Set aside ${formatPence(item.amountPence)} for "${cardName}" card`,
+    detail: creditCardPot?.note || item.label,
+    amountPence: item.amountPence,
+  }
+}
+
+function cardChargeCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot, detail: string): PaycheckTodoItem {
+  return {
+    id: `${item.id}-todo`,
+    label: `Set aside ${formatPence(item.amountPence)} for "${getCardName(snapshot, item.creditCardId)}" card charge "${item.label}"`,
+    detail,
+    amountPence: item.amountPence,
+  }
+}
+
+function getPotName(snapshot: PlannerSnapshot, potId?: string | null): string {
+  if (!potId) {
+    return 'Unlinked'
   }
 
-  if (creditCardPot.periodStartDate && creditCardPot.periodEndDate) {
-    return creditCardPot.periodStartDate === payPeriod.startDate && creditCardPot.periodEndDate === payPeriod.endDate
+  return snapshot.pots.find((candidate) => candidate.id === potId)?.name ?? 'Archived pot'
+}
+
+function getCardName(snapshot: PlannerSnapshot, creditCardId?: string | null): string {
+  if (!creditCardId) {
+    return 'Unlinked'
   }
 
-  return Boolean(creditCardPot.payday && creditCardPot.payday >= payPeriod.startDate && creditCardPot.payday <= payPeriod.endDate)
+  return snapshot.creditCards.find((candidate) => candidate.id === creditCardId)?.name ?? 'Archived card'
 }
 
 function readCompletedTodos(): Record<string, string[]> {

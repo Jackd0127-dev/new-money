@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
@@ -23,11 +24,13 @@ export interface FirebaseAuthController {
   isLoading: boolean
   error: string | null
   clearError: () => void
-  signInWithGoogle: () => Promise<void>
-  signInWithApple: () => Promise<void>
-  signInWithEmail: (email: string, password: string) => Promise<void>
-  createEmailAccount: (email: string, password: string) => Promise<void>
-  signOut: () => Promise<void>
+  signInWithGoogle: () => Promise<boolean>
+  signInWithApple: () => Promise<boolean>
+  signInWithEmail: (email: string, password: string) => Promise<boolean>
+  createEmailAccount: (email: string, password: string) => Promise<boolean>
+  sendPasswordResetEmail: (email: string) => Promise<boolean>
+  deleteAccount: () => Promise<boolean>
+  signOut: () => Promise<boolean>
 }
 
 export function useFirebaseAuth(): FirebaseAuthController {
@@ -66,8 +69,10 @@ export function useFirebaseAuth(): FirebaseAuthController {
 
     try {
       await action()
+      return true
     } catch (caughtError) {
       setError(toAuthMessage(caughtError))
+      return false
     }
   }, [])
 
@@ -107,6 +112,41 @@ export function useFirebaseAuth(): FirebaseAuthController {
     [requireAuth, runAuthAction],
   )
 
+  const sendPasswordResetEmail = useCallback(
+    (email: string) =>
+      runAuthAction(async () => {
+        await firebaseSendPasswordResetEmail(requireAuth(), email)
+      }),
+    [requireAuth, runAuthAction],
+  )
+
+  const deleteAccount = useCallback(
+    () =>
+      runAuthAction(async () => {
+        const auth = requireAuth()
+        const currentUser = auth.currentUser
+
+        if (!currentUser) {
+          throw new Error('No signed-in account to delete.')
+        }
+
+        const idToken = await currentUser.getIdToken(true)
+        const response = await fetch('/api/account', {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error(await getAccountApiErrorMessage(response))
+        }
+
+        await firebaseSignOut(auth)
+      }),
+    [requireAuth, runAuthAction],
+  )
+
   const signOut = useCallback(
     () =>
       runAuthAction(async () => {
@@ -126,6 +166,8 @@ export function useFirebaseAuth(): FirebaseAuthController {
     signInWithApple,
     signInWithEmail,
     createEmailAccount,
+    sendPasswordResetEmail,
+    deleteAccount,
     signOut,
   }
 }
@@ -148,8 +190,38 @@ function toAuthMessage(error: unknown): string {
       return 'That email already has an account. Try signing in instead.'
     }
 
-    return error.message
+    if (error.message.includes('auth/requires-recent-login')) {
+      return 'For security, sign out and sign back in, then try again.'
+    }
+
+    if (error.message.includes('auth/user-not-found')) {
+      return 'No account was found for that email address.'
+    }
+
+    if (error.message.includes('auth/missing-email')) {
+      return 'This account does not have an email address for password reset.'
+    }
+
+    if (error.message.includes('auth/too-many-requests')) {
+      return 'Too many attempts. Wait a moment, then try again.'
+    }
+
+    return 'Authentication failed. Please try again.'
   }
 
   return 'Authentication failed.'
+}
+
+async function getAccountApiErrorMessage(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as { error?: unknown }
+
+    if (typeof payload.error === 'string' && payload.error.trim()) {
+      return payload.error
+    }
+  } catch {
+    // Fall through to the generic account message.
+  }
+
+  return 'Unable to update this account. Please try again.'
 }

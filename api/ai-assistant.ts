@@ -1,5 +1,4 @@
 import { GoogleGenAI, Type } from '@google/genai'
-import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 
 import { defaultSettings } from '../src/data/defaults.js'
@@ -12,6 +11,8 @@ import {
 } from '../src/domain/money.js'
 import type { PlannerSnapshot } from '../src/storage/repository.js'
 import type { AiProvider, PayPeriod, PotAllocation } from '../src/types/models.js'
+import { getBearerToken, getSafeErrorName, initializeFirebaseAdmin } from '../server/firebaseAdmin.js'
+import { isRequestBodyTooLarge, setSecureApiHeaders } from '../server/apiSecurity.js'
 
 const systemInstruction = `
 You are New Money AI, a whole-app assistant inside a private UK paycheck-planner app.
@@ -109,9 +110,15 @@ interface CompactPromptAppContext {
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
+  setSecureApiHeaders(res)
+
   if (req.method !== 'POST') {
     res.setHeader?.('Allow', 'POST')
     return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  if (isRequestBodyTooLarge(req.body)) {
+    return res.status(413).json({ error: 'Request body is too large.' })
   }
 
   const idToken = getBearerToken(req.headers.authorization)
@@ -125,11 +132,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   try {
     initializeFirebaseAdmin()
-    await getAuth().verifyIdToken(idToken)
+    await getAuth().verifyIdToken(idToken, true)
   } catch (error) {
-    return res.status(500).json({
-      error: error instanceof Error ? error.message : 'Unable to verify assistant access',
-    })
+    console.error('AI assistant access verification failed', { reason: getSafeErrorName(error) })
+    return res.status(401).json({ error: 'Unable to verify assistant access.' })
   }
 
   const snapshot = normalizePlannerSnapshot(body.snapshot)
@@ -165,7 +171,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       )
     } catch (error) {
       logAiProviderError(provider, error)
-      return res.status(502).json(createAiProviderError(provider, getErrorMessage(error)))
+      return res.status(502).json(createAiProviderError(provider, 'The AI provider could not complete the request.'))
     }
   }
 
@@ -190,7 +196,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(200).json(parseAssistantResponse(extractGeminiText(response)))
   } catch (error) {
     logAiProviderError(provider, error)
-    return res.status(502).json(createAiProviderError(provider, getErrorMessage(error)))
+    return res.status(502).json(createAiProviderError(provider, 'The AI provider could not complete the request.'))
   }
 }
 
@@ -221,7 +227,7 @@ async function generateOpenRouterJson({
   })
 
   if (!response.ok) {
-    throw new Error(`OpenRouter request failed with ${response.status}: ${await response.text()}`)
+    throw new Error(`OpenRouter request failed with ${response.status}`)
   }
 
   const body = (await response.json()) as {
@@ -971,38 +977,6 @@ function normalizePlannerSnapshot(snapshot: unknown): PlannerSnapshot {
 
 function normalizeAiProvider(provider: unknown): AiProvider {
   return provider === 'openrouter' ? 'openrouter' : 'gemini'
-}
-
-function initializeFirebaseAdmin() {
-  if (getApps().length > 0) {
-    return
-  }
-
-  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-
-  if (!serviceAccountJson) {
-    throw new Error('Firebase service account is not configured')
-  }
-
-  const serviceAccount = JSON.parse(serviceAccountJson) as Record<string, unknown>
-
-  if (typeof serviceAccount.private_key === 'string') {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
-  }
-
-  initializeApp({
-    credential: cert(serviceAccount),
-  })
-}
-
-function getBearerToken(value: string | string[] | undefined): string | null {
-  const header = Array.isArray(value) ? value[0] : value
-
-  if (!header?.startsWith('Bearer ')) {
-    return null
-  }
-
-  return header.slice('Bearer '.length).trim() || null
 }
 
 function parseBody(body: unknown): AssistantRequestBody {

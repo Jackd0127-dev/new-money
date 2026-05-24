@@ -98,7 +98,7 @@ export function useCloudSync({
       if (localSignature === cloudSignature) {
         lastUploadedSignatureRef.current = localSignature
         setStatus('synced')
-        setMessage('Cloud sync is up to date.')
+        setMessage('Account data is up to date.')
         setAutoSyncEnabled(true)
         return
       }
@@ -193,7 +193,7 @@ export function useCloudSync({
           lastUploadedSignatureRef.current = signature
           setCloudUpdatedAtIso(updatedAtIso)
           setStatus('synced')
-          setMessage('Cloud sync is up to date.')
+          setMessage('Account data is up to date.')
         })
         .catch((caughtError) => {
           setStatus('error')
@@ -215,8 +215,16 @@ export function useCloudSync({
 
 function toSyncMessage(error: unknown): string {
   if (error instanceof Error) {
-    return error.message
+    const message = error.message.toLowerCase()
+
+    if (message.includes('permission') || message.includes('auth')) {
+      return 'Account data sync failed. Check your sign-in and account permissions.'
+    }
+
+    if (message.includes('network') || message.includes('offline')) {
+      return 'Account data sync failed. Check your connection and try again.'
+    }
   }
 
-  return 'Cloud sync failed.'
+  return 'Account data sync failed.'
 }

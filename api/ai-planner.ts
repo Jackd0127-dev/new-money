@@ -1,11 +1,12 @@
 import { GoogleGenAI, Type } from '@google/genai'
-import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 
 import { defaultSettings } from '../src/data/defaults.js'
 import { getDebtReservePlans, type DebtReservePlan } from '../src/domain/debtPlanner.js'
 import { findPayPeriodForDate, formatPence, toIsoDate } from '../src/domain/money.js'
 import type { PlannerSnapshot } from '../src/storage/repository.js'
+import { getBearerToken, getSafeErrorName, initializeFirebaseAdmin } from '../server/firebaseAdmin.js'
+import { isRequestBodyTooLarge, setSecureApiHeaders } from '../server/apiSecurity.js'
 
 const systemInstruction = `
 You are a deterministic debt planner inside a private UK paycheck-planner app.
@@ -75,9 +76,15 @@ interface AiPlannerResponse {
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
+  setSecureApiHeaders(res)
+
   if (req.method !== 'POST') {
     res.setHeader?.('Allow', 'POST')
     return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  if (isRequestBodyTooLarge(req.body)) {
+    return res.status(413).json({ error: 'Request body is too large.' })
   }
 
   const idToken = getBearerToken(req.headers.authorization)
@@ -91,11 +98,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   try {
     initializeFirebaseAdmin()
-    await getAuth().verifyIdToken(idToken)
+    await getAuth().verifyIdToken(idToken, true)
   } catch (error) {
-    return res.status(500).json({
-      error: error instanceof Error ? error.message : 'Unable to verify planner access',
-    })
+    console.error('AI planner access verification failed', { reason: getSafeErrorName(error) })
+    return res.status(401).json({ error: 'Unable to verify planner access.' })
   }
 
   const snapshot = normalizePlannerSnapshot(body.snapshot)
@@ -214,38 +220,6 @@ async function generateOpenRouterJson({
   }
 
   return content.trim()
-}
-
-function initializeFirebaseAdmin() {
-  if (getApps().length > 0) {
-    return
-  }
-
-  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-
-  if (!serviceAccountJson) {
-    throw new Error('Firebase service account is not configured')
-  }
-
-  const serviceAccount = JSON.parse(serviceAccountJson) as Record<string, unknown>
-
-  if (typeof serviceAccount.private_key === 'string') {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
-  }
-
-  initializeApp({
-    credential: cert(serviceAccount),
-  })
-}
-
-function getBearerToken(value: string | string[] | undefined): string | null {
-  const header = Array.isArray(value) ? value[0] : value
-
-  if (!header?.startsWith('Bearer ')) {
-    return null
-  }
-
-  return header.slice('Bearer '.length).trim() || null
 }
 
 function parseBody(body: unknown): AiPlannerRequestBody {

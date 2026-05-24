@@ -16,6 +16,7 @@ import { SpendingPage } from './SpendingPage'
 import { AppShell } from '../components/AppShell'
 import { creditCardDesigns } from '../domain/creditCardDesigns'
 import { toIsoDate } from '../domain/money'
+import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { RecurringPayment, Transaction } from '../types/models'
 
@@ -286,6 +287,40 @@ describe('settings page', () => {
       aiInstructions: '',
       aiProvider: 'openrouter',
     })
+  })
+
+  it('sends a password reset email from account actions', async () => {
+    const user = userEvent.setup()
+    const auth = createAuth({
+      user: createAuthUser({ email: 'money@example.com' }),
+    })
+
+    render(<SettingsPage snapshot={createSnapshot()} actions={createActions()} auth={auth} />)
+
+    await user.click(screen.getByRole('button', { name: 'Change password' }))
+
+    expect(auth.sendPasswordResetEmail).toHaveBeenCalledWith('money@example.com')
+    expect(screen.getByText('Password reset email sent to money@example.com.')).toBeVisible()
+  })
+
+  it('deletes the signed-in account after confirmation', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const auth = createAuth({
+      user: createAuthUser({ email: 'money@example.com' }),
+    })
+
+    render(<SettingsPage snapshot={createSnapshot()} actions={createActions()} auth={auth} />)
+
+    await user.click(screen.getByRole('button', { name: 'Delete account' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Delete money@example.com? This cannot be undone. Local app data on this device will stay available.',
+    )
+    expect(auth.deleteAccount).toHaveBeenCalled()
+    expect(screen.getByText('Account deleted. Local app data remains on this device.')).toBeVisible()
+
+    confirmSpy.mockRestore()
   })
 })
 
@@ -1946,6 +1981,36 @@ function createActions(): TestActions {
     deletePayPeriod: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),
   }
+}
+
+function createAuth(overrides: Partial<FirebaseAuthController> = {}): FirebaseAuthController {
+  return {
+    user: null,
+    isConfigured: true,
+    isAppleEnabled: true,
+    isLoading: false,
+    error: null,
+    clearError: vi.fn(),
+    signInWithGoogle: vi.fn(async () => true),
+    signInWithApple: vi.fn(async () => true),
+    signInWithEmail: vi.fn(async () => true),
+    createEmailAccount: vi.fn(async () => true),
+    sendPasswordResetEmail: vi.fn(async () => true),
+    deleteAccount: vi.fn(async () => true),
+    signOut: vi.fn(async () => true),
+    ...overrides,
+  }
+}
+
+function createAuthUser(
+  overrides: Partial<NonNullable<FirebaseAuthController['user']>> = {},
+): NonNullable<FirebaseAuthController['user']> {
+  return {
+    uid: 'user-1',
+    email: 'user@example.com',
+    providerData: [{ providerId: 'password' }],
+    ...overrides,
+  } as NonNullable<FirebaseAuthController['user']>
 }
 
 function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapshot {

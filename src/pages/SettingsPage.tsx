@@ -133,6 +133,8 @@ export function SettingsPage({
 function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [accountMessage, setAccountMessage] = useState<string | null>(null)
+  const [busyAccountAction, setBusyAccountAction] = useState<'password' | 'delete' | null>(null)
 
   async function signInWithEmail() {
     await auth?.signInWithEmail(email, password)
@@ -142,10 +144,56 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
     await auth?.createEmailAccount(email, password)
   }
 
+  async function changePassword() {
+    const resetEmail = auth?.user?.email
+
+    if (!auth || !resetEmail) {
+      return
+    }
+
+    setAccountMessage(null)
+    setBusyAccountAction('password')
+
+    const resetSent = await auth.sendPasswordResetEmail(resetEmail)
+
+    if (resetSent) {
+      setAccountMessage(`Password reset email sent to ${resetEmail}.`)
+    }
+
+    setBusyAccountAction(null)
+  }
+
+  async function deleteAccount() {
+    if (!auth?.user) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${accountIdentifier}? This cannot be undone. Local app data on this device will stay available.`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setAccountMessage(null)
+    setBusyAccountAction('delete')
+
+    const deleted = await auth.deleteAccount()
+
+    if (deleted) {
+      setAccountMessage('Account deleted. Local app data remains on this device.')
+    }
+
+    setBusyAccountAction(null)
+  }
+
   const accountIdentifier = auth?.user?.email ?? auth?.user?.uid ?? (auth ? 'Not signed in' : 'Local planner')
   const providerLabel = getAuthProviderLabel(auth)
   const canUseAuth = Boolean(auth?.isConfigured)
   const isSignedIn = Boolean(auth?.user)
+  const passwordResetEmail = auth?.user?.email ?? ''
+  const canChangePassword = Boolean(isSignedIn && passwordResetEmail && hasPasswordProvider(auth?.user ?? null))
 
   return (
     <Panel title="Account" description="Manage sign-in and account actions." accent="cyan" density="compact">
@@ -223,18 +271,34 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
           </div>
         )}
 
+        {accountMessage && (
+          <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-5 text-emerald-800">
+            <CheckCircle2 className="mt-0.5 shrink-0" size={16} />
+            <p>{accountMessage}</p>
+          </div>
+        )}
+
         <div className="grid gap-2 sm:grid-cols-3">
-          <Button variant="secondary" disabled title="Ready for password reset wiring">
+          <Button
+            variant="secondary"
+            disabled={!canChangePassword || busyAccountAction !== null}
+            onClick={() => void changePassword()}
+            title={getChangePasswordTitle(isSignedIn, passwordResetEmail, canChangePassword)}
+          >
             <KeyRound size={18} />
-            Change password
+            {busyAccountAction === 'password' ? 'Sending reset' : 'Change password'}
           </Button>
-          <Button variant="danger" disabled title="Ready for account deletion wiring">
+          <Button
+            variant="danger"
+            disabled={!isSignedIn || busyAccountAction !== null}
+            onClick={() => void deleteAccount()}
+          >
             <Trash2 size={18} />
-            Delete account
+            {busyAccountAction === 'delete' ? 'Deleting account' : 'Delete account'}
           </Button>
           <Button
             variant="secondary"
-            disabled={!isSignedIn}
+            disabled={!isSignedIn || busyAccountAction !== null}
             onClick={() => {
               if (window.confirm('Log out on this device?')) {
                 void auth?.signOut()
@@ -248,7 +312,7 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
 
         <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">
           <ShieldAlert className="mt-0.5 shrink-0" size={15} />
-          <p>Change password and Delete account are placeholders ready for account-management wiring.</p>
+          <p>Password changes are sent by email. Deleting your account removes the sign-in account; local app data on this device remains available.</p>
         </div>
       </div>
     </Panel>
@@ -288,4 +352,28 @@ function getAuthProviderLabel(auth?: FirebaseAuthController): string {
   }
 
   return providerId
+}
+
+function hasPasswordProvider(user: FirebaseAuthController['user']): boolean {
+  if (!user) {
+    return false
+  }
+
+  return user.providerData.length === 0 || user.providerData.some((provider) => provider.providerId === 'password')
+}
+
+function getChangePasswordTitle(isSignedIn: boolean, email: string, canChangePassword: boolean): string | undefined {
+  if (canChangePassword) {
+    return undefined
+  }
+
+  if (!isSignedIn) {
+    return 'Sign in to change your password.'
+  }
+
+  if (!email) {
+    return 'This account does not have an email address for password reset.'
+  }
+
+  return 'Use your sign-in provider to manage this password.'
 }

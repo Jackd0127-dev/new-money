@@ -9,6 +9,7 @@ import {
   toIsoDate,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
+import { PayPeriodHistoryPanel } from './HistoryPage'
 import {
   Button,
   Field,
@@ -87,7 +88,7 @@ export function PaydayWizardPage({
 
   return (
     <div className="space-y-6">
-      <Panel title="Payday wizard" description="Enter pay details for this payday." accent="emerald">
+      <Panel title="Pay day" description="Enter pay details for this payday." accent="emerald">
         <SectionGrid variant="wideLeft" className="items-start">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Payday">
@@ -180,6 +181,8 @@ export function PaydayWizardPage({
           </div>
         </SectionGrid>
       </Panel>
+
+      <PayPeriodHistoryPanel snapshot={snapshot} actions={actions} />
     </div>
   )
 }

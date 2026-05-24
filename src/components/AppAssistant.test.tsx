@@ -34,8 +34,9 @@ describe('AppAssistant', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
 
-    expect(screen.getByRole('dialog', { name: 'AI helper' })).toBeInTheDocument()
-    expect(screen.getByText('AI')).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getAllByText('AI').length).toBeGreaterThan(0)
     expect(screen.getByText('I can access all of your payments and give you a detailed plan depending on your needs.')).toBeInTheDocument()
     expect(screen.queryByText('New Money AI')).not.toBeInTheDocument()
     expect(screen.queryByText('Full app context, focused on your current screen.')).not.toBeInTheDocument()

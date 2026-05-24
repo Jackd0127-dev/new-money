@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import { Loader2, Send, Sparkles, X } from 'lucide-react'
+import { Loader2, Send, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import {
@@ -12,6 +12,7 @@ import {
 } from '../domain/assistantActions'
 import { getViewLabel } from '../domain/assistantContext'
 import { toIsoDate } from '../domain/money'
+import { useAssistantProfile } from '../hooks/useAssistantProfile'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
@@ -56,6 +57,7 @@ export function AppAssistant({
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isSending, setIsSending] = useState(false)
   const [actionStatuses, setActionStatuses] = useState<Record<string, AssistantActionStatus>>({})
+  const { profile } = useAssistantProfile()
   const todayIso = toIsoDate(new Date())
   const viewLabel = getViewLabel(activeView)
 
@@ -177,10 +179,10 @@ export function AppAssistant({
         onClick={() => setIsOpen(true)}
         className="ai-assistant-trigger fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-2xl shadow-slate-900/25 transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
       >
-        <span className="flex size-9 items-center justify-center rounded-full bg-white text-slate-950">
-          <Sparkles size={18} />
+        <span className="flex size-9 items-center justify-center rounded-full bg-white text-xs font-black text-slate-950">
+          {profile.avatar}
         </span>
-        <span className="hidden sm:inline">Ask AI</span>
+        <span className="hidden sm:inline">Ask {profile.name}</span>
       </button>
     )
   }
@@ -189,11 +191,16 @@ export function AppAssistant({
     <section
       role="dialog"
       aria-label="AI helper"
-      className="fixed bottom-5 right-5 z-40 flex max-h-[min(720px,calc(100vh-2.5rem))] w-[min(430px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
+      className="fixed bottom-5 right-5 z-40 flex max-h-[min(780px,calc(100vh-2.5rem))] w-[min(540px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
     >
-      <div className="border-b border-slate-200 bg-slate-950 p-4 text-white">
+      <div className="ai-assistant-header border-b border-white/15 p-5 text-white">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold">AI</p>
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/95 text-xs font-black text-slate-950">
+              {profile.avatar}
+            </span>
+            <p className="truncate text-base font-semibold">{profile.name}</p>
+          </div>
           <button
             type="button"
             aria-label="Close AI helper"
@@ -239,9 +246,9 @@ export function AppAssistant({
             aria-label="Ask AI"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            rows={2}
-            placeholder={`Ask about ${viewLabel.toLowerCase()}, costs, pots, debts...`}
-            className="max-h-28 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-slate-950 outline-none placeholder:text-slate-400"
+            rows={3}
+            placeholder={`Ask ${profile.name} about ${viewLabel.toLowerCase()}, costs, pots, debts...`}
+            className="max-h-40 min-h-16 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-slate-950 outline-none placeholder:text-slate-400"
           />
           <button
             type="submit"

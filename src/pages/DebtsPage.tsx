@@ -458,14 +458,13 @@ export function DebtsPage({
         </Panel>
       </SectionGrid>
 
-      <SectionGrid variant="wideLeft">
-        <Panel
-          title="Debt list"
-          description="Use this to keep payoff progress visible without mixing debts into pots."
-          accent="amber"
-          density="compact"
-        >
-          <div className="space-y-4 xl:max-h-[820px] xl:overflow-y-auto xl:pr-1">
+      <Panel
+        title="Debt list"
+        description="Use this to keep payoff progress visible without mixing debts into pots."
+        accent="amber"
+        density="compact"
+      >
+        <div className="space-y-4 xl:max-h-[820px] xl:overflow-y-auto xl:pr-1">
             {visibleDebts.length > 0 ? (
               visibleDebts.map((debt) => {
               const paidPence = Math.max(0, debt.originalAmountPence - debt.currentBalancePence)
@@ -573,16 +572,16 @@ export function DebtsPage({
             ) : (
               <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debts tracked yet.</p>
             )}
-          </div>
-        </Panel>
+        </div>
+      </Panel>
 
-        <Panel
-          title="Payment history"
-          description="Delete a mistaken payment to restore it to the debt balance."
-          accent="blue"
-          density="compact"
-        >
-          <div className="space-y-3 xl:max-h-[820px] xl:overflow-y-auto xl:pr-1">
+      <Panel
+        title="Payment history"
+        description="Delete a mistaken payment to restore it to the debt balance."
+        accent="blue"
+        density="compact"
+      >
+        <div className="space-y-3 xl:max-h-[420px] xl:overflow-y-auto xl:pr-1">
           {snapshot.debtPayments.length > 0 ? (
             snapshot.debtPayments.slice(0, 12).map((payment) => {
               const debt = snapshot.debts.find((candidate) => candidate.id === payment.debtId)
@@ -622,9 +621,8 @@ export function DebtsPage({
           ) : (
             <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debt payments yet.</p>
           )}
-          </div>
-        </Panel>
-      </SectionGrid>
+        </div>
+      </Panel>
     </div>
   )
 }

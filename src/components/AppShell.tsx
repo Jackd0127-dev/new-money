@@ -1,8 +1,6 @@
 import {
   Banknote,
   CalendarClock,
-  CircleDollarSign,
-  Clock3,
   CreditCard,
   Gauge,
   ListChecks,
@@ -23,7 +21,7 @@ const navItems: Array<{
   icon: typeof Gauge
 }> = [
   { key: 'dashboard', label: 'Dashboard', icon: Gauge },
-  { key: 'payday', label: 'Payday', icon: Banknote },
+  { key: 'payday', label: 'Pay day', icon: Banknote },
   { key: 'spending', label: 'Spending', icon: WalletCards },
   { key: 'allocatingPayments', label: 'Allocating Payments', icon: ListChecks },
   { key: 'recurring', label: 'Recurring', icon: CalendarClock },
@@ -31,7 +29,6 @@ const navItems: Array<{
   { key: 'debts', label: 'Debts', icon: CreditCard },
   { key: 'calendar', label: 'Calendar', icon: CalendarClock },
   { key: 'aiPlan', label: 'AI', icon: Sparkles },
-  { key: 'history', label: 'History', icon: Clock3 },
   { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -39,23 +36,24 @@ export function AppShell({
   activeView,
   onViewChange,
   selectedPayPeriod,
+  headerAction,
   children,
 }: {
   activeView: ViewKey
   onViewChange: (view: ViewKey) => void
   selectedPayPeriod?: PayPeriod | null
+  headerAction?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-slate-200 bg-white px-4 py-5 lg:block">
         <div className="flex items-center gap-3 px-2">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-slate-950 text-white">
-            <CircleDollarSign size={22} />
+          <div className="flex size-10 items-center justify-center rounded-lg bg-slate-950 p-2 text-white">
+            <img src="/favicon.svg" alt="" className="size-full" />
           </div>
-          <div>
-            <p className="text-sm font-semibold text-slate-950">New Money</p>
-            <p className="text-xs text-slate-500">Private paycheck planner</p>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-950">Money Manager</p>
           </div>
         </div>
         <nav className="mt-8 space-y-1">
@@ -89,7 +87,7 @@ export function AppShell({
               <h1 className="text-xl font-semibold text-slate-950">Paycheck control panel</h1>
               <p className="hidden text-sm text-slate-500 sm:block">
                 {selectedPayPeriod
-                  ? `Viewing ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`
+                  ? `Viewing ${formatShellDate(selectedPayPeriod.startDate)} to ${formatShellDate(selectedPayPeriod.endDate)}`
                   : 'Plan pay, track costs, and keep cloud sync running.'}
               </p>
             </div>
@@ -99,7 +97,7 @@ export function AppShell({
                 <span className="hidden sm:inline">Log spend</span>
                 <span className="sm:hidden">Spend</span>
               </Button>
-              <Button onClick={() => onViewChange('payday')}>New paycheck</Button>
+              {headerAction}
             </div>
           </div>
           <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
@@ -127,4 +125,12 @@ export function AppShell({
       </div>
     </div>
   )
+}
+
+function formatShellDate(value: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: '2-digit',
+  }).format(new Date(`${value}T00:00:00.000Z`))
 }

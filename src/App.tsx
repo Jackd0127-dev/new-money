@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from 'react'
+import { Plus } from 'lucide-react'
 
 import { AppAssistant } from './components/AppAssistant'
 import { AppShell } from './components/AppShell'
+import { Button } from './components/ui'
 import { AiPlanPage } from './pages/AiPlanPage'
 import { AllocatingPaymentsPage } from './pages/AllocatingPaymentsPage'
 import { CalendarPage } from './pages/CalendarPage'
@@ -22,6 +24,7 @@ import type { ViewKey } from './types/navigation'
 function App() {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string | null>(null)
+  const [isCreatePotModalOpen, setIsCreatePotModalOpen] = useState(false)
   const { snapshot, isLoading, error, actions } = usePlannerData()
   const auth = useFirebaseAuth()
   useCloudSync({
@@ -67,9 +70,16 @@ function App() {
         onViewChange={setActiveView}
       />
     ),
-    aiPlan: <AiPlanPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} user={auth.user} />,
+    aiPlan: <AiPlanPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} user={auth.user} actions={actions} />,
     payday: <PaydayWizardPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
-    pots: <PotsPage snapshot={snapshot} actions={actions} />,
+    pots: (
+      <PotsPage
+        snapshot={snapshot}
+        actions={actions}
+        isCreateModalOpen={isCreatePotModalOpen}
+        onCreateModalOpenChange={setIsCreatePotModalOpen}
+      />
+    ),
     spending: <SpendingPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
     allocatingPayments: (
       <AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />
@@ -83,7 +93,24 @@ function App() {
 
   return (
     <>
-      <AppShell activeView={activeView} onViewChange={setActiveView} selectedPayPeriod={selectedPayPeriod}>
+      <AppShell
+        activeView={activeView}
+        onViewChange={(view) => {
+          setActiveView(view)
+          if (view !== 'pots') {
+            setIsCreatePotModalOpen(false)
+          }
+        }}
+        selectedPayPeriod={selectedPayPeriod}
+        headerAction={
+          activeView === 'pots' ? (
+            <Button onClick={() => setIsCreatePotModalOpen(true)}>
+              <Plus size={18} />
+              Create pot
+            </Button>
+          ) : undefined
+        }
+      >
         {pages[activeView]}
       </AppShell>
       <AppAssistant

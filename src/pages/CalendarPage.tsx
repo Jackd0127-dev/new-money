@@ -188,21 +188,16 @@ export function CalendarPage({
 
   return (
     <div className="space-y-6">
-      <Panel accent="cyan">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-slate-950 text-white">
-              <CalendarDays size={20} />
-            </div>
-            <div>
-              <h2 className="text-2xl font-semibold text-slate-950">{formatMonth(visibleMonth)}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {selectedPayPeriod
-                  ? `Showing selected period ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}.`
-                  : 'Pay, payments, cards, debts, reserves, and spending signals.'}
-              </p>
-            </div>
-          </div>
+      <Panel
+        title={formatMonth(visibleMonth)}
+        description={
+          selectedPayPeriod
+            ? `Selected period ${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}. Click any day for details.`
+            : 'Pay, payments, cards, debts, reserves, and spending signals.'
+        }
+        accent="violet"
+        density="compact"
+        action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => changeMonth(-1)} aria-label="Previous month">
               <ChevronLeft size={18} />
@@ -214,17 +209,15 @@ export function CalendarPage({
               <ChevronRight size={18} />
             </Button>
           </div>
-        </div>
-      </Panel>
-
-      <Panel title="Calendar" description="Click any day to open the full day overview." accent="violet" density="compact">
-        <div className="mb-4 flex flex-wrap gap-2">
+        }
+      >
+        <div className="mb-2 flex flex-nowrap gap-1.5 overflow-x-auto pb-1">
           {Object.entries(eventStyles).map(([type, style]) => {
             const Icon = style.icon
 
             return (
-              <span key={type} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold ${style.className}`}>
-                <Icon size={13} />
+              <span key={type} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${style.className}`}>
+                <Icon size={12} />
                 {style.label}
               </span>
             )
@@ -232,9 +225,9 @@ export function CalendarPage({
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <div className="grid min-w-[760px] grid-cols-7">
+          <div className="grid min-w-[680px] grid-cols-7">
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-              <div key={day} className="border-b border-slate-200 bg-slate-50 px-2 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div key={day} className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 {day}
               </div>
             ))}
@@ -256,7 +249,7 @@ export function CalendarPage({
                   onClick={() => selectDate(cell.date)}
                   aria-label={`Open ${formatDateForAria(cell.date)}`}
                   className={clsx(
-                    'group min-h-[132px] border-b border-r p-2 text-left transition focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-slate-950',
+                    'group min-h-[58px] border-b border-r p-1 text-left transition focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-slate-950',
                     isSelectedPeriodDay
                       ? 'border-slate-200 bg-slate-50 hover:bg-slate-100'
                       : isCurrentMonth
@@ -264,48 +257,45 @@ export function CalendarPage({
                         : 'border-slate-100 bg-slate-50 text-slate-400 hover:bg-slate-100',
                   )}
                 >
-                  <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="mb-1 flex items-center justify-between gap-2">
                     <span
                       className={
                         isToday
-                          ? 'flex size-7 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white'
-                          : 'text-xs font-semibold text-slate-500'
+                          ? 'flex size-6 items-center justify-center rounded-full bg-slate-950 text-[11px] font-semibold text-white'
+                          : 'text-[11px] font-semibold text-slate-500'
                       }
                     >
                       {Number(cell.date.slice(-2))}
                     </span>
                     {dayEvents.length > 0 && (
-                      <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                      <span className="rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                         {dayEvents.length}
                       </span>
                     )}
                   </div>
                   {dayCostPence > 0 && (
-                    <p className="mb-2 text-[11px] font-semibold text-slate-600">{formatPence(dayCostPence)} out</p>
+                    <p className="mb-0.5 truncate text-[10px] font-semibold text-slate-600">{formatPence(dayCostPence)} out</p>
                   )}
-                  <div className="space-y-1">
-                    {dayEvents.slice(0, 4).map((event) => {
+                  <div className="space-y-0.5">
+                    {dayEvents.slice(0, 1).map((event) => {
                       const Icon = eventStyles[event.type].icon
 
                       return (
                         <div
                           key={event.id}
-                          className={`rounded-md border px-2 py-1 ${eventStyles[event.type].className}`}
+                          className={`rounded-md border px-1.5 py-0.5 ${eventStyles[event.type].className}`}
                           title={`${event.title} ${formatPence(event.amountPence)}`}
                         >
                           <div className="flex items-center gap-1">
-                            <Icon className="shrink-0" size={13} />
-                            <span className="min-w-0 truncate text-[11px] font-semibold">{event.title}</span>
+                            <Icon className="shrink-0" size={11} />
+                            <span className="min-w-0 truncate text-[10px] font-semibold">{event.title}</span>
                           </div>
-                          {event.amountPence > 0 && (
-                            <p className="mt-0.5 text-[11px] font-semibold">{formatPence(event.amountPence)}</p>
-                          )}
                         </div>
                       )
                     })}
-                    {dayEvents.length > 4 && (
-                      <p className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                        +{dayEvents.length - 4} more
+                    {dayEvents.length > 1 && (
+                      <p className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                        +{dayEvents.length - 1} more
                       </p>
                     )}
                   </div>

@@ -37,7 +37,6 @@ import {
   CalculationDetails,
   Field,
   Panel,
-  SectionGrid,
   SelectInput,
   TextInput,
   type CalculationBreakdown,
@@ -113,14 +112,19 @@ const emptyPotForm = (): PotFormState => ({
 export function PotsPage({
   snapshot,
   actions,
+  isCreateModalOpen,
+  onCreateModalOpenChange,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  isCreateModalOpen?: boolean
+  onCreateModalOpenChange?: (isOpen: boolean) => void
 }) {
   const [createForm, setCreateForm] = useState<PotFormState>(emptyPotForm)
   const [editForm, setEditForm] = useState<PotFormState | null>(null)
   const [openPotId, setOpenPotId] = useState<string | null>(null)
   const [editingPotId, setEditingPotId] = useState<string | null>(null)
+  const [localCreateModalOpen, setLocalCreateModalOpen] = useState(false)
   const [activeCategory, setActiveCategory] = useState<string>(customCategoryAll)
   const [isAddingCategory, setIsAddingCategory] = useState(false)
   const [newCategory, setNewCategory] = useState('')
@@ -128,6 +132,8 @@ export function PotsPage({
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const categoryOptions = useMemo(() => getPotCategoryOptions(activePots, customCategories), [activePots, customCategories])
   const visiblePots = activePots.filter((pot) => isPotInCategory(pot, activeCategory))
+  const isCreateOpen = isCreateModalOpen ?? localCreateModalOpen
+  const setCreateOpen = onCreateModalOpenChange ?? setLocalCreateModalOpen
 
   async function submitPot() {
     if (!createForm.name.trim()) {
@@ -136,6 +142,7 @@ export function PotsPage({
 
     await actions.addPot(potFormToPayload(createForm))
     resetCreateForm()
+    setCreateOpen(false)
   }
 
   async function submitEditedPot() {
@@ -193,33 +200,21 @@ export function PotsPage({
 
   return (
     <div className="space-y-6">
-      <SectionGrid variant="wideRight">
-        <Panel
-          title="Create pot"
-          description="Add money you already set aside, then linked bills can spend from that pot when due."
-          accent="emerald"
-          density="compact"
-        >
-          <div className="space-y-4">
-            <PotFormFields
-              form={createForm}
-              snapshot={snapshot}
-              categoryOptions={categoryOptions}
-              onChange={setCreateForm}
-            />
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={submitPot}>Add pot</Button>
-            </div>
-          </div>
-        </Panel>
-
-        <Panel
-          title="Pots"
-          description="Click a pot to see spending, recurring payments, and allocations tied to it."
-          accent="blue"
-          density="compact"
-        >
-          <div className="space-y-4">
+      <Panel
+        title="Pots"
+        description="Click a pot to see spending, recurring payments, and allocations tied to it."
+        accent="blue"
+        density="compact"
+        action={
+          onCreateModalOpenChange ? undefined : (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus size={18} />
+              Create pot
+            </Button>
+          )
+        }
+      >
+        <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               {categoryOptions.map((category) => (
                 <button
@@ -258,7 +253,7 @@ export function PotsPage({
               </div>
             )}
 
-            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {visiblePots.map((pot) => {
                 const isOpen = openPotId === pot.id
                 const activityItems = getPotActivityItems(pot.id, snapshot)
@@ -285,14 +280,56 @@ export function PotsPage({
               })}
 
               {visiblePots.length === 0 && (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 2xl:col-span-3">
+                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 sm:col-span-2 xl:col-span-4">
                   No pots in this section yet.
                 </p>
               )}
             </div>
           </div>
-        </Panel>
-      </SectionGrid>
+      </Panel>
+
+      {isCreateOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Create pot"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+          >
+            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">Create pot</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Add money you already set aside, then linked payments can spend from that pot when due.
+                </p>
+              </div>
+              <Button variant="ghost" onClick={() => setCreateOpen(false)} aria-label="Close create pot">
+                <X size={18} />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <PotFormFields
+                form={createForm}
+                snapshot={snapshot}
+                categoryOptions={categoryOptions}
+                onChange={setCreateForm}
+              />
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={submitPot}>Add pot</Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    resetCreateForm()
+                    setCreateOpen(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingPotId && editForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">

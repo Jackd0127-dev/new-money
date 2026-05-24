@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { PenLine, Trash2 } from 'lucide-react'
+import { PauseCircle, PenLine, PlayCircle, Trash2, X } from 'lucide-react'
 
 import {
   createNextPayPeriod,
@@ -8,7 +8,6 @@ import {
   parsePoundsToPence,
   type PayPeriodCostSummary,
 } from '../domain/money'
-import { RecurringCalendar } from '../components/RecurringCalendar'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import {
   Button,
@@ -22,6 +21,16 @@ import {
 } from '../components/ui'
 import type { PayFrequency, PayPeriod, PotAllocation, RecurringFrequency, RecurringPriority } from '../types/models'
 
+interface RecurringFormState {
+  name: string
+  amount: string
+  dueDay: string
+  frequency: RecurringFrequency
+  priority: RecurringPriority
+  potId: string
+  creditCardId: string
+}
+
 export function RecurringPage({
   snapshot,
   actions,
@@ -33,14 +42,11 @@ export function RecurringPage({
 }) {
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
-  const [name, setName] = useState('')
-  const [amount, setAmount] = useState('')
-  const [dueDay, setDueDay] = useState('1')
-  const [frequency, setFrequency] = useState<RecurringFrequency>('monthly')
-  const [priority, setPriority] = useState<RecurringPriority>('essential')
-  const [potId, setPotId] = useState(activePots[0]?.id ?? '')
-  const [creditCardId, setCreditCardId] = useState('')
+  const [createForm, setCreateForm] = useState<RecurringFormState>(() =>
+    createEmptyRecurringForm(activePots[0]?.id ?? ''),
+  )
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<RecurringFormState | null>(null)
   const viewedPeriod = selectedPayPeriod ?? null
   const nextPaydayPeriod = viewedPeriod
     ? getNextPaydayPeriod(viewedPeriod, viewedPeriod.payFrequency ?? snapshot.settings.payFrequency)
@@ -61,51 +67,51 @@ export function RecurringPage({
     ],
   })
 
-  async function submitPayment() {
-    const amountPence = parsePoundsToPence(amount)
-    const dueDayNumber = Number.parseInt(dueDay, 10)
+  async function submitPayment(form: RecurringFormState, mode: 'create' | 'edit') {
+    const amountPence = parsePoundsToPence(form.amount)
+    const dueDayNumber = Number.parseInt(form.dueDay, 10)
 
-    if (!name.trim() || !potId || amountPence <= 0 || dueDayNumber < 1 || dueDayNumber > 31) {
+    if (!form.name.trim() || !form.potId || amountPence <= 0 || dueDayNumber < 1 || dueDayNumber > 31) {
       return
     }
 
-    if (editingPaymentId) {
+    if (mode === 'edit' && editingPaymentId) {
       const currentPayment = snapshot.recurringPayments.find((candidate) => candidate.id === editingPaymentId)
       const updateInput = {
-        name: name.trim(),
+        name: form.name.trim(),
         amountPence,
         dueDay: dueDayNumber,
-        frequency,
-        potId,
-        priority,
-        ...(creditCardId || currentPayment?.creditCardId
+        frequency: form.frequency,
+        potId: form.potId,
+        priority: form.priority,
+        ...(form.creditCardId || currentPayment?.creditCardId
           ? {
-              creditCardId: creditCardId || null,
+              creditCardId: form.creditCardId || null,
             }
           : {}),
       }
 
       await actions.updateRecurringPayment(editingPaymentId, updateInput)
-      resetForm()
+      closeEditModal()
       return
     }
 
     const addInput = {
-      name: name.trim(),
+      name: form.name.trim(),
       amountPence,
       dueDay: dueDayNumber,
-      frequency,
-      potId,
-      priority,
-      ...(creditCardId
+      frequency: form.frequency,
+      potId: form.potId,
+      priority: form.priority,
+      ...(form.creditCardId
         ? {
-            creditCardId,
+            creditCardId: form.creditCardId,
           }
         : {}),
     }
 
     await actions.addRecurringPayment(addInput)
-    resetForm()
+    resetCreateForm()
   }
 
   function startEditingPayment(paymentId: string) {
@@ -116,92 +122,46 @@ export function RecurringPage({
     }
 
     setEditingPaymentId(payment.id)
-    setName(payment.name)
-    setAmount((payment.amountPence / 100).toFixed(2))
-    setDueDay(String(payment.dueDay ?? 1))
-    setFrequency(payment.frequency)
-    setPriority(payment.priority)
-    setPotId(payment.potId)
-    setCreditCardId(payment.creditCardId ?? '')
+    setEditForm({
+      name: payment.name,
+      amount: (payment.amountPence / 100).toFixed(2),
+      dueDay: String(payment.dueDay ?? 1),
+      frequency: payment.frequency,
+      priority: payment.priority,
+      potId: payment.potId,
+      creditCardId: payment.creditCardId ?? '',
+    })
   }
 
-  function resetForm() {
+  function resetCreateForm() {
+    setCreateForm(createEmptyRecurringForm(activePots[0]?.id ?? ''))
+  }
+
+  function closeEditModal() {
     setEditingPaymentId(null)
-    setName('')
-    setAmount('')
-    setDueDay('1')
-    setFrequency('monthly')
-    setPriority('essential')
-    setPotId(activePots[0]?.id ?? '')
-    setCreditCardId('')
+    setEditForm(null)
   }
 
   return (
     <div className="space-y-6">
       <SectionGrid variant="wideRight">
         <Panel
-          title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
+          title="Add recurring payment"
           description="Bills use the linked pot balance on their due date."
           accent="violet"
           density="compact"
         >
-        <div className="space-y-4">
-          <Field label="Name">
-            <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Phone bill" />
-          </Field>
-          <Field label="Amount">
-            <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="22.00" />
-          </Field>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Due day">
-              <TextInput inputMode="numeric" value={dueDay} onChange={(event) => setDueDay(event.target.value)} />
-            </Field>
-            <Field label="Frequency">
-              <SelectInput value={frequency} onChange={(event) => setFrequency(event.target.value as RecurringFrequency)}>
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Biweekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly</option>
-              </SelectInput>
-            </Field>
+          <div className="space-y-4">
+            <RecurringPaymentFormFields
+              form={createForm}
+              activePots={activePots}
+              activeCards={activeCards}
+              onChange={setCreateForm}
+            />
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => void submitPayment(createForm, 'create')}>Add recurring payment</Button>
+            </div>
           </div>
-          <Field label="Paid from pot">
-            <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
-              {activePots.map((pot) => (
-                <option key={pot.id} value={pot.id}>
-                  {pot.name}
-                </option>
-              ))}
-            </SelectInput>
-          </Field>
-          <Field label="Paid on credit card">
-            <SelectInput value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
-              <option value="">Unlinked</option>
-              {activeCards.map((card) => (
-                <option key={card.id} value={card.id}>
-                  {card.name} ({card.provider})
-                </option>
-              ))}
-            </SelectInput>
-          </Field>
-          <Field label="Priority">
-            <SelectInput value={priority} onChange={(event) => setPriority(event.target.value as RecurringPriority)}>
-              <option value="essential">Essential</option>
-              <option value="important">Important</option>
-              <option value="optional">Optional</option>
-            </SelectInput>
-          </Field>
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={submitPayment}>
-              {editingPaymentId ? 'Save recurring payment' : 'Add recurring payment'}
-            </Button>
-            {editingPaymentId && (
-              <Button variant="secondary" onClick={resetForm}>
-                Cancel
-              </Button>
-            )}
-          </div>
-        </div>
         </Panel>
 
         <Panel
@@ -230,27 +190,37 @@ export function RecurringPage({
                   </div>
                   <div className="flex items-center gap-3">
                     <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
-                    <Button variant="secondary" onClick={() => actions.toggleRecurringPayment(payment)}>
-                      {payment.active ? 'Pause' : 'Resume'}
-                    </Button>
-                    <Button
-                      variant="secondary"
+                    <button
+                      type="button"
+                      onClick={() => actions.toggleRecurringPayment(payment)}
+                      aria-label={`${payment.active ? 'Pause' : 'Resume'} ${payment.name}`}
+                      title={`${payment.active ? 'Pause' : 'Resume'} ${payment.name}`}
+                      className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                    >
+                      {payment.active ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => startEditingPayment(payment.id)}
                       aria-label={`Edit ${payment.name}`}
+                      title={`Edit ${payment.name}`}
+                      className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
                     >
-                      <PenLine size={16} />
-                    </Button>
-                    <Button
-                      variant="danger"
+                      <PenLine size={15} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => {
                         if (window.confirm(`Delete ${payment.name}?`)) {
                           void actions.deleteRecurringPayment(payment.id)
                         }
                       }}
                       aria-label={`Delete ${payment.name}`}
+                      title={`Delete ${payment.name}`}
+                      className="inline-flex size-8 items-center justify-center rounded-md bg-red-600 text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                     >
-                      <Trash2 size={16} />
-                    </Button>
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                 </div>
               )
@@ -262,11 +232,143 @@ export function RecurringPage({
         </Panel>
       </SectionGrid>
 
-      <SectionGrid variant="balanced">
-        <RecurringCalendar snapshot={snapshot} payPeriod={viewedPeriod} />
-        <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
-      </SectionGrid>
+      <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
+
+      {editingPaymentId && editForm && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit recurring payment"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+          >
+            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">Edit recurring payment</h2>
+                <p className="mt-1 text-sm text-slate-500">Update this bill without changing the add-payment form.</p>
+              </div>
+              <Button variant="ghost" onClick={closeEditModal} aria-label="Close edit recurring payment">
+                <X size={18} />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <RecurringPaymentFormFields
+                form={editForm}
+                activePots={activePots}
+                activeCards={activeCards}
+                onChange={setEditForm}
+              />
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={() => void submitPayment(editForm, 'edit')}>Save recurring payment</Button>
+                <Button variant="secondary" onClick={closeEditModal}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+function createEmptyRecurringForm(defaultPotId: string): RecurringFormState {
+  return {
+    name: '',
+    amount: '',
+    dueDay: '1',
+    frequency: 'monthly',
+    priority: 'essential',
+    potId: defaultPotId,
+    creditCardId: '',
+  }
+}
+
+function RecurringPaymentFormFields({
+  form,
+  activePots,
+  activeCards,
+  onChange,
+}: {
+  form: RecurringFormState
+  activePots: PlannerSnapshot['pots']
+  activeCards: PlannerSnapshot['creditCards']
+  onChange: (form: RecurringFormState) => void
+}) {
+  return (
+    <>
+      <Field label="Name">
+        <TextInput
+          value={form.name}
+          onChange={(event) => onChange({ ...form, name: event.target.value })}
+          placeholder="Phone bill"
+        />
+      </Field>
+      <Field label="Amount">
+        <TextInput
+          inputMode="decimal"
+          value={form.amount}
+          onChange={(event) => onChange({ ...form, amount: event.target.value })}
+          placeholder="22.00"
+        />
+      </Field>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label="Due day">
+          <TextInput
+            inputMode="numeric"
+            value={form.dueDay}
+            onChange={(event) => onChange({ ...form, dueDay: event.target.value })}
+          />
+        </Field>
+        <Field label="Frequency">
+          <SelectInput
+            value={form.frequency}
+            onChange={(event) => onChange({ ...form, frequency: event.target.value as RecurringFrequency })}
+          >
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Biweekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </SelectInput>
+        </Field>
+      </div>
+      <Field label="Paid from pot">
+        <SelectInput value={form.potId} onChange={(event) => onChange({ ...form, potId: event.target.value })}>
+          {activePots.length > 0 ? (
+            activePots.map((pot) => (
+              <option key={pot.id} value={pot.id}>
+                {pot.name}
+              </option>
+            ))
+          ) : (
+            <option value="">No active pots</option>
+          )}
+        </SelectInput>
+      </Field>
+      <Field label="Paid on credit card">
+        <SelectInput
+          value={form.creditCardId}
+          onChange={(event) => onChange({ ...form, creditCardId: event.target.value })}
+        >
+          <option value="">Unlinked</option>
+          {activeCards.map((card) => (
+            <option key={card.id} value={card.id}>
+              {card.name} ({card.provider})
+            </option>
+          ))}
+        </SelectInput>
+      </Field>
+      <Field label="Priority">
+        <SelectInput
+          value={form.priority}
+          onChange={(event) => onChange({ ...form, priority: event.target.value as RecurringPriority })}
+        >
+          <option value="essential">Essential</option>
+          <option value="important">Important</option>
+          <option value="optional">Optional</option>
+        </SelectInput>
+      </Field>
+    </>
   )
 }
 

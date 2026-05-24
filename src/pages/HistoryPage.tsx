@@ -11,6 +11,16 @@ export function HistoryPage({
   snapshot: PlannerSnapshot
   actions: PlannerActions
 }) {
+  return <PayPeriodHistoryPanel snapshot={snapshot} actions={actions} />
+}
+
+export function PayPeriodHistoryPanel({
+  snapshot,
+  actions,
+}: {
+  snapshot: PlannerSnapshot
+  actions: PlannerActions
+}) {
   async function deletePeriod(periodId: string, payday: string) {
     if (window.confirm(`Delete paycheck plan for ${payday}?`)) {
       await actions.deletePayPeriod(periodId)

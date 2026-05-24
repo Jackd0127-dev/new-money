@@ -13,6 +13,7 @@ import { PotsPage } from './PotsPage'
 import { RecurringPage } from './RecurringPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
+import { AppAssistant } from '../components/AppAssistant'
 import { AppShell } from '../components/AppShell'
 import { creditCardDesigns } from '../domain/creditCardDesigns'
 import { toIsoDate } from '../domain/money'
@@ -58,7 +59,7 @@ describe('app shell navigation', () => {
 
     expect(labels).toEqual([
       'Dashboard',
-      'Payday',
+      'Pay day',
       'Spending',
       'Allocating Payments',
       'Recurring',
@@ -66,7 +67,6 @@ describe('app shell navigation', () => {
       'Debts',
       'Calendar',
       'AI',
-      'History',
       'Settings',
     ])
   })
@@ -325,7 +325,7 @@ describe('settings page', () => {
 })
 
 describe('AI page', () => {
-  it('shows one long Ask the AI surface without debt-plan controls', () => {
+  it('shows the messaging surface without debt-plan controls', () => {
     const selectedPayPeriod = createPayPeriod()
 
     render(
@@ -333,24 +333,25 @@ describe('AI page', () => {
         snapshot={createSnapshot({ payPeriods: [selectedPayPeriod] })}
         selectedPayPeriod={selectedPayPeriod}
         user={null}
+        actions={createActions()}
       />,
     )
 
-    expect(screen.getByRole('region', { name: 'Ask the AI' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Ask the AI' })).toHaveClass('min-h-[260px]')
-    expect(screen.getByRole('button', { name: 'Ask the AI' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Message AI' })).toHaveClass('min-h-20')
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.getByText('Message your money agent, confirm actions, and keep the conversation going.')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Debt recommendations' })).not.toBeInTheDocument()
     expect(screen.queryByText('Set aside this paycheck')).not.toBeInTheDocument()
     expect(screen.queryByText(/Reserve £/)).not.toBeInTheDocument()
   })
 
-  it('sends any user question to the AI endpoint and shows the answer only', async () => {
+  it('sends any user question to the assistant endpoint and shows the answer', async () => {
     const user = userEvent.setup()
     const fetchSpy = vi.spyOn(window, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => ({
         answer: 'Use the spare cash for the highest-impact move first.',
-        risks: ['Hidden fees'],
+        highlights: ['Hidden fees'],
         actions: ['Check balances'],
         confidence: 'high',
       }),
@@ -373,24 +374,50 @@ describe('AI page', () => {
         snapshot={snapshot}
         selectedPayPeriod={selectedPayPeriod}
         user={authUser}
+        actions={createActions()}
       />,
     )
 
-    await user.type(screen.getByRole('textbox', { name: 'Ask the AI' }), 'Can I afford my cards this month?')
-    await user.click(screen.getByRole('button', { name: 'Ask the AI' }))
+    await user.type(screen.getByRole('textbox', { name: 'Message AI' }), 'Can I afford my cards this month?')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(authUser.getIdToken).toHaveBeenCalled()
-    expect(fetchSpy).toHaveBeenCalledWith('/api/ai-planner', expect.objectContaining({
+    expect(fetchSpy).toHaveBeenCalledWith('/api/ai-assistant', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
       body: expect.stringContaining('Can I afford my cards this month?'),
     }))
-    expect(screen.getByText('Use the spare cash for the highest-impact move first.')).toBeInTheDocument()
-    expect(screen.queryByText('Risks')).not.toBeInTheDocument()
-    expect(screen.queryByText('Actions')).not.toBeInTheDocument()
+    expect(screen.getByText(/Use the spare cash for the highest-impact move first/)).toBeInTheDocument()
     expect(screen.queryByText(/Confidence:/)).not.toBeInTheDocument()
 
     fetchSpy.mockRestore()
+  })
+
+  it('customizes the AI name and avatar across the AI page and floating assistant', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot()
+    const actions = createActions()
+
+    render(
+      <>
+        <AiPlanPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} user={null} actions={actions} />
+        <AppAssistant
+          snapshot={snapshot}
+          activeView="aiPlan"
+          selectedPayPeriod={snapshot.payPeriods[0]}
+          actions={actions}
+          user={null}
+        />
+      </>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Customize' }))
+    fireEvent.change(screen.getByLabelText('AI name'), { target: { value: 'Nova' } })
+    fireEvent.change(screen.getByLabelText('PFP / initials'), { target: { value: 'NV' } })
+
+    expect(screen.getByRole('heading', { name: 'Nova' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open AI helper' })).toHaveTextContent('Ask Nova')
+    expect(screen.getAllByText('NV').length).toBeGreaterThan(0)
   })
 })
 
@@ -1083,7 +1110,7 @@ describe('pots page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Edit Food' }))
 
-    expect(screen.getByRole('region', { name: 'Create pot' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Create pot' })).not.toBeInTheDocument()
     const editDialog = screen.getByRole('dialog', { name: 'Edit pot' })
     await user.clear(within(editDialog).getByLabelText('Pot name'))
     await user.type(within(editDialog).getByLabelText('Pot name'), 'Groceries')
@@ -1133,12 +1160,13 @@ describe('pots page', () => {
 
     render(<PotsPage snapshot={snapshot} actions={actions} />)
 
-    const createRegion = screen.getByRole('region', { name: 'Create pot' })
-    await user.type(within(createRegion).getByLabelText('Pot name'), 'Amex reserve')
-    await user.type(within(createRegion).getByLabelText(/Current balance/), '400.00')
-    await user.selectOptions(within(createRegion).getByLabelText('Link this pot to'), 'credit_card')
-    await user.selectOptions(within(createRegion).getByLabelText('Credit card'), 'card-amex')
-    await user.click(within(createRegion).getByRole('button', { name: 'Add pot' }))
+    await user.click(screen.getByRole('button', { name: 'Create pot' }))
+    const createDialog = screen.getByRole('dialog', { name: 'Create pot' })
+    await user.type(within(createDialog).getByLabelText('Pot name'), 'Amex reserve')
+    await user.type(within(createDialog).getByLabelText(/Current balance/), '400.00')
+    await user.selectOptions(within(createDialog).getByLabelText('Link this pot to'), 'credit_card')
+    await user.selectOptions(within(createDialog).getByLabelText('Credit card'), 'card-amex')
+    await user.click(within(createDialog).getByRole('button', { name: 'Add pot' }))
 
     expect(actions.addPot).toHaveBeenCalledWith({
       balancePence: 40000,
@@ -1165,10 +1193,11 @@ describe('pots page', () => {
 
     expect(screen.getByRole('button', { name: 'Travel' })).toBeInTheDocument()
 
-    const createRegion = screen.getByRole('region', { name: 'Create pot' })
-    await user.type(within(createRegion).getByLabelText('Pot name'), 'Holiday')
-    await user.click(within(createRegion).getByRole('button', { name: 'Use Shield symbol' }))
-    await user.click(within(createRegion).getByRole('button', { name: 'Add pot' }))
+    await user.click(screen.getByRole('button', { name: 'Create pot' }))
+    const createDialog = screen.getByRole('dialog', { name: 'Create pot' })
+    await user.type(within(createDialog).getByLabelText('Pot name'), 'Holiday')
+    await user.click(within(createDialog).getByRole('button', { name: 'Use Shield symbol' }))
+    await user.click(within(createDialog).getByRole('button', { name: 'Add pot' }))
 
     expect(actions.addPot).toHaveBeenCalledWith({
       balancePence: 0,
@@ -1380,56 +1409,7 @@ describe('pots page', () => {
 })
 
 describe('recurring page', () => {
-  it('shows a dated recurring calendar', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-20T12:00:00.000Z'))
-
-    const snapshot = createSnapshot({
-      recurringPayments: [
-        {
-          id: 'rec-phone',
-          name: 'Phone',
-          amountPence: 2200,
-          dueDay: 23,
-          frequency: 'monthly',
-          potId: 'pot-bills',
-          priority: 'important',
-          active: true,
-          createdAt: '2026-05-16T00:00:00.000Z',
-          updatedAt: '2026-05-16T00:00:00.000Z',
-        },
-      ],
-      payPeriods: [
-        {
-          id: 'period-current',
-          startDate: '2026-05-16',
-          endDate: '2026-05-29',
-          payday: '2026-05-16',
-          nextPayday: '2026-05-30',
-          incomePence: 90000,
-          status: 'active',
-          createdAt: '2026-05-16T00:00:00.000Z',
-          updatedAt: '2026-05-16T00:00:00.000Z',
-        },
-      ],
-    })
-
-    try {
-      render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={snapshot.payPeriods[0]} />)
-
-      expect(screen.getByRole('region', { name: 'Recurring calendar' })).toBeInTheDocument()
-      expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
-      expect(screen.getByText(/23 May/)).toBeInTheDocument()
-      expect(screen.getByText('Before payday')).toBeInTheDocument()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('filters the recurring calendar by the selected range', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-20T12:00:00.000Z'))
-
+  it('removes the recurring calendar and keeps the payment list visible', () => {
     const snapshot = createSnapshot({
       recurringPayments: [
         {
@@ -1459,23 +1439,13 @@ describe('recurring page', () => {
       ],
     })
 
-    try {
-      render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
 
-      const calendar = screen.getByRole('region', { name: 'Recurring calendar' })
-      expect(within(calendar).getAllByText('Broadband').length).toBeGreaterThan(0)
-      expect(within(calendar).getAllByText(/Next 60 days/).length).toBeGreaterThan(0)
-
-      fireEvent.change(within(calendar).getByLabelText('Recurring calendar range'), {
-        target: { value: '14' },
-      })
-
-      expect(within(calendar).getAllByText(/Next 14 days/).length).toBeGreaterThan(0)
-      expect(within(calendar).getAllByText('Phone').length).toBeGreaterThan(0)
-      expect(within(calendar).queryByText('Broadband')).not.toBeInTheDocument()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(screen.queryByRole('region', { name: 'Recurring calendar' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Recurring payments' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'What you owe next payday' })).toBeInTheDocument()
+    expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Broadband').length).toBeGreaterThan(0)
   })
 
   it('shows a next payday owed dropdown with the next pay period costs', () => {
@@ -1573,11 +1543,11 @@ describe('recurring page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Edit Phone' }))
 
-    const editPanel = screen.getByRole('region', { name: 'Edit recurring payment' })
-    await user.clear(within(editPanel).getByLabelText('Amount'))
-    await user.type(within(editPanel).getByLabelText('Amount'), '25.50')
-    await user.selectOptions(within(editPanel).getByLabelText('Frequency'), 'yearly')
-    await user.click(within(editPanel).getByRole('button', { name: 'Save recurring payment' }))
+    const editDialog = screen.getByRole('dialog', { name: 'Edit recurring payment' })
+    await user.clear(within(editDialog).getByLabelText('Amount'))
+    await user.type(within(editDialog).getByLabelText('Amount'), '25.50')
+    await user.selectOptions(within(editDialog).getByLabelText('Frequency'), 'yearly')
+    await user.click(within(editDialog).getByRole('button', { name: 'Save recurring payment' }))
 
     expect(actions.updateRecurringPayment).toHaveBeenCalledWith('rec-phone', {
       amountPence: 2550,

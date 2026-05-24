@@ -82,7 +82,7 @@ export function SettingsPage({
             </div>
             <Field
               label="AI provider"
-              hint="Gemini stays as the default. OpenRouter uses openai/gpt-oss-120b:free on the server."
+              hint="Choose the AI provider used by the server."
             >
               <SelectInput
                 aria-label="AI provider"
@@ -93,7 +93,7 @@ export function SettingsPage({
                 }}
               >
                 <option value="gemini">Gemini</option>
-                <option value="openrouter">OpenRouter gpt-oss-120b</option>
+                <option value="openrouter">GPT</option>
               </SelectInput>
             </Field>
             <Field

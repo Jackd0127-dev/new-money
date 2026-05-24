@@ -267,30 +267,32 @@ export function AllocatingPaymentsPage({
             />
           </Field>
         </div>
-        <Field label="Due date" hint="Day of the month this card is due.">
-          <TextInput
-            aria-label="Due date"
-            inputMode="numeric"
-            value={cardDueDay}
-            onChange={(event) => setCardDueDay(event.target.value)}
-          />
-        </Field>
-        <Field label="Card design">
-          <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className={`figma-credit-card credit-card-design-summary__art figma-credit-card--${selectedDesign.id}`} aria-hidden="true">
-                <CreditCardArtwork design={selectedDesign} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Due date" hint="Day of the month this card is due.">
+            <TextInput
+              aria-label="Due date"
+              inputMode="numeric"
+              value={cardDueDay}
+              onChange={(event) => setCardDueDay(event.target.value)}
+            />
+          </Field>
+          <Field label="Card design">
+            <div className="flex min-h-10 items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 shadow-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className={`figma-credit-card credit-card-design-summary__art figma-credit-card--${selectedDesign.id}`} aria-hidden="true">
+                  <CreditCardArtwork design={selectedDesign} />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-950">{selectedDesign.label}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Selected</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-950">{selectedDesign.label}</p>
-                <p className="mt-1 text-xs text-slate-500">Selected design</p>
-              </div>
+              <Button variant="secondary" aria-label="Card design" onClick={() => setIsCardDesignModalOpen(true)}>
+                Card design
+              </Button>
             </div>
-            <Button variant="secondary" aria-label="Card design" onClick={() => setIsCardDesignModalOpen(true)}>
-              Card design
-            </Button>
-          </div>
-        </Field>
+          </Field>
+        </div>
         {isCardDesignModalOpen && (
           <CreditCardDesignModal
             selectedDesignId={cardDesignId}
@@ -301,24 +303,6 @@ export function AllocatingPaymentsPage({
             }}
           />
         )}
-        <Field label="Colour">
-          <div className="flex flex-wrap gap-2">
-            {cardColors.map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-label={`Use card colour ${option}`}
-                onClick={() => setCardColor(option)}
-                className="size-8 rounded-full border-2"
-                style={{
-                  backgroundColor: option,
-                  borderColor: option === cardColor ? '#0f172a' : 'white',
-                  boxShadow: option === cardColor ? '0 0 0 2px #cbd5e1' : '0 0 0 1px #e2e8f0',
-                }}
-              />
-            ))}
-          </div>
-        </Field>
         <div className="flex flex-wrap gap-3">
           <Button onClick={submitCard}>
             <PlusCircle size={18} />

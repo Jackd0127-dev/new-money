@@ -137,7 +137,7 @@ export function DashboardPage({
         accent="blue"
         description={
           viewedPeriod
-            ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate} · next payday ${viewedPeriod.nextPayday}`
+            ? `Paid ${formatShortDateWithOrdinal(viewedPeriod.payday)} · ${formatShortDateWithOrdinal(viewedPeriod.startDate)} to ${formatShortDateWithOrdinal(viewedPeriod.endDate)}`
             : snapshot.payPeriods.length > 0
               ? 'No saved pay period contains today. Choose a saved period to view its numbers.'
               : 'Create your first paycheck plan to see your pay, payments due, and money left.'
@@ -313,7 +313,38 @@ export function DashboardPage({
 }
 
 function formatPayPeriodOption(period: PayPeriod): string {
-  return `${period.payday} · ${period.startDate} to ${period.endDate} · ${formatPence(period.incomePence)}`
+  return formatShortDateWithOrdinal(period.payday)
+}
+
+function formatShortDateWithOrdinal(value: string): string {
+  const date = new Date(`${value}T00:00:00.000Z`)
+  const day = date.getUTCDate()
+  const month = new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(date)
+  const year = new Intl.DateTimeFormat('en-GB', { year: '2-digit' }).format(date)
+
+  return `${day}${getOrdinalSuffix(day)} ${month} ${year}`
+}
+
+function getOrdinalSuffix(day: number): string {
+  if (day >= 11 && day <= 13) {
+    return 'th'
+  }
+
+  const lastDigit = day % 10
+
+  if (lastDigit === 1) {
+    return 'st'
+  }
+
+  if (lastDigit === 2) {
+    return 'nd'
+  }
+
+  if (lastDigit === 3) {
+    return 'rd'
+  }
+
+  return 'th'
 }
 
 function getTotalPayBreakdown(

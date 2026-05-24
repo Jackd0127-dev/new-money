@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { PenLine, Trash2 } from 'lucide-react'
+import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
 
 import { findPayPeriodForDate, formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
 import type {
@@ -250,8 +250,8 @@ export function SpendingPage({
                 open={group.isSelected || (!selectedPayPeriod && index === 0)}
                 className={
                   group.isSelected
-                    ? 'rounded-lg border border-slate-950 bg-white shadow-sm'
-                    : 'rounded-lg border border-slate-200 bg-white'
+                    ? 'group rounded-lg border border-slate-950 bg-white shadow-sm'
+                    : 'group rounded-lg border border-slate-200 bg-white'
                 }
               >
                 <summary className="cursor-pointer list-none px-4 py-3">
@@ -267,7 +267,10 @@ export function SpendingPage({
                       </div>
                       <p className="mt-1 text-xs text-slate-500">{group.transactions.length} entries</p>
                     </div>
-                    <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
+                      <ChevronDown size={17} className="shrink-0 text-slate-400 transition group-open:rotate-180" />
+                    </div>
                   </div>
                 </summary>
                 <div className="border-t border-slate-100 p-3">

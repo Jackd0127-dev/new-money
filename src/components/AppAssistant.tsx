@@ -20,6 +20,11 @@ type AppAssistantUser = {
   getIdToken: () => Promise<string>
 } | null
 
+interface AssistantConversationMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 interface AssistantResponse {
   answer: string
   highlights: string[]
@@ -146,6 +151,7 @@ export function AppAssistant({
           todayIso,
           activeView,
           selectedPayPeriodId: selectedPayPeriod?.id ?? null,
+          conversationHistory: createConversationHistory(messages),
           snapshot,
         }),
       })
@@ -385,6 +391,27 @@ function createVisibleAssistantResponse(response: AssistantResponse): AssistantR
     answer: ensureNextStepGuidance(response.answer, response.actions),
     proposedActions: normalizeAssistantActionProposals(response.proposedActions),
   }
+}
+
+function createConversationHistory(messages: ChatMessage[]): AssistantConversationMessage[] {
+  return messages
+    .filter((message) => message.answer.trim())
+    .slice(-8)
+    .map((message) => ({
+      role: message.role,
+      content: truncateConversationText(message.answer),
+    }))
+}
+
+function truncateConversationText(value: string): string {
+  const trimmed = value.trim()
+  const maxLength = 1_500
+
+  if (trimmed.length <= maxLength) {
+    return trimmed
+  }
+
+  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`
 }
 
 function ensureNextStepGuidance(answer: string, actions: string[]): string {

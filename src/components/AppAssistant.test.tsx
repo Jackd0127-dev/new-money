@@ -142,6 +142,69 @@ describe('AppAssistant', () => {
     expect(within(dialog).queryByText(/Create or select a pay period/)).not.toBeInTheDocument()
   })
 
+  it('sends recent chat messages with follow-up questions', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          answer: 'Your Food pot has £120.00 left.',
+          highlights: ['Food pot: £120.00'],
+          actions: ['Ask what to change next.'],
+          confidence: 'high',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          answer: 'Yes, that still means the Food pot.',
+          highlights: ['Follow-up understood.'],
+          actions: ['Review the Food pot.'],
+          confidence: 'high',
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <AppAssistant
+        snapshot={createSnapshot()}
+        activeView="dashboard"
+        selectedPayPeriod={createPayPeriod()}
+        actions={createActions()}
+        user={{
+          getIdToken: async () => 'firebase-token',
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
+    await user.type(screen.getByLabelText('Ask AI'), 'How much is in my Food pot?')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    await waitFor(() => expect(screen.getByText(/Your Food pot has £120.00 left/)).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Ask AI'), 'What about if I spend another tenner?')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const secondFetchCall = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    const secondRequestBody = JSON.parse(secondFetchCall[1].body as string) as {
+      question: string
+      conversationHistory: Array<{ role: string; content: string }>
+    }
+
+    expect(secondRequestBody.question).toBe('What about if I spend another tenner?')
+    expect(secondRequestBody.conversationHistory).toEqual([
+      { role: 'user', content: 'How much is in my Food pot?' },
+      {
+        role: 'assistant',
+        content: 'Your Food pot has £120.00 left.\n\nWhat I’d do next: Ask what to change next.',
+      },
+    ])
+  })
+
   it('confirms an AI-proposed spend before logging it', async () => {
     const user = userEvent.setup()
     const actions = createActions()

@@ -1,7 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { GoogleGenAI, Type } from '@google/genai'
 import { getAuth } from 'firebase-admin/auth'
 
@@ -14,27 +10,9 @@ import {
 } from '../src/domain/dailyBriefFacts.js'
 import { getBearerToken, getSafeErrorName, initializeFirebaseAdmin } from '../server/firebaseAdmin.js'
 import { isRequestBodyTooLarge, setSecureApiHeaders } from '../server/apiSecurity.js'
+import { readAiInstruction } from '../server/aiInstructions.js'
 
-const dailyBriefInstructionsPath = join(dirname(fileURLToPath(import.meta.url)), 'daily-brief-instructions.md')
-
-const systemInstruction = `
-You are a financial brief writer inside a private paycheck-planner app.
-You do not calculate final balances unless the snapshot explicitly provides the calculated value.
-You explain and prioritise the provided facts.
-Use only the provided planner snapshot.
-Never invent missing data.
-Never provide tax, legal, regulated investment, credit product, debt restructuring, or lending advice.
-Never suggest borrowing money, taking credit, investing, or changing legal/tax arrangements.
-Your job is to produce a short, practical daily money brief focused on:
-- pay received in the current pay period
-- payments due today or soon
-- credit card amounts owed and card-linked payments
-- upcoming risks before next payday
-- overspent or low pots
-- specific actions for today and next steps
-Write in UK English.
-Use GBP formatting.
-`.trim()
+const systemInstruction = readAiInstruction('daily-brief-system.md')
 
 const dailyBriefResponseSchema = {
   type: Type.OBJECT,
@@ -266,11 +244,7 @@ function buildPrompt({
 }
 
 function getDailyBriefInstructions(): string {
-  try {
-    return readFileSync(dailyBriefInstructionsPath, 'utf8').trim()
-  } catch {
-    return ''
-  }
+  return readAiInstruction('daily-brief-editable.md')
 }
 
 function extractGeminiText(response: unknown): string {

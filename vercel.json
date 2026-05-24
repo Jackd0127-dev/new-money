@@ -37,11 +37,14 @@
     }
   ],
   "functions": {
+    "api/ai-assistant.ts": {
+      "includeFiles": "ai/instructions/**"
+    },
     "api/daily-brief.ts": {
-      "includeFiles": "api/daily-brief-instructions.md"
+      "includeFiles": "ai/instructions/**"
     },
     "api/ai-planner.ts": {
-      "includeFiles": "api/daily-brief-instructions.md"
+      "includeFiles": "ai/instructions/**"
     }
   }
 }

@@ -194,8 +194,8 @@ describe('ai planner api', () => {
       }
     }
 
-    expect(request.config.systemInstruction).toContain('deterministic debt planner')
-    expect(request.config.systemInstruction).toContain('End every visible answer')
+    expect(request.config.systemInstruction).toContain('deterministic debt-reserve planner explainer')
+    expect(request.config.systemInstruction).toContain("What I'd do next:")
     expect(request.config.responseMimeType).toBe('application/json')
     expect(request.contents).toContain('Calculated debt plan facts JSON:')
     expect(request.contents).toContain('Use direct wording.')
@@ -327,7 +327,7 @@ describe('ai planner api', () => {
     expect(requestBody.messages[0]).toMatchObject({
       role: 'system',
     })
-    expect(requestBody.messages[0].content).toContain('deterministic debt planner')
+    expect(requestBody.messages[0].content).toContain('deterministic debt-reserve planner explainer')
     expect(requestBody.messages[1].content).toContain('Calculated debt plan facts JSON:')
     expect(requestBody.response_format).toBeUndefined()
     expect(response.payload).toEqual({

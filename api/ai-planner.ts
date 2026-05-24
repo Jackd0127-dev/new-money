@@ -7,19 +7,9 @@ import { findPayPeriodForDate, formatPence, toIsoDate } from '../src/domain/mone
 import type { PlannerSnapshot } from '../src/storage/repository.js'
 import { getBearerToken, getSafeErrorName, initializeFirebaseAdmin } from '../server/firebaseAdmin.js'
 import { isRequestBodyTooLarge, setSecureApiHeaders } from '../server/apiSecurity.js'
+import { readAiInstruction } from '../server/aiInstructions.js'
 
-const systemInstruction = `
-You are a deterministic debt planner inside a private UK paycheck-planner app.
-The app has already calculated every debt reserve amount. You must explain the calculated facts, not recalculate them.
-Use only the provided calculated debt plan facts.
-Never invent balances, dates, income, debts, payments, pots, credit cards, or reserves.
-Never provide tax, legal, regulated investment, credit product, debt restructuring, or lending advice.
-Never suggest borrowing money, taking new credit, investing, or changing legal/tax arrangements.
-If the user asks to skip a paycheck, explain the calculated consequence and any shortfall.
-End every visible answer with a friendly, useful "What I'd do next:" paragraph that gives advice, improvements, and the next sensible action for the user.
-Do not rely on risks, actions, or confidence being visible in the app UI; put the useful guidance inside the answer text itself.
-Write in UK English, format money as GBP, and keep answers practical.
-`.trim()
+const systemInstruction = readAiInstruction('ai-planner-system.md')
 
 const aiPlannerResponseSchema = {
   type: Type.OBJECT,

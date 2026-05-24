@@ -70,6 +70,7 @@ Rules:
 
 - Payloads must match the executable action schema in `src/domain/assistantActions.ts`.
 - Use IDs from the app context for linked records such as `potId`, `creditCardId`, or `debtId`.
+- For `create_recurring_payment`, `potId` may be `null` or omitted when the payment is not paid from a pot, such as a card-only recurring payment.
 - Do not guess missing IDs, dates, amounts, pay periods, payment methods, or linked records.
 - Convert GBP amounts to integer pence when the payload expects pence.
 - Use ISO dates when dates are required.

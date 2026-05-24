@@ -145,7 +145,7 @@ export function RecurringCalendar({
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
                       {formatCalendarDate(occurrence.dueDate)} · {occurrence.payment.frequency} ·{' '}
-                      {pot?.name ?? 'Archived pot'}
+                      {occurrence.payment.potId ? pot?.name ?? 'Archived pot' : 'No pot linked'}
                     </p>
                   </div>
                   <p className="text-sm font-semibold text-slate-950">{formatPence(occurrence.amountPence)}</p>

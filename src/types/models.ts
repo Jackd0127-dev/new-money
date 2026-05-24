@@ -65,7 +65,7 @@ export interface RecurringPayment extends Timestamped {
   dueDay?: number
   dueDate?: string
   frequency: RecurringFrequency
-  potId: string
+  potId: string | null
   creditCardId?: string | null
   priority: RecurringPriority
   active: boolean

@@ -71,7 +71,7 @@ export function RecurringPage({
     const amountPence = parsePoundsToPence(form.amount)
     const dueDayNumber = Number.parseInt(form.dueDay, 10)
 
-    if (!form.name.trim() || !form.potId || amountPence <= 0 || dueDayNumber < 1 || dueDayNumber > 31) {
+    if (!form.name.trim() || amountPence <= 0 || dueDayNumber < 1 || dueDayNumber > 31) {
       return
     }
 
@@ -82,7 +82,7 @@ export function RecurringPage({
         amountPence,
         dueDay: dueDayNumber,
         frequency: form.frequency,
-        potId: form.potId,
+        potId: form.potId || null,
         priority: form.priority,
         ...(form.creditCardId || currentPayment?.creditCardId
           ? {
@@ -101,7 +101,7 @@ export function RecurringPage({
       amountPence,
       dueDay: dueDayNumber,
       frequency: form.frequency,
-      potId: form.potId,
+      potId: form.potId || null,
       priority: form.priority,
       ...(form.creditCardId
         ? {
@@ -128,7 +128,7 @@ export function RecurringPage({
       dueDay: String(payment.dueDay ?? 1),
       frequency: payment.frequency,
       priority: payment.priority,
-      potId: payment.potId,
+      potId: payment.potId ?? '',
       creditCardId: payment.creditCardId ?? '',
     })
   }
@@ -184,7 +184,7 @@ export function RecurringPage({
                       <h3 className="text-sm font-semibold text-slate-950">{payment.name}</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Due day {payment.dueDay} · {payment.frequency} · paid from {pot?.name ?? 'Archived pot'}
+                      Due day {payment.dueDay} · {payment.frequency} · {payment.potId ? `paid from ${pot?.name ?? 'Archived pot'}` : 'no pot linked'}
                       {card ? ` · ${card.name}` : ''}
                     </p>
                   </div>
@@ -334,15 +334,12 @@ function RecurringPaymentFormFields({
       </div>
       <Field label="Paid from pot">
         <SelectInput value={form.potId} onChange={(event) => onChange({ ...form, potId: event.target.value })}>
-          {activePots.length > 0 ? (
-            activePots.map((pot) => (
-              <option key={pot.id} value={pot.id}>
-                {pot.name}
-              </option>
-            ))
-          ) : (
-            <option value="">No active pots</option>
-          )}
+          <option value="">No pot</option>
+          {activePots.map((pot) => (
+            <option key={pot.id} value={pot.id}>
+              {pot.name}
+            </option>
+          ))}
         </SelectInput>
       </Field>
       <Field label="Paid on credit card">

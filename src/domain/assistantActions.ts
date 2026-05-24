@@ -53,7 +53,7 @@ export interface CreateRecurringPaymentPayload {
   amountPence: number
   dueDay: number
   frequency: RecurringFrequency
-  potId: string
+  potId?: string | null
   creditCardId?: string | null
   priority: RecurringPriority
 }
@@ -189,7 +189,7 @@ export function getAssistantActionValidationError(
       return 'The recurring payment schedule is not supported.'
     }
 
-    if (!snapshot.pots.some((pot) => pot.id === action.payload.potId && !pot.archived)) {
+    if (action.payload.potId && !snapshot.pots.some((pot) => pot.id === action.payload.potId && !pot.archived)) {
       return 'The linked pot could not be found.'
     }
 
@@ -276,7 +276,7 @@ export async function runAssistantAction(
       amountPence: action.payload.amountPence,
       dueDay: action.payload.dueDay,
       frequency: action.payload.frequency,
-      potId: action.payload.potId,
+      potId: action.payload.potId ?? null,
       creditCardId: action.payload.creditCardId ?? null,
       priority: action.payload.priority,
     })
@@ -448,9 +448,9 @@ function normalizeAssistantActionProposal(value: unknown, index: number): Assist
     const dueDay = getNumber(payload.dueDay)
     const frequency = normalizeRecurringFrequency(payload.frequency)
     const priority = normalizeRecurringPriority(payload.priority)
-    const potId = getString(payload.potId)
+    const potId = getNullableString(payload.potId)
 
-    if (!name || amountPence === null || dueDay === null || !frequency || !priority || !potId) {
+    if (!name || amountPence === null || dueDay === null || !frequency || !priority) {
       return null
     }
 

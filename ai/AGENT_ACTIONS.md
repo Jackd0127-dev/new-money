@@ -28,6 +28,7 @@ The model should include `proposedActions` only when all required fields are cle
 Required behaviour:
 
 - Use existing IDs from the app context for `potId`, `creditCardId`, `debtId`, pay-period IDs, or any other linked records.
+- For `create_recurring_payment`, `potId` may be `null` or omitted when the payment is not paid from a pot, such as a card-only recurring payment.
 - Do not guess IDs, dates, accounts, payment methods, card links, or amounts.
 - Convert GBP amounts to integer pence in payloads when the action schema expects pence.
 - Use ISO dates when dates are required.

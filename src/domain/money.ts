@@ -396,6 +396,10 @@ export function getUncoveredRecurringPence(
       return total
     }
 
+    if (!payment.potId) {
+      return total + remainingPaymentPence
+    }
+
     const availableInPot = remainingAllocationByPot.get(payment.potId) ?? 0
     const coveredPence = Math.min(remainingPaymentPence, availableInPot)
     remainingAllocationByPot.set(payment.potId, availableInPot - coveredPence)

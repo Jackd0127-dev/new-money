@@ -81,7 +81,7 @@ export interface RecurringPaymentInput {
   amountPence: number
   dueDay: number
   frequency: RecurringFrequency
-  potId: string
+  potId: string | null
   creditCardId?: string | null
   priority: RecurringPriority
 }
@@ -1350,7 +1350,10 @@ async function applyDueRecurringPayments(todayIso: string): Promise<void> {
 
   await db.transaction('rw', [db.recurringPayments, db.transactions, db.pots, db.payPeriods], async () => {
     const recurringPayments = await db.recurringPayments.toArray()
-    const directPayments = recurringPayments.filter((payment) => payment.active && !payment.creditCardId)
+    const directPayments = recurringPayments.filter(
+      (payment): payment is RecurringPayment & { potId: string } =>
+        payment.active && !payment.creditCardId && Boolean(payment.potId),
+    )
 
     for (const payment of directPayments) {
       const startDate = getRecurringApplicationStartDate(payment, todayIso)
@@ -1412,7 +1415,7 @@ function getRecurringReserveAllocations(
   )
 
   return duePayments.flatMap((payment) => {
-    if (payment.creditCardId) {
+    if (payment.creditCardId || !payment.potId) {
       return []
     }
 

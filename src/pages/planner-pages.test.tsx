@@ -1580,6 +1580,47 @@ describe('recurring page', () => {
     expect(within(nextPaydayPanel).getByText('Loan')).toBeInTheDocument()
   })
 
+  it('creates a card-linked recurring payment without a pot', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      creditCards: [
+        {
+          id: 'card-aqua',
+          name: 'Aqua',
+          provider: 'Aqua',
+          limitPence: 80000,
+          dueDay: 5,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<RecurringPage snapshot={snapshot} actions={actions} />)
+
+    await user.type(screen.getByLabelText('Name'), 'Spotify')
+    await user.type(screen.getByLabelText('Amount'), '11.99')
+    await user.clear(screen.getByLabelText('Due day'))
+    await user.type(screen.getByLabelText('Due day'), '12')
+    await user.selectOptions(screen.getByLabelText('Paid from pot'), '')
+    await user.selectOptions(screen.getByLabelText('Paid on credit card'), 'card-aqua')
+    await user.click(screen.getByRole('button', { name: 'Add recurring payment' }))
+
+    expect(actions.addRecurringPayment).toHaveBeenCalledWith({
+      amountPence: 1199,
+      creditCardId: 'card-aqua',
+      dueDay: 12,
+      frequency: 'monthly',
+      name: 'Spotify',
+      potId: null,
+      priority: 'essential',
+    })
+  })
+
   it('edits an existing recurring payment', async () => {
     const user = userEvent.setup()
     const actions = createActions()

@@ -171,6 +171,52 @@ describe('paycheck plan storage', () => {
     expect(foodPot?.balancePence).toBe(8711)
   })
 
+  it('stores a card-linked recurring payment without a pot or pot reservation', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-05-24T12:00:00.000Z'))
+
+    await createPaycheckPlan({
+      payday: '2026-05-24',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+    await addCreditCard({
+      name: 'Aqua',
+      provider: 'Aqua',
+      limitPence: 80000,
+      openingBalancePence: 0,
+      dueDay: 5,
+      color: '#2563eb',
+      designId: null,
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const card = snapshot.creditCards.find((candidate) => candidate.name === 'Aqua')
+
+    await addRecurringPayment({
+      name: 'Spotify',
+      amountPence: 1199,
+      dueDay: 26,
+      frequency: 'monthly',
+      potId: null,
+      creditCardId: card?.id ?? null,
+      priority: 'optional',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    const payment = snapshot.recurringPayments.find((candidate) => candidate.name === 'Spotify')
+
+    expect(payment).toMatchObject({
+      amountPence: 1199,
+      creditCardId: card?.id,
+      potId: null,
+    })
+    expect(snapshot.potAllocations.some((allocation) => allocation.recurringPaymentId === payment?.id)).toBe(false)
+  })
+
   it('deducts direct recurring payments from the linked pot when the due date arrives', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'))

@@ -1,4 +1,4 @@
-import { formatPence } from './money'
+import { formatPence } from './money.js'
 import type {
   CreditCardInput,
   CreditCardRepaymentInput,
@@ -7,8 +7,8 @@ import type {
   PotInput,
   RecurringPaymentInput,
   TransactionInput,
-} from '../storage/repository'
-import type { PaymentMethod, PotType, RecurringFrequency, RecurringPriority } from '../types/models'
+} from '../storage/repository.js'
+import type { PaymentMethod, PotType, RecurringFrequency, RecurringPriority } from '../types/models.js'
 
 const validPotTypes = new Set<PotType>(['spending', 'reserved', 'saving', 'investment', 'buffer'])
 const validRecurringFrequencies = new Set<RecurringFrequency>(['weekly', 'biweekly', 'monthly', 'yearly'])

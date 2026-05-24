@@ -17,7 +17,7 @@ import {
   addIsoDays,
   findPayPeriodForDate,
   formatPence,
-  getDebtDueAmountPence,
+  getDebtDueAmountAfterReservesAndLinkedPotsPence,
   getPayPeriodCostSummary,
   getRecurringPaymentOccurrences,
   toIsoDate,
@@ -597,10 +597,10 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       id: `debt-${debt.id}`,
       date: debt.dueDate,
       title: debt.name,
-      amountPence: getDebtDueAmountPence(debt),
+      amountPence: getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots),
       type: 'debt' as const,
       direction: 'out' as const,
-      description: `${debt.lender || 'Debt'} due date. Current balance is due unless you record or reserve payments.`,
+      description: `${debt.lender || 'Debt'} due date. Linked pots and planned reserves reduce the amount still to cover.`,
     }))
   const reserveEvents: CalendarEvent[] = snapshot.debtReserves
     .filter((reserve) => reserve.status !== 'cancelled' && reserve.payday >= startDate && reserve.payday <= endDate)

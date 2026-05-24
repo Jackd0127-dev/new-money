@@ -145,6 +145,43 @@ export function getDebtDueAmountAfterReservesPence(
   return Math.max(0, getDebtDueAmountPence(debt) - getPlannedDebtReservePence(reserves, debt.id))
 }
 
+export function getLinkedCreditCardPotPence(
+  pots: Pot[],
+  creditCardId?: string | null,
+): number {
+  if (!creditCardId) {
+    return 0
+  }
+
+  return pots
+    .filter((pot) => !pot.archived && pot.linkedCreditCardId === creditCardId)
+    .reduce((total, pot) => total + Math.max(0, pot.balancePence), 0)
+}
+
+export function getLinkedDebtPotPence(
+  pots: Pot[],
+  debtId?: string | null,
+): number {
+  if (!debtId) {
+    return 0
+  }
+
+  return pots
+    .filter((pot) => !pot.archived && pot.linkedDebtId === debtId)
+    .reduce((total, pot) => total + Math.max(0, pot.balancePence), 0)
+}
+
+export function getDebtDueAmountAfterReservesAndLinkedPotsPence(
+  debt: Pick<Debt, 'id' | 'currentBalancePence'>,
+  reserves: DebtReserve[],
+  pots: Pot[] = [],
+): number {
+  return Math.max(
+    0,
+    getDebtDueAmountAfterReservesPence(debt, reserves) - getLinkedDebtPotPence(pots, debt.id),
+  )
+}
+
 interface CreditCardAllocationInput {
   creditCards: CreditCard[]
   recurringPayments: RecurringPayment[]
@@ -152,6 +189,7 @@ interface CreditCardAllocationInput {
   transactions: Transaction[]
   repayments: CreditCardRepayment[]
   creditCardPots?: CreditCardPot[]
+  pots?: Pot[]
   payPeriod: PayPeriod | null
 }
 
@@ -172,6 +210,7 @@ export interface CreditCardAllocationCardSummary {
   creditPotPence: number
   paycheckCreditPotPence: number
   externalCreditPotPence: number
+  linkedPotPence: number
   remainingAfterCreditPotsPence: number
   availableCreditPence: number
   utilisationPercent: number
@@ -187,6 +226,8 @@ export interface CreditCardAllocationSummary {
   totalCreditPotsPence: number
   totalPaycheckCreditPotsPence: number
   totalExternalCreditPotsPence: number
+  totalLinkedPotPence: number
+  totalRemainingAfterCreditPotsPence: number
   payReceivedPence: number
   paycheckRemainingAfterCardsPence: number
 }
@@ -501,7 +542,7 @@ export function getPayPeriodCostSummary({
     .map((debt) => ({
       id: `debt-${debt.id}`,
       label: debt.name,
-      amountPence: getDebtDueAmountAfterReservesPence(debt, debtReserves),
+      amountPence: getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, debtReserves, pots),
       date: debt.dueDate,
       source: 'debt_minimum' as const,
       creditCardId: null,
@@ -604,6 +645,7 @@ export function getCreditCardAllocationSummary({
   transactions,
   repayments,
   creditCardPots = [],
+  pots = [],
   payPeriod,
 }: CreditCardAllocationInput): CreditCardAllocationSummary {
   const rangeStart = payPeriod?.startDate ?? '0000-01-01'
@@ -694,9 +736,11 @@ export function getCreditCardAllocationSummary({
         creditCardPot.amountPence > 0 &&
         (!payPeriod || creditCardPot.source === 'external' || isCreditCardPotInPayPeriod(creditCardPot, payPeriod)),
     )
-    const creditPotPence = sumCreditCardPots(activeCreditPots)
+    const storedCreditPotPence = sumCreditCardPots(activeCreditPots)
     const paycheckCreditPotPence = sumCreditCardPots(activeCreditPots.filter((creditCardPot) => creditCardPot.source === 'paycheck'))
     const externalCreditPotPence = sumCreditCardPots(activeCreditPots.filter((creditCardPot) => creditCardPot.source === 'external'))
+    const linkedPotPence = getLinkedCreditCardPotPence(pots, card.id)
+    const creditPotPence = storedCreditPotPence + linkedPotPence
     const availableCreditPence = Math.max(0, card.limitPence - owedPence)
 
     return {
@@ -706,6 +750,7 @@ export function getCreditCardAllocationSummary({
       creditPotPence,
       paycheckCreditPotPence,
       externalCreditPotPence,
+      linkedPotPence,
       remainingAfterCreditPotsPence: Math.max(0, owedPence - creditPotPence),
       availableCreditPence,
       utilisationPercent: card.limitPence > 0 ? Math.round((owedPence / card.limitPence) * 100) : 0,
@@ -718,6 +763,11 @@ export function getCreditCardAllocationSummary({
   const totalCreditPotsPence = cards.reduce((total, card) => total + card.creditPotPence, 0)
   const totalPaycheckCreditPotsPence = cards.reduce((total, card) => total + card.paycheckCreditPotPence, 0)
   const totalExternalCreditPotsPence = cards.reduce((total, card) => total + card.externalCreditPotPence, 0)
+  const totalLinkedPotPence = cards.reduce((total, card) => total + card.linkedPotPence, 0)
+  const totalRemainingAfterCreditPotsPence = cards.reduce(
+    (total, card) => total + card.remainingAfterCreditPotsPence,
+    0,
+  )
 
   return {
     cards,
@@ -726,6 +776,8 @@ export function getCreditCardAllocationSummary({
     totalCreditPotsPence,
     totalPaycheckCreditPotsPence,
     totalExternalCreditPotsPence,
+    totalLinkedPotPence,
+    totalRemainingAfterCreditPotsPence,
     payReceivedPence: payPeriod?.incomePence ?? 0,
     paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalOwedPence - totalPaycheckCreditPotsPence,
   }
@@ -892,6 +944,7 @@ export function getDebtSummary(
   today: string,
   payPeriod: Pick<PayPeriod, 'endDate'> | null = null,
   debtReserves: DebtReserve[] = [],
+  pots: Pot[] = [],
 ): DebtSummary {
   const activeDebts = debts.filter(
     (debt) => debt.status === 'active' && debt.currentBalancePence > 0,
@@ -920,7 +973,11 @@ export function getDebtSummary(
     debtDueThisPayPeriodPence: payPeriod
       ? activeDebts
           .filter((debt) => debt.dueDate <= payPeriod.endDate)
-          .reduce((total, debt) => total + getDebtDueAmountAfterReservesPence(debt, debtReserves), 0)
+          .reduce(
+            (total, debt) =>
+              total + getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, debtReserves, pots),
+            0,
+          )
       : 0,
     progressPercent:
       totalOriginalAmountPence > 0

@@ -1,6 +1,7 @@
 import {
   createNextPayPeriod,
-  getDebtDueAmountPence,
+  getDebtDueAmountAfterReservesAndLinkedPotsPence,
+  getLinkedDebtPotPence,
   getPayPeriodCostSummary,
 } from './money.js'
 import type {
@@ -68,7 +69,12 @@ export function getDebtReservePlan(input: DebtReservePlanInput): DebtReservePlan
   const plannedReservePence = input.debtReserves
     .filter((reserve) => reserve.debtId === input.debt.id && reserve.status === 'planned')
     .reduce((total, reserve) => total + reserve.amountPence, 0)
-  const remainingDebtPence = Math.max(0, getDebtDueAmountPence(input.debt) - plannedReservePence)
+  const linkedPotPence = getLinkedDebtPotPence(input.pots ?? [], input.debt.id)
+  const remainingDebtPence = getDebtDueAmountAfterReservesAndLinkedPotsPence(
+    input.debt,
+    input.debtReserves,
+    input.pots ?? [],
+  )
   const periods = selectedPayPeriod ? getPlanPeriods(input, selectedPayPeriod) : []
   const skippedPeriods = input.debtReserves.filter(
     (reserve) => reserve.debtId === input.debt.id && reserve.status === 'skipped',
@@ -103,7 +109,7 @@ export function getDebtReservePlan(input: DebtReservePlanInput): DebtReservePlan
     debt: input.debt,
     selectedPayPeriod,
     remainingDebtPence,
-    plannedReservePence,
+    plannedReservePence: plannedReservePence + linkedPotPence,
     recommendedAmountPence,
     currentPeriodAvailablePence,
     shortfallPence,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import {
   formatPence,
@@ -7,8 +7,17 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, MoneyMetric, Panel, SelectInput, type CalculationBreakdown } from '../components/ui'
-import type { PayPeriod } from '../types/models'
+import type { CreditCardPot, DebtReserve, PayPeriod, PotAllocation } from '../types/models'
 import type { ViewKey } from '../types/navigation'
+
+const dashboardTodoStorageKey = 'new-money.dashboard-todos.v1'
+
+interface PaycheckTodoItem {
+  id: string
+  label: string
+  detail: string
+  amountPence: number
+}
 
 export function DashboardPage({
   snapshot,
@@ -22,6 +31,9 @@ export function DashboardPage({
   onViewChange: (view: ViewKey) => void
 }) {
   const [openMetric, setOpenMetric] = useState<string | null>(null)
+  const [completedTodosByPeriod, setCompletedTodosByPeriod] = useState<Record<string, string[]>>(
+    () => readCompletedTodos(),
+  )
   const viewedPeriod = selectedPayPeriod ?? null
   const summary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
@@ -35,6 +47,36 @@ export function DashboardPage({
     pots: snapshot.pots,
     potAllocations: snapshot.potAllocations,
   })
+  const todoItems = useMemo(
+    () => viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod) : [],
+    [snapshot, viewedPeriod],
+  )
+  const completedTodoIds = new Set(viewedPeriod ? completedTodosByPeriod[viewedPeriod.id] ?? [] : [])
+  const completedTodoCount = todoItems.filter((item) => completedTodoIds.has(item.id)).length
+
+  function toggleTodo(itemId: string, done: boolean) {
+    if (!viewedPeriod) {
+      return
+    }
+
+    setCompletedTodosByPeriod((current) => {
+      const currentIds = new Set(current[viewedPeriod.id] ?? [])
+
+      if (done) {
+        currentIds.add(itemId)
+      } else {
+        currentIds.delete(itemId)
+      }
+
+      const next = {
+        ...current,
+        [viewedPeriod.id]: [...currentIds],
+      }
+
+      writeCompletedTodos(next)
+      return next
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -118,6 +160,65 @@ export function DashboardPage({
           </div>
         )}
       </Panel>
+      {viewedPeriod && (
+        <Panel
+          title="Paycheck to-do list"
+          accent="emerald"
+          description={`Tick off where this paycheck needs to go. ${completedTodoCount} of ${todoItems.length} done.`}
+        >
+          {todoItems.length > 0 ? (
+            <ul className="space-y-2">
+              {todoItems.map((item) => {
+                const isDone = completedTodoIds.has(item.id)
+
+                return (
+                  <li
+                    key={item.id}
+                    className={
+                      isDone
+                        ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3'
+                        : 'rounded-lg border border-slate-200 bg-white px-3 py-3'
+                    }
+                  >
+                    <label className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500"
+                        checked={isDone}
+                        onChange={(event) => toggleTodo(item.id, event.target.checked)}
+                      />
+                      <span className="min-w-0">
+                        <span
+                          className={
+                            isDone
+                              ? 'block text-sm font-semibold text-emerald-900 line-through decoration-2'
+                              : 'block text-sm font-semibold text-slate-950'
+                          }
+                        >
+                          {item.label}
+                        </span>
+                        <span className={isDone ? 'mt-1 block text-xs text-emerald-700' : 'mt-1 block text-xs text-slate-500'}>
+                          {item.detail}
+                        </span>
+                      </span>
+                      <span className={isDone ? 'text-sm font-semibold text-emerald-800' : 'text-sm font-semibold text-slate-950'}>
+                        {formatPence(item.amountPence)}
+                      </span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <p className="text-sm font-semibold text-slate-950">No set-asides for this paycheck</p>
+              <p className="mt-1 text-sm leading-5 text-slate-500">
+                Add pot allocations, credit pots, or debt reserves and they will appear here.
+              </p>
+            </div>
+          )}
+        </Panel>
+      )}
     </div>
   )
 }
@@ -240,5 +341,149 @@ function getMoneyLeftBreakdown(summary: PayPeriodCostSummary): CalculationBreakd
       },
     ],
     note: summary.moneyLeftPence < 0 ? 'This period is over committed.' : 'This is what remains after the listed costs.',
+  }
+}
+
+function getPaycheckTodoItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod): PaycheckTodoItem[] {
+  const potItems = snapshot.potAllocations
+    .filter((allocation) => allocation.payPeriodId === payPeriod.id && allocation.amountPence > 0)
+    .map((allocation) => potAllocationToTodoItem(allocation, snapshot))
+  const debtItems = snapshot.debtReserves
+    .filter(
+      (reserve) =>
+        reserve.status === 'planned' &&
+        reserve.amountPence > 0 &&
+        isDebtReserveInPayPeriod(reserve, payPeriod),
+    )
+    .map((reserve) => debtReserveToTodoItem(reserve, snapshot))
+  const creditCardItems = snapshot.creditCardPots
+    .filter(
+      (creditCardPot) =>
+        creditCardPot.status === 'active' &&
+        creditCardPot.source === 'paycheck' &&
+        creditCardPot.amountPence > 0 &&
+        isCreditCardPotInPayPeriod(creditCardPot, payPeriod),
+    )
+    .map((creditCardPot) => creditCardPotToTodoItem(creditCardPot, snapshot))
+
+  return [...potItems, ...debtItems, ...creditCardItems].sort((a, b) => {
+    const detailSort = a.detail.localeCompare(b.detail)
+
+    if (detailSort !== 0) {
+      return detailSort
+    }
+
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function potAllocationToTodoItem(allocation: PotAllocation, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  const pot = snapshot.pots.find((candidate) => candidate.id === allocation.potId)
+  const payment = allocation.recurringPaymentId
+    ? snapshot.recurringPayments.find((candidate) => candidate.id === allocation.recurringPaymentId)
+    : null
+  const potName = pot?.name ?? 'Unknown'
+
+  return {
+    id: `pot-allocation-${allocation.id}-${allocation.amountPence}`,
+    label: payment
+      ? `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot for "${payment.name}"`
+      : `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot`,
+    detail: allocation.source === 'recurring'
+      ? 'Recurring bill reserve'
+      : allocation.source === 'pot_auto'
+        ? 'Automatic payday top-up'
+        : 'Manual pot allocation',
+    amountPence: allocation.amountPence,
+  }
+}
+
+function debtReserveToTodoItem(reserve: DebtReserve, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  const debt = snapshot.debts.find((candidate) => candidate.id === reserve.debtId)
+  const debtName = debt?.name ?? 'Unknown debt'
+
+  return {
+    id: `debt-reserve-${reserve.id}-${reserve.amountPence}`,
+    label: `Set aside ${formatPence(reserve.amountPence)} for "${debtName}" debt`,
+    detail: reserve.note || 'Debt reserve',
+    amountPence: reserve.amountPence,
+  }
+}
+
+function creditCardPotToTodoItem(creditCardPot: CreditCardPot, snapshot: PlannerSnapshot): PaycheckTodoItem {
+  const card = snapshot.creditCards.find((candidate) => candidate.id === creditCardPot.creditCardId)
+  const cardName = card?.name ?? 'Unknown card'
+
+  return {
+    id: `credit-card-pot-${creditCardPot.id}-${creditCardPot.amountPence}`,
+    label: `Set aside ${formatPence(creditCardPot.amountPence)} for "${cardName}" card`,
+    detail: creditCardPot.note || creditCardPot.name,
+    amountPence: creditCardPot.amountPence,
+  }
+}
+
+function isDebtReserveInPayPeriod(
+  reserve: Pick<DebtReserve, 'payPeriodId' | 'periodStartDate' | 'periodEndDate'>,
+  payPeriod: PayPeriod,
+): boolean {
+  if (reserve.payPeriodId) {
+    return reserve.payPeriodId === payPeriod.id
+  }
+
+  return reserve.periodStartDate === payPeriod.startDate && reserve.periodEndDate === payPeriod.endDate
+}
+
+function isCreditCardPotInPayPeriod(
+  creditCardPot: Pick<CreditCardPot, 'payPeriodId' | 'periodStartDate' | 'periodEndDate' | 'payday'>,
+  payPeriod: PayPeriod,
+): boolean {
+  if (creditCardPot.payPeriodId) {
+    return creditCardPot.payPeriodId === payPeriod.id
+  }
+
+  if (creditCardPot.periodStartDate && creditCardPot.periodEndDate) {
+    return creditCardPot.periodStartDate === payPeriod.startDate && creditCardPot.periodEndDate === payPeriod.endDate
+  }
+
+  return Boolean(creditCardPot.payday && creditCardPot.payday >= payPeriod.startDate && creditCardPot.payday <= payPeriod.endDate)
+}
+
+function readCompletedTodos(): Record<string, string[]> {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  try {
+    const stored = window.localStorage.getItem(dashboardTodoStorageKey)
+
+    if (!stored) {
+      return {}
+    }
+
+    const parsed = JSON.parse(stored) as unknown
+
+    if (!parsed || typeof parsed !== 'object') {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string[]] =>
+        Array.isArray(entry[1]) && entry[1].every((item) => typeof item === 'string'),
+      ),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function writeCompletedTodos(completedTodos: Record<string, string[]>): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(dashboardTodoStorageKey, JSON.stringify(completedTodos))
+  } catch {
+    // The checklist still works for the current session if storage is unavailable.
   }
 }

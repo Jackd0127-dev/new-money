@@ -177,6 +177,29 @@ export class PlannerDatabase extends Dexie {
       creditCardRepayments: 'id, creditCardId, date',
       dailyBriefs: 'id, date',
     })
+
+    this.version(9).stores({
+      settings: 'id',
+      pots: 'id, type, archived, linkedCreditCardId, linkedDebtId',
+      recurringPayments: 'id, potId, creditCardId, active, frequency',
+      payPeriods: 'id, payday, status',
+      paychecks: 'id, payPeriodId',
+      potAllocations: 'id, payPeriodId, potId',
+      transactions: 'id, potId, payPeriodId, creditCardId, recurringPaymentId, date, type, paymentMethod',
+      debts: 'id, status, dueDate',
+      debtPayments: 'id, debtId, date',
+      debtReserves: 'id, debtId, payPeriodId, payday, status',
+      creditCards: 'id, archived',
+      creditCardPots: 'id, creditCardId, payPeriodId, payday, source, status',
+      customPayments: 'id, creditCardId, dueDate, status',
+      creditCardRepayments: 'id, creditCardId, date',
+      dailyBriefs: 'id, date',
+    }).upgrade((transaction) =>
+      transaction.table('pots').toCollection().modify((pot) => {
+        pot.linkedCreditCardId = pot.linkedCreditCardId ?? null
+        pot.linkedDebtId = pot.linkedDebtId ?? null
+      }),
+    )
   }
 }
 

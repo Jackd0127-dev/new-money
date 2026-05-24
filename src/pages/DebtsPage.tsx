@@ -4,7 +4,8 @@ import { PenLine, Trash2 } from 'lucide-react'
 import {
   findPayPeriodForDate,
   formatPence,
-  getDebtDueAmountAfterReservesPence,
+  getDebtDueAmountAfterReservesAndLinkedPotsPence,
+  getLinkedDebtPotPence,
   getDebtSummary,
   parsePoundsToPence,
   toIsoDate,
@@ -69,7 +70,7 @@ export function DebtsPage({
   const nextPayPeriod = snapshot.payPeriods
     .filter((period) => period.startDate > today)
     .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null
-  const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today, currentPayPeriod, snapshot.debtReserves)
+  const summary = getDebtSummary(snapshot.debts, snapshot.debtPayments, today, currentPayPeriod, snapshot.debtReserves, snapshot.pots)
   const payPeriodEndDate = currentPayPeriod?.endDate ?? null
   const activeDebtIds = new Set(activeDebts.map((debt) => debt.id))
   const recordedDebtPaymentPence = snapshot.debtPayments
@@ -225,8 +226,8 @@ export function DebtsPage({
                   ? [
                       ...dueThisPayPeriod.map((debt) => ({
                         label: debt.name,
-                        value: formatPence(getDebtDueAmountAfterReservesPence(debt, snapshot.debtReserves)),
-                        detail: debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`,
+                        value: formatPence(getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots)),
+                        detail: getDebtDueDetail(debt, snapshot.pots, today),
                         tone: 'add' as const,
                       })),
                       {
@@ -473,7 +474,8 @@ export function DebtsPage({
                   ? Math.round((paidPence / debt.originalAmountPence) * 100)
                   : 100
               const isOverdue = debt.status === 'active' && debt.dueDate < today
-              const debtDueAmountPence = getDebtDueAmountAfterReservesPence(debt, snapshot.debtReserves)
+              const linkedPotPence = getLinkedDebtPotPence(snapshot.pots, debt.id)
+              const debtDueAmountPence = getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots)
 
               return (
                 <div key={debt.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -511,10 +513,11 @@ export function DebtsPage({
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-5">
+                  <div className="mt-4 grid gap-3 md:grid-cols-6">
                     <DebtStat label="Balance" value={formatPence(debt.currentBalancePence)} />
                     <DebtStat label="Original" value={formatPence(debt.originalAmountPence)} />
                     <DebtStat label="Due amount" value={formatPence(debtDueAmountPence)} />
+                    <DebtStat label="In linked pots" value={formatPence(linkedPotPence)} />
                     <DebtStat label="Minimum" value={debt.minimumPaymentPence > 0 ? formatPence(debt.minimumPaymentPence) : 'Optional'} />
                     <DebtStat
                       label="Due"
@@ -640,4 +643,15 @@ function formatShortDate(value: string) {
     month: 'short',
     year: 'numeric',
   }).format(new Date(`${value}T00:00:00.000Z`))
+}
+
+function getDebtDueDetail(debt: Debt, pots: PlannerSnapshot['pots'], today: string): string {
+  const linkedPotPence = getLinkedDebtPotPence(pots, debt.id)
+  const dateDetail = debt.dueDate < today ? `Overdue since ${debt.dueDate}` : `Due ${debt.dueDate}`
+
+  if (linkedPotPence <= 0) {
+    return dateDetail
+  }
+
+  return `${dateDetail} · ${formatPence(linkedPotPence)} already in linked pots`
 }

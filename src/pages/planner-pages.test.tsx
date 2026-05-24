@@ -1092,6 +1092,8 @@ describe('pots page', () => {
     expect(actions.updatePot).toHaveBeenCalledWith('pot-food', {
       balancePence: 12000,
       color: '#16a34a',
+      linkedCreditCardId: null,
+      linkedDebtId: null,
       name: 'Groceries',
       targetPence: null,
       type: 'spending',
@@ -1104,6 +1106,47 @@ describe('pots page', () => {
     expect(actions.deletePot).toHaveBeenCalledWith('pot-food')
 
     confirmSpy.mockRestore()
+  })
+
+  it('creates a pot linked to a credit card reserve target', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 80000,
+          openingBalancePence: 60000,
+          dueDay: 1,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={actions} />)
+
+    const createRegion = screen.getByRole('region', { name: 'Create pot' })
+    await user.type(within(createRegion).getByLabelText('Pot name'), 'Amex reserve')
+    await user.type(within(createRegion).getByLabelText(/Current balance/), '400.00')
+    await user.selectOptions(within(createRegion).getByLabelText('Link this pot to'), 'credit_card')
+    await user.selectOptions(within(createRegion).getByLabelText('Credit card'), 'card-amex')
+    await user.click(within(createRegion).getByRole('button', { name: 'Add pot' }))
+
+    expect(actions.addPot).toHaveBeenCalledWith({
+      balancePence: 40000,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-amex',
+      linkedDebtId: null,
+      name: 'Amex reserve',
+      targetPence: null,
+      type: 'spending',
+    })
   })
 
   it('expands a pot to show spending, recurring payments, and allocations tied to it', async () => {
@@ -1564,6 +1607,140 @@ describe('dashboard page', () => {
     expect(screen.queryByText('Available after bills')).not.toBeInTheDocument()
   })
 
+  it('shows a per-paycheck to-do list and marks set-asides complete', async () => {
+    const user = userEvent.setup()
+    const restoreLocalStorage = mockLocalStorage()
+    const snapshot = createSnapshot({
+      payPeriods: [createPayPeriod({ id: 'period-current', incomePence: 120000 })],
+      recurringPayments: [
+        {
+          id: 'insurance',
+          name: 'Car Insurance',
+          amountPence: 8500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'pot-food',
+          amountPence: 14000,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'allocation-insurance',
+          payPeriodId: 'period-current',
+          potId: 'pot-bills',
+          amountPence: 8500,
+          source: 'recurring',
+          recurringPaymentId: 'insurance',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-loan',
+          name: 'Loan',
+          lender: 'Finance Co',
+          originalAmountPence: 100000,
+          currentBalancePence: 80000,
+          minimumPaymentPence: 4000,
+          dueDate: '2026-05-25',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debtReserves: [
+        {
+          id: 'reserve-loan',
+          debtId: 'debt-loan',
+          payPeriodId: 'period-current',
+          payday: '2026-05-16',
+          periodStartDate: '2026-05-16',
+          periodEndDate: '2026-05-29',
+          amountPence: 20000,
+          status: 'planned',
+          source: 'manual',
+          note: 'Loan reserve',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 1,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCardPots: [
+        {
+          id: 'credit-pot-amex',
+          creditCardId: 'card-amex',
+          payPeriodId: 'period-current',
+          payday: '2026-05-16',
+          periodStartDate: '2026-05-16',
+          periodEndDate: '2026-05-29',
+          name: 'Amex payoff',
+          amountPence: 5000,
+          source: 'paycheck',
+          status: 'active',
+          note: 'Card set-aside',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    const { unmount } = render(
+      <DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />,
+    )
+
+    const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
+    expect(within(todoList).getByText('0 of 4 done.', { exact: false })).toBeInTheDocument()
+    expect(within(todoList).getByText('Set aside £140.00 into "Food" pot')).toBeInTheDocument()
+    expect(within(todoList).getByText('Set aside £85.00 into "Bills" pot for "Car Insurance"')).toBeInTheDocument()
+    expect(within(todoList).getByText('Set aside £200.00 for "Loan" debt')).toBeInTheDocument()
+    expect(within(todoList).getByText('Set aside £50.00 for "Everyday Amex" card')).toBeInTheDocument()
+
+    const foodCheckbox = within(todoList).getByRole('checkbox', {
+      name: /Set aside £140\.00 into "Food" pot/,
+    })
+    await user.click(foodCheckbox)
+
+    expect(foodCheckbox).toBeChecked()
+    expect(foodCheckbox.closest('li')).toHaveClass('bg-emerald-50')
+    expect(within(todoList).getByText('1 of 4 done.', { exact: false })).toBeInTheDocument()
+
+    unmount()
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
+
+    expect(screen.getByRole('checkbox', { name: /Set aside £140\.00 into "Food" pot/ })).toBeChecked()
+    restoreLocalStorage()
+  })
+
   it('expands only one dashboard summary card at a time', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
@@ -2013,6 +2190,30 @@ function createAuthUser(
     providerData: [{ providerId: 'password' }],
     ...overrides,
   } as NonNullable<FirebaseAuthController['user']>
+}
+
+function mockLocalStorage(): () => void {
+  const storedItems = new Map<string, string>()
+  const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage')
+
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: vi.fn((key: string) => storedItems.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storedItems.set(key, value)
+      }),
+      removeItem: vi.fn((key: string) => {
+        storedItems.delete(key)
+      }),
+    },
+  })
+
+  return () => {
+    if (originalDescriptor) {
+      Object.defineProperty(window, 'localStorage', originalDescriptor)
+    }
+  }
 }
 
 function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapshot {

@@ -51,6 +51,8 @@ export interface Pot extends Timestamped {
   balancePence: number
   targetPence: number | null
   color: string
+  linkedCreditCardId?: string | null
+  linkedDebtId?: string | null
   archived: boolean
 }
 

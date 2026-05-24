@@ -16,6 +16,7 @@ import {
 import type { PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
+type PotLinkType = 'none' | 'credit_card' | 'debt'
 
 interface PotFormState {
   name: string
@@ -23,6 +24,8 @@ interface PotFormState {
   paycheckAmount: string
   balance: string
   color: string
+  linkType: PotLinkType
+  linkedEntityId: string
 }
 
 const emptyPotForm = (): PotFormState => ({
@@ -31,6 +34,8 @@ const emptyPotForm = (): PotFormState => ({
   paycheckAmount: '',
   balance: '',
   color: colors[0],
+  linkType: 'none',
+  linkedEntityId: '',
 })
 
 export function PotsPage({
@@ -78,6 +83,8 @@ export function PotsPage({
       paycheckAmount: pot.targetPence ? (pot.targetPence / 100).toFixed(2) : '',
       balance: (pot.balancePence / 100).toFixed(2),
       color: pot.color,
+      linkType: getPotLinkType(pot),
+      linkedEntityId: pot.linkedCreditCardId ?? pot.linkedDebtId ?? '',
     })
   }
 
@@ -100,7 +107,7 @@ export function PotsPage({
           density="compact"
         >
           <div className="space-y-4">
-            <PotFormFields form={createForm} onChange={setCreateForm} />
+            <PotFormFields form={createForm} snapshot={snapshot} onChange={setCreateForm} />
             <div className="flex flex-wrap gap-3">
               <Button onClick={submitPot}>Add pot</Button>
             </div>
@@ -113,11 +120,15 @@ export function PotsPage({
           accent="blue"
           density="compact"
         >
-          <div className="grid items-start gap-4 md:grid-cols-2 xl:max-h-[760px] xl:grid-cols-3 xl:overflow-y-auto xl:pr-1">
+          <div
+            className="grid items-start gap-4 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))' }}
+          >
           {activePots.map((pot) => {
             const isOpen = openPotId === pot.id
             const activityItems = getPotActivityItems(pot.id, snapshot)
             const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
+            const linkedTargetLabel = getPotLinkedTargetLabel(pot.id, snapshot)
 
             return (
               <div key={pot.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -129,16 +140,19 @@ export function PotsPage({
                     aria-label={`${isOpen ? 'Hide' : 'View'} ${pot.name} activity`}
                     className="min-w-0 flex-1 rounded-md text-left outline-none transition hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-slate-100"
                   >
-                    <div className="flex items-start justify-between gap-3 p-1">
+                    <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 p-1">
+                      <span className="mt-1 size-3 rounded-full" style={{ backgroundColor: pot.color }} />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="size-3 rounded-full" style={{ backgroundColor: pot.color }} />
-                          <h3 className="truncate text-sm font-semibold text-slate-950">{pot.name}</h3>
+                        <div>
+                          <h3 className="break-words text-sm font-semibold leading-5 text-slate-950">{pot.name}</h3>
                         </div>
                         <p className="mt-1 text-xs capitalize text-slate-500">{pot.type}</p>
+                        {linkedTargetLabel && (
+                          <p className="mt-1 text-xs font-medium text-slate-600">{linkedTargetLabel}</p>
+                        )}
                       </div>
                       <ChevronDown
-                        size={18}
+                        size={14}
                         className={`mt-0.5 shrink-0 text-slate-400 transition ${isOpen ? 'rotate-180' : ''}`}
                       />
                     </div>
@@ -149,25 +163,29 @@ export function PotsPage({
                       </p>
                     )}
                   </button>
-                  <div className="flex shrink-0 gap-2">
-                    <Button
-                      variant="secondary"
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      className="inline-flex size-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
                       onClick={() => startEditingPot(pot.id)}
                       aria-label={`Edit ${pot.name}`}
+                      title={`Edit ${pot.name}`}
                     >
-                      <PenLine size={16} />
-                    </Button>
-                    <Button
-                      variant="danger"
+                      <PenLine size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex size-6 items-center justify-center rounded-md bg-red-600 text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                       onClick={() => {
                         if (window.confirm(`Delete ${pot.name}?`)) {
                           void actions.deletePot(pot.id)
                         }
                       }}
                       aria-label={`Delete ${pot.name}`}
+                      title={`Delete ${pot.name}`}
                     >
-                      <Trash2 size={16} />
-                    </Button>
+                      <Trash2 size={12} />
+                    </button>
                   </div>
                 </div>
 
@@ -251,7 +269,7 @@ export function PotsPage({
               </Button>
             </div>
             <div className="space-y-4">
-              <PotFormFields form={editForm} onChange={setEditForm} />
+              <PotFormFields form={editForm} snapshot={snapshot} onChange={setEditForm} />
               <div className="flex flex-wrap gap-3">
                 <Button onClick={submitEditedPot}>Save pot</Button>
                 <Button variant="secondary" onClick={closeEditModal}>
@@ -268,11 +286,20 @@ export function PotsPage({
 
 function PotFormFields({
   form,
+  snapshot,
   onChange,
 }: {
   form: PotFormState
+  snapshot: PlannerSnapshot
   onChange: (form: PotFormState) => void
 }) {
+  const creditCards = snapshot.creditCards.filter(
+    (card) => !card.archived || card.id === form.linkedEntityId,
+  )
+  const debts = snapshot.debts.filter(
+    (debt) => debt.status !== 'archived' || debt.id === form.linkedEntityId,
+  )
+
   return (
     <>
       <Field label="Pot name">
@@ -307,6 +334,52 @@ function PotFormFields({
           placeholder="0.00"
         />
       </Field>
+      <Field label="Link this pot to">
+        <SelectInput
+          value={form.linkType}
+          onChange={(event) =>
+            onChange({
+              ...form,
+              linkType: event.target.value as PotLinkType,
+              linkedEntityId: '',
+            })
+          }
+        >
+          <option value="none">No link</option>
+          <option value="credit_card">Credit card</option>
+          <option value="debt">Debt</option>
+        </SelectInput>
+      </Field>
+      {form.linkType === 'credit_card' && (
+        <Field label="Credit card">
+          <SelectInput
+            value={form.linkedEntityId}
+            onChange={(event) => onChange({ ...form, linkedEntityId: event.target.value })}
+          >
+            <option value="">Choose credit card</option>
+            {creditCards.map((card) => (
+              <option key={card.id} value={card.id}>
+                {card.name}
+              </option>
+            ))}
+          </SelectInput>
+        </Field>
+      )}
+      {form.linkType === 'debt' && (
+        <Field label="Debt">
+          <SelectInput
+            value={form.linkedEntityId}
+            onChange={(event) => onChange({ ...form, linkedEntityId: event.target.value })}
+          >
+            <option value="">Choose debt</option>
+            {debts.map((debt) => (
+              <option key={debt.id} value={debt.id}>
+                {debt.name}
+              </option>
+            ))}
+          </SelectInput>
+        </Field>
+      )}
       <Field label="Colour">
         <div className="flex flex-wrap gap-2">
           {colors.map((option) => (
@@ -336,7 +409,41 @@ function potFormToPayload(form: PotFormState) {
     balancePence: form.balance ? parsePoundsToPence(form.balance) : 0,
     targetPence: form.paycheckAmount ? parsePoundsToPence(form.paycheckAmount) : null,
     color: form.color,
+    linkedCreditCardId: form.linkType === 'credit_card' ? form.linkedEntityId || null : null,
+    linkedDebtId: form.linkType === 'debt' ? form.linkedEntityId || null : null,
   }
+}
+
+function getPotLinkType(pot: PlannerSnapshot['pots'][number]): PotLinkType {
+  if (pot.linkedCreditCardId) {
+    return 'credit_card'
+  }
+
+  if (pot.linkedDebtId) {
+    return 'debt'
+  }
+
+  return 'none'
+}
+
+function getPotLinkedTargetLabel(potId: string, snapshot: PlannerSnapshot): string | null {
+  const pot = snapshot.pots.find((candidate) => candidate.id === potId)
+
+  if (!pot) {
+    return null
+  }
+
+  if (pot.linkedCreditCardId) {
+    const card = snapshot.creditCards.find((candidate) => candidate.id === pot.linkedCreditCardId)
+    return `Linked to ${card?.name ?? 'deleted credit card'}`
+  }
+
+  if (pot.linkedDebtId) {
+    const debt = snapshot.debts.find((candidate) => candidate.id === pot.linkedDebtId)
+    return `Linked to ${debt?.name ?? 'deleted debt'}`
+  }
+
+  return null
 }
 
 interface PotActivityItem {

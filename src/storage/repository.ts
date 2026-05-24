@@ -68,6 +68,8 @@ export interface PotInput {
   balancePence: number
   targetPence: number | null
   color: string
+  linkedCreditCardId?: string | null
+  linkedDebtId?: string | null
 }
 
 export type PotUpdateInput = PotInput
@@ -257,7 +259,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
 
   return {
     settings: normalizeSettings(settings),
-    pots: pots.sort((a, b) => a.name.localeCompare(b.name)),
+    pots: pots.map(normalizePot).sort((a, b) => a.name.localeCompare(b.name)),
     recurringPayments: recurringPayments.sort((a, b) => a.name.localeCompare(b.name)),
     payPeriods,
     paychecks,
@@ -295,6 +297,8 @@ export async function addPot(input: PotInput): Promise<void> {
     balancePence: input.balancePence,
     targetPence: input.targetPence === null ? null : Math.max(0, input.targetPence),
     color: input.color,
+    linkedCreditCardId: input.linkedCreditCardId ?? null,
+    linkedDebtId: input.linkedDebtId ?? null,
     archived: false,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -308,6 +312,8 @@ export async function updatePot(potId: string, input: PotUpdateInput): Promise<v
     balancePence: input.balancePence,
     targetPence: input.targetPence === null ? null : Math.max(0, input.targetPence),
     color: input.color,
+    linkedCreditCardId: input.linkedCreditCardId ?? null,
+    linkedDebtId: input.linkedDebtId ?? null,
     updatedAt: nowIso(),
   })
 }
@@ -1247,7 +1253,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       ])
 
       await db.settings.put(normalizeSettings(snapshot.settings))
-      await putAll(db.pots, snapshot.pots)
+      await putAll(db.pots, snapshot.pots.map(normalizePot))
       await putAll(db.recurringPayments, snapshot.recurringPayments)
       await putAll(db.payPeriods, snapshot.payPeriods)
       await putAll(db.paychecks, snapshot.paychecks)
@@ -1498,6 +1504,14 @@ function normalizeSettings(settings?: Settings): Settings {
     defaultHoursWorked: settings?.defaultHoursWorked ?? defaultSettings.defaultHoursWorked,
     aiInstructions: settings?.aiInstructions ?? defaultSettings.aiInstructions,
     aiProvider: settings?.aiProvider ?? defaultSettings.aiProvider,
+  }
+}
+
+function normalizePot(pot: Pot): Pot {
+  return {
+    ...pot,
+    linkedCreditCardId: pot.linkedCreditCardId ?? null,
+    linkedDebtId: pot.linkedDebtId ?? null,
   }
 }
 

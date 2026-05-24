@@ -1,7 +1,7 @@
 import {
   addIsoDays,
   getCreditCardAllocationSummary,
-  getDebtDueAmountPence,
+  getDebtDueAmountAfterReservesAndLinkedPotsPence,
   getRecurringPaymentOccurrences,
 } from './money.js'
 import type {
@@ -10,6 +10,7 @@ import type {
   CreditCardRepayment,
   CustomPayment,
   Debt,
+  DebtReserve,
   DebtPayment,
   PayPeriod,
   Paycheck,
@@ -42,6 +43,7 @@ export interface DailyBriefSnapshotInput {
   transactions?: Transaction[]
   debts?: Debt[]
   debtPayments?: DebtPayment[]
+  debtReserves?: DebtReserve[]
   creditCards?: CreditCard[]
   creditCardPots?: CreditCardPot[]
   customPayments?: CustomPayment[]
@@ -153,6 +155,7 @@ export function getDailyBriefFacts(
   const payPeriods = snapshot.payPeriods ?? []
   const customPayments = snapshot.customPayments ?? []
   const debts = snapshot.debts ?? []
+  const debtReserves = snapshot.debtReserves ?? []
   const creditCards = snapshot.creditCards ?? []
   const creditCardPots = snapshot.creditCardPots ?? []
   const transactions = snapshot.transactions ?? []
@@ -204,7 +207,7 @@ export function getDailyBriefFacts(
       name: debt.name,
       lender: debt.lender,
       minimumPaymentPence: debt.minimumPaymentPence,
-      amountDuePence: getDebtDueAmountPence(debt),
+      amountDuePence: getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, debtReserves, pots),
       dueIso: debt.dueDate,
     }))
     .sort((a, b) => a.dueIso.localeCompare(b.dueIso) || a.name.localeCompare(b.name))
@@ -226,6 +229,7 @@ export function getDailyBriefFacts(
     transactions,
     repayments: creditCardRepayments,
     creditCardPots,
+    pots,
     payPeriod,
   })
   const cardLinkedPaymentsPence = duePayments

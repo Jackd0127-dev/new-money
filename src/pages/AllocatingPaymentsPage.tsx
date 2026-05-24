@@ -51,6 +51,7 @@ export function AllocatingPaymentsPage({
     transactions: snapshot.transactions,
     repayments: snapshot.creditCardRepayments,
     creditCardPots: snapshot.creditCardPots,
+    pots: snapshot.pots,
     payPeriod: viewedPeriod,
   })
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
@@ -421,8 +422,8 @@ export function AllocatingPaymentsPage({
           />
           <MoneyMetric
             label="Cards owed"
-            value={formatPence(summary.totalOwedPence)}
-            tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
+            value={formatPence(summary.totalRemainingAfterCreditPotsPence)}
+            tone={summary.totalRemainingAfterCreditPotsPence > 0 ? 'warning' : 'neutral'}
             breakdown={getCardsOwedBreakdown(summary.cards)}
             open={openSummaryMetric === 'cards-owed'}
             onOpenChange={(isOpen) =>
@@ -690,7 +691,7 @@ function CreditCardPreviewButton({
       <div className="figma-card-button__summary">
         <p className="figma-card-button__name">{cardSummary.card.name}</p>
         <p className="figma-card-button__meta">
-          <span><strong>{formatPence(cardSummary.owedPence)}</strong> owed</span>
+          <span><strong>{formatPence(cardSummary.remainingAfterCreditPotsPence)}</strong> owed</span>
           <span><strong>{formatPence(cardSummary.availableCreditPence)}</strong> available</span>
           <span>{cardSummary.dueLabel}</span>
         </p>
@@ -1003,8 +1004,18 @@ function CreditCardOverview({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <CreditCardStat label="Balance" value={formatPence(cardSummary.owedPence)} tone={cardSummary.owedPence > 0 ? 'warning' : 'good'} />
+            <CreditCardStat
+              label="Balance"
+              value={formatPence(cardSummary.remainingAfterCreditPotsPence)}
+              detail={
+                cardSummary.creditPotPence > 0
+                  ? `${formatPence(cardSummary.owedPence)} actual balance`
+                  : undefined
+              }
+              tone={cardSummary.remainingAfterCreditPotsPence > 0 ? 'warning' : 'good'}
+            />
             <CreditCardStat label="Available" value={formatPence(cardSummary.availableCreditPence)} tone="good" />
+            <CreditCardStat label="Reserved" value={formatPence(cardSummary.creditPotPence)} tone={cardSummary.creditPotPence > 0 ? 'good' : 'neutral'} />
             <CreditCardStat label="Due" value={cardSummary.dueLabel} tone="neutral" />
             <CreditCardStat
               label="Used"
@@ -1138,25 +1149,27 @@ function CreditCardActivityRow({
 }
 
 function getCardsOwedBreakdown(cards: CreditCardAllocationCardSummary[]): CalculationBreakdown {
+  const totalRemainingPence = cards.reduce((total, cardSummary) => total + cardSummary.remainingAfterCreditPotsPence, 0)
+
   return {
-    formula: 'Cards owed = existing balances + tracked card charges - repayments, up to the selected period end.',
+    formula: 'Cards owed = actual card balances minus money already reserved in credit pots and linked pots.',
     lines:
       cards.length > 0
         ? [
             ...cards.map((cardSummary) => ({
               label: cardSummary.card.name,
-              value: formatPence(cardSummary.owedPence),
-              detail: `${formatPence(cardSummary.openingBalancePence)} existing balance · ${cardSummary.balanceItems.length} tracked balance movements.`,
-              tone: cardSummary.owedPence > 0 ? ('add' as const) : ('muted' as const),
+              value: formatPence(cardSummary.remainingAfterCreditPotsPence),
+              detail: `${formatPence(cardSummary.owedPence)} actual balance · ${formatPence(cardSummary.creditPotPence)} reserved.`,
+              tone: cardSummary.remainingAfterCreditPotsPence > 0 ? ('add' as const) : ('muted' as const),
             })),
             {
               label: 'Cards owed',
-              value: formatPence(cards.reduce((total, cardSummary) => total + cardSummary.owedPence, 0)),
+              value: formatPence(totalRemainingPence),
               tone: 'result' as const,
             },
           ]
         : [{ label: 'No active cards', value: formatPence(0), tone: 'result' }],
-    note: 'Each card balance is floored at zero so overpayments do not create negative owed amounts.',
+    note: 'Card availability still uses the actual balance because reserved pot money has not been paid to the card yet.',
   }
 }
 
@@ -1164,14 +1177,14 @@ function getCreditPotsBreakdown(cards: CreditCardAllocationCardSummary[]): Calcu
   const totalCreditPotsPence = cards.reduce((total, cardSummary) => total + cardSummary.creditPotPence, 0)
 
   return {
-    formula: 'Credit pots = active set-asides linked to cards. Paycheck pots reduce dashboard money left; external pots do not.',
+    formula: 'Credit pots = active card set-asides plus ordinary pots linked to cards.',
     lines:
       cards.length > 0
         ? [
             ...cards.map((cardSummary) => ({
               label: cardSummary.card.name,
               value: formatPence(cardSummary.creditPotPence),
-              detail: `${formatPence(cardSummary.paycheckCreditPotPence)} from paychecks · ${formatPence(cardSummary.externalCreditPotPence)} external.`,
+              detail: `${formatPence(cardSummary.paycheckCreditPotPence)} from paychecks · ${formatPence(cardSummary.externalCreditPotPence)} external · ${formatPence(cardSummary.linkedPotPence)} linked pots.`,
               tone: cardSummary.creditPotPence > 0 ? ('add' as const) : ('muted' as const),
             })),
             {
@@ -1181,7 +1194,7 @@ function getCreditPotsBreakdown(cards: CreditCardAllocationCardSummary[]): Calcu
             },
           ]
         : [{ label: 'No active cards', value: formatPence(0), tone: 'result' }],
-    note: 'These do not reduce card owed until you apply or record an actual card repayment.',
+    note: 'These reduce the amount still to cover, but they do not change actual card balance or availability until a repayment is recorded.',
   }
 }
 

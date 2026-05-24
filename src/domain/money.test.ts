@@ -436,6 +436,29 @@ describe('debt tracking', () => {
     })
   })
 
+  it('uses linked pot balances to reduce debt due without changing the current balance', () => {
+    expect(
+      getDebtSummary(debts, payments, '2026-05-18', payPeriod, [], [
+        {
+          id: 'pot-debt-reserve',
+          name: 'Debt reserve',
+          type: 'reserved',
+          balancePence: 30000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          linkedCreditCardId: null,
+          linkedDebtId: 'debt-card',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ]),
+    ).toMatchObject({
+      totalCurrentBalancePence: 85000,
+      debtDueThisPayPeriodPence: 55000,
+    })
+  })
+
   it('uses the full active debt balance as due even when the optional minimum is zero', () => {
     expect(
       getDebtSummary(
@@ -716,6 +739,86 @@ describe('credit card allocation', () => {
       availableCreditPence: 40000,
       utilisationPercent: 60,
     })
+  })
+
+  it('uses linked pot balances to reduce the card amount still to cover without changing availability', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          ...cards[0],
+          limitPence: 80000,
+          openingBalancePence: 60000,
+        },
+      ],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      pots: [
+        {
+          id: 'pot-card-reserve',
+          name: 'Card reserve',
+          type: 'reserved',
+          balancePence: 40000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          linkedCreditCardId: 'card-amex',
+          linkedDebtId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      payPeriod,
+    })
+
+    expect(summary.totalOwedPence).toBe(60000)
+    expect(summary.totalCreditPotsPence).toBe(40000)
+    expect(summary.totalLinkedPotPence).toBe(40000)
+    expect(summary.totalRemainingAfterCreditPotsPence).toBe(20000)
+    expect(summary.cards[0]).toMatchObject({
+      owedPence: 60000,
+      linkedPotPence: 40000,
+      creditPotPence: 40000,
+      remainingAfterCreditPotsPence: 20000,
+      availableCreditPence: 20000,
+    })
+  })
+
+  it('caps the card amount still to cover at zero when linked pots cover the actual balance', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          ...cards[0],
+          limitPence: 80000,
+          openingBalancePence: 60000,
+        },
+      ],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      pots: [
+        {
+          id: 'pot-card-reserve',
+          name: 'Card reserve',
+          type: 'reserved',
+          balancePence: 60000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          linkedCreditCardId: 'card-amex',
+          linkedDebtId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      payPeriod,
+    })
+
+    expect(summary.cards[0].owedPence).toBe(60000)
+    expect(summary.cards[0].remainingAfterCreditPotsPence).toBe(0)
+    expect(summary.cards[0].availableCreditPence).toBe(20000)
   })
 
   it('lists unlinked payments separately from card balances', () => {

@@ -693,6 +693,7 @@ describe('allocating payments page', () => {
     expect(cardVisual).toHaveAttribute('data-node-id', '3114:376')
     expect(screen.getAllByText('Everyday Amex').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Day 12').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('£1,000.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('£72.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('£928.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('Pay left after cards')).not.toBeInTheDocument()
@@ -732,6 +733,7 @@ describe('allocating payments page', () => {
     expect(cardVisual).toHaveAttribute('data-figma-design', 'cart-geometric-4')
     expect(cardVisual).toHaveAttribute('data-node-id', '1730:4631')
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4/mastercard-logo.svg"]')).not.toBeNull()
+    expect(container.querySelector('img[src="/figma-assets/cart-geometric-4/bottom-panel.svg"]')).not.toBeNull()
 
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Mint Reserve')
@@ -800,6 +802,7 @@ describe('allocating payments page', () => {
     const cardVisual = screen.getByLabelText('Maroon Travel credit card')
     expect(cardVisual).toHaveAttribute('data-figma-design', 'cart-geometric-4-maroon')
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4-maroon/mastercard-logo.svg"]')).not.toBeNull()
+    expect(container.querySelector('img[src="/figma-assets/cart-geometric-4-maroon/bottom-panel.svg"]')).toBeNull()
 
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
 

@@ -561,7 +561,7 @@ export function AllocatingPaymentsPage({
 }
 
 type CreditCardVisualDetails = {
-  balance: string
+  limit: string
   owed: string
   available: string
   name: string
@@ -649,8 +649,8 @@ function FigmaCreditCard({ details, design }: { details: CreditCardVisualDetails
         </div>
         <dl className="figma-credit-card__metrics">
           <div>
-            <dt>Balance</dt>
-            <dd>{details.balance}</dd>
+            <dt>Limit</dt>
+            <dd>{details.limit}</dd>
           </div>
           <div>
             <dt>Owed</dt>
@@ -663,7 +663,7 @@ function FigmaCreditCard({ details, design }: { details: CreditCardVisualDetails
         </dl>
       </div>
       <span className="sr-only">
-        {details.name}, due {details.dueDate}, {details.balance} balance, {details.owed} owed after credit pots, {details.available} available.
+        {details.name}, due {details.dueDate}, {details.limit} limit, {details.owed} owed after credit pots, {details.available} available.
       </span>
     </div>
   )
@@ -739,7 +739,9 @@ function CreditCardArtwork({ design }: { design: CreditCardDesign }) {
       <div className="figma-credit-card__art" aria-hidden="true">
         <img className="figma-credit-card__layer figma-credit-card__layer--full" src={`${assetPath}/card-mask.svg`} alt="" />
         <img className="figma-credit-card__layer figma-credit-card__layer--geometric-4-circle" src={`${assetPath}/circle.svg`} alt="" />
-        <img className="figma-credit-card__layer figma-credit-card__layer--geometric-4-bottom" src={`${assetPath}/bottom-panel.svg`} alt="" />
+        {design.id === 'cart-geometric-4' && (
+          <img className="figma-credit-card__layer figma-credit-card__layer--geometric-4-bottom" src={`${assetPath}/bottom-panel.svg`} alt="" />
+        )}
         <img className="figma-credit-card__layer figma-credit-card__noise" src="/figma-assets/noise.png" alt="" />
         <img className="figma-credit-card__logo figma-credit-card__logo--mastercard" src={`${assetPath}/mastercard-logo.svg`} alt="" />
         <img className="figma-credit-card__chip" src={`${assetPath}/chip.svg`} alt="" />
@@ -781,7 +783,7 @@ function isCartGeometric4Design(designId: string): boolean {
 
 function getCreditCardVisualDetails(cardSummary: CreditCardAllocationCardSummary): CreditCardVisualDetails {
   return {
-    balance: formatPence(cardSummary.owedPence),
+    limit: formatPence(cardSummary.card.limitPence),
     owed: formatPence(cardSummary.remainingAfterCreditPotsPence),
     available: formatPence(cardSummary.availableCreditPence),
     name: cardSummary.card.name,

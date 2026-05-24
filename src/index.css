@@ -155,7 +155,7 @@ select {
   --cc-bottom-text: #ffffff;
   --cc-bottom-muted: rgba(255, 255, 255, 0.7);
   --cc-shadow: 0 1px 14px rgba(0, 0, 0, 0.32);
-  --cc-panel: rgba(15, 23, 42, 0.54);
+  --cc-panel: rgba(15, 23, 42, 0.5);
   --cc-panel-border: rgba(255, 255, 255, 0.22);
 
   position: relative;
@@ -410,7 +410,7 @@ select {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.16;
+  opacity: 0.04;
 }
 
 .figma-credit-card__logo,
@@ -480,11 +480,11 @@ select {
 }
 
 .figma-credit-card--cart-geometric-1 .figma-credit-card__noise {
-  opacity: 0.2;
+  opacity: 0.04;
 }
 
 .figma-credit-card[class*='figma-credit-card--cart-geometric-4'] .figma-credit-card__noise {
-  opacity: 0.2;
+  opacity: 0.04;
 }
 
 .figma-credit-card__content {
@@ -498,17 +498,6 @@ select {
   padding: 7.8% 7.7% 7.4%;
   color: #ffffff;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.34);
-  pointer-events: none;
-}
-
-.figma-credit-card__content::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    linear-gradient(180deg, rgba(2, 6, 23, 0.26) 0%, rgba(2, 6, 23, 0.04) 42%, rgba(2, 6, 23, 0.48) 100%),
-    linear-gradient(90deg, rgba(2, 6, 23, 0.22) 0%, rgba(2, 6, 23, 0) 62%);
   pointer-events: none;
 }
 
@@ -532,8 +521,6 @@ select {
   border-radius: clamp(6px, 1.45cqw, 8px);
   background: var(--cc-panel);
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.14);
-  -webkit-backdrop-filter: blur(7px);
-  backdrop-filter: blur(7px);
 }
 
 .figma-credit-card__identity,

@@ -692,7 +692,13 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       }]
     })
   const spendingEvents: CalendarEvent[] = snapshot.transactions
-    .filter((transaction) => transaction.type === 'spending' && transaction.date >= startDate && transaction.date <= endDate)
+    .filter(
+      (transaction) =>
+        transaction.type === 'spending' &&
+        !transaction.recurringPaymentId &&
+        transaction.date >= startDate &&
+        transaction.date <= endDate,
+    )
     .map((transaction) => {
       const card = transaction.creditCardId ? cardById.get(transaction.creditCardId) : null
       const pot = transaction.potId ? potById.get(transaction.potId) : null

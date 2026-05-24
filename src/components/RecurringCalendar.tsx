@@ -29,13 +29,23 @@ export function RecurringCalendar({
   const today = toIsoDate(new Date())
   const viewedPeriod = payPeriod ?? null
   const upcomingEndDate = addIsoDays(today, selectedRangeDays)
+  const paidRecurringOccurrenceKeys = new Set(
+    snapshot.transactions
+      .filter((transaction) => transaction.recurringPaymentId && transaction.type === 'spending')
+      .map((transaction) => `${transaction.recurringPaymentId}:${transaction.date}`),
+  )
   const upcomingOccurrences = getRecurringPaymentOccurrences(
     snapshot.recurringPayments,
     today,
     upcomingEndDate,
   )
   const dueBeforeNextPayday = viewedPeriod
-    ? upcomingOccurrences.filter((occurrence) => occurrence.dueDate >= viewedPeriod.startDate && occurrence.dueDate <= viewedPeriod.endDate)
+    ? upcomingOccurrences.filter(
+        (occurrence) =>
+          occurrence.dueDate >= viewedPeriod.startDate &&
+          occurrence.dueDate <= viewedPeriod.endDate &&
+          !paidRecurringOccurrenceKeys.has(`${occurrence.payment.id}:${occurrence.dueDate}`),
+      )
     : []
   const dueBeforeNextPaydayPence = dueBeforeNextPayday.reduce(
     (total, occurrence) => total + occurrence.amountPence,
@@ -112,6 +122,7 @@ export function RecurringCalendar({
               const isBeforeNextPayday = viewedPeriod
                 ? occurrence.dueDate >= viewedPeriod.startDate && occurrence.dueDate <= viewedPeriod.endDate
                 : false
+              const isPaid = paidRecurringOccurrenceKeys.has(`${occurrence.payment.id}:${occurrence.dueDate}`)
 
               return (
                 <div
@@ -124,6 +135,11 @@ export function RecurringCalendar({
                       {isBeforeNextPayday && (
                         <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
                           Before payday
+                        </span>
+                      )}
+                      {isPaid && (
+                        <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">
+                          Paid from pot
                         </span>
                       )}
                     </div>

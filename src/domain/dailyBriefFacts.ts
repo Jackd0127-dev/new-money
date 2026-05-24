@@ -165,15 +165,22 @@ export function getDailyBriefFacts(
   const expectedPayPence = payPeriod
     ? (snapshot.paychecks ?? []).find((paycheck) => paycheck.payPeriodId === payPeriod.id)?.calculatedAmountPence ?? null
     : null
-  const recurringDue = getRecurringPaymentOccurrences(recurringPayments, rangeStart, rangeEnd).map((occurrence) => ({
-    id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
-    name: occurrence.payment.name,
-    amountPence: occurrence.amountPence,
-    dueIso: occurrence.dueDate,
-    source: 'recurring' as const,
-    sourceId: occurrence.payment.id,
-    creditCardId: occurrence.payment.creditCardId ?? null,
-  }))
+  const paidRecurringOccurrenceKeys = new Set(
+    transactions
+      .filter((transaction) => transaction.recurringPaymentId && transaction.type === 'spending')
+      .map((transaction) => `${transaction.recurringPaymentId}:${transaction.date}`),
+  )
+  const recurringDue = getRecurringPaymentOccurrences(recurringPayments, rangeStart, rangeEnd)
+    .filter((occurrence) => !paidRecurringOccurrenceKeys.has(`${occurrence.payment.id}:${occurrence.dueDate}`))
+    .map((occurrence) => ({
+      id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+      name: occurrence.payment.name,
+      amountPence: occurrence.amountPence,
+      dueIso: occurrence.dueDate,
+      source: 'recurring' as const,
+      sourceId: occurrence.payment.id,
+      creditCardId: occurrence.payment.creditCardId ?? null,
+    }))
   const unpaidCustomPayments = customPayments
     .filter((payment) => payment.status === 'unpaid' && payment.dueDate <= rangeEnd)
     .map((payment) => ({

@@ -104,6 +104,7 @@ export interface Transaction extends Timestamped {
   type: TransactionType
   paymentMethod?: PaymentMethod
   creditCardId?: string | null
+  recurringPaymentId?: string | null
   date: string
   note: string
 }

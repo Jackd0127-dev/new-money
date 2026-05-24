@@ -95,7 +95,7 @@ export function PotsPage({
       <SectionGrid variant="wideRight">
         <Panel
           title="Create pot"
-          description="Pots carry balances forward until you spend or move the money."
+          description="Add money you already set aside, then linked bills can spend from that pot when due."
           accent="emerald"
           density="compact"
         >
@@ -117,6 +117,7 @@ export function PotsPage({
           {activePots.map((pot) => {
             const isOpen = openPotId === pot.id
             const activityItems = getPotActivityItems(pot.id, snapshot)
+            const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
 
             return (
               <div key={pot.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -199,6 +200,26 @@ export function PotsPage({
                         No activity recorded for this pot yet.
                       </p>
                     )}
+                    {linkedRecurringPayments.length > 0 && (
+                      <div className="mt-4 rounded-lg border border-slate-200 bg-white">
+                        <div className="border-b border-slate-100 px-3 py-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked recurring payments</p>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {linkedRecurringPayments.map((payment) => (
+                            <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-950">{payment.name}</p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {payment.frequency} · due day {payment.dueDay ?? 'set date'}
+                                </p>
+                              </div>
+                              <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -278,7 +299,7 @@ function PotFormFields({
           placeholder="50.00"
         />
       </Field>
-      <Field label="Current balance" hint="Money already inside this pot before the next paycheck top-up.">
+      <Field label="Current balance" hint="Money already set aside in this pot before you started using the app.">
         <TextInput
           inputMode="decimal"
           value={form.balance}
@@ -365,11 +386,14 @@ function getPotActivityItems(potId: string, snapshot: PlannerSnapshot): PotActiv
   const allocations = snapshot.potAllocations
     .filter((allocation) => allocation.potId === potId)
     .map((allocation) => allocationToActivityItem(allocation, snapshot))
-  const recurringPayments = snapshot.recurringPayments
-    .filter((payment) => payment.potId === potId)
-    .map((payment) => recurringPaymentToActivityItem(payment))
 
-  return [...transactions, ...allocations, ...recurringPayments]
+  return [...transactions, ...allocations]
+}
+
+function getPotLinkedRecurringPayments(potId: string, snapshot: PlannerSnapshot): RecurringPayment[] {
+  return snapshot.recurringPayments
+    .filter((payment) => payment.active && payment.potId === potId)
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function transactionToActivityItem(transaction: Transaction): PotActivityItem {
@@ -378,7 +402,7 @@ function transactionToActivityItem(transaction: Transaction): PotActivityItem {
   return {
     id: `transaction-${transaction.id}`,
     title: transaction.note,
-    detail: `${formatTransactionType(transaction.type)} · ${transaction.date}`,
+    detail: `${transaction.recurringPaymentId ? 'Recurring payment' : formatTransactionType(transaction.type)} · ${transaction.date}`,
     amountPence: isSpending ? -transaction.amountPence : transaction.amountPence,
   }
 }
@@ -398,15 +422,6 @@ function allocationToActivityItem(allocation: PotAllocation, snapshot: PlannerSn
         : 'Paycheck allocation',
     detail: `Allocation · ${period?.payday ?? allocation.createdAt.slice(0, 10)}`,
     amountPence: allocation.amountPence,
-  }
-}
-
-function recurringPaymentToActivityItem(payment: RecurringPayment): PotActivityItem {
-  return {
-    id: `recurring-${payment.id}`,
-    title: payment.name,
-    detail: `Recurring · ${payment.frequency} · day ${payment.dueDay ?? 'set date'}`,
-    amountPence: -payment.amountPence,
   }
 }
 

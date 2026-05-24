@@ -5,8 +5,9 @@ import {
   createNextPayPeriod,
   findPayPeriodForDate,
   getPotBalanceAfterTransactionRemoval,
+  getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
-  getUncoveredRecurringPence,
+  toIsoDate,
 } from '../domain/money'
 import type {
   CreditCard,
@@ -90,6 +91,7 @@ export interface TransactionInput {
   type: TransactionType
   paymentMethod?: Transaction['paymentMethod']
   creditCardId?: string | null
+  recurringPaymentId?: string | null
   date: string
   note: string
 }
@@ -216,6 +218,7 @@ export interface DebtReserveApplyInput {
 export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   await ensureSeedData()
   await repairDuplicateRecurringAllocations()
+  await applyDueRecurringPayments(toIsoDate(new Date()))
 
   const [
     settings,
@@ -648,6 +651,7 @@ export async function addTransaction(input: TransactionInput): Promise<void> {
       type: input.type,
       paymentMethod,
       creditCardId: paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
+      recurringPaymentId: input.recurringPaymentId ?? null,
       date: input.date,
       note: input.note,
       createdAt: timestamp,
@@ -1033,13 +1037,12 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
         periodDates.startDate,
         periodDates.endDate,
       )
-      const reservedAllocations = duePayments.map((payment) => ({
-        potId: payment.potId,
-        amountPence: payment.amountPence,
-        source: 'recurring' as const,
-        recurringPaymentId: payment.id,
-      }))
       const pots = await db.pots.toArray()
+      const existingPeriodAllocations = existingPeriod
+        ? await db.potAllocations.where('payPeriodId').equals(existingPeriod.id).toArray()
+        : []
+      const potsBeforePeriodAllocations = removeAllocationsFromPotBalances(pots, existingPeriodAllocations)
+      const reservedAllocations = getRecurringReserveAllocations(duePayments, potsBeforePeriodAllocations)
       const automaticPotAllocations = pots
         .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0)
         .map((pot) => ({
@@ -1330,6 +1333,128 @@ async function findStoredPayPeriodIdForDate(date: string): Promise<string | null
   return findPayPeriodForDate(payPeriods, date)?.id ?? null
 }
 
+async function applyDueRecurringPayments(todayIso: string): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', [db.recurringPayments, db.transactions, db.pots, db.payPeriods], async () => {
+    const recurringPayments = await db.recurringPayments.toArray()
+    const directPayments = recurringPayments.filter((payment) => payment.active && !payment.creditCardId)
+
+    for (const payment of directPayments) {
+      const startDate = getRecurringApplicationStartDate(payment, todayIso)
+      const occurrences = getRecurringPaymentOccurrences([payment], startDate, todayIso)
+
+      for (const occurrence of occurrences) {
+        const transactionId = getRecurringTransactionId(payment.id, occurrence.dueDate)
+        const existingTransaction = await db.transactions.get(transactionId)
+
+        if (existingTransaction) {
+          continue
+        }
+
+        const pot = await db.pots.get(payment.potId)
+
+        if (!pot || pot.archived || occurrence.amountPence <= 0) {
+          continue
+        }
+
+        const periodId = await findStoredPayPeriodIdForDate(occurrence.dueDate)
+
+        await db.transactions.add({
+          id: transactionId,
+          potId: payment.potId,
+          payPeriodId: periodId,
+          amountPence: occurrence.amountPence,
+          type: 'spending',
+          paymentMethod: 'pot',
+          creditCardId: null,
+          recurringPaymentId: payment.id,
+          date: occurrence.dueDate,
+          note: payment.name,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+
+        await db.pots.update(pot.id, {
+          balancePence: pot.balancePence - occurrence.amountPence,
+          updatedAt: timestamp,
+        })
+      }
+    }
+  })
+}
+
+function getRecurringReserveAllocations(
+  duePayments: RecurringPayment[],
+  pots: Pot[],
+): Array<{
+  potId: string
+  amountPence: number
+  source: 'recurring'
+  recurringPaymentId: string
+}> {
+  const availableByPot = new Map(
+    pots
+      .filter((pot) => !pot.archived)
+      .map((pot) => [pot.id, Math.max(0, pot.balancePence)]),
+  )
+
+  return duePayments.flatMap((payment) => {
+    if (payment.creditCardId) {
+      return []
+    }
+
+    const availablePence = availableByPot.get(payment.potId) ?? 0
+    const coveredPence = Math.min(payment.amountPence, availablePence)
+    const uncoveredPence = Math.max(0, payment.amountPence - coveredPence)
+
+    availableByPot.set(payment.potId, availablePence - coveredPence)
+
+    if (uncoveredPence <= 0) {
+      return []
+    }
+
+    return [
+      {
+        potId: payment.potId,
+        amountPence: uncoveredPence,
+        source: 'recurring' as const,
+        recurringPaymentId: payment.id,
+      },
+    ]
+  })
+}
+
+function removeAllocationsFromPotBalances(pots: Pot[], allocations: PotAllocation[]): Pot[] {
+  const allocationTotalsByPot = new Map<string, number>()
+
+  for (const allocation of allocations) {
+    allocationTotalsByPot.set(
+      allocation.potId,
+      (allocationTotalsByPot.get(allocation.potId) ?? 0) + allocation.amountPence,
+    )
+  }
+
+  return pots.map((pot) => ({
+    ...pot,
+    balancePence: pot.balancePence - (allocationTotalsByPot.get(pot.id) ?? 0),
+  }))
+}
+
+function getRecurringApplicationStartDate(payment: RecurringPayment, todayIso: string): string {
+  const createdDate = payment.createdAt.slice(0, 10)
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(createdDate)) {
+    return createdDate <= todayIso ? createdDate : todayIso
+  }
+
+  return todayIso
+}
+
+function getRecurringTransactionId(paymentId: string, dueDate: string): string {
+  return `recurring-${paymentId}-${dueDate}`
+}
+
 function nowIso(): string {
   return new Date().toISOString()
 }
@@ -1409,32 +1534,29 @@ async function reserveNewRecurringPaymentForActivePeriod(
     return
   }
 
-  const existingAllocations = await db.potAllocations
-    .where('payPeriodId')
-    .equals(latestPeriod.id)
-    .toArray()
-  const uncoveredPence = getUncoveredRecurringPence(duePayments, existingAllocations)
+  const pots = await db.pots.toArray()
+  const [reserveAllocation] = getRecurringReserveAllocations(duePayments, pots)
 
-  if (uncoveredPence <= 0) {
+  if (!reserveAllocation) {
     return
   }
 
   await db.potAllocations.add({
     id: crypto.randomUUID(),
     payPeriodId: latestPeriod.id,
-    potId: payment.potId,
-    amountPence: uncoveredPence,
+    potId: reserveAllocation.potId,
+    amountPence: reserveAllocation.amountPence,
     source: 'recurring',
-    recurringPaymentId: payment.id,
+    recurringPaymentId: reserveAllocation.recurringPaymentId,
     createdAt: timestamp,
     updatedAt: timestamp,
   })
 
-  const pot = await db.pots.get(payment.potId)
+  const pot = await db.pots.get(reserveAllocation.potId)
 
   if (pot) {
     await db.pots.update(pot.id, {
-      balancePence: pot.balancePence + uncoveredPence,
+      balancePence: pot.balancePence + reserveAllocation.amountPence,
       updatedAt: timestamp,
     })
   }
@@ -1474,37 +1596,56 @@ async function reconcileRecurringPaymentForActivePeriod(
     return
   }
 
+  const pots = await db.pots.toArray()
+  const adjustedPots = existingAllocation
+    ? pots.map((pot) =>
+        pot.id === existingAllocation.potId
+          ? { ...pot, balancePence: pot.balancePence - existingAllocation.amountPence }
+          : pot,
+      )
+    : pots
+  const [reserveAllocation] = getRecurringReserveAllocations([payment], adjustedPots)
+
+  if (!reserveAllocation) {
+    if (existingAllocation) {
+      await removeAllocationFromPot(existingAllocation, timestamp)
+      await db.potAllocations.delete(existingAllocation.id)
+    }
+
+    return
+  }
+
   if (!existingAllocation) {
     await db.potAllocations.add({
       id: crypto.randomUUID(),
       payPeriodId: latestPeriod.id,
-      potId: payment.potId,
-      amountPence: payment.amountPence,
+      potId: reserveAllocation.potId,
+      amountPence: reserveAllocation.amountPence,
       source: 'recurring',
-      recurringPaymentId: payment.id,
+      recurringPaymentId: reserveAllocation.recurringPaymentId,
       createdAt: timestamp,
       updatedAt: timestamp,
     })
-    await addAllocationToPot(payment.potId, payment.amountPence, timestamp)
+    await addAllocationToPot(reserveAllocation.potId, reserveAllocation.amountPence, timestamp)
     return
   }
 
-  if (existingAllocation.potId !== payment.potId) {
+  if (existingAllocation.potId !== reserveAllocation.potId) {
     await removeAllocationFromPot(existingAllocation, timestamp)
-    await addAllocationToPot(payment.potId, payment.amountPence, timestamp)
+    await addAllocationToPot(reserveAllocation.potId, reserveAllocation.amountPence, timestamp)
   } else {
     await addAllocationToPot(
       existingAllocation.potId,
-      payment.amountPence - existingAllocation.amountPence,
+      reserveAllocation.amountPence - existingAllocation.amountPence,
       timestamp,
     )
   }
 
   await db.potAllocations.update(existingAllocation.id, {
-    potId: payment.potId,
-    amountPence: payment.amountPence,
+    potId: reserveAllocation.potId,
+    amountPence: reserveAllocation.amountPence,
     source: 'recurring',
-    recurringPaymentId: payment.id,
+    recurringPaymentId: reserveAllocation.recurringPaymentId,
     updatedAt: timestamp,
   })
 }

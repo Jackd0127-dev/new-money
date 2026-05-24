@@ -141,7 +141,7 @@ export function RecurringPage({
       <SectionGrid variant="wideRight">
         <Panel
           title={editingPaymentId ? 'Edit recurring payment' : 'Add recurring payment'}
-          description="Bills reserve during the pay period that contains their due day."
+          description="Bills use the linked pot balance on their due date."
           accent="violet"
           density="compact"
         >
@@ -165,7 +165,7 @@ export function RecurringPage({
               </SelectInput>
             </Field>
           </div>
-          <Field label="Reserve into pot">
+          <Field label="Paid from pot">
             <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
               {activePots.map((pot) => (
                 <option key={pot.id} value={pot.id}>
@@ -224,7 +224,7 @@ export function RecurringPage({
                       <h3 className="text-sm font-semibold text-slate-950">{payment.name}</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Due day {payment.dueDay} · {payment.frequency} · {pot?.name ?? 'Archived pot'}
+                      Due day {payment.dueDay} · {payment.frequency} · paid from {pot?.name ?? 'Archived pot'}
                       {card ? ` · ${card.name}` : ''}
                     </p>
                   </div>

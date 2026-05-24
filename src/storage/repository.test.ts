@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   addCreditCard,
@@ -10,6 +10,7 @@ import {
   addDailyBrief,
   addDebt,
   addDebtReserve,
+  addRecurringPayment,
   addTransaction,
   applyCreditCardPot,
   applyDebtReserve,
@@ -33,6 +34,10 @@ describe('paycheck plan storage', () => {
     await db.delete()
     await db.open()
     await resetPlannerData()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('updates an existing payday plan instead of creating duplicate history or double-counting pots', async () => {
@@ -129,6 +134,83 @@ describe('paycheck plan storage', () => {
       balancePence: 5000,
       targetPence: 5000,
     })
+  })
+
+  it('uses existing pot balance before reserving money for a due recurring payment', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-05-24T12:00:00.000Z'))
+
+    await updatePot('pot-food', {
+      name: 'Food',
+      type: 'spending',
+      balancePence: 8711,
+      targetPence: null,
+      color: '#16a34a',
+    })
+    await addRecurringPayment({
+      name: 'Car insurance',
+      amountPence: 8711,
+      dueDay: 1,
+      frequency: 'monthly',
+      potId: 'pot-food',
+      priority: 'essential',
+    })
+    await createPaycheckPlan({
+      payday: '2026-05-24',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+
+    const snapshot = await getPlannerSnapshot()
+    const foodPot = snapshot.pots.find((pot) => pot.id === 'pot-food')
+
+    expect(snapshot.potAllocations.some((allocation) => allocation.recurringPaymentId)).toBe(false)
+    expect(foodPot?.balancePence).toBe(8711)
+  })
+
+  it('deducts direct recurring payments from the linked pot when the due date arrives', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'))
+
+    await updatePot('pot-food', {
+      name: 'Food',
+      type: 'spending',
+      balancePence: 8711,
+      targetPence: null,
+      color: '#16a34a',
+    })
+    await addRecurringPayment({
+      name: 'Car insurance',
+      amountPence: 8711,
+      dueDay: 1,
+      frequency: 'monthly',
+      potId: 'pot-food',
+      priority: 'essential',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const payment = snapshot.recurringPayments.find((candidate) => candidate.name === 'Car insurance')
+    const transaction = snapshot.transactions.find((candidate) => candidate.recurringPaymentId === payment?.id)
+
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
+    expect(transaction).toMatchObject({
+      id: `recurring-${payment?.id}-2026-06-01`,
+      amountPence: 8711,
+      date: '2026-06-01',
+      note: 'Car insurance',
+      paymentMethod: 'pot',
+      potId: 'pot-food',
+      recurringPaymentId: payment?.id,
+      type: 'spending',
+    })
+
+    snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.transactions.filter((candidate) => candidate.recurringPaymentId === payment?.id)).toHaveLength(1)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
   })
 
   it('does not recreate default pots after every pot is deleted', async () => {

@@ -401,15 +401,18 @@ export function getPayPeriodCostSummary({
     recurringPayments,
     payPeriod.startDate,
     payPeriod.endDate,
-  ).map((occurrence) => ({
-    id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
-    label: occurrence.payment.name,
-    amountPence: occurrence.amountPence,
-    date: occurrence.dueDate,
-    source: 'recurring' as const,
-    creditCardId: occurrence.payment.creditCardId ?? null,
-    potId: occurrence.payment.potId,
-  }))
+  )
+    .map((occurrence) => ({
+      id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+      label: occurrence.payment.name,
+      amountPence: occurrence.amountPence,
+      date: occurrence.dueDate,
+      source: 'recurring' as const,
+      creditCardId: occurrence.payment.creditCardId ?? null,
+      potId: occurrence.payment.potId,
+    }))
+  const directRecurringItems = recurringItems.filter((item) => !item.creditCardId)
+  const creditCardRecurringItems = recurringItems.filter((item) => item.creditCardId)
   const savedPaymentItems = customPayments
     .filter(
       (payment) =>
@@ -429,6 +432,7 @@ export function getPayPeriodCostSummary({
     .filter(
       (transaction) =>
         transaction.type === 'spending' &&
+        !transaction.recurringPaymentId &&
         isIsoDateBetweenInclusive(transaction.date, payPeriod.startDate, payPeriod.endDate),
     )
     .map((transaction) => ({
@@ -533,7 +537,8 @@ export function getPayPeriodCostSummary({
       potId: null,
     }))
   const allItems = [
-    ...recurringItems,
+    ...directRecurringItems,
+    ...creditCardRecurringItems,
     ...savedPaymentItems,
     ...manualSpendItems,
     ...potAllocationItems,
@@ -543,7 +548,7 @@ export function getPayPeriodCostSummary({
     ...repaymentItems,
   ].sort(sortPeriodCostItems)
   const directRecurringPence = sumPositive(
-    recurringItems.filter((item) => !item.creditCardId),
+    directRecurringItems,
   )
   const savedPaymentsPence = sumPositive(
     savedPaymentItems.filter((item) => !item.creditCardId),
@@ -556,7 +561,7 @@ export function getPayPeriodCostSummary({
   const debtMinimumsPence = sumPositive(debtMinimumItems)
   const creditCardPotsPence = sumPositive(creditCardPotItems)
   const creditCardChargesPence = sumPositive(
-    [...recurringItems, ...savedPaymentItems, ...manualSpendItems].filter((item) => item.creditCardId),
+    [...creditCardRecurringItems, ...savedPaymentItems, ...manualSpendItems].filter((item) => item.creditCardId),
   )
   const creditCardRepaymentsPence = Math.abs(
     repaymentItems.reduce((total, item) => total + item.amountPence, 0),

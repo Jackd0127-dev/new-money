@@ -753,6 +753,7 @@ function compactTransaction(transaction: PlannerSnapshot['transactions'][number]
     paymentMethod: transaction.paymentMethod,
     creditCardId: transaction.creditCardId ?? null,
     creditCardName: getLookupName(lookups.creditCards, transaction.creditCardId),
+    recurringPaymentId: transaction.recurringPaymentId ?? null,
     date: transaction.date,
     note: truncateText(transaction.note, 180),
   }

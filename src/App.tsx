@@ -24,7 +24,7 @@ function App() {
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string | null>(null)
   const { snapshot, isLoading, error, actions } = usePlannerData()
   const auth = useFirebaseAuth()
-  const sync = useCloudSync({
+  useCloudSync({
     user: auth.user,
     snapshot,
     refresh: actions.refresh,
@@ -78,7 +78,7 @@ function App() {
     recurring: <RecurringPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
     calendar: <CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />,
     history: <HistoryPage snapshot={snapshot} actions={actions} />,
-    settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} sync={sync} />,
+    settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} />,
   }
 
   return (

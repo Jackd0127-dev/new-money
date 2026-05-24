@@ -54,6 +54,7 @@ export function AllocatingPaymentsPage({
     payPeriod: viewedPeriod,
   })
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const [openSummaryMetric, setOpenSummaryMetric] = useState<string | null>(null)
   const [editingCardId, setEditingCardId] = useState<string | null>(null)
   const [cardName, setCardName] = useState('')
   const [cardProvider, setCardProvider] = useState('')
@@ -62,6 +63,7 @@ export function AllocatingPaymentsPage({
   const [cardDueDay, setCardDueDay] = useState('1')
   const [cardColor, setCardColor] = useState(cardColors[0])
   const [cardDesignId, setCardDesignId] = useState(defaultCreditCardDesignId)
+  const [isCardDesignModalOpen, setIsCardDesignModalOpen] = useState(false)
   const [editingRepaymentId, setEditingRepaymentId] = useState<string | null>(null)
   const [repaymentCardId, setRepaymentCardId] = useState(activeCards[0]?.id ?? '')
   const [repaymentAmount, setRepaymentAmount] = useState('')
@@ -180,7 +182,7 @@ export function AllocatingPaymentsPage({
       amountPence: transaction.amountPence,
       date: transaction.date,
       note: transaction.note,
-      paymentMethod: nextCardId || transaction.paymentMethod === 'credit_card' ? 'credit_card' : 'pot',
+      paymentMethod: nextCardId ? 'credit_card' : transaction.potId ? 'pot' : undefined,
       creditCardId: nextCardId,
     })
   }
@@ -226,6 +228,7 @@ export function AllocatingPaymentsPage({
     setCardDueDay('1')
     setCardColor(cardColors[0])
     setCardDesignId(defaultCreditCardDesignId)
+    setIsCardDesignModalOpen(false)
   }
 
   function resetRepaymentForm() {
@@ -237,14 +240,18 @@ export function AllocatingPaymentsPage({
   }
 
   function renderCardForm(submitLabel: string, showCancel = false) {
+    const selectedDesign = getCreditCardDesign(cardDesignId)
+
     return (
       <div className="space-y-4">
-        <Field label="Card name">
-          <TextInput value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
-        </Field>
-        <Field label="Provider">
-          <TextInput value={cardProvider} onChange={(event) => setCardProvider(event.target.value)} placeholder="Amex" />
-        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Card name">
+            <TextInput value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
+          </Field>
+          <Field label="Provider">
+            <TextInput value={cardProvider} onChange={(event) => setCardProvider(event.target.value)} placeholder="Amex" />
+          </Field>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Limit">
             <TextInput inputMode="decimal" value={cardLimit} onChange={(event) => setCardLimit(event.target.value)} placeholder="1000.00" />
@@ -259,12 +266,40 @@ export function AllocatingPaymentsPage({
             />
           </Field>
         </div>
-        <Field label="Due day">
-          <TextInput inputMode="numeric" value={cardDueDay} onChange={(event) => setCardDueDay(event.target.value)} />
+        <Field label="Due date" hint="Day of the month this card is due.">
+          <TextInput
+            aria-label="Due date"
+            inputMode="numeric"
+            value={cardDueDay}
+            onChange={(event) => setCardDueDay(event.target.value)}
+          />
         </Field>
         <Field label="Card design">
-          <CreditCardDesignPicker selectedDesignId={cardDesignId} onChange={setCardDesignId} />
+          <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className={`figma-credit-card credit-card-design-summary__art figma-credit-card--${selectedDesign.id}`} aria-hidden="true">
+                <CreditCardArtwork design={selectedDesign} />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-950">{selectedDesign.label}</p>
+                <p className="mt-1 text-xs text-slate-500">Selected design</p>
+              </div>
+            </div>
+            <Button variant="secondary" aria-label="Card design" onClick={() => setIsCardDesignModalOpen(true)}>
+              Card design
+            </Button>
+          </div>
         </Field>
+        {isCardDesignModalOpen && (
+          <CreditCardDesignModal
+            selectedDesignId={cardDesignId}
+            onClose={() => setIsCardDesignModalOpen(false)}
+            onSelect={(designId) => {
+              setCardDesignId(designId)
+              setIsCardDesignModalOpen(false)
+            }}
+          />
+        )}
         <Field label="Colour">
           <div className="flex flex-wrap gap-2">
             {cardColors.map((option) => (
@@ -354,7 +389,7 @@ export function AllocatingPaymentsPage({
   return (
     <div className="space-y-6">
       <Panel title="Credit card summary" description="Selected pay, card balances, and linked credit pots." accent="cyan">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid items-start gap-4 md:grid-cols-3">
           <MoneyMetric
             label="Selected pay"
             value={formatPence(summary.payReceivedPence)}
@@ -369,18 +404,30 @@ export function AllocatingPaymentsPage({
                 },
               ],
             }}
-          />
-          <MoneyMetric
-            label="Cards owed"
-            value={formatPence(summary.totalOwedPence)}
-            tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
-            breakdown={getCardsOwedBreakdown(summary.cards)}
+            open={openSummaryMetric === 'selected-pay'}
+            onOpenChange={(isOpen) =>
+              setOpenSummaryMetric((current) => isOpen ? 'selected-pay' : current === 'selected-pay' ? null : current)
+            }
           />
           <MoneyMetric
             label="Credit pots"
             value={formatPence(summary.totalCreditPotsPence)}
             tone={summary.totalCreditPotsPence > 0 ? 'good' : 'neutral'}
             breakdown={getCreditPotsBreakdown(summary.cards)}
+            open={openSummaryMetric === 'credit-pots'}
+            onOpenChange={(isOpen) =>
+              setOpenSummaryMetric((current) => isOpen ? 'credit-pots' : current === 'credit-pots' ? null : current)
+            }
+          />
+          <MoneyMetric
+            label="Cards owed"
+            value={formatPence(summary.totalOwedPence)}
+            tone={summary.totalOwedPence > 0 ? 'warning' : 'neutral'}
+            breakdown={getCardsOwedBreakdown(summary.cards)}
+            open={openSummaryMetric === 'cards-owed'}
+            onOpenChange={(isOpen) =>
+              setOpenSummaryMetric((current) => isOpen ? 'cards-owed' : current === 'cards-owed' ? null : current)
+            }
           />
         </div>
       </Panel>
@@ -402,18 +449,20 @@ export function AllocatingPaymentsPage({
           density="compact"
         >
           <div className="space-y-4">
-            <Field label="Credit card">
-              <SelectInput value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
-                {activeCards.map((card) => (
-                  <option key={card.id} value={card.id}>
-                    {card.name} ({card.provider})
-                  </option>
-                ))}
-              </SelectInput>
-            </Field>
-            <Field label="Amount">
-              <TextInput inputMode="decimal" value={repaymentAmount} onChange={(event) => setRepaymentAmount(event.target.value)} placeholder="100.00" />
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Credit card">
+                <SelectInput value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
+                  {activeCards.map((card) => (
+                    <option key={card.id} value={card.id}>
+                      {card.name} ({card.provider})
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+              <Field label="Amount">
+                <TextInput inputMode="decimal" value={repaymentAmount} onChange={(event) => setRepaymentAmount(event.target.value)} placeholder="100.00" />
+              </Field>
+            </div>
             <Field label="Date">
               <TextInput type="date" value={repaymentDate} onChange={(event) => setRepaymentDate(event.target.value)} />
             </Field>
@@ -569,32 +618,54 @@ type CreditCardVisualDetails = {
   dueDate: string
 }
 
-function CreditCardDesignPicker({
+function CreditCardDesignModal({
   selectedDesignId,
-  onChange,
+  onSelect,
+  onClose,
 }: {
   selectedDesignId: string
-  onChange: (designId: string) => void
+  onSelect: (designId: string) => void
+  onClose: () => void
 }) {
   return (
-    <div className="credit-card-design-picker">
-      {creditCardDesigns.map((design) => {
-        const isSelected = normalizeCreditCardDesignId(selectedDesignId) === design.id
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Card design"
+        className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+      >
+        <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+          <div>
+            <h2 className="text-base font-semibold text-slate-950">Card design</h2>
+            <p className="mt-1 text-sm text-slate-500">Choose the design shown on this card.</p>
+          </div>
+          <Button variant="ghost" onClick={onClose} aria-label="Close card design">
+            <X size={18} />
+          </Button>
+        </div>
+        <div className="credit-card-design-picker">
+          {creditCardDesigns.map((design) => {
+            const isSelected = normalizeCreditCardDesignId(selectedDesignId) === design.id
 
-        return (
-          <button
-            key={design.id}
-            type="button"
-            aria-pressed={isSelected}
-            className="credit-card-design-picker__option"
-            onClick={() => onChange(design.id)}
-          >
-            <img src={`${design.assetPath}/reference.png`} alt="" />
-            <span>{design.label}</span>
-            {isSelected && <Check size={16} aria-hidden="true" />}
-          </button>
-        )
-      })}
+            return (
+              <button
+                key={design.id}
+                type="button"
+                aria-pressed={isSelected}
+                className="credit-card-design-picker__option"
+                onClick={() => onSelect(design.id)}
+              >
+                <div className={`figma-credit-card credit-card-design-picker__art figma-credit-card--${design.id}`} aria-hidden="true">
+                  <CreditCardArtwork design={design} />
+                </div>
+                <span>{design.label}</span>
+                {isSelected && <Check size={16} aria-hidden="true" />}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

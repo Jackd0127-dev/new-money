@@ -24,7 +24,7 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
-import { Button, MoneyMetric, Panel, SectionGrid } from '../components/ui'
+import { Button, Panel, SectionGrid } from '../components/ui'
 
 type CalendarEventType =
   | 'payday'
@@ -144,12 +144,6 @@ export function CalendarPage({
   )
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events])
   const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth])
-  const duePence = events
-    .filter((event) => event.direction === 'out')
-    .reduce((total, event) => total + Math.max(0, event.amountPence), 0)
-  const payPence = events
-    .filter((event) => event.direction === 'in')
-    .reduce((total, event) => total + event.amountPence, 0)
   const selectedDayPayPeriod = selectedDate ? findPayPeriodForDate(snapshot.payPeriods, selectedDate) : null
 
   useEffect(() => {
@@ -220,37 +214,6 @@ export function CalendarPage({
               <ChevronRight size={18} />
             </Button>
           </div>
-        </div>
-      </Panel>
-
-      <Panel title="Month summary" description="Incoming pay, outgoing costs, and visible calendar signals." accent="cyan" density="compact">
-        <div className="grid gap-4 md:grid-cols-3">
-          <MoneyMetric
-            label="Pay shown"
-            value={formatPence(payPence)}
-            tone={payPence > 0 ? 'good' : 'neutral'}
-            breakdown={{
-              formula: 'Pay shown = incoming payday events visible in this month.',
-              lines: getCalendarBreakdownLines(events.filter((event) => event.direction === 'in' && event.amountPence > 0), 'Pay shown'),
-            }}
-          />
-          <MoneyMetric
-            label="Costs shown"
-            value={formatPence(duePence)}
-            tone={duePence > 0 ? 'warning' : 'neutral'}
-            breakdown={{
-              formula: 'Costs shown = outgoing calendar events with a positive amount.',
-              lines: getCalendarBreakdownLines(events.filter((event) => event.direction === 'out' && event.amountPence > 0), 'Costs shown'),
-            }}
-          />
-          <MoneyMetric
-            label="Calendar items"
-            value={String(events.length)}
-            breakdown={{
-              formula: 'Calendar items = every sign rendered in the visible month.',
-              lines: getCalendarItemCountLines(events),
-            }}
-          />
         </div>
       </Panel>
 
@@ -550,47 +513,6 @@ function CompactMoneyLine({
       <p className="text-sm font-semibold text-slate-950">{value}</p>
     </div>
   )
-}
-
-function getCalendarBreakdownLines(events: CalendarEvent[], resultLabel: string) {
-  const totalPence = events.reduce((total, event) => total + event.amountPence, 0)
-
-  if (events.length === 0) {
-    return [{ label: 'No matching events', value: formatPence(0), tone: 'result' as const }]
-  }
-
-  return [
-    ...events.map((event) => ({
-      label: event.title,
-      value: formatPence(event.amountPence),
-      detail: `${event.date} · ${eventStyles[event.type].label}`,
-      tone: event.direction === 'out' ? 'subtract' as const : 'add' as const,
-    })),
-    {
-      label: resultLabel,
-      value: formatPence(totalPence),
-      tone: 'result' as const,
-    },
-  ]
-}
-
-function getCalendarItemCountLines(events: CalendarEvent[]) {
-  const counts = Object.entries(eventStyles)
-    .map(([type, style]) => ({
-      label: style.label,
-      value: String(events.filter((event) => event.type === type).length),
-      tone: 'neutral' as const,
-    }))
-    .filter((line) => line.value !== '0')
-
-  return [
-    ...(counts.length > 0 ? counts : [{ label: 'No items this month', value: '0', tone: 'muted' as const }]),
-    {
-      label: 'Calendar items',
-      value: String(events.length),
-      tone: 'result' as const,
-    },
-  ]
 }
 
 function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate: string): CalendarEvent[] {

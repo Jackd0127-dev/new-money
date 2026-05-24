@@ -287,20 +287,22 @@ export function DebtsPage({
           density="compact"
         >
           <div className="space-y-4">
-            <Field label="Debt name">
-              <TextInput
-                value={debtForm.name}
-                onChange={(event) => setDebtForm({ ...debtForm, name: event.target.value })}
-                placeholder="Credit card"
-              />
-            </Field>
-            <Field label="Lender">
-              <TextInput
-                value={debtForm.lender}
-                onChange={(event) => setDebtForm({ ...debtForm, lender: event.target.value })}
-                placeholder="Bank or provider"
-              />
-            </Field>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Debt name">
+                <TextInput
+                  value={debtForm.name}
+                  onChange={(event) => setDebtForm({ ...debtForm, name: event.target.value })}
+                  placeholder="Credit card"
+                />
+              </Field>
+              <Field label="Lender">
+                <TextInput
+                  value={debtForm.lender}
+                  onChange={(event) => setDebtForm({ ...debtForm, lender: event.target.value })}
+                  placeholder="Bank or provider"
+                />
+              </Field>
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Current balance">
                 <TextInput

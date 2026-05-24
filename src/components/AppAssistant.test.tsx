@@ -33,11 +33,15 @@ describe('AppAssistant', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
 
-    expect(screen.getByRole('dialog', { name: 'New Money AI helper' })).toBeInTheDocument()
-    expect(screen.getByText('Spending')).toBeInTheDocument()
-    expect(screen.getByText('2026-05-16 to 2026-05-29')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'AI helper' })).toBeInTheDocument()
+    expect(screen.getByText('AI')).toBeInTheDocument()
+    expect(screen.getByText('I can access all of your payments and give you a detailed plan depending on your needs.')).toBeInTheDocument()
+    expect(screen.queryByText('New Money AI')).not.toBeInTheDocument()
+    expect(screen.queryByText('Full app context, focused on your current screen.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Spending')).not.toBeInTheDocument()
+    expect(screen.queryByText('2026-05-16 to 2026-05-29')).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Ask New Money AI'), 'What am I looking at?')
+    await user.type(screen.getByLabelText('Ask AI'), 'What am I looking at?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -83,12 +87,12 @@ describe('AppAssistant', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask New Money AI'), 'Can you see my app?')
+    await user.type(screen.getByLabelText('Ask AI'), 'Can you see my app?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'New Money AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
 
-    expect(within(dialog).getByText(/Sign in from Settings to ask New Money AI/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Sign in from Settings to ask AI/)).toBeInTheDocument()
     expect(within(dialog).getByText(/What I’d do next: Sign in from Settings/)).toBeInTheDocument()
     expect(within(dialog).queryByText(/I can still see the local dashboard context/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/pay is/)).not.toBeInTheDocument()
@@ -119,10 +123,10 @@ describe('AppAssistant', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask New Money AI'), 'Give me every paycheck I received.')
+    await user.type(screen.getByLabelText('Ask AI'), 'Give me every paycheck I received.')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'New Money AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(within(dialog).getByText(/Assistant returned invalid JSON/)).toBeInTheDocument()

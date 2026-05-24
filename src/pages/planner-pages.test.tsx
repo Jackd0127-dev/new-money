@@ -234,6 +234,10 @@ describe('settings page', () => {
     render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
 
     expect(screen.queryByText('Settings saved')).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Account' })).toBeInTheDocument()
+    expect(screen.getByText('Local planner')).toBeInTheDocument()
+    expect(screen.queryByText(/Cloud sync/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Planner data' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Save settings' }))
 
@@ -437,7 +441,28 @@ describe('payday wizard', () => {
 })
 
 describe('spending page', () => {
-  it('uses quick amount buttons for faster manual spending entry', async () => {
+  it('saves quick spend without a pot or credit card link', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const today = toIsoDate(new Date())
+
+    render(<SpendingPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: '£10.00' }))
+    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+
+    expect(actions.addTransaction).toHaveBeenCalledWith({
+      amountPence: 1000,
+      creditCardId: null,
+      date: today,
+      note: 'Manual spend',
+      payPeriodId: null,
+      potId: null,
+      type: 'spending',
+    })
+  })
+
+  it('uses quick amount buttons for faster manual spending entry with an optional note', async () => {
     const user = userEvent.setup()
     const actions = createActions()
     const today = toIsoDate(new Date())
@@ -454,8 +479,31 @@ describe('spending page', () => {
       date: today,
       note: 'Coffee',
       payPeriodId: null,
+      potId: null,
+      type: 'spending',
+    })
+  })
+
+  it('logs spending against a pot when a pot link is selected', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const today = toIsoDate(new Date())
+
+    render(<SpendingPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: '£5.00' }))
+    await user.selectOptions(screen.getByLabelText('Link spend to'), 'pot')
+    await user.selectOptions(screen.getByLabelText('Pot'), 'pot-food')
+    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+
+    expect(actions.addTransaction).toHaveBeenCalledWith({
+      amountPence: 500,
+      creditCardId: null,
+      date: today,
+      note: 'Manual spend',
+      payPeriodId: null,
       paymentMethod: 'pot',
-      potId: 'pot-bills',
+      potId: 'pot-food',
       type: 'spending',
     })
   })
@@ -528,7 +576,7 @@ describe('spending page', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '£20.00' }))
-    await user.selectOptions(screen.getByLabelText('Payment method'), 'credit_card')
+    await user.selectOptions(screen.getByLabelText('Link spend to'), 'credit_card')
     await user.selectOptions(screen.getByLabelText('Credit card'), 'card-amex')
     await user.type(screen.getByLabelText('Note'), 'Groceries')
     await user.click(screen.getByRole('button', { name: 'Log spending' }))
@@ -583,9 +631,10 @@ describe('allocating payments page', () => {
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Capital One')
     await user.type(within(cardPanel).getByLabelText('Limit'), '1200')
     await user.type(within(cardPanel).getByLabelText('Existing balance'), '250')
-    await user.clear(within(cardPanel).getByLabelText('Due day'))
-    await user.type(within(cardPanel).getByLabelText('Due day'), '9')
-    await user.click(within(cardPanel).getByRole('button', { name: 'Gradient 12' }))
+    await user.clear(within(cardPanel).getByLabelText('Due date'))
+    await user.type(within(cardPanel).getByLabelText('Due date'), '9')
+    await user.click(within(cardPanel).getByRole('button', { name: 'Card design' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Card design' })).getByRole('button', { name: 'Blue Card' }))
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
 
     expect(actions.addCreditCard).toHaveBeenCalledWith({
@@ -701,7 +750,59 @@ describe('allocating payments page', () => {
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
   })
 
-  it('offers and renders the Cart Geometric 4 credit card design', async () => {
+  it('orders and expands credit summary cards independently', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          openingBalancePence: 20000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    const summaryPanel = screen.getByRole('region', { name: 'Credit card summary' })
+    const metricLabels = within(summaryPanel)
+      .getAllByText(/Selected pay|Credit pots|Cards owed/)
+      .filter((element) => element.closest('summary'))
+      .map((element) => element.textContent)
+
+    expect(metricLabels).toEqual(['Selected pay', 'Credit pots', 'Cards owed'])
+
+    const selectedPay = getMetricDetails(summaryPanel, 'Selected pay')
+    const creditPots = getMetricDetails(summaryPanel, 'Credit pots')
+    const cardsOwed = getMetricDetails(summaryPanel, 'Cards owed')
+
+    await user.click(within(selectedPay).getByText('Show calculation'))
+    expect(selectedPay).toHaveAttribute('open')
+    expect(creditPots).not.toHaveAttribute('open')
+    expect(cardsOwed).not.toHaveAttribute('open')
+
+    await user.click(within(creditPots).getByText('Show calculation'))
+    expect(selectedPay).not.toHaveAttribute('open')
+    expect(creditPots).toHaveAttribute('open')
+    expect(cardsOwed).not.toHaveAttribute('open')
+
+    await user.click(within(cardsOwed).getByText('Show calculation'))
+    expect(selectedPay).not.toHaveAttribute('open')
+    expect(creditPots).not.toHaveAttribute('open')
+    expect(cardsOwed).toHaveAttribute('open')
+  })
+
+  it('offers and renders the teal credit card design', async () => {
     const user = userEvent.setup()
     const actions = createActions()
     const selectedPayPeriod = createPayPeriod()
@@ -739,24 +840,25 @@ describe('allocating payments page', () => {
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Mint Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Mastercard')
     await user.type(within(cardPanel).getByLabelText('Limit'), '900')
-    await user.click(within(cardPanel).getByRole('button', { name: 'Geometric 4' }))
+    await user.click(within(cardPanel).getByRole('button', { name: 'Card design' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Card design' })).getByRole('button', { name: 'Teal Card' }))
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
 
     expect(actions.addCreditCard).toHaveBeenCalledWith(expect.objectContaining({ designId: 'cart-geometric-4' }))
   })
 
-  it('offers Cart Geometric 4 colorway variants as separate card designs', async () => {
+  it('offers clean colorway names as separate card designs', async () => {
     const geometric4Colorways = [
-      ['cart-geometric-4-blue', 'Geometric 4 Blue'],
-      ['cart-geometric-4-red', 'Geometric 4 Red'],
-      ['cart-geometric-4-black', 'Geometric 4 Black'],
-      ['cart-geometric-4-orange', 'Geometric 4 Orange'],
-      ['cart-geometric-4-gray', 'Geometric 4 Gray'],
-      ['cart-geometric-4-gold', 'Geometric 4 Gold'],
-      ['cart-geometric-4-light-blue', 'Geometric 4 Light Blue'],
-      ['cart-geometric-4-teal', 'Geometric 4 Teal'],
-      ['cart-geometric-4-maroon', 'Geometric 4 Maroon'],
-      ['cart-geometric-4-violet', 'Geometric 4 Violet'],
+      ['cart-geometric-4-blue', 'Royal Blue Card'],
+      ['cart-geometric-4-red', 'Red Card'],
+      ['cart-geometric-4-black', 'Black Card'],
+      ['cart-geometric-4-orange', 'Orange Card'],
+      ['cart-geometric-4-gray', 'Grey Card'],
+      ['cart-geometric-4-gold', 'Gold Card'],
+      ['cart-geometric-4-light-blue', 'Light Blue Card'],
+      ['cart-geometric-4-teal', 'Deep Teal Card'],
+      ['cart-geometric-4-maroon', 'Maroon Card'],
+      ['cart-geometric-4-violet', 'Violet Card'],
     ]
     const user = userEvent.setup()
     const actions = createActions()
@@ -806,20 +908,26 @@ describe('allocating payments page', () => {
 
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
 
+    expect(within(cardPanel).queryByRole('button', { name: 'Gold Card' })).not.toBeInTheDocument()
+    await user.click(within(cardPanel).getByRole('button', { name: 'Card design' }))
+    const designDialog = screen.getByRole('dialog', { name: 'Card design' })
+
     for (const [, label] of geometric4Colorways) {
-      expect(within(cardPanel).getByRole('button', { name: label })).toBeInTheDocument()
+      expect(within(designDialog).getByRole('button', { name: label })).toBeInTheDocument()
     }
+    expect(designDialog.querySelector('img[src$="/reference.png"]')).toBeNull()
+    expect(designDialog.querySelector('.credit-card-design-picker__art')).not.toBeNull()
+    await user.click(within(designDialog).getByRole('button', { name: 'Gold Card' }))
 
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Mastercard')
     await user.type(within(cardPanel).getByLabelText('Limit'), '900')
-    await user.click(within(cardPanel).getByRole('button', { name: 'Geometric 4 Gold' }))
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
 
     expect(actions.addCreditCard).toHaveBeenCalledWith(expect.objectContaining({ designId: 'cart-geometric-4-gold' }))
   })
 
-  it('offers and renders the Cart Geometric 1 credit card design', async () => {
+  it('offers and renders the bright blue credit card design', async () => {
     const user = userEvent.setup()
     const actions = createActions()
     const selectedPayPeriod = createPayPeriod()
@@ -856,7 +964,8 @@ describe('allocating payments page', () => {
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Blue Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Visa')
     await user.type(within(cardPanel).getByLabelText('Limit'), '900')
-    await user.click(within(cardPanel).getByRole('button', { name: 'Geometric 1' }))
+    await user.click(within(cardPanel).getByRole('button', { name: 'Card design' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Card design' })).getByRole('button', { name: 'Bright Blue Card' }))
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
 
     expect(actions.addCreditCard).toHaveBeenCalledWith(expect.objectContaining({ designId: 'cart-geometric-1' }))
@@ -939,10 +1048,11 @@ describe('pots page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Edit Food' }))
 
-    const editPanel = screen.getByRole('region', { name: 'Edit pot' })
-    await user.clear(within(editPanel).getByLabelText('Pot name'))
-    await user.type(within(editPanel).getByLabelText('Pot name'), 'Groceries')
-    await user.click(within(editPanel).getByRole('button', { name: 'Save pot' }))
+    expect(screen.getByRole('region', { name: 'Create pot' })).toBeInTheDocument()
+    const editDialog = screen.getByRole('dialog', { name: 'Edit pot' })
+    await user.clear(within(editDialog).getByLabelText('Pot name'))
+    await user.type(within(editDialog).getByLabelText('Pot name'), 'Groceries')
+    await user.click(within(editDialog).getByRole('button', { name: 'Save pot' }))
 
     expect(actions.updatePot).toHaveBeenCalledWith('pot-food', {
       balancePence: 12000,
@@ -951,6 +1061,7 @@ describe('pots page', () => {
       targetPence: null,
       type: 'spending',
     })
+    expect(screen.queryByRole('dialog', { name: 'Edit pot' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Delete Food' }))
 
@@ -1089,6 +1200,58 @@ describe('recurring page', () => {
       expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
       expect(screen.getByText(/23 May/)).toBeInTheDocument()
       expect(screen.getByText('Before payday')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('filters the recurring calendar by the selected range', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-20T12:00:00.000Z'))
+
+    const snapshot = createSnapshot({
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 23,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'rec-broadband',
+          name: 'Broadband',
+          amountPence: 3200,
+          dueDay: 15,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    try {
+      render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+
+      const calendar = screen.getByRole('region', { name: 'Recurring calendar' })
+      expect(within(calendar).getAllByText('Broadband').length).toBeGreaterThan(0)
+      expect(within(calendar).getAllByText(/Next 60 days/).length).toBeGreaterThan(0)
+
+      fireEvent.change(within(calendar).getByLabelText('Recurring calendar range'), {
+        target: { value: '14' },
+      })
+
+      expect(within(calendar).getAllByText(/Next 14 days/).length).toBeGreaterThan(0)
+      expect(within(calendar).getAllByText('Phone').length).toBeGreaterThan(0)
+      expect(within(calendar).queryByText('Broadband')).not.toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -1362,6 +1525,38 @@ describe('dashboard page', () => {
     expect(within(currentPeriod).getAllByText('£548.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('Safe today')).not.toBeInTheDocument()
     expect(screen.queryByText('Available after bills')).not.toBeInTheDocument()
+  })
+
+  it('expands only one dashboard summary card at a time', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot({
+      payPeriods: [createPayPeriod({ incomePence: 90000 })],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
+
+    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const totalPay = getMetricDetails(currentPeriod, 'Total pay')
+    const totalCosts = getMetricDetails(currentPeriod, 'Total costs')
+    const moneyLeft = getMetricDetails(currentPeriod, 'Money left')
+
+    await user.click(within(totalPay).getByText('Show calculation'))
+
+    expect(totalPay).toHaveAttribute('open')
+    expect(totalCosts).not.toHaveAttribute('open')
+    expect(moneyLeft).not.toHaveAttribute('open')
+
+    await user.click(within(totalCosts).getByText('Show calculation'))
+
+    expect(totalPay).not.toHaveAttribute('open')
+    expect(totalCosts).toHaveAttribute('open')
+    expect(moneyLeft).not.toHaveAttribute('open')
+
+    await user.click(within(moneyLeft).getByText('Show calculation'))
+
+    expect(totalPay).not.toHaveAttribute('open')
+    expect(totalCosts).not.toHaveAttribute('open')
+    expect(moneyLeft).toHaveAttribute('open')
   })
 
   it('deducts planned debt reserves and only counts the unreserved debt due amount', () => {
@@ -1700,6 +1895,14 @@ describe('debts page', () => {
     expect(within(debtDueMetric as HTMLElement).queryByText('Future period debt')).not.toBeInTheDocument()
   })
 })
+
+function getMetricDetails(container: HTMLElement, label: string): HTMLElement {
+  const details = within(container).getAllByText(label)[0].closest('details')
+
+  expect(details).not.toBeNull()
+
+  return details as HTMLElement
+}
 
 function createActions(): TestActions {
   return {

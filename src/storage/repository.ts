@@ -634,15 +634,11 @@ export async function deleteRecurringPayment(paymentId: string): Promise<void> {
 export async function addTransaction(input: TransactionInput): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
-  const paymentMethod = input.paymentMethod ?? 'pot'
+  const paymentMethod = resolveTransactionPaymentMethod(input.paymentMethod, input.potId, input.creditCardId)
 
   await db.transaction('rw', db.transactions, db.pots, db.payPeriods, async () => {
     const periodId = input.payPeriodId ?? (await findStoredPayPeriodIdForDate(input.date))
     const potId = paymentMethod === 'credit_card' ? null : input.potId ?? null
-
-    if (paymentMethod === 'pot' && !potId) {
-      return
-    }
 
     await db.transactions.add({
       id: crypto.randomUUID(),
@@ -676,7 +672,7 @@ export async function updateTransaction(
 ): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
-  const paymentMethod = input.paymentMethod ?? 'pot'
+  const paymentMethod = resolveTransactionPaymentMethod(input.paymentMethod, input.potId, input.creditCardId)
 
   await db.transaction('rw', db.transactions, db.pots, db.payPeriods, async () => {
     const current = await db.transactions.get(transactionId)
@@ -686,10 +682,6 @@ export async function updateTransaction(
     }
 
     const nextPotId = paymentMethod === 'credit_card' ? null : input.potId ?? null
-
-    if (paymentMethod === 'pot' && !nextPotId) {
-      return
-    }
 
     const oldPot = current.potId ? await db.pots.get(current.potId) : null
     let samePotAfterRemovalBalance: number | null = null
@@ -751,6 +743,30 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
       })
     }
   })
+}
+
+function resolveTransactionPaymentMethod(
+  paymentMethod: Transaction['paymentMethod'] | undefined,
+  potId?: string | null,
+  creditCardId?: string | null,
+): Transaction['paymentMethod'] | undefined {
+  if (paymentMethod === 'credit_card') {
+    return creditCardId ? 'credit_card' : undefined
+  }
+
+  if (paymentMethod === 'pot') {
+    return potId ? 'pot' : undefined
+  }
+
+  if (creditCardId) {
+    return 'credit_card'
+  }
+
+  if (potId) {
+    return 'pot'
+  }
+
+  return undefined
 }
 
 export async function addDebt(input: DebtInput): Promise<void> {

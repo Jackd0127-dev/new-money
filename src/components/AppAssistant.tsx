@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import { Bot, ChevronDown, Loader2, MessageCircle, Send, Sparkles, X } from 'lucide-react'
+import { Loader2, Send, Sparkles, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import { getViewLabel } from '../domain/assistantContext'
@@ -41,10 +41,6 @@ export function AppAssistant({
   const [isSending, setIsSending] = useState(false)
   const todayIso = toIsoDate(new Date())
   const viewLabel = getViewLabel(activeView)
-  const periodLabel = selectedPayPeriod
-    ? `${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`
-    : 'No pay period selected'
-
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -72,7 +68,7 @@ export function AppAssistant({
         createMessage({
           role: 'assistant',
           ...createUnavailableResponse(
-            'Sign in from Settings to ask New Money AI.',
+            'Sign in from Settings to ask AI.',
             'Authentication is required before any planner data is sent to an AI provider.',
             'Sign in from Settings, then ask again so I can use your synced planner data.',
           ),
@@ -119,7 +115,7 @@ export function AppAssistant({
         type="button"
         aria-label="Open AI helper"
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-2xl shadow-slate-900/25 transition hover:-translate-y-0.5 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+        className="ai-assistant-trigger fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-2xl shadow-slate-900/25 transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
       >
         <span className="flex size-9 items-center justify-center rounded-full bg-white text-slate-950">
           <Sparkles size={18} />
@@ -132,20 +128,12 @@ export function AppAssistant({
   return (
     <section
       role="dialog"
-      aria-label="New Money AI helper"
+      aria-label="AI helper"
       className="fixed bottom-5 right-5 z-40 flex max-h-[min(720px,calc(100vh-2.5rem))] w-[min(430px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
     >
       <div className="border-b border-slate-200 bg-slate-950 p-4 text-white">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white text-slate-950">
-              <Bot size={20} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">New Money AI</p>
-              <p className="mt-1 text-xs leading-5 text-slate-300">Full app context, focused on your current screen.</p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold">AI</p>
           <button
             type="button"
             aria-label="Close AI helper"
@@ -155,23 +143,11 @@ export function AppAssistant({
             <X size={18} />
           </button>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <ContextPill label={viewLabel} />
-          <ContextPill label={periodLabel} />
-          <ContextPill label={snapshot.settings.aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'} />
-        </div>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
         <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
-          <div className="mb-2 flex items-center gap-2 text-slate-950">
-            <MessageCircle size={16} />
-            <p className="font-semibold">Ask anything in your planner</p>
-          </div>
-          <p>
-            I can use every saved tab: pay periods, pots, spending, debts, reserves, credit cards,
-            recurring payments, calendar data, history, daily briefs, and settings.
-          </p>
+          <p>I can access all of your payments and give you a detailed plan depending on your needs.</p>
         </div>
 
         {messages.map((message) => (
@@ -188,12 +164,12 @@ export function AppAssistant({
 
       <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-3">
         <label htmlFor="app-assistant-input" className="sr-only">
-          Ask New Money AI
+          Ask AI
         </label>
         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 shadow-inner shadow-slate-200/50 focus-within:border-slate-400 focus-within:ring-4 focus-within:ring-slate-100">
           <textarea
             id="app-assistant-input"
-            aria-label="Ask New Money AI"
+            aria-label="Ask AI"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             rows={2}
@@ -211,15 +187,6 @@ export function AppAssistant({
         </div>
       </form>
     </section>
-  )
-}
-
-function ContextPill({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2.5 py-1 text-xs font-semibold text-slate-100">
-      <ChevronDown size={13} className="-rotate-90 text-slate-400" />
-      {label}
-    </span>
   )
 }
 

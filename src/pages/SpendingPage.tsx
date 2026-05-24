@@ -21,6 +21,7 @@ import {
 import type { PaymentMethod, PayPeriod } from '../types/models'
 
 const quickAmounts = ['3.00', '5.00', '10.00', '20.00', '50.00']
+type QuickSpendLinkMethod = PaymentMethod | 'unlinked'
 
 export function SpendingPage({
   snapshot,
@@ -33,9 +34,9 @@ export function SpendingPage({
 }) {
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
-  const [potId, setPotId] = useState(activePots[0]?.id ?? '')
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pot')
-  const [creditCardId, setCreditCardId] = useState(activeCards[0]?.id ?? '')
+  const [potId, setPotId] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<QuickSpendLinkMethod>('unlinked')
+  const [creditCardId, setCreditCardId] = useState('')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(toIsoDate(new Date()))
   const [note, setNote] = useState('')
@@ -50,25 +51,24 @@ export function SpendingPage({
     ),
   ).slice(0, 4)
   const parsedAmountPence = parsePoundsToPence(amount)
-  const canSubmitSpend =
-    parsedAmountPence > 0 && (paymentMethod === 'pot' ? Boolean(potId) : Boolean(creditCardId))
+  const canSubmitSpend = parsedAmountPence > 0 && Boolean(date)
   const groupedTransactions = groupTransactionsByPeriod(snapshot.transactions, snapshot, selectedPayPeriod ?? null)
 
   async function submitTransaction() {
     const amountPence = parsedAmountPence
 
-    if (amountPence <= 0 || (paymentMethod === 'pot' && !potId) || (paymentMethod === 'credit_card' && !creditCardId)) {
+    if (amountPence <= 0 || !date) {
       return
     }
 
+    const linkFields = getQuickSpendLinkFields(paymentMethod, potId, creditCardId)
+
     if (editingTransactionId) {
       const updateInput: TransactionUpdateInput = {
-        potId: paymentMethod === 'pot' ? potId : null,
         amountPence,
         date,
         note: note.trim() || 'Manual spend',
-        paymentMethod,
-        creditCardId: paymentMethod === 'credit_card' ? creditCardId : null,
+        ...linkFields,
       }
 
       await actions.updateTransaction(editingTransactionId, updateInput)
@@ -77,14 +77,12 @@ export function SpendingPage({
     }
 
     const addInput: TransactionInput = {
-      potId: paymentMethod === 'pot' ? potId : null,
       amountPence,
       type: 'spending',
       date,
       note: note.trim() || 'Manual spend',
       payPeriodId: findPayPeriodForDate(snapshot.payPeriods, date)?.id ?? null,
-      paymentMethod,
-      creditCardId: paymentMethod === 'credit_card' ? creditCardId : null,
+      ...linkFields,
     }
 
     await actions.addTransaction(addInput)
@@ -99,9 +97,9 @@ export function SpendingPage({
     }
 
     setEditingTransactionId(transaction.id)
-    setPotId(transaction.potId ?? activePots[0]?.id ?? '')
-    setPaymentMethod(transaction.paymentMethod ?? 'pot')
-    setCreditCardId(transaction.creditCardId ?? activeCards[0]?.id ?? '')
+    setPotId(transaction.potId ?? '')
+    setPaymentMethod(getTransactionLinkMethod(transaction))
+    setCreditCardId(transaction.creditCardId ?? '')
     setAmount((transaction.amountPence / 100).toFixed(2))
     setDate(transaction.date)
     setNote(transaction.note)
@@ -109,16 +107,20 @@ export function SpendingPage({
 
   function resetForm() {
     setEditingTransactionId(null)
-    setPotId(activePots[0]?.id ?? '')
-    setPaymentMethod('pot')
-    setCreditCardId(activeCards[0]?.id ?? '')
+    setPotId('')
+    setPaymentMethod('unlinked')
+    setCreditCardId('')
     setAmount('')
     setDate(toIsoDate(new Date()))
     setNote('')
   }
 
-  function changePaymentMethod(nextMethod: PaymentMethod) {
+  function changePaymentMethod(nextMethod: QuickSpendLinkMethod) {
     setPaymentMethod(nextMethod)
+
+    if (nextMethod === 'pot' && !potId) {
+      setPotId(activePots[0]?.id ?? '')
+    }
 
     if (nextMethod === 'credit_card' && !creditCardId) {
       setCreditCardId(activeCards[0]?.id ?? '')
@@ -130,7 +132,7 @@ export function SpendingPage({
       <SectionGrid variant="wideRight">
         <Panel
           title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
-          description="Choose whether the money came from a pot or a credit card."
+          description="Log money quickly, with an optional pot or credit card link."
           accent="blue"
           density="compact"
         >
@@ -150,8 +152,9 @@ export function SpendingPage({
               </button>
             ))}
           </div>
-          <Field label="Payment method">
-            <SelectInput value={paymentMethod} onChange={(event) => changePaymentMethod(event.target.value as PaymentMethod)}>
+          <Field label="Link spend to">
+            <SelectInput value={paymentMethod} onChange={(event) => changePaymentMethod(event.target.value as QuickSpendLinkMethod)}>
+              <option value="unlinked">Unlinked</option>
               <option value="pot">Pot</option>
               <option value="credit_card" disabled={activeCards.length === 0}>
                 Credit card
@@ -159,8 +162,9 @@ export function SpendingPage({
             </SelectInput>
           </Field>
           {paymentMethod === 'pot' && (
-            <Field label="Pot">
-              <SelectInput value={potId} onChange={(event) => setPotId(event.target.value)}>
+            <Field label="Pot" hint="Optional. Choose no pot to keep this spend unlinked.">
+              <SelectInput aria-label="Pot" value={potId} onChange={(event) => setPotId(event.target.value)}>
+                <option value="">No pot linked</option>
                 {activePots.map((pot) => (
                   <option key={pot.id} value={pot.id}>
                     {pot.name} · {formatPence(pot.balancePence)}
@@ -170,8 +174,9 @@ export function SpendingPage({
             </Field>
           )}
           {paymentMethod === 'credit_card' && (
-            <Field label="Credit card">
-              <SelectInput value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
+            <Field label="Credit card" hint="Optional. Choose no card to keep this spend unlinked.">
+              <SelectInput aria-label="Credit card" value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
+                <option value="">No credit card linked</option>
                 {activeCards.map((card) => (
                   <option key={card.id} value={card.id}>
                     {card.name} ({card.provider})
@@ -219,10 +224,7 @@ export function SpendingPage({
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-950">
-                  {parsedAmountPence > 0 ? formatPence(parsedAmountPence) : 'No amount'} ·{' '}
-                  {paymentMethod === 'credit_card'
-                    ? selectedCard?.name ?? 'Choose card'
-                    : selectedPot?.name ?? 'Choose pot'}
+                  {parsedAmountPence > 0 ? formatPence(parsedAmountPence) : 'No amount'} · {getSelectedSpendLinkLabel(paymentMethod, selectedPot?.name, selectedCard?.name)}
                 </p>
                 <p className="text-xs text-slate-500">{date}</p>
               </div>
@@ -269,22 +271,16 @@ export function SpendingPage({
                   </div>
                 </summary>
                 <div className="border-t border-slate-100 p-3">
-                  <CalculationDetails breakdown={getSpendingGroupBreakdown(group)} />
+                  <CalculationDetails breakdown={getSpendingGroupBreakdown(group, snapshot)} />
                 </div>
                 <div className="divide-y divide-slate-100">
                   {group.transactions.map((transaction) => {
-                    const pot = snapshot.pots.find((candidate) => candidate.id === transaction.potId)
-                    const card = snapshot.creditCards.find((candidate) => candidate.id === transaction.creditCardId)
-
                     return (
                       <div key={transaction.id} className="flex items-center justify-between gap-4 px-4 py-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
                           <p className="text-xs text-slate-500">
-                            {transaction.date} ·{' '}
-                            {(transaction.paymentMethod ?? 'pot') === 'credit_card'
-                              ? card?.name ?? 'Archived card'
-                              : pot?.name ?? 'Archived pot'}
+                            {transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -333,7 +329,7 @@ interface TransactionGroup {
   sortDate: string
 }
 
-function getSpendingGroupBreakdown(group: TransactionGroup): CalculationBreakdown {
+function getSpendingGroupBreakdown(group: TransactionGroup, snapshot: PlannerSnapshot): CalculationBreakdown {
   return {
     formula: 'Period spending total = every manual spending entry in this dropdown.',
     lines:
@@ -342,7 +338,7 @@ function getSpendingGroupBreakdown(group: TransactionGroup): CalculationBreakdow
             ...group.transactions.map((transaction) => ({
               label: transaction.note,
               value: formatPence(transaction.amountPence),
-              detail: transaction.date,
+              detail: `${transaction.date} · ${getTransactionLinkLabel(transaction, snapshot)}`,
               tone: 'add' as const,
             })),
             {
@@ -410,4 +406,79 @@ function groupTransactionsByPeriod(
 
       return b.sortDate.localeCompare(a.sortDate)
     })
+}
+
+function getQuickSpendLinkFields(
+  paymentMethod: QuickSpendLinkMethod,
+  potId: string,
+  creditCardId: string,
+): Pick<TransactionInput, 'potId' | 'paymentMethod' | 'creditCardId'> {
+  if (paymentMethod === 'pot' && potId) {
+    return {
+      potId,
+      paymentMethod: 'pot',
+      creditCardId: null,
+    }
+  }
+
+  if (paymentMethod === 'credit_card' && creditCardId) {
+    return {
+      potId: null,
+      paymentMethod: 'credit_card',
+      creditCardId,
+    }
+  }
+
+  return {
+    potId: null,
+    creditCardId: null,
+  }
+}
+
+function getTransactionLinkMethod(transaction: TransactionInput): QuickSpendLinkMethod {
+  if (transaction.paymentMethod === 'credit_card' || transaction.creditCardId) {
+    return 'credit_card'
+  }
+
+  if (transaction.paymentMethod === 'pot' || transaction.potId) {
+    return transaction.potId ? 'pot' : 'unlinked'
+  }
+
+  return 'unlinked'
+}
+
+function getSelectedSpendLinkLabel(
+  paymentMethod: QuickSpendLinkMethod,
+  potName?: string,
+  cardName?: string,
+): string {
+  if (paymentMethod === 'pot') {
+    return potName ?? 'No pot linked'
+  }
+
+  if (paymentMethod === 'credit_card') {
+    return cardName ?? 'No credit card linked'
+  }
+
+  return 'Unlinked'
+}
+
+function getTransactionLinkLabel(transaction: TransactionInput, snapshot: PlannerSnapshot): string {
+  if (transaction.paymentMethod === 'credit_card' || transaction.creditCardId) {
+    if (!transaction.creditCardId) {
+      return 'No credit card linked'
+    }
+
+    return snapshot.creditCards.find((candidate) => candidate.id === transaction.creditCardId)?.name ?? 'Archived card'
+  }
+
+  if (transaction.potId) {
+    return snapshot.pots.find((candidate) => candidate.id === transaction.potId)?.name ?? 'Archived pot'
+  }
+
+  if (transaction.paymentMethod === 'pot') {
+    return 'No pot linked'
+  }
+
+  return 'Unlinked'
 }

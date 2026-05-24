@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AlertTriangle, CalendarDays } from 'lucide-react'
 
 import {
@@ -8,7 +9,10 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
-import { MoneyMetric, Panel } from './ui'
+import { MoneyMetric, Panel, SelectInput } from './ui'
+
+const recurringRangeOptions = [14, 30, 60, 90, 365] as const
+type RecurringRangeDays = (typeof recurringRangeOptions)[number]
 
 export function RecurringCalendar({
   snapshot,
@@ -19,9 +23,12 @@ export function RecurringCalendar({
   payPeriod?: PayPeriod | null
   horizonDays?: number
 }) {
+  const [selectedRangeDays, setSelectedRangeDays] = useState<RecurringRangeDays>(
+    isRecurringRangeDays(horizonDays) ? horizonDays : 30,
+  )
   const today = toIsoDate(new Date())
   const viewedPeriod = payPeriod ?? null
-  const upcomingEndDate = addIsoDays(today, horizonDays)
+  const upcomingEndDate = addIsoDays(today, selectedRangeDays)
   const upcomingOccurrences = getRecurringPaymentOccurrences(
     snapshot.recurringPayments,
     today,
@@ -38,8 +45,25 @@ export function RecurringCalendar({
   return (
     <Panel
       title="Recurring calendar"
-      description={`Next ${horizonDays} days of bills, subscriptions, insurance, debt payments, and investment commitments.`}
-      action={<CalendarDays className="text-slate-500" size={20} />}
+      description={`Next ${selectedRangeDays} days of bills, subscriptions, insurance, debt payments, and investment commitments.`}
+      action={
+        <div className="flex items-center gap-2">
+          <CalendarDays className="hidden text-slate-500 sm:block" size={20} />
+          <label className="sr-only" htmlFor="recurring-calendar-range">Recurring calendar range</label>
+          <SelectInput
+            id="recurring-calendar-range"
+            aria-label="Recurring calendar range"
+            value={selectedRangeDays}
+            onChange={(event) => setSelectedRangeDays(Number(event.target.value) as RecurringRangeDays)}
+          >
+            {recurringRangeOptions.map((days) => (
+              <option key={days} value={days}>
+                Next {days} days
+              </option>
+            ))}
+          </SelectInput>
+        </div>
+      }
       accent="cyan"
       density="compact"
     >
@@ -83,7 +107,7 @@ export function RecurringCalendar({
 
         <div className="space-y-3">
           {upcomingOccurrences.length > 0 ? (
-            upcomingOccurrences.slice(0, 10).map((occurrence) => {
+            upcomingOccurrences.map((occurrence) => {
               const pot = snapshot.pots.find((candidate) => candidate.id === occurrence.payment.potId)
               const isBeforeNextPayday = viewedPeriod
                 ? occurrence.dueDate >= viewedPeriod.startDate && occurrence.dueDate <= viewedPeriod.endDate
@@ -121,6 +145,10 @@ export function RecurringCalendar({
       </div>
     </Panel>
   )
+}
+
+function isRecurringRangeDays(value: number): value is RecurringRangeDays {
+  return recurringRangeOptions.includes(value as RecurringRangeDays)
 }
 
 function formatCalendarDate(value: string): string {

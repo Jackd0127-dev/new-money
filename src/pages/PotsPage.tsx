@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
+import { ChevronDown, PenLine, Trash2, X } from 'lucide-react'
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -17,6 +17,22 @@ import type { PotAllocation, PotType, RecurringPayment, Transaction } from '../t
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
 
+interface PotFormState {
+  name: string
+  type: PotType
+  paycheckAmount: string
+  balance: string
+  color: string
+}
+
+const emptyPotForm = (): PotFormState => ({
+  name: '',
+  type: 'spending',
+  paycheckAmount: '',
+  balance: '',
+  color: colors[0],
+})
+
 export function PotsPage({
   snapshot,
   actions,
@@ -24,39 +40,28 @@ export function PotsPage({
   snapshot: PlannerSnapshot
   actions: PlannerActions
 }) {
-  const [name, setName] = useState('')
-  const [type, setType] = useState<PotType>('spending')
-  const [paycheckAmount, setPaycheckAmount] = useState('')
-  const [balance, setBalance] = useState('')
-  const [color, setColor] = useState(colors[0])
+  const [createForm, setCreateForm] = useState<PotFormState>(emptyPotForm)
+  const [editForm, setEditForm] = useState<PotFormState | null>(null)
   const [openPotId, setOpenPotId] = useState<string | null>(null)
   const [editingPotId, setEditingPotId] = useState<string | null>(null)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
-  const editingPot = editingPotId
-    ? snapshot.pots.find((candidate) => candidate.id === editingPotId) ?? null
-    : null
 
   async function submitPot() {
-    if (!name.trim()) {
+    if (!createForm.name.trim()) {
       return
     }
 
-    const payload = {
-      name: name.trim(),
-      type,
-      balancePence: balance ? parsePoundsToPence(balance) : 0,
-      targetPence: paycheckAmount ? parsePoundsToPence(paycheckAmount) : null,
-      color,
-    }
+    await actions.addPot(potFormToPayload(createForm))
+    resetCreateForm()
+  }
 
-    if (editingPot) {
-      await actions.updatePot(editingPot.id, payload)
-      resetForm()
+  async function submitEditedPot() {
+    if (!editingPotId || !editForm?.name.trim()) {
       return
     }
 
-    await actions.addPot(payload)
-    resetForm()
+    await actions.updatePot(editingPotId, potFormToPayload(editForm))
+    closeEditModal()
   }
 
   function startEditingPot(potId: string) {
@@ -67,76 +72,38 @@ export function PotsPage({
     }
 
     setEditingPotId(pot.id)
-    setName(pot.name)
-    setType(pot.type)
-    setPaycheckAmount(pot.targetPence ? (pot.targetPence / 100).toFixed(2) : '')
-    setBalance((pot.balancePence / 100).toFixed(2))
-    setColor(pot.color)
+    setEditForm({
+      name: pot.name,
+      type: pot.type,
+      paycheckAmount: pot.targetPence ? (pot.targetPence / 100).toFixed(2) : '',
+      balance: (pot.balancePence / 100).toFixed(2),
+      color: pot.color,
+    })
   }
 
-  function resetForm() {
+  function resetCreateForm() {
+    setCreateForm(emptyPotForm())
+  }
+
+  function closeEditModal() {
     setEditingPotId(null)
-    setName('')
-    setPaycheckAmount('')
-    setBalance('')
-    setType('spending')
-    setColor(colors[0])
+    setEditForm(null)
   }
 
   return (
     <div className="space-y-6">
       <SectionGrid variant="wideRight">
         <Panel
-          title={editingPot ? 'Edit pot' : 'Create pot'}
+          title="Create pot"
           description="Pots carry balances forward until you spend or move the money."
           accent="emerald"
           density="compact"
         >
           <div className="space-y-4">
-          <Field label="Pot name">
-            <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Car insurance" />
-          </Field>
-          <Field label="Type">
-            <SelectInput value={type} onChange={(event) => setType(event.target.value as PotType)}>
-              <option value="spending">Spending</option>
-              <option value="reserved">Reserved</option>
-              <option value="saving">Saving</option>
-              <option value="investment">Investment</option>
-              <option value="buffer">Buffer</option>
-            </SelectInput>
-          </Field>
-          <Field label="Add each paycheck" hint="This amount is automatically deducted from every confirmed paycheck and added to this pot.">
-            <TextInput inputMode="decimal" value={paycheckAmount} onChange={(event) => setPaycheckAmount(event.target.value)} placeholder="50.00" />
-          </Field>
-          <Field label="Current balance" hint="Money already inside this pot before the next paycheck top-up.">
-            <TextInput inputMode="decimal" value={balance} onChange={(event) => setBalance(event.target.value)} placeholder="0.00" />
-          </Field>
-          <Field label="Colour">
-            <div className="flex flex-wrap gap-2">
-              {colors.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-label={`Use colour ${option}`}
-                  onClick={() => setColor(option)}
-                  className="size-8 rounded-full border-2"
-                  style={{
-                    backgroundColor: option,
-                    borderColor: option === color ? '#0f172a' : 'white',
-                    boxShadow: option === color ? '0 0 0 2px #cbd5e1' : '0 0 0 1px #e2e8f0',
-                  }}
-                />
-              ))}
+            <PotFormFields form={createForm} onChange={setCreateForm} />
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={submitPot}>Add pot</Button>
             </div>
-          </Field>
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={submitPot}>{editingPot ? 'Save pot' : 'Add pot'}</Button>
-            {editingPot && (
-              <Button variant="secondary" onClick={resetForm}>
-                Cancel
-              </Button>
-            )}
-          </div>
           </div>
         </Panel>
 
@@ -146,7 +113,7 @@ export function PotsPage({
           accent="blue"
           density="compact"
         >
-          <div className="space-y-4 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
+          <div className="grid items-start gap-4 md:grid-cols-2 xl:max-h-[760px] xl:grid-cols-3 xl:overflow-y-auto xl:pr-1">
           {activePots.map((pot) => {
             const isOpen = openPotId === pot.id
             const activityItems = getPotActivityItems(pot.id, snapshot)
@@ -237,11 +204,118 @@ export function PotsPage({
               </div>
             )
           })}
+          {activePots.length === 0 && (
+            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 xl:col-span-3">
+              No pots yet.
+            </p>
+          )}
           </div>
         </Panel>
       </SectionGrid>
+      {editingPotId && editForm && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit pot"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+          >
+            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">Edit pot</h2>
+                <p className="mt-1 text-sm text-slate-500">Update this pot without replacing the create form.</p>
+              </div>
+              <Button variant="ghost" onClick={closeEditModal} aria-label="Close edit pot">
+                <X size={18} />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <PotFormFields form={editForm} onChange={setEditForm} />
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={submitEditedPot}>Save pot</Button>
+                <Button variant="secondary" onClick={closeEditModal}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+function PotFormFields({
+  form,
+  onChange,
+}: {
+  form: PotFormState
+  onChange: (form: PotFormState) => void
+}) {
+  return (
+    <>
+      <Field label="Pot name">
+        <TextInput
+          value={form.name}
+          onChange={(event) => onChange({ ...form, name: event.target.value })}
+          placeholder="Car insurance"
+        />
+      </Field>
+      <Field label="Type">
+        <SelectInput value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as PotType })}>
+          <option value="spending">Spending</option>
+          <option value="reserved">Reserved</option>
+          <option value="saving">Saving</option>
+          <option value="investment">Investment</option>
+          <option value="buffer">Buffer</option>
+        </SelectInput>
+      </Field>
+      <Field label="Add each paycheck" hint="This amount is automatically deducted from every confirmed paycheck and added to this pot.">
+        <TextInput
+          inputMode="decimal"
+          value={form.paycheckAmount}
+          onChange={(event) => onChange({ ...form, paycheckAmount: event.target.value })}
+          placeholder="50.00"
+        />
+      </Field>
+      <Field label="Current balance" hint="Money already inside this pot before the next paycheck top-up.">
+        <TextInput
+          inputMode="decimal"
+          value={form.balance}
+          onChange={(event) => onChange({ ...form, balance: event.target.value })}
+          placeholder="0.00"
+        />
+      </Field>
+      <Field label="Colour">
+        <div className="flex flex-wrap gap-2">
+          {colors.map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-label={`Use colour ${option}`}
+              onClick={() => onChange({ ...form, color: option })}
+              className="size-8 rounded-full border-2"
+              style={{
+                backgroundColor: option,
+                borderColor: option === form.color ? '#0f172a' : 'white',
+                boxShadow: option === form.color ? '0 0 0 2px #cbd5e1' : '0 0 0 1px #e2e8f0',
+              }}
+            />
+          ))}
+        </div>
+      </Field>
+    </>
+  )
+}
+
+function potFormToPayload(form: PotFormState) {
+  return {
+    name: form.name.trim(),
+    type: form.type,
+    balancePence: form.balance ? parsePoundsToPence(form.balance) : 0,
+    targetPence: form.paycheckAmount ? parsePoundsToPence(form.paycheckAmount) : null,
+    color: form.color,
+  }
 }
 
 interface PotActivityItem {

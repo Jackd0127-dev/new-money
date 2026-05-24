@@ -10,6 +10,7 @@ import {
   addDailyBrief,
   addDebt,
   addDebtReserve,
+  addTransaction,
   applyCreditCardPot,
   applyDebtReserve,
   cancelDebtReserve,
@@ -23,6 +24,7 @@ import {
   updateCreditCardPot,
   updateDebtReserve,
   updatePot,
+  updateTransaction,
 } from './repository'
 import { db } from './db'
 
@@ -284,6 +286,49 @@ describe('paycheck plan storage', () => {
       snapshotSignature: 'snapshot-signature',
       content: 'Today: check your card balances.',
     })
+  })
+
+  it('persists unlinked spending without changing pot balances', async () => {
+    await addTransaction({
+      amountPence: 1000,
+      type: 'spending',
+      date: '2026-05-20',
+      note: 'Coffee',
+      potId: null,
+      creditCardId: null,
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const transaction = snapshot.transactions[0]
+    const foodPot = snapshot.pots.find((pot) => pot.id === 'pot-food')
+
+    expect(transaction).toMatchObject({
+      amountPence: 1000,
+      creditCardId: null,
+      note: 'Coffee',
+      potId: null,
+    })
+    expect(transaction.paymentMethod).toBeUndefined()
+    expect(foodPot?.balancePence).toBe(0)
+
+    await updateTransaction(transaction.id, {
+      amountPence: 1200,
+      date: '2026-05-21',
+      note: 'Coffee updated',
+      potId: null,
+      creditCardId: null,
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.transactions[0]).toMatchObject({
+      amountPence: 1200,
+      date: '2026-05-21',
+      note: 'Coffee updated',
+      potId: null,
+      creditCardId: null,
+    })
+    expect(snapshot.transactions[0].paymentMethod).toBeUndefined()
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
   })
 
   it('stores, updates, applies, and deletes credit card pots', async () => {

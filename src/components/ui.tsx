@@ -202,15 +202,19 @@ export function MoneyMetric({
   value,
   tone = 'neutral',
   breakdown,
+  open,
+  onOpenChange,
 }: {
   label: string
   value: string
   tone?: 'neutral' | 'primary' | 'good' | 'warning' | 'bad'
   breakdown?: CalculationBreakdown
+  open?: boolean
+  onOpenChange?: (isOpen: boolean) => void
 }) {
   const isPrimary = tone === 'primary'
   const className = clsx(
-    'rounded-lg border p-4',
+    'h-fit self-start rounded-lg border p-4',
     tone === 'neutral' && 'border-slate-200 bg-white',
     tone === 'primary' && 'border-slate-950 bg-slate-950 text-white',
     tone === 'good' && 'border-emerald-200 bg-emerald-50',
@@ -230,7 +234,11 @@ export function MoneyMetric({
   }
 
   return (
-    <details className={clsx(className, 'group')}>
+    <details
+      className={clsx(className, 'group')}
+      open={open}
+      onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
+    >
       <summary className="-m-2 cursor-pointer list-none rounded-md p-2 outline-none transition focus-visible:ring-4 focus-visible:ring-slate-200">
         <div className="flex items-start justify-between gap-3">
           <div>

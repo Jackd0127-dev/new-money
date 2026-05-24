@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import {
   formatPence,
   getPayPeriodCostSummary,
@@ -19,6 +21,7 @@ export function DashboardPage({
   onPayPeriodChange?: (payPeriodId: string | null) => void
   onViewChange: (view: ViewKey) => void
 }) {
+  const [openMetric, setOpenMetric] = useState<string | null>(null)
   const viewedPeriod = selectedPayPeriod ?? null
   const summary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
@@ -70,24 +73,36 @@ export function DashboardPage({
         }
       >
         {viewedPeriod ? (
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid items-start gap-4 lg:grid-cols-3">
             <MoneyMetric
               label="Total pay"
               value={formatPence(summary.payReceivedPence)}
               tone="primary"
               breakdown={getTotalPayBreakdown(summary, viewedPeriod.startDate, viewedPeriod.endDate)}
+              open={openMetric === 'total-pay'}
+              onOpenChange={(isOpen) =>
+                setOpenMetric((current) => isOpen ? 'total-pay' : current === 'total-pay' ? null : current)
+              }
             />
             <MoneyMetric
               label="Total costs"
               value={formatPence(summary.totalCostsPence)}
               tone="warning"
               breakdown={getTotalCostsBreakdown(summary)}
+              open={openMetric === 'total-costs'}
+              onOpenChange={(isOpen) =>
+                setOpenMetric((current) => isOpen ? 'total-costs' : current === 'total-costs' ? null : current)
+              }
             />
             <MoneyMetric
               label="Money left"
               value={formatPence(summary.moneyLeftPence)}
               tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
               breakdown={getMoneyLeftBreakdown(summary)}
+              open={openMetric === 'money-left'}
+              onOpenChange={(isOpen) =>
+                setOpenMetric((current) => isOpen ? 'money-left' : current === 'money-left' ? null : current)
+              }
             />
           </div>
         ) : (

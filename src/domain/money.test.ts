@@ -1124,4 +1124,64 @@ describe('pay period cost summary', () => {
       isOverCommitted: true,
     })
   })
+
+  it('uses linked pot balances to reduce recurring set-asides due this pay period', () => {
+    const payPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 100000,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const summary = getPayPeriodCostSummary({
+      payPeriod,
+      recurringPayments: [
+        {
+          id: 'car-insurance',
+          name: 'Car Insurance',
+          amountPence: 8711,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-car-insurance',
+          priority: 'essential',
+          active: true,
+          creditCardId: null,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [],
+      debts: [],
+      creditCardRepayments: [],
+      pots: [
+        {
+          id: 'pot-car-insurance',
+          name: 'Car Insurance',
+          type: 'reserved',
+          balancePence: 8711,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [],
+    })
+
+    expect(summary.directRecurringPence).toBe(0)
+    expect(summary.totalCostsPence).toBe(0)
+    expect(summary.moneyLeftPence).toBe(100000)
+    expect(summary.items).toContainEqual(
+      expect.objectContaining({
+        id: 'recurring-car-insurance-2026-06-01',
+        amountPence: 0,
+      }),
+    )
+  })
 })

@@ -373,7 +373,7 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
       {
         label: 'Recurring not on cards',
         value: formatPence(summary.directRecurringPence),
-        detail: 'Bills due this pay period that are not linked to a credit card.',
+        detail: 'Bills due this pay period that are not linked to a credit card, after money already set aside in linked pots.',
         tone: 'add',
       },
       {

@@ -455,7 +455,10 @@ export function getPayPeriodCostSummary({
       creditCardId: occurrence.payment.creditCardId ?? null,
       potId: occurrence.payment.potId,
     }))
-  const directRecurringItems = recurringItems.filter((item) => !item.creditCardId)
+  const directRecurringItems = applyLinkedPotBalancesToRecurringItems(
+    recurringItems.filter((item) => !item.creditCardId),
+    pots,
+  )
   const creditCardRecurringItems = recurringItems.filter((item) => item.creditCardId)
   const savedPaymentItems = customPayments
     .filter(
@@ -637,6 +640,37 @@ export function getPayPeriodCostSummary({
   ].sort(sortPeriodCostItems)
 
   return createPayPeriodCostSummaryFromItems(payPeriod.incomePence, allItems)
+}
+
+function applyLinkedPotBalancesToRecurringItems(
+  items: PeriodCostItem[],
+  pots: Pot[],
+): PeriodCostItem[] {
+  const availableBalanceByPot = new Map(
+    pots
+      .filter((pot) => !pot.archived)
+      .map((pot) => [pot.id, Math.max(0, pot.balancePence)]),
+  )
+
+  return items.map((item) => {
+    if (!item.potId || item.amountPence <= 0) {
+      return item
+    }
+
+    const availablePence = availableBalanceByPot.get(item.potId) ?? 0
+
+    if (availablePence <= 0) {
+      return item
+    }
+
+    const coveredPence = Math.min(item.amountPence, availablePence)
+    availableBalanceByPot.set(item.potId, availablePence - coveredPence)
+
+    return {
+      ...item,
+      amountPence: item.amountPence - coveredPence,
+    }
+  })
 }
 
 export function filterPayPeriodCostSummary(

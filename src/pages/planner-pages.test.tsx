@@ -1498,6 +1498,19 @@ describe('recurring page', () => {
 
   it('shows a next payday owed dropdown with the next pay period costs', () => {
     const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
       recurringPayments: [
         {
           id: 'rec-rent',
@@ -1655,6 +1668,19 @@ describe('dashboard page', () => {
 
   it('shows one clear pay summary with correct current period maths', () => {
     const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
       payPeriods: [
         {
           id: 'period-current',
@@ -1771,6 +1797,30 @@ describe('dashboard page', () => {
     const restoreLocalStorage = mockLocalStorage()
     const snapshot = createSnapshot({
       payPeriods: [createPayPeriod({ id: 'period-current', incomePence: 120000 })],
+      pots: [
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-food',
+          name: 'Food',
+          type: 'spending',
+          balancePence: 12000,
+          targetPence: null,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
       recurringPayments: [
         {
           id: 'insurance',
@@ -1930,6 +1980,19 @@ describe('dashboard page', () => {
     const restoreLocalStorage = mockLocalStorage()
     const snapshot = createSnapshot({
       payPeriods: [createPayPeriod({ id: 'period-current', incomePence: 100000 })],
+      pots: [
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
       recurringPayments: [
         {
           id: 'council-tax',
@@ -1979,6 +2042,58 @@ describe('dashboard page', () => {
       within(screen.getByRole('region', { name: 'Selected pay period' })).getAllByText('£1,000.00').length,
     ).toBeGreaterThan(0)
     restoreLocalStorage()
+  })
+
+  it('does not ask for a recurring pot set-aside when the linked pot already covers it', () => {
+    const selectedPayPeriod = createPayPeriod({
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 100000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-car-insurance',
+          name: 'Car Insurance',
+          type: 'reserved',
+          balancePence: 8711,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'car-insurance',
+          name: 'Car Insurance',
+          amountPence: 8711,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-car-insurance',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
+
+    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
+
+    expect(within(currentPeriod).getAllByText('£0.00').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('£1,000.00').length).toBeGreaterThan(0)
+    expect(
+      within(todoList).queryByText('Set aside £87.11 into "Car Insurance" pot for "Car Insurance"'),
+    ).not.toBeInTheDocument()
+    expect(within(todoList).getByText('No set-asides for this paycheck')).toBeInTheDocument()
   })
 
   it('shows linked credit card amounts owed as pot set-asides', () => {

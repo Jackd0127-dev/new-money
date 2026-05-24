@@ -213,6 +213,48 @@ describe('paycheck plan storage', () => {
     expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
   })
 
+  it('deducts a linked pot recurring payment due on 5 June from the pot balance', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-05T12:00:00.000Z'))
+
+    await updatePot('pot-food', {
+      name: 'Car Insurance',
+      type: 'spending',
+      balancePence: 8711,
+      targetPence: null,
+      color: '#2563eb',
+    })
+    await addRecurringPayment({
+      name: 'Car insurance',
+      amountPence: 8711,
+      dueDay: 5,
+      frequency: 'monthly',
+      potId: 'pot-food',
+      priority: 'essential',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const payment = snapshot.recurringPayments.find((candidate) => candidate.name === 'Car insurance')
+    const transaction = snapshot.transactions.find((candidate) => candidate.recurringPaymentId === payment?.id)
+
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
+    expect(transaction).toMatchObject({
+      id: `recurring-${payment?.id}-2026-06-05`,
+      amountPence: 8711,
+      date: '2026-06-05',
+      note: 'Car insurance',
+      paymentMethod: 'pot',
+      potId: 'pot-food',
+      recurringPaymentId: payment?.id,
+      type: 'spending',
+    })
+
+    snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.transactions.filter((candidate) => candidate.recurringPaymentId === payment?.id)).toHaveLength(1)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
+  })
+
   it('does not recreate default pots after every pot is deleted', async () => {
     let snapshot = await getPlannerSnapshot()
 

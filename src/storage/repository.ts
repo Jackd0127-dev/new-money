@@ -65,6 +65,8 @@ export interface PaycheckPlanInput {
 export interface PotInput {
   name: string
   type: PotType
+  category?: string | null
+  icon?: string | null
   balancePence: number
   targetPence: number | null
   color: string
@@ -294,6 +296,8 @@ export async function addPot(input: PotInput): Promise<void> {
     id: crypto.randomUUID(),
     name: input.name,
     type: input.type,
+    category: normalizePotCategory(input.category),
+    icon: normalizePotIcon(input.icon),
     balancePence: input.balancePence,
     targetPence: input.targetPence === null ? null : Math.max(0, input.targetPence),
     color: input.color,
@@ -309,6 +313,8 @@ export async function updatePot(potId: string, input: PotUpdateInput): Promise<v
   await db.pots.update(potId, {
     name: input.name.trim(),
     type: input.type,
+    category: normalizePotCategory(input.category),
+    icon: normalizePotIcon(input.icon),
     balancePence: input.balancePence,
     targetPence: input.targetPence === null ? null : Math.max(0, input.targetPence),
     color: input.color,
@@ -1510,9 +1516,23 @@ function normalizeSettings(settings?: Settings): Settings {
 function normalizePot(pot: Pot): Pot {
   return {
     ...pot,
+    category: normalizePotCategory(pot.category),
+    icon: normalizePotIcon(pot.icon),
     linkedCreditCardId: pot.linkedCreditCardId ?? null,
     linkedDebtId: pot.linkedDebtId ?? null,
   }
+}
+
+function normalizePotCategory(category?: string | null): string | null {
+  const clean = category?.trim().replace(/\s+/g, ' ').slice(0, 32) ?? ''
+
+  return clean || null
+}
+
+function normalizePotIcon(icon?: string | null): string | null {
+  const clean = icon?.trim().slice(0, 32) ?? ''
+
+  return clean || null
 }
 
 function normalizeCreditCard(card: CreditCard): CreditCard {

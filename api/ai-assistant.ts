@@ -722,6 +722,8 @@ function compactPot(pot: PlannerSnapshot['pots'][number]) {
     id: pot.id,
     name: truncateText(pot.name, 120),
     type: pot.type,
+    category: pot.category ?? null,
+    icon: pot.icon ?? null,
     balancePence: pot.balancePence,
     targetPence: pot.targetPence,
     color: pot.color,

@@ -126,6 +126,8 @@ function normalizePlannerSnapshot(snapshot: Partial<PlannerSnapshot>): PlannerSn
     },
     pots: (snapshot.pots ?? []).map((pot) => ({
       ...pot,
+      category: pot.category ?? null,
+      icon: pot.icon ?? null,
       linkedCreditCardId: pot.linkedCreditCardId ?? null,
       linkedDebtId: pot.linkedDebtId ?? null,
     })),

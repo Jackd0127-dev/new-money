@@ -48,6 +48,8 @@ export interface Pot extends Timestamped {
   id: string
   name: string
   type: PotType
+  category?: string | null
+  icon?: string | null
   balancePence: number
   targetPence: number | null
   color: string

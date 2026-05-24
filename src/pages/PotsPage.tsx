@@ -1,7 +1,36 @@
-import { useState } from 'react'
-import { ChevronDown, PenLine, Trash2, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { clsx } from 'clsx'
+import {
+  Banknote,
+  Car,
+  CreditCard,
+  Dumbbell,
+  Fuel,
+  Gift,
+  Heart,
+  Home,
+  MoreHorizontal,
+  PenLine,
+  Phone,
+  PiggyBank,
+  Plane,
+  Plus,
+  Shield,
+  Target,
+  Trash2,
+  Utensils,
+  Wallet,
+  X,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 
-import { formatPence, parsePoundsToPence } from '../domain/money'
+import {
+  formatPence,
+  getCreditCardAllocationSummary,
+  parsePoundsToPence,
+  toIsoDate,
+} from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import {
   Button,
@@ -13,14 +42,38 @@ import {
   TextInput,
   type CalculationBreakdown,
 } from '../components/ui'
-import type { PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
+import type { Pot, PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
+const builtinCategories = ['All Pots', 'Spending', 'Bills', 'Savings'] as const
+const customCategoryAll = 'All Pots'
+
+const iconOptions = [
+  { key: 'wallet', label: 'Wallet', Icon: Wallet },
+  { key: 'home', label: 'Home', Icon: Home },
+  { key: 'card', label: 'Card', Icon: CreditCard },
+  { key: 'shield', label: 'Shield', Icon: Shield },
+  { key: 'car', label: 'Car', Icon: Car },
+  { key: 'fuel', label: 'Fuel', Icon: Fuel },
+  { key: 'gym', label: 'Gym', Icon: Dumbbell },
+  { key: 'food', label: 'Food', Icon: Utensils },
+  { key: 'phone', label: 'Phone', Icon: Phone },
+  { key: 'zap', label: 'Bolt', Icon: Zap },
+  { key: 'gift', label: 'Gift', Icon: Gift },
+  { key: 'plane', label: 'Travel', Icon: Plane },
+  { key: 'heart', label: 'Heart', Icon: Heart },
+  { key: 'target', label: 'Target', Icon: Target },
+  { key: 'money', label: 'Money', Icon: Banknote },
+  { key: 'savings', label: 'Savings', Icon: PiggyBank },
+] satisfies Array<{ key: string; label: string; Icon: LucideIcon }>
+
 type PotLinkType = 'none' | 'credit_card' | 'debt'
 
 interface PotFormState {
   name: string
   type: PotType
+  category: string
+  icon: string
   paycheckAmount: string
   balance: string
   color: string
@@ -28,9 +81,28 @@ interface PotFormState {
   linkedEntityId: string
 }
 
+interface PotProgress {
+  targetPence: number
+  coveredPence: number
+  percent: number
+  targetLabel: string
+  sourceLabels: string[]
+  shortfallPence: number
+  dueIso: string | null
+}
+
+interface PotActivityItem {
+  id: string
+  title: string
+  detail: string
+  amountPence: number
+}
+
 const emptyPotForm = (): PotFormState => ({
   name: '',
   type: 'spending',
+  category: 'Spending',
+  icon: 'wallet',
   paycheckAmount: '',
   balance: '',
   color: colors[0],
@@ -49,7 +121,13 @@ export function PotsPage({
   const [editForm, setEditForm] = useState<PotFormState | null>(null)
   const [openPotId, setOpenPotId] = useState<string | null>(null)
   const [editingPotId, setEditingPotId] = useState<string | null>(null)
+  const [activeCategory, setActiveCategory] = useState<string>(customCategoryAll)
+  const [isAddingCategory, setIsAddingCategory] = useState(false)
+  const [newCategory, setNewCategory] = useState('')
+  const [customCategories, setCustomCategories] = useState<string[]>([])
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
+  const categoryOptions = useMemo(() => getPotCategoryOptions(activePots, customCategories), [activePots, customCategories])
+  const visiblePots = activePots.filter((pot) => isPotInCategory(pot, activeCategory))
 
   async function submitPot() {
     if (!createForm.name.trim()) {
@@ -80,6 +158,8 @@ export function PotsPage({
     setEditForm({
       name: pot.name,
       type: pot.type,
+      category: getPotCategory(pot),
+      icon: getPotIconKey(pot),
       paycheckAmount: pot.targetPence ? (pot.targetPence / 100).toFixed(2) : '',
       balance: (pot.balancePence / 100).toFixed(2),
       color: pot.color,
@@ -97,6 +177,20 @@ export function PotsPage({
     setEditForm(null)
   }
 
+  function submitCustomCategory() {
+    const category = cleanCategory(newCategory)
+
+    if (!category) {
+      return
+    }
+
+    setCustomCategories((current) => current.some((item) => item.toLowerCase() === category.toLowerCase()) ? current : [...current, category])
+    setActiveCategory(category)
+    setCreateForm((current) => ({ ...current, category }))
+    setNewCategory('')
+    setIsAddingCategory(false)
+  }
+
   return (
     <div className="space-y-6">
       <SectionGrid variant="wideRight">
@@ -107,7 +201,12 @@ export function PotsPage({
           density="compact"
         >
           <div className="space-y-4">
-            <PotFormFields form={createForm} snapshot={snapshot} onChange={setCreateForm} />
+            <PotFormFields
+              form={createForm}
+              snapshot={snapshot}
+              categoryOptions={categoryOptions}
+              onChange={setCreateForm}
+            />
             <div className="flex flex-wrap gap-3">
               <Button onClick={submitPot}>Add pot</Button>
             </div>
@@ -120,137 +219,81 @@ export function PotsPage({
           accent="blue"
           density="compact"
         >
-          <div
-            className="grid items-start gap-4 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1"
-            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))' }}
-          >
-          {activePots.map((pot) => {
-            const isOpen = openPotId === pot.id
-            const activityItems = getPotActivityItems(pot.id, snapshot)
-            const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
-            const linkedTargetLabel = getPotLinkedTargetLabel(pot.id, snapshot)
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {categoryOptions.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setActiveCategory(category)}
+                  className={clsx(
+                    'inline-flex min-h-10 items-center justify-center rounded-lg border px-4 text-sm font-semibold transition',
+                    activeCategory === category
+                      ? 'border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  )}
+                >
+                  {category}
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-label="Add pot category"
+                onClick={() => setIsAddingCategory((current) => !current)}
+                className="inline-flex size-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
 
-            return (
-              <div key={pot.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setOpenPotId(isOpen ? null : pot.id)}
-                    aria-expanded={isOpen}
-                    aria-label={`${isOpen ? 'Hide' : 'View'} ${pot.name} activity`}
-                    className="min-w-0 flex-1 rounded-md text-left outline-none transition hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-slate-100"
-                  >
-                    <div className="grid grid-cols-[auto_1fr_auto] items-start gap-2 p-1">
-                      <span className="mt-1 size-3 rounded-full" style={{ backgroundColor: pot.color }} />
-                      <div className="min-w-0">
-                        <div>
-                          <h3 className="break-words text-sm font-semibold leading-5 text-slate-950">{pot.name}</h3>
-                        </div>
-                        <p className="mt-1 text-xs capitalize text-slate-500">{pot.type}</p>
-                        {linkedTargetLabel && (
-                          <p className="mt-1 text-xs font-medium text-slate-600">{linkedTargetLabel}</p>
-                        )}
-                      </div>
-                      <ChevronDown
-                        size={14}
-                        className={`mt-0.5 shrink-0 text-slate-400 transition ${isOpen ? 'rotate-180' : ''}`}
-                      />
-                    </div>
-                    <p className="px-1 pb-1 pt-3 text-2xl font-semibold text-slate-950">{formatPence(pot.balancePence)}</p>
-                    {(pot.targetPence ?? 0) > 0 && (
-                      <p className="px-1 pb-1 text-sm text-slate-500">
-                        Payday top-up {formatPence(pot.targetPence ?? 0)}
-                      </p>
-                    )}
-                  </button>
-                  <div className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      className="inline-flex size-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-                      onClick={() => startEditingPot(pot.id)}
-                      aria-label={`Edit ${pot.name}`}
-                      title={`Edit ${pot.name}`}
-                    >
-                      <PenLine size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex size-6 items-center justify-center rounded-md bg-red-600 text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                      onClick={() => {
-                        if (window.confirm(`Delete ${pot.name}?`)) {
-                          void actions.deletePot(pot.id)
-                        }
-                      }}
-                      aria-label={`Delete ${pot.name}`}
-                      title={`Delete ${pot.name}`}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                </div>
-
-                {isOpen && (
-                  <div role="region" aria-label={`${pot.name} activity`} className="mt-4 border-t border-slate-100 pt-4">
-                    <CalculationDetails breakdown={getPotBalanceBreakdown(pot.id, pot.balancePence, activityItems)} />
-                    {activityItems.length > 0 ? (
-                      <div className="mt-3 space-y-2">
-                        {activityItems.map((item) => (
-                          <div
-                            key={item.id}
-                            className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-50 px-3 py-2"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-slate-950">{item.title}</p>
-                              <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
-                            </div>
-                            <p
-                              className={`text-sm font-semibold ${
-                                item.amountPence < 0 ? 'text-red-700' : 'text-emerald-700'
-                              }`}
-                            >
-                              {formatSignedPence(item.amountPence)}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
-                        No activity recorded for this pot yet.
-                      </p>
-                    )}
-                    {linkedRecurringPayments.length > 0 && (
-                      <div className="mt-4 rounded-lg border border-slate-200 bg-white">
-                        <div className="border-b border-slate-100 px-3 py-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked recurring payments</p>
-                        </div>
-                        <div className="divide-y divide-slate-100">
-                          {linkedRecurringPayments.map((payment) => (
-                            <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-950">{payment.name}</p>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {payment.frequency} · due day {payment.dueDay ?? 'set date'}
-                                </p>
-                              </div>
-                              <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+            {isAddingCategory && (
+              <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row">
+                <TextInput
+                  value={newCategory}
+                  onChange={(event) => setNewCategory(event.target.value)}
+                  placeholder="New section name"
+                  aria-label="New pot category"
+                />
+                <Button onClick={submitCustomCategory}>Add section</Button>
               </div>
-            )
-          })}
-          {activePots.length === 0 && (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-              No pots yet.
-            </p>
-          )}
+            )}
+
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+              {visiblePots.map((pot) => {
+                const isOpen = openPotId === pot.id
+                const activityItems = getPotActivityItems(pot.id, snapshot)
+                const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
+                const progress = getPotProgress(pot, snapshot)
+
+                return (
+                  <PotCard
+                    key={pot.id}
+                    pot={pot}
+                    progress={progress}
+                    activityItems={activityItems}
+                    linkedRecurringPayments={linkedRecurringPayments}
+                    isOpen={isOpen}
+                    onToggle={() => setOpenPotId(isOpen ? null : pot.id)}
+                    onEdit={() => startEditingPot(pot.id)}
+                    onDelete={() => {
+                      if (window.confirm(`Delete ${pot.name}?`)) {
+                        void actions.deletePot(pot.id)
+                      }
+                    }}
+                  />
+                )
+              })}
+
+              {visiblePots.length === 0 && (
+                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 2xl:col-span-3">
+                  No pots in this section yet.
+                </p>
+              )}
+            </div>
           </div>
         </Panel>
       </SectionGrid>
+
       {editingPotId && editForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
           <div
@@ -269,7 +312,12 @@ export function PotsPage({
               </Button>
             </div>
             <div className="space-y-4">
-              <PotFormFields form={editForm} snapshot={snapshot} onChange={setEditForm} />
+              <PotFormFields
+                form={editForm}
+                snapshot={snapshot}
+                categoryOptions={categoryOptions}
+                onChange={setEditForm}
+              />
               <div className="flex flex-wrap gap-3">
                 <Button onClick={submitEditedPot}>Save pot</Button>
                 <Button variant="secondary" onClick={closeEditModal}>
@@ -284,13 +332,180 @@ export function PotsPage({
   )
 }
 
+function PotCard({
+  pot,
+  progress,
+  activityItems,
+  linkedRecurringPayments,
+  isOpen,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  pot: Pot
+  progress: PotProgress
+  activityItems: PotActivityItem[]
+  linkedRecurringPayments: RecurringPayment[]
+  isOpen: boolean
+  onToggle: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const icon = getPotIconOption(pot)
+  const Icon = icon.Icon
+  const dueLabel = getPotDueLabel(progress)
+  const progressWidth = `${Math.min(100, Math.max(0, progress.percent))}%`
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isOpen}
+          aria-label={`${isOpen ? 'Hide' : 'View'} ${pot.name} activity`}
+          className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-start gap-3 rounded-lg text-left outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+        >
+          <span
+            className="flex size-14 shrink-0 items-center justify-center rounded-full"
+            style={{
+              backgroundColor: withAlpha(pot.color, 0.14),
+              color: pot.color,
+            }}
+          >
+            <Icon size={26} strokeWidth={2.4} />
+          </span>
+          <span className="min-w-0 pt-2">
+            <span className="block truncate text-base font-semibold text-slate-950">{pot.name}</span>
+            <span className="mt-0.5 block truncate text-sm text-slate-500">{getPotCategory(pot)}</span>
+          </span>
+        </button>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className="inline-flex size-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            onClick={onEdit}
+            aria-label={`Edit ${pot.name}`}
+            title={`Edit ${pot.name}`}
+          >
+            <PenLine size={14} />
+          </button>
+          <button
+            type="button"
+            className="inline-flex size-7 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+            onClick={onDelete}
+            aria-label={`Delete ${pot.name}`}
+            title={`Delete ${pot.name}`}
+          >
+            <Trash2 size={14} />
+          </button>
+          <MoreHorizontal size={16} className="text-slate-400" aria-hidden="true" />
+        </div>
+      </div>
+
+      <p className="mt-5 text-3xl font-semibold tracking-normal text-slate-950">{formatPence(pot.balancePence)}</p>
+
+      <div className="mt-4">
+        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{
+              width: progress.targetPence > 0 ? progressWidth : '0%',
+              backgroundColor: pot.color,
+            }}
+          />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+          <span className="font-semibold" style={{ color: pot.color }}>
+            {progress.targetPence > 0 ? `${progress.percent}%` : '0%'}
+          </span>
+          <span className="text-right text-slate-500">{progress.targetLabel}</span>
+        </div>
+      </div>
+
+      {dueLabel && (
+        <div
+          className="mt-4 rounded-lg px-3 py-2 text-sm font-medium"
+          style={{
+            backgroundColor: withAlpha(pot.color, 0.1),
+            color: pot.color,
+          }}
+        >
+          {dueLabel}
+        </div>
+      )}
+
+      {progress.sourceLabels.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {progress.sourceLabels.map((label) => (
+            <span key={label} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {isOpen && (
+        <div role="region" aria-label={`${pot.name} activity`} className="mt-4 border-t border-slate-100 pt-4">
+          <CalculationDetails breakdown={getPotBalanceBreakdown(pot.id, pot.balancePence, activityItems)} />
+          {activityItems.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {activityItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-50 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-950">{item.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                  </div>
+                  <p className={clsx('text-sm font-semibold', item.amountPence < 0 ? 'text-red-700' : 'text-emerald-700')}>
+                    {formatSignedPence(item.amountPence)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+              No activity recorded for this pot yet.
+            </p>
+          )}
+          {linkedRecurringPayments.length > 0 && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white">
+              <div className="border-b border-slate-100 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked recurring payments</p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {linkedRecurringPayments.map((payment) => (
+                  <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-950">{payment.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {payment.frequency} · due day {payment.dueDay ?? 'set date'}
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PotFormFields({
   form,
   snapshot,
+  categoryOptions,
   onChange,
 }: {
   form: PotFormState
   snapshot: PlannerSnapshot
+  categoryOptions: string[]
   onChange: (form: PotFormState) => void
 }) {
   const creditCards = snapshot.creditCards.filter(
@@ -310,13 +525,39 @@ function PotFormFields({
         />
       </Field>
       <Field label="Type">
-        <SelectInput value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value as PotType })}>
+        <SelectInput
+          value={form.type}
+          onChange={(event) => {
+            const type = event.target.value as PotType
+            const currentCategory = cleanCategory(form.category)
+            const shouldUseTypeCategory = !currentCategory || isBuiltinPotCategory(currentCategory)
+
+            onChange({
+              ...form,
+              type,
+              category: shouldUseTypeCategory ? defaultCategoryForPotType(type) : form.category,
+            })
+          }}
+        >
           <option value="spending">Spending</option>
           <option value="reserved">Reserved</option>
           <option value="saving">Saving</option>
           <option value="investment">Investment</option>
           <option value="buffer">Buffer</option>
         </SelectInput>
+      </Field>
+      <Field label="Category" hint="This controls the little section tabs above the pot cards.">
+        <TextInput
+          value={form.category}
+          onChange={(event) => onChange({ ...form, category: event.target.value })}
+          placeholder="Spending"
+          list="pot-category-options"
+        />
+        <datalist id="pot-category-options">
+          {categoryOptions.filter((category) => category !== customCategoryAll).map((category) => (
+            <option key={category} value={category} />
+          ))}
+        </datalist>
       </Field>
       <Field label="Add each paycheck" hint="This amount is automatically deducted from every confirmed paycheck and added to this pot.">
         <TextInput
@@ -380,6 +621,31 @@ function PotFormFields({
           </SelectInput>
         </Field>
       )}
+      <Field label="Symbol">
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+          {iconOptions.map((option) => {
+            const Icon = option.Icon
+
+            return (
+              <button
+                key={option.key}
+                type="button"
+                aria-label={`Use ${option.label} symbol`}
+                onClick={() => onChange({ ...form, icon: option.key })}
+                className={clsx(
+                  'flex size-10 items-center justify-center rounded-lg border transition',
+                  option.key === form.icon
+                    ? 'border-slate-950 bg-slate-950 text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                )}
+                title={option.label}
+              >
+                <Icon size={18} />
+              </button>
+            )
+          })}
+        </div>
+      </Field>
       <Field label="Colour">
         <div className="flex flex-wrap gap-2">
           {colors.map((option) => (
@@ -406,6 +672,8 @@ function potFormToPayload(form: PotFormState) {
   return {
     name: form.name.trim(),
     type: form.type,
+    category: cleanCategory(form.category) || defaultCategoryForPotType(form.type),
+    icon: form.icon,
     balancePence: form.balance ? parsePoundsToPence(form.balance) : 0,
     targetPence: form.paycheckAmount ? parsePoundsToPence(form.paycheckAmount) : null,
     color: form.color,
@@ -414,7 +682,7 @@ function potFormToPayload(form: PotFormState) {
   }
 }
 
-function getPotLinkType(pot: PlannerSnapshot['pots'][number]): PotLinkType {
+function getPotLinkType(pot: Pot): PotLinkType {
   if (pot.linkedCreditCardId) {
     return 'credit_card'
   }
@@ -426,31 +694,95 @@ function getPotLinkType(pot: PlannerSnapshot['pots'][number]): PotLinkType {
   return 'none'
 }
 
-function getPotLinkedTargetLabel(potId: string, snapshot: PlannerSnapshot): string | null {
-  const pot = snapshot.pots.find((candidate) => candidate.id === potId)
+function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
+  const sourceLabels: string[] = []
+  let linkedTargetPence = 0
+  let dueIso: string | null = null
 
-  if (!pot) {
-    return null
+  const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
+  const recurringTargetPence = linkedRecurringPayments.reduce((total, payment) => total + payment.amountPence, 0)
+
+  if (recurringTargetPence > 0) {
+    linkedTargetPence += recurringTargetPence
+    sourceLabels.push('Recurring')
+    dueIso = minIsoDate(dueIso, getEarliestRecurringDueDate(linkedRecurringPayments))
   }
 
   if (pot.linkedCreditCardId) {
-    const card = snapshot.creditCards.find((candidate) => candidate.id === pot.linkedCreditCardId)
-    return `Linked to ${card?.name ?? 'deleted credit card'}`
+    const cardSummary = getCreditCardAllocationSummary({
+      creditCards: snapshot.creditCards,
+      recurringPayments: snapshot.recurringPayments,
+      customPayments: snapshot.customPayments,
+      transactions: snapshot.transactions,
+      repayments: snapshot.creditCardRepayments,
+      creditCardPots: snapshot.creditCardPots,
+      pots: snapshot.pots,
+      payPeriod: null,
+    }).cards.find((summary) => summary.card.id === pot.linkedCreditCardId)
+
+    if (cardSummary && cardSummary.owedPence > 0) {
+      linkedTargetPence += cardSummary.owedPence
+      sourceLabels.push(`${cardSummary.card.name} card`)
+      dueIso = minIsoDate(dueIso, getCreditCardDueIso(cardSummary.card))
+    }
   }
 
   if (pot.linkedDebtId) {
-    const debt = snapshot.debts.find((candidate) => candidate.id === pot.linkedDebtId)
-    return `Linked to ${debt?.name ?? 'deleted debt'}`
+    const debt = snapshot.debts.find((candidate) => candidate.id === pot.linkedDebtId && candidate.status !== 'archived')
+
+    if (debt && debt.currentBalancePence > 0) {
+      linkedTargetPence += debt.currentBalancePence
+      sourceLabels.push(`${debt.name} debt`)
+      dueIso = minIsoDate(dueIso, debt.dueDate)
+    }
   }
 
-  return null
+  const manualTargetPence = Math.max(0, pot.targetPence ?? 0)
+  const targetPence = linkedTargetPence > 0 ? linkedTargetPence : manualTargetPence
+  const coveredPence = Math.max(0, pot.balancePence)
+  const shortfallPence = Math.max(0, targetPence - coveredPence)
+
+  return {
+    targetPence,
+    coveredPence,
+    percent: targetPence > 0 ? Math.min(100, Math.round((coveredPence / targetPence) * 100)) : 0,
+    targetLabel: targetPence > 0 ? `${formatPence(targetPence)} target` : 'No target yet',
+    sourceLabels,
+    shortfallPence,
+    dueIso,
+  }
 }
 
-interface PotActivityItem {
-  id: string
-  title: string
-  detail: string
-  amountPence: number
+function getPotDueLabel(progress: PotProgress): string | null {
+  if (progress.targetPence <= 0 || progress.shortfallPence <= 0) {
+    return null
+  }
+
+  if (!progress.dueIso) {
+    return `Top up ${formatPence(progress.shortfallPence)}`
+  }
+
+  const days = getDaysUntil(progress.dueIso)
+  const dueText = days <= 0 ? 'Due now' : `Due in ${days} day${days === 1 ? '' : 's'}`
+
+  return `${dueText} • ${formatPence(progress.shortfallPence)} left`
+}
+
+function getPotActivityItems(potId: string, snapshot: PlannerSnapshot): PotActivityItem[] {
+  const transactions = snapshot.transactions
+    .filter((transaction) => transaction.potId === potId)
+    .map((transaction) => transactionToActivityItem(transaction))
+  const allocations = snapshot.potAllocations
+    .filter((allocation) => allocation.potId === potId)
+    .map((allocation) => allocationToActivityItem(allocation, snapshot))
+
+  return [...transactions, ...allocations]
+}
+
+function getPotLinkedRecurringPayments(potId: string, snapshot: PlannerSnapshot): RecurringPayment[] {
+  return snapshot.recurringPayments
+    .filter((payment) => payment.active && payment.potId === potId)
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function getPotBalanceBreakdown(
@@ -486,23 +818,6 @@ function getPotBalanceBreakdown(
   }
 }
 
-function getPotActivityItems(potId: string, snapshot: PlannerSnapshot): PotActivityItem[] {
-  const transactions = snapshot.transactions
-    .filter((transaction) => transaction.potId === potId)
-    .map((transaction) => transactionToActivityItem(transaction))
-  const allocations = snapshot.potAllocations
-    .filter((allocation) => allocation.potId === potId)
-    .map((allocation) => allocationToActivityItem(allocation, snapshot))
-
-  return [...transactions, ...allocations]
-}
-
-function getPotLinkedRecurringPayments(potId: string, snapshot: PlannerSnapshot): RecurringPayment[] {
-  return snapshot.recurringPayments
-    .filter((payment) => payment.active && payment.potId === potId)
-    .sort((a, b) => a.name.localeCompare(b.name))
-}
-
 function transactionToActivityItem(transaction: Transaction): PotActivityItem {
   const isSpending = transaction.type === 'spending'
 
@@ -530,6 +845,174 @@ function allocationToActivityItem(allocation: PotAllocation, snapshot: PlannerSn
     detail: `Allocation · ${period?.payday ?? allocation.createdAt.slice(0, 10)}`,
     amountPence: allocation.amountPence,
   }
+}
+
+function getPotCategoryOptions(pots: Pot[], customCategories: string[]): string[] {
+  const categories = new Set<string>(builtinCategories)
+
+  for (const pot of pots) {
+    categories.add(getPotCategory(pot))
+  }
+
+  for (const category of customCategories) {
+    const clean = cleanCategory(category)
+
+    if (clean) {
+      categories.add(clean)
+    }
+  }
+
+  return Array.from(categories)
+}
+
+function isPotInCategory(pot: Pot, category: string): boolean {
+  if (category === customCategoryAll) {
+    return true
+  }
+
+  if (category === 'Spending') {
+    return getPotCategory(pot) === 'Spending' || pot.type === 'spending'
+  }
+
+  if (category === 'Bills') {
+    return getPotCategory(pot) === 'Bills' || pot.type === 'reserved'
+  }
+
+  if (category === 'Savings') {
+    return getPotCategory(pot) === 'Savings' || pot.type === 'saving' || pot.type === 'investment' || pot.type === 'buffer'
+  }
+
+  return getPotCategory(pot).toLowerCase() === category.toLowerCase()
+}
+
+function getPotCategory(pot: Pot): string {
+  return cleanCategory(pot.category ?? '') || defaultCategoryForPotType(pot.type)
+}
+
+function defaultCategoryForPotType(type: PotType): string {
+  if (type === 'reserved') {
+    return 'Bills'
+  }
+
+  if (type === 'saving' || type === 'investment' || type === 'buffer') {
+    return 'Savings'
+  }
+
+  return 'Spending'
+}
+
+function isBuiltinPotCategory(category: string): boolean {
+  return builtinCategories.some((builtin) => builtin.toLowerCase() === category.toLowerCase())
+}
+
+function cleanCategory(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').slice(0, 32)
+}
+
+function getPotIconOption(pot: Pot) {
+  const key = getPotIconKey(pot)
+
+  return iconOptions.find((option) => option.key === key) ?? iconOptions[0]
+}
+
+function getPotIconKey(pot: Pot): string {
+  if (pot.icon && iconOptions.some((option) => option.key === pot.icon)) {
+    return pot.icon
+  }
+
+  const name = pot.name.toLowerCase()
+
+  if (/airbnb|rent|home|house/.test(name)) {
+    return 'home'
+  }
+
+  if (/card|amex|capital|barclays|jaja|zable|credit/.test(name)) {
+    return 'card'
+  }
+
+  if (/car|insurance|cover|tax/.test(name)) {
+    return 'shield'
+  }
+
+  if (/fuel|petrol|diesel/.test(name)) {
+    return 'fuel'
+  }
+
+  if (/gym|fitness/.test(name)) {
+    return 'gym'
+  }
+
+  if (/food|grocery|groceries|lunch/.test(name)) {
+    return 'food'
+  }
+
+  if (/saving|goal/.test(name)) {
+    return 'savings'
+  }
+
+  return 'wallet'
+}
+
+function getEarliestRecurringDueDate(payments: RecurringPayment[]): string | null {
+  return payments.reduce<string | null>((earliest, payment) => {
+    const dueDate = payment.dueDate ?? (payment.dueDay ? getNextDueDayIso(payment.dueDay) : null)
+
+    return minIsoDate(earliest, dueDate)
+  }, null)
+}
+
+function getCreditCardDueIso(card: PlannerSnapshot['creditCards'][number]): string | null {
+  return card.dueDate ?? (card.dueDay ? getNextDueDayIso(card.dueDay) : null)
+}
+
+function getNextDueDayIso(dueDay: number): string {
+  const today = new Date(`${toIsoDate(new Date())}T00:00:00`)
+  const candidate = new Date(today)
+  candidate.setDate(Math.min(dueDay, getDaysInMonth(candidate)))
+
+  if (candidate < today) {
+    candidate.setMonth(candidate.getMonth() + 1)
+    candidate.setDate(Math.min(dueDay, getDaysInMonth(candidate)))
+  }
+
+  return toIsoDate(candidate)
+}
+
+function getDaysInMonth(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+}
+
+function minIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right
+  }
+
+  if (!right) {
+    return left
+  }
+
+  return right < left ? right : left
+}
+
+function getDaysUntil(isoDate: string): number {
+  const today = new Date(`${toIsoDate(new Date())}T00:00:00`).getTime()
+  const due = new Date(`${isoDate}T00:00:00`).getTime()
+
+  return Math.ceil((due - today) / 86_400_000)
+}
+
+function withAlpha(color: string, alpha: number): string {
+  const hex = color.replace('#', '')
+
+  if (!/^[\da-f]{6}$/i.test(hex)) {
+    return color
+  }
+
+  const red = parseInt(hex.slice(0, 2), 16)
+  const green = parseInt(hex.slice(2, 4), 16)
+  const blue = parseInt(hex.slice(4, 6), 16)
+
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
 function formatTransactionType(type: Transaction['type']): string {

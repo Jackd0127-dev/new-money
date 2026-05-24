@@ -1091,7 +1091,9 @@ describe('pots page', () => {
 
     expect(actions.updatePot).toHaveBeenCalledWith('pot-food', {
       balancePence: 12000,
+      category: 'Spending',
       color: '#16a34a',
+      icon: 'food',
       linkedCreditCardId: null,
       linkedDebtId: null,
       name: 'Groceries',
@@ -1140,10 +1142,42 @@ describe('pots page', () => {
 
     expect(actions.addPot).toHaveBeenCalledWith({
       balancePence: 40000,
+      category: 'Spending',
       color: '#2563eb',
+      icon: 'wallet',
       linkedCreditCardId: 'card-amex',
       linkedDebtId: null,
       name: 'Amex reserve',
+      targetPence: null,
+      type: 'spending',
+    })
+  })
+
+  it('creates a custom pot section and saves the selected symbol', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<PotsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Add pot category' }))
+    await user.type(screen.getByLabelText('New pot category'), 'Travel')
+    await user.click(screen.getByRole('button', { name: 'Add section' }))
+
+    expect(screen.getByRole('button', { name: 'Travel' })).toBeInTheDocument()
+
+    const createRegion = screen.getByRole('region', { name: 'Create pot' })
+    await user.type(within(createRegion).getByLabelText('Pot name'), 'Holiday')
+    await user.click(within(createRegion).getByRole('button', { name: 'Use Shield symbol' }))
+    await user.click(within(createRegion).getByRole('button', { name: 'Add pot' }))
+
+    expect(actions.addPot).toHaveBeenCalledWith({
+      balancePence: 0,
+      category: 'Travel',
+      color: '#2563eb',
+      icon: 'shield',
+      linkedCreditCardId: null,
+      linkedDebtId: null,
+      name: 'Holiday',
       targetPence: null,
       type: 'spending',
     })
@@ -1235,6 +1269,113 @@ describe('pots page', () => {
     expect(within(activity).getByText('monthly · due day 20')).toBeInTheDocument()
     expect(within(activity).getByText('£18.00')).toBeInTheDocument()
     expect(within(activity).queryByText('Direct debit')).not.toBeInTheDocument()
+  })
+
+  it('shows pot card progress from linked recurring, credit card, and debt obligations', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-car',
+          name: 'Car Insurance',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'shield',
+          balancePence: 8711,
+          targetPence: null,
+          color: '#7c3aed',
+          linkedCreditCardId: null,
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-card',
+          name: 'Capital One',
+          type: 'spending',
+          category: 'Spending',
+          icon: 'card',
+          balancePence: 40000,
+          targetPence: null,
+          color: '#ea580c',
+          linkedCreditCardId: 'card-capital-one',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-debt',
+          name: 'AIRBNB',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'home',
+          balancePence: 34678,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: null,
+          linkedDebtId: 'debt-airbnb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'rec-car',
+          name: 'Car insurance',
+          amountPence: 8711,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-car',
+          creditCardId: null,
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-capital-one',
+          name: 'Capital One',
+          provider: 'Capital One',
+          limitPence: 80000,
+          openingBalancePence: 60000,
+          dueDay: 5,
+          dueDate: null,
+          color: '#ea580c',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-airbnb',
+          name: 'AIRBNB',
+          lender: 'AIRBNB',
+          originalAmountPence: 55741,
+          currentBalancePence: 55741,
+          minimumPaymentPence: 0,
+          dueDate: '2026-06-05',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('100%')).toBeInTheDocument()
+    expect(screen.getByText('£87.11 target')).toBeInTheDocument()
+    expect(screen.getByText('67%')).toBeInTheDocument()
+    expect(screen.getByText('£600.00 target')).toBeInTheDocument()
+    expect(screen.getByText('62%')).toBeInTheDocument()
+    expect(screen.getByText('£557.41 target')).toBeInTheDocument()
   })
 })
 

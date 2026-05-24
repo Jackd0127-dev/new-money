@@ -377,6 +377,108 @@ describe('AI assistant api', () => {
     })
   })
 
+  it('adds a confirmable pot action when the provider omits proposedActions for a clear pot request', async () => {
+    mocks.generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        answer: "I'll propose creating a new spending pot named **jerasuium**. It won't be saved until you confirm the details.",
+        highlights: [],
+        actions: ['Review the confirmation card.'],
+        confidence: 'high',
+      }),
+    })
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'Make a spending pot named jerasuium',
+          todayIso: '2026-05-20',
+          activeView: 'pots',
+          snapshot: createSnapshot(),
+        },
+      },
+      response,
+    )
+
+    expect(response.payload).toEqual({
+      answer: "I'll propose creating a new spending pot named **jerasuium**. It won't be saved until you confirm the details.",
+      highlights: [],
+      actions: ['Review the confirmation card.'],
+      confidence: 'high',
+      proposedActions: [
+        {
+          id: 'create-pot-jerasuium',
+          type: 'create_pot',
+          label: 'Create jerasuium pot',
+          payload: {
+            name: 'jerasuium',
+            type: 'spending',
+            balancePence: 0,
+            targetPence: null,
+            color: '#2563eb',
+            linkedCreditCardId: null,
+            linkedDebtId: null,
+          },
+        },
+      ],
+    })
+  })
+
+  it('turns a confirm follow-up into a pot confirmation card when the previous assistant message proposed one', async () => {
+    mocks.generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        answer: "I'll propose creating a new spending pot named **jerasuium**. It won't be saved until you confirm the details.",
+        highlights: [],
+        actions: ['Confirm the pot creation if everything looks right.'],
+        confidence: 'high',
+      }),
+    })
+    const response = createResponse()
+
+    await handler(
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer firebase-token',
+        },
+        body: {
+          question: 'confirm',
+          todayIso: '2026-05-20',
+          activeView: 'pots',
+          snapshot: createSnapshot(),
+          conversationHistory: [
+            { role: 'user', content: 'Make a spending pot named jerasuium' },
+            {
+              role: 'assistant',
+              content: "I'll propose creating a new spending pot named **jerasuium**. It won't be saved until you confirm the details.",
+            },
+          ],
+        },
+      },
+      response,
+    )
+
+    expect(response.payload).toMatchObject({
+      proposedActions: [
+        {
+          id: 'create-pot-jerasuium',
+          type: 'create_pot',
+          label: 'Create jerasuium pot',
+          payload: {
+            name: 'jerasuium',
+            type: 'spending',
+            balancePence: 0,
+            targetPence: null,
+          },
+        },
+      ],
+    })
+  })
+
   it('compresses large app snapshots while preserving paycheck history for OpenRouter', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

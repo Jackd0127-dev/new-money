@@ -14,7 +14,7 @@ import {
   toIsoDate,
 } from '../src/domain/money.js'
 import type { PlannerSnapshot } from '../src/storage/repository.js'
-import type { AiProvider, PayPeriod, PotAllocation } from '../src/types/models.js'
+import type { AiProvider, PayPeriod, PotAllocation, PotType } from '../src/types/models.js'
 import { getBearerToken, getSafeErrorName, initializeFirebaseAdmin } from '../server/firebaseAdmin.js'
 import { isRequestBodyTooLarge, setSecureApiHeaders } from '../server/apiSecurity.js'
 import { readAiInstruction } from '../server/aiInstructions.js'
@@ -96,6 +96,11 @@ interface AssistantConversationMessage {
   content: string
 }
 
+interface AssistantActionFallbackContext {
+  question: string
+  conversationHistory: AssistantConversationMessage[]
+}
+
 interface CompactPromptAppContext {
   settings: Record<string, unknown>
   overview: unknown
@@ -146,6 +151,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(401).json({ error: 'Unable to verify assistant access.' })
   }
 
+  const question = body.question ?? ''
+  const conversationHistory = normalizeConversationHistory(body.conversationHistory)
   const snapshot = normalizePlannerSnapshot(body.snapshot)
   const context = buildAssistantAppContext({
     snapshot,
@@ -154,9 +161,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     todayIso,
   })
   const prompt = buildPrompt({
-    question: body.question ?? '',
+    question,
     customInstructions: snapshot.settings.aiInstructions,
-    conversationHistory: normalizeConversationHistory(body.conversationHistory),
+    conversationHistory,
     context,
   })
   const provider = snapshot.settings.aiProvider
@@ -176,6 +183,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             systemInstruction,
             prompt,
           }),
+          { question, conversationHistory },
         ),
       )
     } catch (error) {
@@ -202,7 +210,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       },
     })
 
-    return res.status(200).json(parseAssistantResponse(extractGeminiText(response)))
+    return res.status(200).json(parseAssistantResponse(extractGeminiText(response), { question, conversationHistory }))
   } catch (error) {
     logAiProviderError(provider, error)
     return res.status(502).json(createAiProviderError(provider, 'The AI provider could not complete the request.'))
@@ -918,7 +926,7 @@ function createAiProviderError(provider: AiProvider, reason: string) {
   }
 }
 
-function parseAssistantResponse(value: string): AssistantResponse {
+function parseAssistantResponse(value: string, fallbackContext?: AssistantActionFallbackContext): AssistantResponse {
   const parsed = JSON.parse(extractJsonObjectText(value)) as unknown
 
   if (!parsed || typeof parsed !== 'object') {
@@ -936,13 +944,178 @@ function parseAssistantResponse(value: string): AssistantResponse {
     getValue(response, ['proposedActions', 'proposed_actions', 'appActions', 'app_actions']),
   )
 
-  return {
+  return addFallbackProposedActions({
     answer: answer.trim(),
     highlights: normalizeStringList(getValue(response, ['highlights', 'facts', 'keyFacts'])),
     actions: normalizeStringList(getValue(response, ['actions', 'nextActions', 'next_steps'])),
     confidence: normalizeConfidence(getValue(response, ['confidence', 'certainty'])),
     ...(proposedActions.length > 0 ? { proposedActions } : {}),
+  }, fallbackContext)
+}
+
+function addFallbackProposedActions(
+  response: AssistantResponse,
+  fallbackContext?: AssistantActionFallbackContext,
+): AssistantResponse {
+  if ((response.proposedActions?.length ?? 0) > 0) {
+    return response
   }
+
+  const createPotAction = createFallbackPotAction(fallbackContext)
+
+  if (!createPotAction) {
+    return response
+  }
+
+  return {
+    ...response,
+    actions: response.actions.length > 0 ? response.actions : ['Review and confirm the suggested pot.'],
+    proposedActions: [createPotAction],
+  }
+}
+
+function createFallbackPotAction(fallbackContext?: AssistantActionFallbackContext): AssistantActionProposal | null {
+  const source = getFallbackPotActionSource(fallbackContext)
+
+  if (!source) {
+    return null
+  }
+
+  const name = extractRequestedPotName(source)
+
+  if (!name) {
+    return null
+  }
+
+  const targetPence = extractPaycheckTopUpPence(source)
+  const balancePence = extractPotBalancePence(source) ?? 0
+
+  return {
+    id: `create-pot-${slugifyActionId(name)}`,
+    type: 'create_pot',
+    label: `Create ${name} pot`,
+    payload: {
+      name,
+      type: extractRequestedPotType(source) ?? 'spending',
+      balancePence,
+      targetPence,
+      color: '#2563eb',
+      linkedCreditCardId: null,
+      linkedDebtId: null,
+    },
+  }
+}
+
+function getFallbackPotActionSource(fallbackContext?: AssistantActionFallbackContext): string {
+  if (!fallbackContext) {
+    return ''
+  }
+
+  const question = fallbackContext.question.trim()
+
+  if (isCreatePotRequest(question)) {
+    return question
+  }
+
+  if (!isConfirmationRequest(question)) {
+    return ''
+  }
+
+  const previousAssistantProposal = [...fallbackContext.conversationHistory]
+    .reverse()
+    .find((message) => message.role === 'assistant' && isCreatePotRequest(message.content))
+
+  return previousAssistantProposal?.content ?? ''
+}
+
+function isCreatePotRequest(value: string): boolean {
+  const normalised = value.toLowerCase()
+
+  return /\bpot\b/.test(normalised) && /\b(create|make|add|set up|setup|new|propos(?:e|ing|ed))\b/.test(normalised)
+}
+
+function isConfirmationRequest(value: string): boolean {
+  return /^(confirm|confirm it|yes|yep|yeah|do it|go ahead|save it|create it)$/i.test(value.trim())
+}
+
+function extractRequestedPotName(value: string): string {
+  const patterns = [
+    /\bpot\s+(?:called|named)\s+\*\*([^*]{1,80})\*\*/i,
+    /\bpot\s+(?:called|named)\s+["“']([^"”']{1,80})["”']/i,
+    /\bpot\s+(?:called|named)\s+(.+?)(?:\s+(?:with|that|and)\b|[.!?]|$)/i,
+    /\b(?:called|named)\s+\*\*([^*]{1,80})\*\*/i,
+    /\b(?:called|named)\s+["“']([^"”']{1,80})["”']/i,
+    /\b(?:called|named)\s+(.+?)(?:\s+(?:with|that|and)\b|[.!?]|$)/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = value.match(pattern)
+    const name = cleanPotName(match?.[1] ?? '')
+
+    if (name) {
+      return name
+    }
+  }
+
+  return ''
+}
+
+function extractRequestedPotType(value: string): PotType | null {
+  const normalised = value.toLowerCase()
+  const potTypes: PotType[] = ['spending', 'reserved', 'saving', 'investment', 'buffer']
+
+  return potTypes.find((type) => normalised.includes(`${type} pot`)) ?? null
+}
+
+function extractPaycheckTopUpPence(value: string): number | null {
+  if (!/\b(each|every)\s+pay(?:check|day)\b|\bpay(?:check|day)\s+top-?up\b|\btop\s+up\b/i.test(value)) {
+    return null
+  }
+
+  return extractFirstMoneyPence(value)
+}
+
+function extractPotBalancePence(value: string): number | null {
+  if (!/\b(current balance|balance|already set aside|with)\b/i.test(value)) {
+    return null
+  }
+
+  return extractFirstMoneyPence(value)
+}
+
+function extractFirstMoneyPence(value: string): number | null {
+  const match = value.match(/£\s*([\d,]+(?:\.\d{1,2})?)/)
+
+  if (!match) {
+    return null
+  }
+
+  const amount = Number(match[1].replaceAll(',', ''))
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    return null
+  }
+
+  return Math.round(amount * 100)
+}
+
+function cleanPotName(value: string): string {
+  return value
+    .replace(/\*\*/g, '')
+    .replace(/[“”"]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+will\s+not\s+be\s+saved.*$/i, '')
+    .replace(/\s+won[’']?t\s+be\s+saved.*$/i, '')
+    .trim()
+    .replace(/[.,!?]+$/g, '')
+    .slice(0, 80)
+    .trim()
+}
+
+function slugifyActionId(value: string): string {
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+  return slug || 'new-pot'
 }
 
 function extractJsonObjectText(value: string): string {

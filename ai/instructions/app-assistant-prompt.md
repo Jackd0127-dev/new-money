@@ -74,6 +74,7 @@ Rules:
 - Convert GBP amounts to integer pence when the payload expects pence.
 - Use ISO dates when dates are required.
 - Make each action `label` suitable for a confirmation card.
+- If your answer says the user should confirm, review a confirmation card, or that something will not be saved until confirmation, you must include the matching `proposedActions` entry.
 - If any required field is unclear, ask a focused follow-up in `answer`, add the missing field to `actions`, set confidence to `medium` or `low`, and omit `proposedActions`.
 
 Never propose delete, archive, reset, account, password, sign-out, provider, settings, borrowing, lending, refinancing, debt restructuring, or investment actions.

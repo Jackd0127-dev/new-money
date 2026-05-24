@@ -23,6 +23,7 @@ import {
   deleteDebtPayment,
   deleteCreditCardRepayment,
   deletePayPeriod,
+  deletePaycheckPotAllocation,
   deletePot,
   deleteRecurringPayment,
   deleteTransaction,
@@ -36,6 +37,7 @@ import {
   updateDebt,
   updateDebtReserve,
   updateCustomPayment,
+  upsertPaycheckPotAllocation,
   updatePot,
   updateRecurringPayment,
   updateSettings,
@@ -58,6 +60,7 @@ import {
   type DebtReserveUpdateInput,
   type DebtUpdateInput,
   type PaycheckPlanInput,
+  type PaycheckPotAllocationInput,
   type PlannerSnapshot,
   type PotInput,
   type PotUpdateInput,
@@ -106,6 +109,8 @@ export interface PlannerActions {
   skipDebtReserve: typeof skipDebtReserve
   applyDebtReserve: typeof applyDebtReserve
   createPaycheckPlan: typeof createPaycheckPlan
+  upsertPaycheckPotAllocation: typeof upsertPaycheckPotAllocation
+  deletePaycheckPotAllocation: typeof deletePaycheckPotAllocation
   deletePayPeriod: typeof deletePayPeriod
   resetPlannerData: typeof resetPlannerData
 }
@@ -172,6 +177,8 @@ export function usePlannerData() {
       skipDebtReserve: withRefresh(skipDebtReserve, refresh),
       applyDebtReserve: withRefresh(applyDebtReserve, refresh),
       createPaycheckPlan: withRefresh(createPaycheckPlan, refresh),
+      upsertPaycheckPotAllocation: withRefresh(upsertPaycheckPotAllocation, refresh),
+      deletePaycheckPotAllocation: withRefresh(deletePaycheckPotAllocation, refresh),
       deletePayPeriod: withRefresh(deletePayPeriod, refresh),
       resetPlannerData: withRefresh(resetPlannerData, refresh),
     }),
@@ -215,6 +222,7 @@ export type {
   DebtReserveUpdateInput,
   DebtUpdateInput,
   PaycheckPlanInput,
+  PaycheckPotAllocationInput,
   PlannerSnapshot,
   PotInput,
   PotUpdateInput,

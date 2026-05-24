@@ -66,6 +66,7 @@ function App() {
       <DashboardPage
         snapshot={snapshot}
         selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
         onPayPeriodChange={setSelectedPayPeriodId}
         onViewChange={setActiveView}
       />

@@ -420,6 +420,8 @@ function createActions(): PlannerActions {
     skipDebtReserve: vi.fn(async () => {}),
     applyDebtReserve: vi.fn(async () => {}),
     createPaycheckPlan: vi.fn(async () => {}),
+    upsertPaycheckPotAllocation: vi.fn(async () => {}),
+    deletePaycheckPotAllocation: vi.fn(async () => {}),
     deletePayPeriod: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),
   }

@@ -26,6 +26,8 @@ import {
   updateDebtReserve,
   updatePot,
   updateTransaction,
+  upsertPaycheckPotAllocation,
+  deletePaycheckPotAllocation,
 } from './repository'
 import { db } from './db'
 
@@ -99,6 +101,59 @@ describe('paycheck plan storage', () => {
     expect(snapshot.paychecks).toHaveLength(0)
     expect(snapshot.potAllocations).toHaveLength(0)
     expect(foodPot?.balancePence).toBe(0)
+  })
+
+  it('upserts paycheck checklist pot allocations into pot balances', async () => {
+    await createPaycheckPlan({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+
+    const savedSnapshot = await getPlannerSnapshot()
+    const payPeriodId = savedSnapshot.payPeriods[0].id
+    const allocationId = `dashboard-todo-${payPeriodId}-recurring-council-tax-2026-05-20`
+
+    await upsertPaycheckPotAllocation({
+      id: allocationId,
+      payPeriodId,
+      potId: 'pot-food',
+      amountPence: 14800,
+    })
+
+    let snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.potAllocations).toContainEqual(
+      expect.objectContaining({
+        id: allocationId,
+        payPeriodId,
+        potId: 'pot-food',
+        amountPence: 14800,
+        source: 'manual',
+        recurringPaymentId: null,
+      }),
+    )
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(14800)
+
+    await upsertPaycheckPotAllocation({
+      id: allocationId,
+      payPeriodId,
+      potId: 'pot-food',
+      amountPence: 20000,
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.potAllocations.find((allocation) => allocation.id === allocationId)?.amountPence).toBe(20000)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(20000)
+
+    await deletePaycheckPotAllocation(allocationId)
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.potAllocations.some((allocation) => allocation.id === allocationId)).toBe(false)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
   })
 
   it('automatically adds pot top-ups when a paycheck plan is confirmed', async () => {

@@ -62,6 +62,13 @@ export interface PaycheckPlanInput {
   allocations: Array<{ potId: string; amountPence: number }>
 }
 
+export interface PaycheckPotAllocationInput {
+  id: string
+  payPeriodId: string
+  potId: string
+  amountPence: number
+}
+
 export interface PotInput {
   name: string
   type: PotType
@@ -1164,6 +1171,78 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
       }
     },
   )
+}
+
+export async function upsertPaycheckPotAllocation(input: PaycheckPotAllocationInput): Promise<void> {
+  const timestamp = nowIso()
+  const amountPence = Math.max(0, Math.round(input.amountPence))
+
+  if (!input.id || !input.payPeriodId || !input.potId || amountPence <= 0) {
+    return
+  }
+
+  await db.transaction('rw', [db.payPeriods, db.potAllocations, db.pots], async () => {
+    const [payPeriod, pot, existingAllocation] = await Promise.all([
+      db.payPeriods.get(input.payPeriodId),
+      db.pots.get(input.potId),
+      db.potAllocations.get(input.id),
+    ])
+
+    if (!payPeriod || !pot || pot.archived) {
+      return
+    }
+
+    if (!existingAllocation) {
+      await db.potAllocations.add({
+        id: input.id,
+        payPeriodId: input.payPeriodId,
+        potId: input.potId,
+        amountPence,
+        source: 'manual',
+        recurringPaymentId: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      await addAllocationToPot(input.potId, amountPence, timestamp)
+      return
+    }
+
+    if (existingAllocation.potId !== input.potId) {
+      await removeAllocationFromPot(existingAllocation, timestamp)
+      await addAllocationToPot(input.potId, amountPence, timestamp)
+    } else {
+      await addAllocationToPot(input.potId, amountPence - existingAllocation.amountPence, timestamp)
+    }
+
+    await db.potAllocations.put({
+      ...existingAllocation,
+      payPeriodId: input.payPeriodId,
+      potId: input.potId,
+      amountPence,
+      source: 'manual',
+      recurringPaymentId: null,
+      updatedAt: timestamp,
+    })
+  })
+}
+
+export async function deletePaycheckPotAllocation(allocationId: string): Promise<void> {
+  if (!allocationId) {
+    return
+  }
+
+  const timestamp = nowIso()
+
+  await db.transaction('rw', [db.potAllocations, db.pots], async () => {
+    const allocation = await db.potAllocations.get(allocationId)
+
+    if (!allocation) {
+      return
+    }
+
+    await removeAllocationFromPot(allocation, timestamp)
+    await db.potAllocations.delete(allocation.id)
+  })
 }
 
 export async function deletePayPeriod(payPeriodId: string): Promise<void> {

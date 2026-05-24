@@ -7,7 +7,7 @@ import {
   type PeriodCostItem,
   type PayPeriodCostSummary,
 } from '../domain/money'
-import type { PlannerSnapshot } from '../hooks/usePlannerData'
+import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, MoneyMetric, Panel, SelectInput, type CalculationBreakdown } from '../components/ui'
 import type { PayPeriod } from '../types/models'
 import type { ViewKey } from '../types/navigation'
@@ -22,16 +22,27 @@ interface PaycheckTodoItem {
   label: string
   detail: string
   amountPence: number
+  completion?: PaycheckTodoCompletion
+}
+
+interface PaycheckTodoCompletion {
+  type: 'pot_allocation'
+  id: string
+  payPeriodId: string
+  potId: string
+  amountPence: number
 }
 
 export function DashboardPage({
   snapshot,
   selectedPayPeriod,
+  actions,
   onPayPeriodChange,
   onViewChange,
 }: {
   snapshot: PlannerSnapshot
   selectedPayPeriod?: PayPeriod | null
+  actions?: Pick<PlannerActions, 'upsertPaycheckPotAllocation' | 'deletePaycheckPotAllocation'>
   onPayPeriodChange?: (payPeriodId: string | null) => void
   onViewChange: (view: ViewKey) => void
 }) {
@@ -42,6 +53,7 @@ export function DashboardPage({
   const [ignoredPaymentsByPeriod, setIgnoredPaymentsByPeriod] = useState<Record<string, string[]>>(
     () => readIgnoredPayments(),
   )
+  const [pendingTodoIds, setPendingTodoIds] = useState<Set<string>>(() => new Set())
   const viewedPeriod = selectedPayPeriod ?? null
   const baseSummary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
@@ -64,18 +76,41 @@ export function DashboardPage({
   const completedTodoCount = activeTodoItems.filter((item) => completedTodoIds.has(item.id)).length
   const ignoredTodoCount = todoItems.length - activeTodoItems.length
 
-  function toggleTodo(itemId: string, done: boolean) {
+  async function toggleTodo(item: PaycheckTodoItem, done: boolean) {
     if (!viewedPeriod) {
       return
+    }
+
+    if (item.completion && actions) {
+      setPendingTodoIds((current) => new Set(current).add(item.id))
+
+      try {
+        if (done) {
+          await actions.upsertPaycheckPotAllocation({
+            id: item.completion.id,
+            payPeriodId: item.completion.payPeriodId,
+            potId: item.completion.potId,
+            amountPence: item.completion.amountPence,
+          })
+        } else {
+          await actions.deletePaycheckPotAllocation(item.completion.id)
+        }
+      } finally {
+        setPendingTodoIds((current) => {
+          const next = new Set(current)
+          next.delete(item.id)
+          return next
+        })
+      }
     }
 
     setCompletedTodosByPeriod((current) => {
       const currentIds = new Set(current[viewedPeriod.id] ?? [])
 
       if (done) {
-        currentIds.add(itemId)
+        currentIds.add(item.id)
       } else {
-        currentIds.delete(itemId)
+        currentIds.delete(item.id)
       }
 
       const next = {
@@ -223,6 +258,7 @@ export function DashboardPage({
               {todoItems.map((item) => {
                 const isDone = completedTodoIds.has(item.id)
                 const isIgnored = ignoredPaymentIds.has(item.ignoreId)
+                const isPending = pendingTodoIds.has(item.id)
 
                 return (
                   <li
@@ -242,8 +278,8 @@ export function DashboardPage({
                         className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={item.label}
                         checked={isDone && !isIgnored}
-                        disabled={isIgnored}
-                        onChange={(event) => toggleTodo(item.id, event.target.checked)}
+                        disabled={isIgnored || isPending}
+                        onChange={(event) => void toggleTodo(item, event.target.checked)}
                       />
                       <label htmlFor={`dashboard-todo-${item.id}`} className={isIgnored ? 'min-w-0 cursor-default' : 'min-w-0 cursor-pointer'}>
                         <span
@@ -485,7 +521,7 @@ function getPaycheckTodoItems(
     )
     .map((allocation) => recurringAllocationToTodoItem(allocation, snapshot))
   const todoItems = [
-    ...summary.items.flatMap((item) => periodCostItemToTodoItems(item, snapshot)),
+    ...summary.items.flatMap((item) => periodCostItemToTodoItems(item, snapshot, payPeriod)),
     ...recurringAllocationTodos,
   ]
 
@@ -505,13 +541,17 @@ function getRecurringPaymentIdFromCostItem(item: PeriodCostItem): string | null 
   return match?.[1] ?? null
 }
 
-function periodCostItemToTodoItems(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem[] {
+function periodCostItemToTodoItems(
+  item: PeriodCostItem,
+  snapshot: PlannerSnapshot,
+  payPeriod: PayPeriod,
+): PaycheckTodoItem[] {
   if (item.amountPence <= 0) {
     return []
   }
 
   if (item.source === 'recurring') {
-    return [recurringCostToTodoItem(item, snapshot)]
+    return [recurringCostToTodoItem(item, snapshot, payPeriod)]
   }
 
   if (item.source === 'saved_payment') {
@@ -523,7 +563,7 @@ function periodCostItemToTodoItems(item: PeriodCostItem, snapshot: PlannerSnapsh
   }
 
   if (item.source === 'pot_allocation') {
-    return [potAllocationCostToTodoItem(item, snapshot)]
+    return [potAllocationCostToTodoItem(item, snapshot, payPeriod)]
   }
 
   if (item.source === 'debt_reserve') {
@@ -539,7 +579,7 @@ function periodCostItemToTodoItems(item: PeriodCostItem, snapshot: PlannerSnapsh
   }
 
   if (item.source === 'linked_credit_card_pot') {
-    return [linkedCreditCardPotCostToTodoItem(item, snapshot)]
+    return [linkedCreditCardPotCostToTodoItem(item, snapshot, payPeriod)]
   }
 
   if (item.source === 'credit_card_repayment') {
@@ -570,10 +610,23 @@ function recurringAllocationToTodoItem(
   }
 }
 
-function recurringCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+function recurringCostToTodoItem(
+  item: PeriodCostItem,
+  snapshot: PlannerSnapshot,
+  payPeriod: PayPeriod,
+): PaycheckTodoItem {
   if (item.creditCardId) {
     return cardChargeCostToTodoItem(item, snapshot, 'Recurring card charge')
   }
+
+  const completion = item.potId
+    ? createPaycheckPotCompletion({
+        payPeriod,
+        potId: item.potId,
+        amountPence: item.amountPence,
+        costItemId: item.id,
+      })
+    : undefined
 
   return {
     id: `${item.id}-todo`,
@@ -584,6 +637,7 @@ function recurringCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot
       : `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
     detail: `Recurring bill due ${item.date}`,
     amountPence: item.amountPence,
+    completion,
   }
 }
 
@@ -619,14 +673,34 @@ function manualSpendCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
   }
 }
 
-function potAllocationCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+function potAllocationCostToTodoItem(
+  item: PeriodCostItem,
+  snapshot: PlannerSnapshot,
+  payPeriod: PayPeriod,
+): PaycheckTodoItem {
+  const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(item.id, payPeriod.id)
+  const todoId = sourceCostItemId ? `${sourceCostItemId}-todo` : `${item.id}-todo`
+  const completion = sourceCostItemId && item.potId
+    ? createPaycheckPotCompletion({
+        payPeriod,
+        potId: item.potId,
+        amountPence: item.amountPence,
+        costItemId: sourceCostItemId,
+      })
+    : undefined
+
   return {
-    id: `${item.id}-todo`,
+    id: todoId,
     ignoreId: item.id,
     ignoreLabel: item.label,
     label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot`,
-    detail: item.label.toLowerCase().includes('payday top-up') ? 'Automatic payday top-up' : 'Manual pot allocation',
+    detail: sourceCostItemId
+      ? 'Moved into this pot from the dashboard checklist'
+      : item.label.toLowerCase().includes('payday top-up')
+        ? 'Automatic payday top-up'
+        : 'Manual pot allocation',
     amountPence: item.amountPence,
+    completion,
   }
 }
 
@@ -670,7 +744,11 @@ function creditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnap
   }
 }
 
-function linkedCreditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapshot): PaycheckTodoItem {
+function linkedCreditCardPotCostToTodoItem(
+  item: PeriodCostItem,
+  snapshot: PlannerSnapshot,
+  payPeriod: PayPeriod,
+): PaycheckTodoItem {
   const cardName = getCardName(snapshot, item.creditCardId)
 
   return {
@@ -680,6 +758,14 @@ function linkedCreditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: Plann
     label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" card amount owed`,
     detail: 'Linked card balance still owed',
     amountPence: item.amountPence,
+    completion: item.potId
+      ? createPaycheckPotCompletion({
+          payPeriod,
+          potId: item.potId,
+          amountPence: item.amountPence,
+          costItemId: item.id,
+        })
+      : undefined,
   }
 }
 
@@ -692,6 +778,40 @@ function cardChargeCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsho
     detail,
     amountPence: item.amountPence,
   }
+}
+
+function createPaycheckPotCompletion({
+  payPeriod,
+  potId,
+  amountPence,
+  costItemId,
+}: {
+  payPeriod: PayPeriod
+  potId: string
+  amountPence: number
+  costItemId: string
+}): PaycheckTodoCompletion {
+  return {
+    type: 'pot_allocation',
+    id: getDashboardTodoAllocationId(payPeriod.id, costItemId),
+    payPeriodId: payPeriod.id,
+    potId,
+    amountPence,
+  }
+}
+
+function getDashboardTodoAllocationId(payPeriodId: string, costItemId: string): string {
+  return `dashboard-todo-${payPeriodId}-${costItemId}`
+}
+
+function getCostItemIdFromDashboardTodoAllocationId(itemId: string, payPeriodId: string): string | null {
+  const allocationPrefix = `pot-allocation-dashboard-todo-${payPeriodId}-`
+
+  if (!itemId.startsWith(allocationPrefix)) {
+    return null
+  }
+
+  return itemId.slice(allocationPrefix.length) || null
 }
 
 function getPotName(snapshot: PlannerSnapshot, potId?: string | null): string {

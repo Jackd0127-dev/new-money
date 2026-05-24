@@ -37,6 +37,8 @@ type TestActions = PlannerActions & {
   updateCreditCardRepayment: ReturnType<typeof vi.fn>
   updateCustomPayment: ReturnType<typeof vi.fn>
   updatePot: ReturnType<typeof vi.fn>
+  upsertPaycheckPotAllocation: ReturnType<typeof vi.fn>
+  deletePaycheckPotAllocation: ReturnType<typeof vi.fn>
   updateRecurringPayment: ReturnType<typeof vi.fn>
   updateTransaction: ReturnType<typeof vi.fn>
   addDebtReserve: ReturnType<typeof vi.fn>
@@ -2016,6 +2018,70 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('moves money into a pot when a dashboard set-aside is checked', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const restoreLocalStorage = mockLocalStorage()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 100000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'council-tax',
+          name: 'Council Tax',
+          amountPence: 14800,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('checkbox', { name: /Set aside £148\.00 into "Bills" pot/ }))
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'dashboard-todo-period-current-recurring-council-tax-2026-05-20',
+      payPeriodId: 'period-current',
+      potId: 'pot-bills',
+      amountPence: 14800,
+    })
+
+    restoreLocalStorage()
+  })
+
   it('ignores a checklist payment for the selected paycheck maths', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()
@@ -2617,6 +2683,8 @@ function createActions(): TestActions {
     updateSettings: vi.fn(async () => {}),
     addPot: vi.fn(async () => {}),
     updatePot: vi.fn(async () => {}),
+    upsertPaycheckPotAllocation: vi.fn(async () => {}),
+    deletePaycheckPotAllocation: vi.fn(async () => {}),
     deletePot: vi.fn(async () => {}),
     addCreditCard: vi.fn(async () => {}),
     updateCreditCard: vi.fn(async () => {}),

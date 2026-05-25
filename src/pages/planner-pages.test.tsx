@@ -413,6 +413,41 @@ describe('calendar page', () => {
     expect(screen.getByText('Card autopay')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Back to calendar' })).toBeInTheDocument()
   })
+
+  it('shows the payment breakdown inside a completed linked-card pot allocation event', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({ completed: true })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    const allocationCard = screen.getByText('Barclays allocation').closest('article')
+
+    expect(allocationCard).not.toBeNull()
+    expect(within(allocationCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£70.00')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£25.00')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£178.57')).toBeInTheDocument()
+  })
+
+  it('shows later card spend as its own calendar event after linked card cover is completed', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 24 May 2026' }))
+
+    expect(screen.getByText('Coffee')).toBeInTheDocument()
+    expect(screen.getByText('£20.00')).toBeInTheDocument()
+  })
 })
 
 describe('settings page', () => {
@@ -2827,6 +2862,129 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('keeps the full linked-card cover breakdown after the checklist item is completed', async () => {
+    const user = userEvent.setup()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({ completed: true })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={createActions()}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Show breakdown.*Barclays/ }))
+
+    const breakdown = screen.getByRole('region', { name: /Breakdown.*Barclays/ })
+
+    expect(within(breakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Fuel')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£83.57')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£70.00')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£25.00')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£178.57')).toBeInTheDocument()
+
+    restoreLocalStorage()
+  })
+
+  it('merges later Barclays card spend into the open planned cover checklist item', async () => {
+    const user = userEvent.setup()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: false,
+      extraCardSpendPence: 2000,
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={createActions()}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    const mergedItem = screen.getByRole('checkbox', {
+      name: /Set aside £198\.57 into "Barclays" pot for "Barclays" planned card cover/,
+    })
+
+    expect(mergedItem).not.toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: /Set aside £20\.00 into "Barclays" pot/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Show breakdown.*Barclays planned card cover/ }))
+
+    const breakdown = screen.getByRole('region', { name: /Breakdown.*Barclays planned card cover/ })
+
+    expect(within(breakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Coffee')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Fuel')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£20.00')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£198.57')).toBeInTheDocument()
+
+    restoreLocalStorage()
+  })
+
+  it('keeps later Barclays card spend separate and unticked after planned cover is completed', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+    })
+
+    window.localStorage.setItem(
+      'new-money.dashboard-todos.v1',
+      JSON.stringify({ 'period-current': ['linked-credit-card-pot-card-barclays-todo'] }),
+    )
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    expect(
+      screen.getByRole('checkbox', {
+        name: /Set aside £178\.57 into "Barclays" pot for "Barclays" planned card cover/,
+      }),
+    ).toBeChecked()
+
+    const extraItem = screen.getByRole('checkbox', {
+      name: /Set aside £20\.00 into "Barclays" pot for "Barclays" planned card cover/,
+    })
+
+    expect(extraItem).not.toBeChecked()
+
+    await user.click(screen.getByRole('button', { name: /Show breakdown.*Barclays additional planned card cover/ }))
+
+    const extraBreakdown = screen.getByRole('region', { name: /Breakdown.*Barclays additional planned card cover/ })
+
+    expect(within(extraBreakdown).getByText('Coffee')).toBeInTheDocument()
+    expect(within(extraBreakdown).getAllByText('£20.00')).toHaveLength(2)
+    expect(within(extraBreakdown).queryByText('Fuel')).not.toBeInTheDocument()
+    expect(within(extraBreakdown).queryByText('Gym')).not.toBeInTheDocument()
+
+    await user.click(extraItem)
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays',
+      payPeriodId: 'period-current',
+      potId: 'pot-barclays',
+      amountPence: 2000,
+    })
+
+    restoreLocalStorage()
+  })
+
   it('ignores a checklist payment for the selected paycheck maths', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()
@@ -3600,5 +3758,122 @@ function createPayPeriod(overrides: Partial<PlannerSnapshot['payPeriods'][number
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
+  }
+}
+
+function createBarclaysLinkedCardCoverFixture({
+  completed = false,
+  extraCardSpendPence = 0,
+}: {
+  completed?: boolean
+  extraCardSpendPence?: number
+} = {}): {
+  selectedPayPeriod: PlannerSnapshot['payPeriods'][number]
+  snapshot: PlannerSnapshot
+} {
+  const selectedPayPeriod = createPayPeriod({
+    id: 'period-current',
+    startDate: '2026-05-22',
+    endDate: '2026-06-04',
+    payday: '2026-05-22',
+    nextPayday: '2026-06-05',
+    incomePence: 78850,
+  })
+
+  return {
+    selectedPayPeriod,
+    snapshot: createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: completed ? 77505 : 59648,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      potAllocations: completed
+        ? [
+            {
+              id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+              payPeriodId: 'period-current',
+              potId: 'pot-barclays',
+              amountPence: 17857,
+              source: 'manual',
+              recurringPaymentId: null,
+              createdAt: '2026-05-22T00:00:00.000Z',
+              updatedAt: '2026-05-22T00:00:00.000Z',
+            },
+          ]
+        : [],
+      transactions: extraCardSpendPence > 0
+        ? [
+            {
+              id: 'txn-barclays-coffee',
+              potId: null,
+              payPeriodId: 'period-current',
+              amountPence: extraCardSpendPence,
+              type: 'spending',
+              paymentMethod: 'credit_card',
+              creditCardId: 'card-barclays',
+              recurringPaymentId: null,
+              date: '2026-05-24',
+              note: 'Coffee',
+              createdAt: '2026-05-24T10:00:00.000Z',
+              updatedAt: '2026-05-24T10:00:00.000Z',
+            },
+          ]
+        : [],
+    }),
   }
 }

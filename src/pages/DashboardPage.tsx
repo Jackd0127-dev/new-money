@@ -4,9 +4,11 @@ import { ChevronDown } from 'lucide-react'
 import {
   filterPayPeriodCostSummary,
   formatPence,
-  getCreditCardAllocationSummary,
+  getCostItemIdFromDashboardTodoPeriodCostItemId,
+  getCreditCardIdFromLinkedCreditCardPotCostItemId,
+  getDashboardTodoAllocationId,
+  getLinkedCreditCardPotCoverBreakdown,
   getPayPeriodCostSummary,
-  toIsoDate,
   type PeriodCostItem,
   type PayPeriodCostSummary,
 } from '../domain/money'
@@ -763,8 +765,11 @@ function potAllocationCostToTodoItem(
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
 ): PaycheckTodoItem {
-  const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(item.id, payPeriod.id)
+  const sourceCostItemId = getCostItemIdFromDashboardTodoPeriodCostItemId(item.id, payPeriod.id)
   const todoId = sourceCostItemId ? `${sourceCostItemId}-todo` : `${item.id}-todo`
+  const linkedCreditCardId = sourceCostItemId
+    ? getCreditCardIdFromLinkedCreditCardPotCostItemId(sourceCostItemId)
+    : null
   const completion = sourceCostItemId && item.potId
     ? createPaycheckPotCompletion({
         payPeriod,
@@ -773,6 +778,34 @@ function potAllocationCostToTodoItem(
         costItemId: sourceCostItemId,
       })
     : undefined
+
+  if (sourceCostItemId && linkedCreditCardId && item.potId) {
+    const cardName = getCardName(snapshot, linkedCreditCardId)
+
+    return {
+      id: todoId,
+      ignoreId: item.id,
+      ignoreLabel: cardName,
+      label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" planned card cover`,
+      detail: 'Moved into this pot from the dashboard checklist',
+      amountPence: item.amountPence,
+      breakdownLabel: `${cardName} planned card cover`,
+      breakdownLines: getLinkedCreditCardPotBreakdownLines(
+        {
+          ...item,
+          id: sourceCostItemId,
+          label: `${cardName} planned card cover`,
+          source: 'linked_credit_card_pot',
+          creditCardId: linkedCreditCardId,
+        },
+        snapshot,
+        payPeriod,
+        item.amountPence,
+        item.createdAt ?? undefined,
+      ),
+      completion,
+    }
+  }
 
   return {
     id: todoId,
@@ -848,15 +881,21 @@ function linkedCreditCardPotCostToTodoItem(
   payPeriod: PayPeriod,
 ): PaycheckTodoItem {
   const cardName = getCardName(snapshot, item.creditCardId)
+  const isAdditionalCover = Boolean(item.coverBreakdown)
+  const breakdownLabel = isAdditionalCover
+    ? `${cardName} additional planned card cover`
+    : `${cardName} planned card cover`
 
   return {
     id: `${item.id}-todo`,
     ignoreId: item.id,
     ignoreLabel: cardName,
     label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" planned card cover`,
-    detail: 'Current shortfall plus planned card charges before next payday',
+    detail: isAdditionalCover
+      ? 'New card costs after the previous checklist cover was completed'
+      : 'Current shortfall plus planned card charges before next payday',
     amountPence: item.amountPence,
-    breakdownLabel: `${cardName} planned card cover`,
+    breakdownLabel,
     breakdownLines: getLinkedCreditCardPotBreakdownLines(item, snapshot, payPeriod),
     completion: item.potId
       ? createPaycheckPotCompletion({
@@ -894,85 +933,43 @@ function getLinkedCreditCardPotBreakdownLines(
   item: PeriodCostItem,
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
+  excludedLinkedPotAllocationPence = 0,
+  createdBeforeOrAt?: string,
 ): PaycheckTodoBreakdownLine[] {
-  const cardSummary = getCreditCardAllocationSummary({
-    creditCards: snapshot.creditCards,
-    recurringPayments: snapshot.recurringPayments,
-    customPayments: snapshot.customPayments,
-    transactions: snapshot.transactions,
-    repayments: snapshot.creditCardRepayments,
-    creditCardPots: snapshot.creditCardPots,
-    pots: snapshot.pots,
+  const breakdownSnapshot = createdBeforeOrAt
+    ? filterSnapshotCreatedBeforeOrAt(snapshot, createdBeforeOrAt)
+    : snapshot
+  const lines = item.coverBreakdown ?? getLinkedCreditCardPotCoverBreakdown({
+    creditCards: breakdownSnapshot.creditCards,
+    recurringPayments: breakdownSnapshot.recurringPayments,
+    customPayments: breakdownSnapshot.customPayments,
+    transactions: breakdownSnapshot.transactions,
+    repayments: breakdownSnapshot.creditCardRepayments,
+    creditCardPots: breakdownSnapshot.creditCardPots,
+    pots: breakdownSnapshot.pots,
     payPeriod,
-  }).cards.find((candidate) => candidate.card.id === item.creditCardId)
+    creditCardId: item.creditCardId ?? '',
+    linkedPotId: item.potId,
+    amountPence: item.amountPence,
+    excludedLinkedPotAllocationPence,
+  })
 
-  if (!cardSummary) {
-    return [periodCostItemToBreakdownLine(item, 'Planned card cover')]
-  }
-
-  const todayIso = toIsoDate(new Date())
-  const lines: PaycheckTodoBreakdownLine[] = []
-
-  if (cardSummary.actualUncoveredPence > 0) {
-    lines.push({
-      id: `breakdown-${item.id}-current-shortfall`,
-      label: 'Current card shortfall',
-      detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
-      amountPence: cardSummary.actualUncoveredPence,
-    })
-  }
-
-  for (const cardItem of cardSummary.items.filter((cardItem) => isForecastCardBreakdownItem(cardItem, todayIso))) {
-    lines.push({
-      id: `breakdown-${item.id}-${cardItem.id}`,
-      label: cardItem.label,
-      detail: getCardBreakdownDetail(cardItem),
-      amountPence: cardItem.amountPence,
-    })
-  }
-
-  const lineTotalPence = lines.reduce((total, line) => total + line.amountPence, 0)
-  const adjustmentPence = item.amountPence - lineTotalPence
-
-  if (adjustmentPence !== 0) {
-    lines.push({
-      id: `breakdown-${item.id}-cover-adjustment`,
-      label: adjustmentPence < 0 ? 'Existing card cover already set aside' : 'Additional forecast cover',
-      detail: 'Linked pot balance and active card reserves are applied before this paycheck top-up',
-      amountPence: adjustmentPence,
-    })
-  }
-
-  return lines.length > 0 ? lines : [periodCostItemToBreakdownLine(item, 'Planned card cover')]
+  return lines.map((line) => ({
+    id: `breakdown-${item.id}-${line.id}`,
+    label: line.label,
+    detail: line.detail,
+    amountPence: line.amountPence,
+  }))
 }
 
-function isForecastCardBreakdownItem(
-  item: ReturnType<typeof getCreditCardAllocationSummary>['cards'][number]['items'][number],
-  todayIso: string,
-): boolean {
-  if (item.source === 'recurring' || item.source === 'custom') {
-    return true
+function filterSnapshotCreatedBeforeOrAt(snapshot: PlannerSnapshot, cutoffTimestamp: string): PlannerSnapshot {
+  return {
+    ...snapshot,
+    recurringPayments: snapshot.recurringPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
+    customPayments: snapshot.customPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
+    transactions: snapshot.transactions.filter((transaction) => transaction.createdAt <= cutoffTimestamp),
+    creditCardRepayments: snapshot.creditCardRepayments.filter((repayment) => repayment.createdAt <= cutoffTimestamp),
   }
-
-  return item.date > todayIso
-}
-
-function getCardBreakdownDetail(
-  item: ReturnType<typeof getCreditCardAllocationSummary>['cards'][number]['items'][number],
-): string {
-  if (item.source === 'recurring') {
-    return `Recurring card charge due ${item.date}`
-  }
-
-  if (item.source === 'custom') {
-    return `Saved card payment due ${item.date}`
-  }
-
-  if (item.source === 'repayment') {
-    return `Planned card repayment on ${item.date}`
-  }
-
-  return `Logged card spend on ${item.date}`
 }
 
 function createPaycheckPotCompletion({
@@ -993,20 +990,6 @@ function createPaycheckPotCompletion({
     potId,
     amountPence,
   }
-}
-
-function getDashboardTodoAllocationId(payPeriodId: string, costItemId: string): string {
-  return `dashboard-todo-${payPeriodId}-${costItemId}`
-}
-
-function getCostItemIdFromDashboardTodoAllocationId(itemId: string, payPeriodId: string): string | null {
-  const allocationPrefix = `pot-allocation-dashboard-todo-${payPeriodId}-`
-
-  if (!itemId.startsWith(allocationPrefix)) {
-    return null
-  }
-
-  return itemId.slice(allocationPrefix.length) || null
 }
 
 function getPotName(snapshot: PlannerSnapshot, potId?: string | null): string {

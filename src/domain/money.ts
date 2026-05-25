@@ -105,6 +105,8 @@ export interface PeriodCostItem {
   source: PeriodCostItemSource
   creditCardId?: string | null
   potId?: string | null
+  createdAt?: string | null
+  coverBreakdown?: LinkedCreditCardPotCoverBreakdownItem[]
 }
 
 export interface PayPeriodCostSummary {
@@ -248,6 +250,31 @@ export interface CreditCardAllocationSummary {
   totalRemainingAfterCreditPotsPence: number
   payReceivedPence: number
   paycheckRemainingAfterCardsPence: number
+}
+
+interface LinkedCreditCardPotCoverBreakdownInput {
+  creditCards: CreditCard[]
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  repayments: CreditCardRepayment[]
+  creditCardPots?: CreditCardPot[]
+  pots: Pot[]
+  payPeriod: PayPeriod
+  creditCardId: string
+  linkedPotId?: string | null
+  amountPence: number
+  excludedLinkedPotAllocationPence?: number
+  asOfDate?: string
+}
+
+export interface LinkedCreditCardPotCoverBreakdownItem {
+  id: string
+  label: string
+  detail: string
+  amountPence: number
+  date: string
+  source: 'current_shortfall' | CreditCardAllocationItem['source'] | 'adjustment'
 }
 
 export function calculatePaycheckAmount({
@@ -529,6 +556,7 @@ export function getPayPeriodCostSummary({
         source: 'pot_allocation' as const,
         creditCardId: null,
         potId: allocation.potId,
+        createdAt: allocation.createdAt,
       }
     })
   const debtReserveItems = debtReserves
@@ -605,6 +633,14 @@ export function getPayPeriodCostSummary({
       .map((pot) => pot.linkedCreditCardId)
       .filter((cardId): cardId is string => typeof cardId === 'string' && activeCreditCardIds.has(cardId)),
   )
+  const completedLinkedCardAllocationByCardId = new Map(
+    [...linkedCreditCardIds]
+      .map((creditCardId) => [
+        creditCardId,
+        getCompletedLinkedCreditCardPotAllocation(potAllocations, payPeriod.id, creditCardId),
+      ] as const)
+      .filter((entry): entry is readonly [string, PotAllocation] => Boolean(entry[1])),
+  )
   const linkedCreditCardPotItems = linkedCreditCardIds.size > 0
     ? getCreditCardAllocationSummary({
         creditCards,
@@ -626,15 +662,32 @@ export function getPayPeriodCostSummary({
           return []
         }
 
+        const completedAllocation = completedLinkedCardAllocationByCardId.get(cardSummary.card.id) ?? null
+        const isAdditionalCover = Boolean(completedAllocation)
+        const itemId = isAdditionalCover
+          ? getAdditionalLinkedCreditCardPotCostItemId(cardSummary.card.id)
+          : getLinkedCreditCardPotCostItemId(cardSummary.card.id)
+
         return [
           {
-            id: `linked-credit-card-pot-${cardSummary.card.id}`,
+            id: itemId,
             label: `${cardSummary.card.name} planned card cover`,
             amountPence: cardSummary.plannedTopUpNeededPence,
             date: payPeriod.payday,
             source: 'linked_credit_card_pot' as const,
             creditCardId: cardSummary.card.id,
             potId: linkedPot.id,
+            coverBreakdown: completedAllocation
+              ? getAdditionalLinkedCreditCardPotCoverBreakdown({
+                  recurringPayments,
+                  customPayments,
+                  transactions,
+                  payPeriod,
+                  creditCardId: cardSummary.card.id,
+                  amountPence: cardSummary.plannedTopUpNeededPence,
+                  completedAllocation,
+                })
+              : undefined,
           },
         ]
       })
@@ -944,6 +997,354 @@ export function getCreditCardAllocationSummary({
   }
 }
 
+export function getLinkedCreditCardPotCoverBreakdown({
+  creditCards,
+  recurringPayments,
+  customPayments,
+  transactions,
+  repayments,
+  creditCardPots = [],
+  pots,
+  payPeriod,
+  creditCardId,
+  linkedPotId,
+  amountPence,
+  excludedLinkedPotAllocationPence = 0,
+  asOfDate,
+}: LinkedCreditCardPotCoverBreakdownInput): LinkedCreditCardPotCoverBreakdownItem[] {
+  const todayIso = asOfDate ?? toIsoDate(new Date())
+  const adjustedPots =
+    linkedPotId && excludedLinkedPotAllocationPence > 0
+      ? pots.map((pot) =>
+          pot.id === linkedPotId
+            ? { ...pot, balancePence: Math.max(0, pot.balancePence - excludedLinkedPotAllocationPence) }
+            : pot,
+        )
+      : pots
+  const cardSummary = getCreditCardAllocationSummary({
+    creditCards,
+    recurringPayments,
+    customPayments,
+    transactions,
+    repayments,
+    creditCardPots,
+    pots: adjustedPots,
+    payPeriod,
+    asOfDate: todayIso,
+  }).cards.find((candidate) => candidate.card.id === creditCardId)
+
+  if (!cardSummary) {
+    return [
+      {
+        id: 'planned-card-cover',
+        label: 'Planned card cover',
+        detail: 'Linked credit card cover',
+        amountPence,
+        date: payPeriod.payday,
+        source: 'adjustment',
+      },
+    ]
+  }
+
+  const lines: LinkedCreditCardPotCoverBreakdownItem[] = []
+
+  if (cardSummary.actualUncoveredPence > 0) {
+    let remainingActualUncoveredPence = cardSummary.actualUncoveredPence
+    const postedSpendItems = cardSummary.balanceItems.filter(
+      (cardItem) =>
+        cardItem.source === 'spending' &&
+        cardItem.amountPence > 0 &&
+        cardItem.date >= payPeriod.startDate &&
+        cardItem.date <= todayIso,
+    )
+    const postedSpendPence = postedSpendItems.reduce((total, cardItem) => total + cardItem.amountPence, 0)
+    const existingShortfallPence = Math.max(0, remainingActualUncoveredPence - postedSpendPence)
+
+    if (existingShortfallPence > 0) {
+      lines.push({
+        id: 'current-shortfall',
+        label: 'Current card shortfall',
+        detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
+        amountPence: existingShortfallPence,
+        date: payPeriod.payday,
+        source: 'current_shortfall',
+      })
+      remainingActualUncoveredPence -= existingShortfallPence
+    }
+
+    for (const cardItem of postedSpendItems) {
+      if (remainingActualUncoveredPence <= 0) {
+        break
+      }
+
+      const uncoveredSpendPence = Math.min(cardItem.amountPence, remainingActualUncoveredPence)
+
+      if (uncoveredSpendPence > 0) {
+        lines.push({
+          id: cardItem.id,
+          label: cardItem.label,
+          detail: getCreditCardCoverBreakdownDetail(cardItem),
+          amountPence: uncoveredSpendPence,
+          date: cardItem.date,
+          source: cardItem.source,
+        })
+        remainingActualUncoveredPence -= uncoveredSpendPence
+      }
+    }
+
+    if (remainingActualUncoveredPence > 0) {
+      lines.push({
+        id: 'current-shortfall',
+        label: 'Current card shortfall',
+        detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
+        amountPence: remainingActualUncoveredPence,
+        date: payPeriod.payday,
+        source: 'current_shortfall',
+      })
+    }
+  }
+
+  for (const cardItem of getForecastCreditCardItems(cardSummary.items, todayIso)) {
+    lines.push({
+      id: cardItem.id,
+      label: cardItem.label,
+      detail: getCreditCardCoverBreakdownDetail(cardItem),
+      amountPence: cardItem.amountPence,
+      date: cardItem.date,
+      source: cardItem.source,
+    })
+  }
+
+  const lineTotalPence = lines.reduce((total, line) => total + line.amountPence, 0)
+  const adjustmentPence = amountPence - lineTotalPence
+
+  if (adjustmentPence !== 0) {
+    lines.push({
+      id: 'cover-adjustment',
+      label: adjustmentPence < 0 ? 'Existing card cover already set aside' : 'Additional forecast cover',
+      detail: 'Linked pot balance and active card reserves are applied before this paycheck top-up',
+      amountPence: adjustmentPence,
+      date: payPeriod.payday,
+      source: 'adjustment',
+    })
+  }
+
+  return lines.length > 0
+    ? lines
+    : [
+        {
+          id: 'planned-card-cover',
+          label: 'Planned card cover',
+          detail: 'Linked credit card cover',
+          amountPence,
+          date: payPeriod.payday,
+          source: 'adjustment',
+        },
+      ]
+}
+
+function getAdditionalLinkedCreditCardPotCoverBreakdown({
+  recurringPayments,
+  customPayments,
+  transactions,
+  payPeriod,
+  creditCardId,
+  amountPence,
+  completedAllocation,
+}: {
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  payPeriod: PayPeriod
+  creditCardId: string
+  amountPence: number
+  completedAllocation: PotAllocation
+}): LinkedCreditCardPotCoverBreakdownItem[] {
+  const cutoffTimestamp = completedAllocation.updatedAt || completedAllocation.createdAt
+  const recurringLines = getRecurringPaymentOccurrences(
+    recurringPayments.filter(
+      (payment) =>
+        payment.creditCardId === creditCardId &&
+        isCreatedAfter(payment, cutoffTimestamp),
+    ),
+    payPeriod.startDate,
+    payPeriod.endDate,
+  ).map((occurrence) => ({
+    id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+    label: occurrence.payment.name,
+    detail: `Recurring card charge due ${occurrence.dueDate}`,
+    amountPence: occurrence.amountPence,
+    date: occurrence.dueDate,
+    source: 'recurring' as const,
+  }))
+  const savedLines = customPayments
+    .filter(
+      (payment) =>
+        payment.status === 'unpaid' &&
+        payment.creditCardId === creditCardId &&
+        payment.dueDate >= payPeriod.startDate &&
+        payment.dueDate <= payPeriod.endDate &&
+        isCreatedAfter(payment, cutoffTimestamp),
+    )
+    .map((payment) => ({
+      id: `custom-${payment.id}`,
+      label: payment.name,
+      detail: `Saved card payment due ${payment.dueDate}`,
+      amountPence: payment.amountPence,
+      date: payment.dueDate,
+      source: 'custom' as const,
+    }))
+  const spendingLines = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === 'spending' &&
+        transaction.paymentMethod === 'credit_card' &&
+        transaction.creditCardId === creditCardId &&
+        !transaction.recurringPaymentId &&
+        transaction.date >= payPeriod.startDate &&
+        transaction.date <= payPeriod.endDate &&
+        isCreatedAfter(transaction, cutoffTimestamp),
+    )
+    .map((transaction) => ({
+      id: `transaction-${transaction.id}`,
+      label: transaction.note || 'Manual spend',
+      detail: `Logged card spend on ${transaction.date}`,
+      amountPence: transaction.amountPence,
+      date: transaction.date,
+      source: 'spending' as const,
+    }))
+  const lines = [...recurringLines, ...savedLines, ...spendingLines].sort(sortCoverBreakdownItems)
+  const cappedLines = capCoverBreakdownLinesToAmount(lines, amountPence)
+  const cappedTotalPence = cappedLines.reduce((total, line) => total + line.amountPence, 0)
+  const adjustmentPence = amountPence - cappedTotalPence
+
+  if (adjustmentPence > 0) {
+    cappedLines.push({
+      id: 'additional-card-cover',
+      label: 'Additional card cover',
+      detail: 'New card costs after the previous checklist cover was completed',
+      amountPence: adjustmentPence,
+      date: payPeriod.payday,
+      source: 'adjustment',
+    })
+  }
+
+  return cappedLines.length > 0
+    ? cappedLines
+    : [
+        {
+          id: 'additional-card-cover',
+          label: 'Additional card cover',
+          detail: 'New card costs after the previous checklist cover was completed',
+          amountPence,
+          date: payPeriod.payday,
+          source: 'adjustment',
+        },
+      ]
+}
+
+function capCoverBreakdownLinesToAmount(
+  lines: LinkedCreditCardPotCoverBreakdownItem[],
+  amountPence: number,
+): LinkedCreditCardPotCoverBreakdownItem[] {
+  let remainingPence = amountPence
+  const cappedLines: LinkedCreditCardPotCoverBreakdownItem[] = []
+
+  for (const line of lines) {
+    if (remainingPence <= 0) {
+      break
+    }
+
+    const lineAmountPence = Math.min(line.amountPence, remainingPence)
+
+    if (lineAmountPence > 0) {
+      cappedLines.push({
+        ...line,
+        amountPence: lineAmountPence,
+      })
+      remainingPence -= lineAmountPence
+    }
+  }
+
+  return cappedLines
+}
+
+function sortCoverBreakdownItems(
+  a: LinkedCreditCardPotCoverBreakdownItem,
+  b: LinkedCreditCardPotCoverBreakdownItem,
+): number {
+  const dateSort = a.date.localeCompare(b.date)
+
+  if (dateSort !== 0) {
+    return dateSort
+  }
+
+  return a.label.localeCompare(b.label)
+}
+
+function isCreatedAfter(
+  record: Pick<RecurringPayment | CustomPayment | Transaction, 'createdAt' | 'updatedAt'>,
+  cutoffTimestamp: string,
+): boolean {
+  return (record.createdAt || record.updatedAt) > cutoffTimestamp
+}
+
+function getLinkedCreditCardPotCostItemId(creditCardId: string): string {
+  return `linked-credit-card-pot-${creditCardId}`
+}
+
+function getAdditionalLinkedCreditCardPotCostItemId(creditCardId: string): string {
+  return `linked-credit-card-pot-additional-${creditCardId}`
+}
+
+export function getCompletedLinkedCreditCardPotAllocation(
+  potAllocations: PotAllocation[],
+  payPeriodId: string,
+  creditCardId: string,
+): PotAllocation | null {
+  const allocationId = getDashboardTodoAllocationId(payPeriodId, getLinkedCreditCardPotCostItemId(creditCardId))
+
+  return potAllocations.find((allocation) => allocation.id === allocationId && allocation.amountPence > 0) ?? null
+}
+
+export function getDashboardTodoAllocationId(payPeriodId: string, costItemId: string): string {
+  return `dashboard-todo-${payPeriodId}-${costItemId}`
+}
+
+export function getCostItemIdFromDashboardTodoAllocationId(allocationId: string, payPeriodId: string): string | null {
+  const allocationPrefix = `dashboard-todo-${payPeriodId}-`
+
+  if (!allocationId.startsWith(allocationPrefix)) {
+    return null
+  }
+
+  return allocationId.slice(allocationPrefix.length) || null
+}
+
+export function getCostItemIdFromDashboardTodoPeriodCostItemId(itemId: string, payPeriodId: string): string | null {
+  const potAllocationPrefix = 'pot-allocation-'
+  const allocationId = itemId.startsWith(potAllocationPrefix)
+    ? itemId.slice(potAllocationPrefix.length)
+    : itemId
+
+  return getCostItemIdFromDashboardTodoAllocationId(allocationId, payPeriodId)
+}
+
+export function getCreditCardIdFromLinkedCreditCardPotCostItemId(costItemId: string): string | null {
+  const additionalLinkedCardPotPrefix = 'linked-credit-card-pot-additional-'
+  const linkedCardPotPrefix = 'linked-credit-card-pot-'
+
+  if (costItemId.startsWith(additionalLinkedCardPotPrefix)) {
+    return costItemId.slice(additionalLinkedCardPotPrefix.length) || null
+  }
+
+  if (!costItemId.startsWith(linkedCardPotPrefix)) {
+    return null
+  }
+
+  return costItemId.slice(linkedCardPotPrefix.length) || null
+}
+
 function getActualCreditCardBalanceItems({
   card,
   transactions,
@@ -1002,6 +1403,22 @@ function getForecastCreditCardItems(
 
     return item.date > asOfDate
   })
+}
+
+function getCreditCardCoverBreakdownDetail(item: CreditCardAllocationItem): string {
+  if (item.source === 'recurring') {
+    return `Recurring card charge due ${item.date}`
+  }
+
+  if (item.source === 'custom') {
+    return `Saved card payment due ${item.date}`
+  }
+
+  if (item.source === 'repayment') {
+    return `Planned card repayment on ${item.date}`
+  }
+
+  return `Logged card spend on ${item.date}`
 }
 
 function getCreditCardOpeningBalancePence(card: CreditCard): number {

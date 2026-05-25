@@ -17,13 +17,17 @@ import {
   addIsoDays,
   findPayPeriodForDate,
   formatPence,
+  getCostItemIdFromDashboardTodoAllocationId,
+  getCompletedLinkedCreditCardPotAllocation,
+  getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
+  getLinkedCreditCardPotCoverBreakdown,
   getPayPeriodCostSummary,
   getRecurringPaymentOccurrences,
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
-import type { PayPeriod } from '../types/models'
+import type { PayPeriod, Transaction } from '../types/models'
 import { Button, Panel, SectionGrid } from '../components/ui'
 
 type CalendarEventType =
@@ -718,6 +722,8 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         return []
       }
 
+      const breakdown = getPotAllocationEventBreakdown(snapshot, allocation, period)
+
       return [{
         id: `allocation-${allocation.id}`,
         date: period.payday,
@@ -730,6 +736,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         type: 'allocation' as const,
         direction: allocation.source === 'recurring' ? 'info' as const : 'out' as const,
         description: `${allocation.source === 'recurring' ? 'Bill reserve' : allocation.source === 'pot_auto' ? 'Automatic payday top-up' : 'Manual allocation'} for ${period.startDate} to ${period.endDate}.`,
+        breakdown,
       }]
     })
   const spendingEvents: CalendarEvent[] = snapshot.transactions
@@ -737,7 +744,10 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       (transaction) =>
         transaction.type === 'spending' &&
         !transaction.recurringPaymentId &&
-        !(transaction.paymentMethod === 'credit_card' && isLinkedToActiveCard(transaction.creditCardId, activeCardIds)) &&
+        (
+          !(transaction.paymentMethod === 'credit_card' && isLinkedToActiveCard(transaction.creditCardId, activeCardIds)) ||
+          isLinkedCardSpendAfterCompletedCover(snapshot, transaction, periodById)
+        ) &&
         transaction.date >= startDate &&
         transaction.date <= endDate,
     )
@@ -779,8 +789,63 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
   })
 }
 
+function getPotAllocationEventBreakdown(
+  snapshot: PlannerSnapshot,
+  allocation: PlannerSnapshot['potAllocations'][number],
+  payPeriod: PayPeriod,
+): CalendarEventBreakdownItem[] | undefined {
+  const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, allocation.payPeriodId)
+  const linkedCreditCardId = sourceCostItemId
+    ? getCreditCardIdFromLinkedCreditCardPotCostItemId(sourceCostItemId)
+    : null
+
+  if (!linkedCreditCardId) {
+    return undefined
+  }
+
+  return getLinkedCreditCardPotCoverBreakdown({
+    creditCards: snapshot.creditCards,
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    repayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
+    pots: snapshot.pots,
+    payPeriod,
+    creditCardId: linkedCreditCardId,
+    linkedPotId: allocation.potId,
+    amountPence: allocation.amountPence,
+    excludedLinkedPotAllocationPence: allocation.amountPence,
+  }).map((line) => ({
+    id: `allocation-${allocation.id}-${line.id}`,
+    label: line.label,
+    amountPence: line.amountPence,
+    date: line.date,
+    source: line.detail,
+  }))
+}
+
 function isLinkedToActiveCard(creditCardId: string | null | undefined, activeCardIds: Set<string>): boolean {
   return Boolean(creditCardId && activeCardIds.has(creditCardId))
+}
+
+function isLinkedCardSpendAfterCompletedCover(
+  snapshot: PlannerSnapshot,
+  transaction: Transaction,
+  periodById: Map<string, PayPeriod>,
+): boolean {
+  if (transaction.paymentMethod !== 'credit_card' || !transaction.creditCardId) {
+    return false
+  }
+
+  const period = transaction.payPeriodId
+    ? periodById.get(transaction.payPeriodId) ?? findPayPeriodForDate(snapshot.payPeriods, transaction.date)
+    : findPayPeriodForDate(snapshot.payPeriods, transaction.date)
+  const completedAllocation = period
+    ? getCompletedLinkedCreditCardPotAllocation(snapshot.potAllocations, period.id, transaction.creditCardId)
+    : null
+
+  return Boolean(completedAllocation && transaction.createdAt > completedAllocation.createdAt)
 }
 
 function getCardPaymentBreakdown(

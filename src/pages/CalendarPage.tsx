@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import {
   Banknote,
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -18,12 +19,15 @@ import {
   findPayPeriodForDate,
   formatPence,
   getCostItemIdFromDashboardTodoAllocationId,
+  getAdditionalLinkedCreditCardPotCoverBreakdown,
   getCompletedLinkedCreditCardPotAllocation,
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
+  getLinkedCreditCardPotAllocationExclusionPence,
   getLinkedCreditCardPotCoverBreakdown,
   getPayPeriodCostSummary,
   getRecurringPaymentOccurrences,
+  isAdditionalLinkedCreditCardPotCostItemId,
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
@@ -448,13 +452,17 @@ function CalendarDayDetails({
 }
 
 function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
   const style = eventStyles[event.type]
   const Icon = style.icon
+  const hasBreakdown = Boolean(event.breakdown && event.breakdown.length > 0)
   const breakdownTotalPence = event.breakdown?.reduce((total, item) => total + item.amountPence, 0) ?? 0
+  const breakdownId = `calendar-event-breakdown-${event.id}`
+  const breakdownLabel = `${event.title} ${formatEventAmount(event)}`
 
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto] sm:items-center">
         <div className={`flex size-11 items-center justify-center rounded-lg border ${style.className}`}>
           <Icon size={19} />
         </div>
@@ -476,10 +484,26 @@ function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
         >
           {formatEventAmount(event)}
         </p>
+        {hasBreakdown && (
+          <button
+            type="button"
+            aria-label={`${isBreakdownOpen ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
+            aria-expanded={isBreakdownOpen}
+            aria-controls={breakdownId}
+            onClick={() => setIsBreakdownOpen((current) => !current)}
+            className="inline-flex min-h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            <ChevronDown
+              size={16}
+              aria-hidden="true"
+              className={isBreakdownOpen ? 'rotate-180 transition' : 'transition'}
+            />
+          </button>
+        )}
       </div>
 
-      {event.breakdown && event.breakdown.length > 0 && (
-        <div className="mt-3 border-t border-slate-100 pt-3">
+      {hasBreakdown && isBreakdownOpen && event.breakdown && (
+        <div id={breakdownId} role="region" aria-label={`Breakdown for ${breakdownLabel}`} className="mt-3 border-t border-slate-100 pt-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Breakdown</p>
           <div className="mt-2 divide-y divide-slate-100">
             {event.breakdown.map((item) => (
@@ -799,30 +823,87 @@ function getPotAllocationEventBreakdown(
     ? getCreditCardIdFromLinkedCreditCardPotCostItemId(sourceCostItemId)
     : null
 
-  if (!linkedCreditCardId) {
+  if (!sourceCostItemId || !linkedCreditCardId) {
     return undefined
   }
 
-  return getLinkedCreditCardPotCoverBreakdown({
-    creditCards: snapshot.creditCards,
-    recurringPayments: snapshot.recurringPayments,
-    customPayments: snapshot.customPayments,
-    transactions: snapshot.transactions,
-    repayments: snapshot.creditCardRepayments,
-    creditCardPots: snapshot.creditCardPots,
-    pots: snapshot.pots,
-    payPeriod,
-    creditCardId: linkedCreditCardId,
-    linkedPotId: allocation.potId,
-    amountPence: allocation.amountPence,
-    excludedLinkedPotAllocationPence: allocation.amountPence,
-  }).map((line) => ({
+  const lines = isAdditionalLinkedCreditCardPotCostItemId(sourceCostItemId)
+    ? getAdditionalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId)
+    : getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId)
+
+  return lines.map((line) => ({
     id: `allocation-${allocation.id}-${line.id}`,
     label: line.label,
     amountPence: line.amountPence,
     date: line.date,
     source: line.detail,
   }))
+}
+
+function getHistoricalLinkedCreditCardPotAllocationBreakdown(
+  snapshot: PlannerSnapshot,
+  allocation: PlannerSnapshot['potAllocations'][number],
+  payPeriod: PayPeriod,
+  linkedCreditCardId: string,
+) {
+  const breakdownSnapshot = filterSnapshotCreatedBeforeOrAt(snapshot, allocation.createdAt)
+
+  return getLinkedCreditCardPotCoverBreakdown({
+    creditCards: breakdownSnapshot.creditCards,
+    recurringPayments: breakdownSnapshot.recurringPayments,
+    customPayments: breakdownSnapshot.customPayments,
+    transactions: breakdownSnapshot.transactions,
+    repayments: breakdownSnapshot.creditCardRepayments,
+    creditCardPots: breakdownSnapshot.creditCardPots,
+    pots: breakdownSnapshot.pots,
+    payPeriod,
+    creditCardId: linkedCreditCardId,
+    linkedPotId: allocation.potId,
+    amountPence: allocation.amountPence,
+    excludedLinkedPotAllocationPence: getLinkedCreditCardPotAllocationExclusionPence(
+      snapshot.potAllocations,
+      payPeriod.id,
+      allocation.potId,
+      allocation.createdAt,
+    ) || allocation.amountPence,
+  })
+}
+
+function getAdditionalLinkedCreditCardPotAllocationBreakdown(
+  snapshot: PlannerSnapshot,
+  allocation: PlannerSnapshot['potAllocations'][number],
+  payPeriod: PayPeriod,
+  linkedCreditCardId: string,
+) {
+  const completedAllocation = getCompletedLinkedCreditCardPotAllocation(
+    snapshot.potAllocations,
+    payPeriod.id,
+    linkedCreditCardId,
+  )
+
+  if (!completedAllocation) {
+    return getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId)
+  }
+
+  return getAdditionalLinkedCreditCardPotCoverBreakdown({
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    payPeriod,
+    creditCardId: linkedCreditCardId,
+    amountPence: allocation.amountPence,
+    completedAllocation,
+  })
+}
+
+function filterSnapshotCreatedBeforeOrAt(snapshot: PlannerSnapshot, cutoffTimestamp: string): PlannerSnapshot {
+  return {
+    ...snapshot,
+    recurringPayments: snapshot.recurringPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
+    customPayments: snapshot.customPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
+    transactions: snapshot.transactions.filter((transaction) => transaction.createdAt <= cutoffTimestamp),
+    creditCardRepayments: snapshot.creditCardRepayments.filter((repayment) => repayment.createdAt <= cutoffTimestamp),
+  }
 }
 
 function isLinkedToActiveCard(creditCardId: string | null | undefined, activeCardIds: Set<string>): boolean {

@@ -1143,7 +1143,7 @@ export function getLinkedCreditCardPotCoverBreakdown({
       ]
 }
 
-function getAdditionalLinkedCreditCardPotCoverBreakdown({
+export function getAdditionalLinkedCreditCardPotCoverBreakdown({
   recurringPayments,
   customPayments,
   transactions,
@@ -1295,6 +1295,35 @@ function getLinkedCreditCardPotCostItemId(creditCardId: string): string {
 
 function getAdditionalLinkedCreditCardPotCostItemId(creditCardId: string): string {
   return `linked-credit-card-pot-additional-${creditCardId}`
+}
+
+export function isAdditionalLinkedCreditCardPotCostItemId(costItemId: string): boolean {
+  return costItemId.startsWith('linked-credit-card-pot-additional-')
+}
+
+export function getLinkedCreditCardPotAllocationExclusionPence(
+  potAllocations: PotAllocation[],
+  payPeriodId: string,
+  potId: string | null | undefined,
+  allocationCreatedAt: string | null | undefined,
+): number {
+  if (!potId || !allocationCreatedAt) {
+    return 0
+  }
+
+  return potAllocations
+    .filter((allocation) => {
+      const costItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, payPeriodId)
+
+      return (
+        allocation.payPeriodId === payPeriodId &&
+        allocation.potId === potId &&
+        allocation.amountPence > 0 &&
+        allocation.createdAt >= allocationCreatedAt &&
+        Boolean(costItemId && getCreditCardIdFromLinkedCreditCardPotCostItemId(costItemId))
+      )
+    })
+    .reduce((total, allocation) => total + allocation.amountPence, 0)
 }
 
 export function getCompletedLinkedCreditCardPotAllocation(

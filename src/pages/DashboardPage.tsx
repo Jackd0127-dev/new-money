@@ -5,10 +5,14 @@ import {
   filterPayPeriodCostSummary,
   formatPence,
   getCostItemIdFromDashboardTodoPeriodCostItemId,
+  getAdditionalLinkedCreditCardPotCoverBreakdown,
+  getCompletedLinkedCreditCardPotAllocation,
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getDashboardTodoAllocationId,
+  getLinkedCreditCardPotAllocationExclusionPence,
   getLinkedCreditCardPotCoverBreakdown,
   getPayPeriodCostSummary,
+  isAdditionalLinkedCreditCardPotCostItemId,
   type PeriodCostItem,
   type PayPeriodCostSummary,
 } from '../domain/money'
@@ -781,6 +785,44 @@ function potAllocationCostToTodoItem(
 
   if (sourceCostItemId && linkedCreditCardId && item.potId) {
     const cardName = getCardName(snapshot, linkedCreditCardId)
+    const isAdditionalCover = isAdditionalLinkedCreditCardPotCostItemId(sourceCostItemId)
+    const breakdownLabel = isAdditionalCover
+      ? `${cardName} additional planned card cover`
+      : `${cardName} planned card cover`
+    const completedAllocation = isAdditionalCover
+      ? getCompletedLinkedCreditCardPotAllocation(snapshot.potAllocations, payPeriod.id, linkedCreditCardId)
+      : null
+    const breakdownLines = isAdditionalCover && completedAllocation
+      ? mapLinkedCreditCardPotCoverBreakdownLines(
+          sourceCostItemId,
+          getAdditionalLinkedCreditCardPotCoverBreakdown({
+            recurringPayments: snapshot.recurringPayments,
+            customPayments: snapshot.customPayments,
+            transactions: snapshot.transactions,
+            payPeriod,
+            creditCardId: linkedCreditCardId,
+            amountPence: item.amountPence,
+            completedAllocation,
+          }),
+        )
+      : getLinkedCreditCardPotBreakdownLines(
+          {
+            ...item,
+            id: sourceCostItemId,
+            label: `${cardName} planned card cover`,
+            source: 'linked_credit_card_pot',
+            creditCardId: linkedCreditCardId,
+          },
+          snapshot,
+          payPeriod,
+          getLinkedCreditCardPotAllocationExclusionPence(
+            snapshot.potAllocations,
+            payPeriod.id,
+            item.potId,
+            item.createdAt,
+          ) || item.amountPence,
+          item.createdAt ?? undefined,
+        )
 
     return {
       id: todoId,
@@ -789,20 +831,8 @@ function potAllocationCostToTodoItem(
       label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" planned card cover`,
       detail: 'Moved into this pot from the dashboard checklist',
       amountPence: item.amountPence,
-      breakdownLabel: `${cardName} planned card cover`,
-      breakdownLines: getLinkedCreditCardPotBreakdownLines(
-        {
-          ...item,
-          id: sourceCostItemId,
-          label: `${cardName} planned card cover`,
-          source: 'linked_credit_card_pot',
-          creditCardId: linkedCreditCardId,
-        },
-        snapshot,
-        payPeriod,
-        item.amountPence,
-        item.createdAt ?? undefined,
-      ),
+      breakdownLabel,
+      breakdownLines,
       completion,
     }
   }
@@ -956,6 +986,18 @@ function getLinkedCreditCardPotBreakdownLines(
 
   return lines.map((line) => ({
     id: `breakdown-${item.id}-${line.id}`,
+    label: line.label,
+    detail: line.detail,
+    amountPence: line.amountPence,
+  }))
+}
+
+function mapLinkedCreditCardPotCoverBreakdownLines(
+  itemId: string,
+  lines: ReturnType<typeof getLinkedCreditCardPotCoverBreakdown>,
+): PaycheckTodoBreakdownLine[] {
+  return lines.map((line) => ({
+    id: `breakdown-${itemId}-${line.id}`,
     label: line.label,
     detail: line.detail,
     amountPence: line.amountPence,

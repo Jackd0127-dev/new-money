@@ -178,12 +178,16 @@ describe('calendar page', () => {
     await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
     await user.click(screen.getByRole('button', { name: 'Open 5 June 2026' }))
     expect(screen.getByText('Barclays card payment')).toBeInTheDocument()
-    expect(screen.getByText('Fuel')).toBeInTheDocument()
-    expect(screen.getByText('Gym')).toBeInTheDocument()
-    expect(screen.getByText('£95.00')).toBeInTheDocument()
+    const barclaysCard = screen.getByText('Barclays card payment').closest('article') as HTMLElement
+    await user.click(within(barclaysCard).getByRole('button', { name: 'Show breakdown for Barclays card payment -£95.00' }))
+    expect(within(barclaysCard).getByText('Fuel')).toBeInTheDocument()
+    expect(within(barclaysCard).getByText('Gym')).toBeInTheDocument()
+    expect(within(barclaysCard).getByText('£95.00')).toBeInTheDocument()
     expect(screen.getByText('Capital One card payment')).toBeInTheDocument()
-    expect(screen.getByText('Personal')).toBeInTheDocument()
-    expect(screen.getAllByText('£50.00').length).toBeGreaterThan(0)
+    const capitalOneCard = screen.getByText('Capital One card payment').closest('article') as HTMLElement
+    await user.click(within(capitalOneCard).getByRole('button', { name: 'Show breakdown for Capital One card payment -£50.00' }))
+    expect(within(capitalOneCard).getByText('Personal')).toBeInTheDocument()
+    expect(within(capitalOneCard).getAllByText('£50.00').length).toBeGreaterThan(0)
   })
 
   it('shows events on visible next-month cells in the current month grid', () => {
@@ -401,7 +405,6 @@ describe('calendar page', () => {
     expect(screen.getByRole('heading', { name: /Friday.*22 May 2026/ })).toBeInTheDocument()
     expect(screen.getByText('Paycheck received')).toBeInTheDocument()
     expect(screen.getByText('Phone')).toBeInTheDocument()
-    expect(screen.getByText('MOT')).toBeInTheDocument()
     expect(screen.getByText('Card balance')).toBeInTheDocument()
     expect(screen.getByText('Card balance reserve')).toBeInTheDocument()
     expect(screen.getByText('Card balance payment')).toBeInTheDocument()
@@ -411,6 +414,9 @@ describe('calendar page', () => {
     expect(screen.getByText('Everyday Amex card payment')).toBeInTheDocument()
     expect(screen.getByText('Actual payment')).toBeInTheDocument()
     expect(screen.getByText('Card autopay')).toBeInTheDocument()
+    const amexCard = screen.getByText('Everyday Amex card payment').closest('article') as HTMLElement
+    await user.click(within(amexCard).getByRole('button', { name: 'Show breakdown for Everyday Amex card payment -£45.00' }))
+    expect(within(amexCard).getByText('MOT')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Back to calendar' })).toBeInTheDocument()
   })
 
@@ -425,6 +431,7 @@ describe('calendar page', () => {
     const allocationCard = screen.getByText('Barclays allocation').closest('article')
 
     expect(allocationCard).not.toBeNull()
+    await user.click(within(allocationCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
     expect(within(allocationCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
@@ -432,6 +439,27 @@ describe('calendar page', () => {
     expect(within(allocationCard as HTMLElement).getByText('£70.00')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('£25.00')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('£178.57')).toBeInTheDocument()
+  })
+
+  it('keeps calendar event breakdowns hidden until the row is expanded', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({ completed: true })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    const allocationCard = screen.getByText('Barclays allocation').closest('article') as HTMLElement
+
+    expect(within(allocationCard).queryByText('Fuel')).not.toBeInTheDocument()
+
+    await user.click(within(allocationCard).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
+
+    expect(within(allocationCard).getByText('Fuel')).toBeInTheDocument()
+    expect(within(allocationCard).getByRole('button', { name: 'Hide breakdown for Barclays allocation -£178.57' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
   })
 
   it('shows later card spend as its own calendar event after linked card cover is completed', async () => {
@@ -447,6 +475,43 @@ describe('calendar page', () => {
 
     expect(screen.getByText('Coffee')).toBeInTheDocument()
     expect(screen.getByText('£20.00')).toBeInTheDocument()
+  })
+
+  it('keeps completed linked-card allocation breakdowns separated from later top-ups', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+      additionalCoverCompleted: true,
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    const allocationCards = screen
+      .getAllByText('Barclays allocation')
+      .map((heading) => heading.closest('article'))
+      .filter((article): article is HTMLElement => article instanceof HTMLElement)
+    const originalCard = allocationCards.find((article) => article.textContent?.includes('-£178.57'))
+    const additionalCard = allocationCards.find((article) => article.textContent?.includes('-£20.00'))
+
+    expect(originalCard).toBeDefined()
+    expect(additionalCard).toBeDefined()
+    await user.click(within(originalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
+    await user.click(within(additionalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£20.00' }))
+    expect(within(originalCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).queryByText('Coffee')).not.toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).queryByText('Manual spend')).not.toBeInTheDocument()
+
+    expect(within(additionalCard as HTMLElement).getByText('Coffee')).toBeInTheDocument()
+    expect(within(additionalCard as HTMLElement).getAllByText('£20.00')).toHaveLength(2)
+    expect(within(additionalCard as HTMLElement).queryByText('Fuel')).not.toBeInTheDocument()
+    expect(within(additionalCard as HTMLElement).queryByText('Gym')).not.toBeInTheDocument()
+    expect(within(additionalCard as HTMLElement).queryByText('Existing card cover already set aside')).not.toBeInTheDocument()
   })
 })
 
@@ -3764,9 +3829,11 @@ function createPayPeriod(overrides: Partial<PlannerSnapshot['payPeriods'][number
 function createBarclaysLinkedCardCoverFixture({
   completed = false,
   extraCardSpendPence = 0,
+  additionalCoverCompleted = false,
 }: {
   completed?: boolean
   extraCardSpendPence?: number
+  additionalCoverCompleted?: boolean
 } = {}): {
   selectedPayPeriod: PlannerSnapshot['payPeriods'][number]
   snapshot: PlannerSnapshot
@@ -3789,7 +3856,7 @@ function createBarclaysLinkedCardCoverFixture({
           id: 'pot-barclays',
           name: 'Barclays',
           type: 'reserved',
-          balancePence: completed ? 77505 : 59648,
+          balancePence: completed ? 77505 + (additionalCoverCompleted ? 2000 : 0) : 59648,
           targetPence: null,
           color: '#2563eb',
           linkedCreditCardId: 'card-barclays',
@@ -3854,6 +3921,20 @@ function createBarclaysLinkedCardCoverFixture({
               createdAt: '2026-05-22T00:00:00.000Z',
               updatedAt: '2026-05-22T00:00:00.000Z',
             },
+            ...(additionalCoverCompleted
+              ? [
+                  {
+                    id: 'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays',
+                    payPeriodId: 'period-current',
+                    potId: 'pot-barclays',
+                    amountPence: 2000,
+                    source: 'manual' as const,
+                    recurringPaymentId: null,
+                    createdAt: '2026-05-24T11:00:00.000Z',
+                    updatedAt: '2026-05-24T11:00:00.000Z',
+                  },
+                ]
+              : []),
           ]
         : [],
       transactions: extraCardSpendPence > 0

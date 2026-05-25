@@ -1326,6 +1326,74 @@ export function getLinkedCreditCardPotAllocationExclusionPence(
     .reduce((total, allocation) => total + allocation.amountPence, 0)
 }
 
+export function getAdditionalLinkedCreditCardPotAllocationPence(
+  potAllocations: PotAllocation[],
+  payPeriodId: string,
+  potId: string | null | undefined,
+  creditCardId: string,
+): number {
+  if (!potId) {
+    return 0
+  }
+
+  return potAllocations
+    .filter((allocation) => {
+      const costItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, payPeriodId)
+
+      return (
+        allocation.payPeriodId === payPeriodId &&
+        allocation.potId === potId &&
+        allocation.amountPence > 0 &&
+        Boolean(costItemId && isAdditionalLinkedCreditCardPotCostItemId(costItemId)) &&
+        getCreditCardIdFromLinkedCreditCardPotCostItemId(costItemId ?? '') === creditCardId
+      )
+    })
+    .reduce((total, allocation) => total + allocation.amountPence, 0)
+}
+
+export function getCoveredAdditionalLinkedCardManualSpendTransactionIds(
+  transactions: Transaction[],
+  payPeriod: PayPeriod,
+  creditCardId: string,
+  coveredAmountPence: number,
+): Set<string> {
+  let remainingPence = coveredAmountPence
+  const coveredIds = new Set<string>()
+  const candidates = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === 'spending' &&
+        transaction.paymentMethod === 'credit_card' &&
+        transaction.creditCardId === creditCardId &&
+        !transaction.recurringPaymentId &&
+        transaction.amountPence > 0 &&
+        transaction.date >= payPeriod.startDate &&
+        transaction.date <= payPeriod.endDate,
+    )
+    .sort((a, b) => {
+      const createdSort = (b.createdAt || '').localeCompare(a.createdAt || '')
+
+      if (createdSort !== 0) {
+        return createdSort
+      }
+
+      return b.date.localeCompare(a.date)
+    })
+
+  for (const transaction of candidates) {
+    if (remainingPence <= 0) {
+      break
+    }
+
+    if (transaction.amountPence <= remainingPence) {
+      coveredIds.add(transaction.id)
+      remainingPence -= transaction.amountPence
+    }
+  }
+
+  return coveredIds
+}
+
 export function getCompletedLinkedCreditCardPotAllocation(
   potAllocations: PotAllocation[],
   payPeriodId: string,

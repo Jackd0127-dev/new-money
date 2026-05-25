@@ -513,6 +513,37 @@ describe('calendar page', () => {
     expect(within(additionalCard as HTMLElement).queryByText('Gym')).not.toBeInTheDocument()
     expect(within(additionalCard as HTMLElement).queryByText('Existing card cover already set aside')).not.toBeInTheDocument()
   })
+
+  it('does not show a separately covered manual spend inside the original allocation breakdown', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+      additionalCoverCompleted: true,
+      originalAllocationCreatedAt: '2026-05-26T00:00:00.000Z',
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    const allocationCards = screen
+      .getAllByText('Barclays allocation')
+      .map((heading) => heading.closest('article'))
+      .filter((article): article is HTMLElement => article instanceof HTMLElement)
+    const originalCard = allocationCards.find((article) => article.textContent?.includes('-£178.57'))
+
+    expect(originalCard).toBeDefined()
+    await user.click(within(originalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
+
+    expect(within(originalCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).queryByText('Manual spend')).not.toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).queryByText('Coffee')).not.toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).queryByText('Existing card cover already set aside')).not.toBeInTheDocument()
+  })
 })
 
 describe('settings page', () => {
@@ -3050,6 +3081,66 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('does not duplicate separately completed Barclays card spend inside the original dashboard breakdown', async () => {
+    const user = userEvent.setup()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+      additionalCoverCompleted: true,
+      originalAllocationCreatedAt: '2026-05-26T00:00:00.000Z',
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={createActions()}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    const originalCheckbox = screen.getByRole('checkbox', {
+      name: /Set aside £178\.57 into "Barclays" pot for "Barclays" planned card cover/,
+    })
+    const originalItem = originalCheckbox.closest('li')
+
+    expect(originalItem).toBeInstanceOf(HTMLElement)
+
+    await user.click(within(originalItem as HTMLElement).getByRole('button', { name: /Show breakdown/ }))
+
+    const originalBreakdown = within(originalItem as HTMLElement).getByRole('region', {
+      name: /Breakdown.*Barclays planned card cover/,
+    })
+
+    expect(within(originalBreakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(originalBreakdown).getByText('Fuel')).toBeInTheDocument()
+    expect(within(originalBreakdown).getByText('Gym')).toBeInTheDocument()
+    expect(within(originalBreakdown).getByText('£83.57')).toBeInTheDocument()
+    expect(within(originalBreakdown).queryByText('Manual spend')).not.toBeInTheDocument()
+    expect(within(originalBreakdown).queryByText('Coffee')).not.toBeInTheDocument()
+    expect(within(originalBreakdown).queryByText('Existing card cover already set aside')).not.toBeInTheDocument()
+    expect(within(originalBreakdown).queryByText('Additional forecast cover')).not.toBeInTheDocument()
+
+    const extraCheckbox = screen.getByRole('checkbox', {
+      name: /Set aside £20\.00 into "Barclays" pot for "Barclays" planned card cover/,
+    })
+    const extraItem = extraCheckbox.closest('li')
+
+    expect(extraItem).toBeInstanceOf(HTMLElement)
+
+    await user.click(within(extraItem as HTMLElement).getByRole('button', { name: /Show breakdown/ }))
+
+    const extraBreakdown = within(extraItem as HTMLElement).getByRole('region', {
+      name: /Breakdown.*Barclays additional planned card cover/,
+    })
+
+    expect(within(extraBreakdown).getByText('Additional card cover')).toBeInTheDocument()
+    expect(within(extraBreakdown).getAllByText('£20.00')).toHaveLength(2)
+
+    restoreLocalStorage()
+  })
+
   it('ignores a checklist payment for the selected paycheck maths', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()
@@ -3830,10 +3921,12 @@ function createBarclaysLinkedCardCoverFixture({
   completed = false,
   extraCardSpendPence = 0,
   additionalCoverCompleted = false,
+  originalAllocationCreatedAt = '2026-05-22T00:00:00.000Z',
 }: {
   completed?: boolean
   extraCardSpendPence?: number
   additionalCoverCompleted?: boolean
+  originalAllocationCreatedAt?: string
 } = {}): {
   selectedPayPeriod: PlannerSnapshot['payPeriods'][number]
   snapshot: PlannerSnapshot
@@ -3918,8 +4011,8 @@ function createBarclaysLinkedCardCoverFixture({
               amountPence: 17857,
               source: 'manual',
               recurringPaymentId: null,
-              createdAt: '2026-05-22T00:00:00.000Z',
-              updatedAt: '2026-05-22T00:00:00.000Z',
+              createdAt: originalAllocationCreatedAt,
+              updatedAt: originalAllocationCreatedAt,
             },
             ...(additionalCoverCompleted
               ? [

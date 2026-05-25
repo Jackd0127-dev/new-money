@@ -19,8 +19,10 @@ import {
   findPayPeriodForDate,
   formatPence,
   getCostItemIdFromDashboardTodoAllocationId,
+  getAdditionalLinkedCreditCardPotAllocationPence,
   getAdditionalLinkedCreditCardPotCoverBreakdown,
   getCompletedLinkedCreditCardPotAllocation,
+  getCoveredAdditionalLinkedCardManualSpendTransactionIds,
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
   getLinkedCreditCardPotAllocationExclusionPence,
@@ -846,7 +848,32 @@ function getHistoricalLinkedCreditCardPotAllocationBreakdown(
   payPeriod: PayPeriod,
   linkedCreditCardId: string,
 ) {
-  const breakdownSnapshot = filterSnapshotCreatedBeforeOrAt(snapshot, allocation.createdAt)
+  const additionalCoverPence = getAdditionalLinkedCreditCardPotAllocationPence(
+    snapshot.potAllocations,
+    payPeriod.id,
+    allocation.potId,
+    linkedCreditCardId,
+  )
+  const coveredManualSpendIds = getCoveredAdditionalLinkedCardManualSpendTransactionIds(
+    snapshot.transactions,
+    payPeriod,
+    linkedCreditCardId,
+    additionalCoverPence,
+  )
+  const breakdownSnapshot = filterSnapshotForHistoricalAllocation(
+    snapshot,
+    allocation.createdAt,
+    coveredManualSpendIds,
+  )
+  const excludedLinkedPotAllocationPence = Math.max(
+    getLinkedCreditCardPotAllocationExclusionPence(
+      snapshot.potAllocations,
+      payPeriod.id,
+      allocation.potId,
+      allocation.createdAt,
+    ) || 0,
+    allocation.amountPence + additionalCoverPence,
+  )
 
   return getLinkedCreditCardPotCoverBreakdown({
     creditCards: breakdownSnapshot.creditCards,
@@ -860,12 +887,7 @@ function getHistoricalLinkedCreditCardPotAllocationBreakdown(
     creditCardId: linkedCreditCardId,
     linkedPotId: allocation.potId,
     amountPence: allocation.amountPence,
-    excludedLinkedPotAllocationPence: getLinkedCreditCardPotAllocationExclusionPence(
-      snapshot.potAllocations,
-      payPeriod.id,
-      allocation.potId,
-      allocation.createdAt,
-    ) || allocation.amountPence,
+    excludedLinkedPotAllocationPence,
   })
 }
 
@@ -896,12 +918,18 @@ function getAdditionalLinkedCreditCardPotAllocationBreakdown(
   })
 }
 
-function filterSnapshotCreatedBeforeOrAt(snapshot: PlannerSnapshot, cutoffTimestamp: string): PlannerSnapshot {
+function filterSnapshotForHistoricalAllocation(
+  snapshot: PlannerSnapshot,
+  cutoffTimestamp: string,
+  excludedTransactionIds: Set<string>,
+): PlannerSnapshot {
   return {
     ...snapshot,
     recurringPayments: snapshot.recurringPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
     customPayments: snapshot.customPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
-    transactions: snapshot.transactions.filter((transaction) => transaction.createdAt <= cutoffTimestamp),
+    transactions: snapshot.transactions.filter(
+      (transaction) => transaction.createdAt <= cutoffTimestamp && !excludedTransactionIds.has(transaction.id),
+    ),
     creditCardRepayments: snapshot.creditCardRepayments.filter((repayment) => repayment.createdAt <= cutoffTimestamp),
   }
 }

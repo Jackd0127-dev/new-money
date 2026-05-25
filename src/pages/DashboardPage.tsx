@@ -5,8 +5,10 @@ import {
   filterPayPeriodCostSummary,
   formatPence,
   getCostItemIdFromDashboardTodoPeriodCostItemId,
+  getAdditionalLinkedCreditCardPotAllocationPence,
   getAdditionalLinkedCreditCardPotCoverBreakdown,
   getCompletedLinkedCreditCardPotAllocation,
+  getCoveredAdditionalLinkedCardManualSpendTransactionIds,
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getDashboardTodoAllocationId,
   getLinkedCreditCardPotAllocationExclusionPence,
@@ -966,8 +968,23 @@ function getLinkedCreditCardPotBreakdownLines(
   excludedLinkedPotAllocationPence = 0,
   createdBeforeOrAt?: string,
 ): PaycheckTodoBreakdownLine[] {
+  const additionalCoverPence = getAdditionalLinkedCreditCardPotAllocationPence(
+    snapshot.potAllocations,
+    payPeriod.id,
+    item.potId,
+    item.creditCardId ?? '',
+  )
+  const coveredManualSpendIds = getCoveredAdditionalLinkedCardManualSpendTransactionIds(
+    snapshot.transactions,
+    payPeriod,
+    item.creditCardId ?? '',
+    additionalCoverPence,
+  )
+  const historicalExcludedLinkedPotAllocationPence = createdBeforeOrAt
+    ? Math.max(excludedLinkedPotAllocationPence, item.amountPence + additionalCoverPence)
+    : excludedLinkedPotAllocationPence
   const breakdownSnapshot = createdBeforeOrAt
-    ? filterSnapshotCreatedBeforeOrAt(snapshot, createdBeforeOrAt)
+    ? filterSnapshotForHistoricalAllocation(snapshot, createdBeforeOrAt, coveredManualSpendIds)
     : snapshot
   const lines = item.coverBreakdown ?? getLinkedCreditCardPotCoverBreakdown({
     creditCards: breakdownSnapshot.creditCards,
@@ -981,7 +998,7 @@ function getLinkedCreditCardPotBreakdownLines(
     creditCardId: item.creditCardId ?? '',
     linkedPotId: item.potId,
     amountPence: item.amountPence,
-    excludedLinkedPotAllocationPence,
+    excludedLinkedPotAllocationPence: historicalExcludedLinkedPotAllocationPence,
   })
 
   return lines.map((line) => ({
@@ -1004,12 +1021,18 @@ function mapLinkedCreditCardPotCoverBreakdownLines(
   }))
 }
 
-function filterSnapshotCreatedBeforeOrAt(snapshot: PlannerSnapshot, cutoffTimestamp: string): PlannerSnapshot {
+function filterSnapshotForHistoricalAllocation(
+  snapshot: PlannerSnapshot,
+  cutoffTimestamp: string,
+  excludedTransactionIds: Set<string>,
+): PlannerSnapshot {
   return {
     ...snapshot,
     recurringPayments: snapshot.recurringPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
     customPayments: snapshot.customPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
-    transactions: snapshot.transactions.filter((transaction) => transaction.createdAt <= cutoffTimestamp),
+    transactions: snapshot.transactions.filter(
+      (transaction) => transaction.createdAt <= cutoffTimestamp && !excludedTransactionIds.has(transaction.id),
+    ),
     creditCardRepayments: snapshot.creditCardRepayments.filter((repayment) => repayment.createdAt <= cutoffTimestamp),
   }
 }

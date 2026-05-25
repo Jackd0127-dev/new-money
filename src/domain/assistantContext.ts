@@ -53,6 +53,7 @@ const viewLabels: Record<ViewKey, string> = {
   aiPlan: 'AI',
   payday: 'Pay day',
   pots: 'Pots',
+  savingsInvestments: 'Savings & Investments',
   spending: 'Spending',
   allocatingPayments: 'Allocating Payments',
   debts: 'Debts',

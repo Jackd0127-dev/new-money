@@ -11,6 +11,7 @@ import { CalendarPage } from './CalendarPage'
 import { PaydayWizardPage } from './PaydayWizardPage'
 import { PotsPage } from './PotsPage'
 import { RecurringPage } from './RecurringPage'
+import { SavingsInvestmentsPage } from './SavingsInvestmentsPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
 import { AppAssistant } from '../components/AppAssistant'
@@ -66,11 +67,154 @@ describe('app shell navigation', () => {
       'Allocating Payments',
       'Recurring',
       'Pots',
+      'Savings & Investments',
       'Debts',
       'Calendar',
       'AI',
       'Settings',
     ])
+  })
+})
+
+describe('savings and investments page', () => {
+  it('sets aside selected paycheck money into a savings pot', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-emergency',
+          name: 'Emergency fund',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'savings',
+          balancePence: 10000,
+          targetPence: 100000,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-index',
+          name: 'Index fund',
+          type: 'investment',
+          category: 'Investments',
+          icon: 'target',
+          balancePence: 25000,
+          targetPence: null,
+          color: '#7c3aed',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-food',
+          name: 'Food',
+          type: 'spending',
+          balancePence: 12000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <SavingsInvestmentsPage
+        snapshot={snapshot}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    expect(screen.getAllByText('Emergency fund').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Index fund').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Food')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Savings or investment pot'), 'pot-emergency')
+    await user.type(screen.getByLabelText('Amount to set aside'), '35.00')
+    await user.click(screen.getByRole('button', { name: 'Set aside money' }))
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'savings-investments-period-current-pot-emergency',
+      payPeriodId: 'period-current',
+      potId: 'pot-emergency',
+      amountPence: 3500,
+    })
+  })
+
+  it('adds to the existing savings allocation for the selected paycheck', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-index',
+          name: 'Index fund',
+          type: 'investment',
+          category: 'Investments',
+          icon: 'target',
+          balancePence: 25000,
+          targetPence: null,
+          color: '#7c3aed',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'savings-investments-period-current-pot-index',
+          payPeriodId: 'period-current',
+          potId: 'pot-index',
+          amountPence: 2000,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <SavingsInvestmentsPage
+        snapshot={snapshot}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    await user.selectOptions(screen.getByLabelText('Savings or investment pot'), 'pot-index')
+    await user.type(screen.getByLabelText('Amount to set aside'), '15.00')
+    await user.click(screen.getByRole('button', { name: 'Set aside money' }))
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'savings-investments-period-current-pot-index',
+      payPeriodId: 'period-current',
+      potId: 'pot-index',
+      amountPence: 3500,
+    })
   })
 })
 
@@ -1381,6 +1525,58 @@ describe('pots page', () => {
 
     expect(screen.getByText('Target £500.00')).toBeInTheDocument()
     expect(screen.getByText('25%')).toBeInTheDocument()
+  })
+
+  it('shows the true percentage when a pot is over target', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-emergency',
+          name: 'Emergency fund',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'savings',
+          balancePence: 11400,
+          targetPence: 10000,
+          color: '#16a34a',
+          linkedCreditCardId: null,
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('114%')).toBeInTheDocument()
+    expect(screen.queryByText('100%')).not.toBeInTheDocument()
+  })
+
+  it('shows the true percentage for over-target savings and investments pots', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-emergency',
+          name: 'Emergency fund',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'savings',
+          balancePence: 11400,
+          targetPence: 10000,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<SavingsInvestmentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={null} />)
+
+    expect(screen.getByText('114%')).toBeInTheDocument()
+    expect(screen.queryByText('100%')).not.toBeInTheDocument()
   })
 
   it('expands a pot to show spending, recurring payments, and allocations tied to it', async () => {

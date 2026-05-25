@@ -864,7 +864,7 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
   return {
     targetPence,
     coveredPence,
-    percent: targetPence > 0 ? Math.min(100, Math.round((coveredPence / targetPence) * 100)) : 0,
+    percent: targetPence > 0 ? Math.round((coveredPence / targetPence) * 100) : 0,
     targetLabel: targetPence > 0 ? `Target ${formatPence(targetPence)}` : 'No target yet',
     sourceLabels,
     shortfallPence,

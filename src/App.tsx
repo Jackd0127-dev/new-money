@@ -13,6 +13,7 @@ import { HistoryPage } from './pages/HistoryPage'
 import { PaydayWizardPage } from './pages/PaydayWizardPage'
 import { PotsPage } from './pages/PotsPage'
 import { RecurringPage } from './pages/RecurringPage'
+import { SavingsInvestmentsPage } from './pages/SavingsInvestmentsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SpendingPage } from './pages/SpendingPage'
 import { findPayPeriodForDate, toIsoDate } from './domain/money'
@@ -80,6 +81,13 @@ function App() {
         selectedPayPeriod={selectedPayPeriod}
         isCreateModalOpen={isCreatePotModalOpen}
         onCreateModalOpenChange={setIsCreatePotModalOpen}
+      />
+    ),
+    savingsInvestments: (
+      <SavingsInvestmentsPage
+        snapshot={snapshot}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
       />
     ),
     spending: <SpendingPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,

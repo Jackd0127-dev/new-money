@@ -7,6 +7,7 @@ import {
   PiggyBank,
   Settings,
   Sparkles,
+  TrendingUp,
   WalletCards,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -26,6 +27,7 @@ const navItems: Array<{
   { key: 'allocatingPayments', label: 'Allocating Payments', icon: ListChecks },
   { key: 'recurring', label: 'Recurring', icon: CalendarClock },
   { key: 'pots', label: 'Pots', icon: PiggyBank },
+  { key: 'savingsInvestments', label: 'Savings & Investments', icon: TrendingUp },
   { key: 'debts', label: 'Debts', icon: CreditCard },
   { key: 'calendar', label: 'Calendar', icon: CalendarClock },
   { key: 'aiPlan', label: 'AI', icon: Sparkles },

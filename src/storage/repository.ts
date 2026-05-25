@@ -4,6 +4,7 @@ import {
   calculatePaycheckAmount,
   createNextPayPeriod,
   findPayPeriodForDate,
+  getCreditCardAllocationSummary,
   getPayPeriodCostSummary,
   getPotBalanceAfterTransactionRemoval,
   getRecurringPaymentOccurrences,
@@ -233,6 +234,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   await ensureSeedData()
   await repairDuplicateRecurringAllocations()
   await applyDueRecurringPayments(toIsoDate(new Date()))
+  await applyDueLinkedCreditCardPotRepayments(toIsoDate(new Date()))
 
   const [
     settings,
@@ -332,6 +334,7 @@ export async function updatePlannerDataToLatest(): Promise<void> {
 
   await repairDuplicateRecurringAllocations()
   await applyDueRecurringPayments(toIsoDate(new Date()))
+  await applyDueLinkedCreditCardPotRepayments(toIsoDate(new Date()))
 }
 
 export async function addPot(input: PotInput): Promise<void> {
@@ -1857,6 +1860,120 @@ async function applyDueRecurringPayments(todayIso: string): Promise<void> {
       }
     }
   })
+}
+
+async function applyDueLinkedCreditCardPotRepayments(todayIso: string): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', [db.creditCards, db.pots, db.transactions, db.creditCardRepayments], async () => {
+    const [creditCards, pots, transactions, creditCardRepayments] = await Promise.all([
+      db.creditCards.toArray(),
+      db.pots.toArray(),
+      db.transactions.toArray(),
+      db.creditCardRepayments.toArray(),
+    ])
+    const repayments = [...creditCardRepayments]
+
+    for (const card of creditCards.filter((candidate) => !candidate.archived)) {
+      const linkedPot = pots.find(
+        (pot) => !pot.archived && pot.linkedCreditCardId === card.id && pot.balancePence > 0,
+      )
+
+      if (!linkedPot) {
+        continue
+      }
+
+      let linkedPotBalancePence = linkedPot.balancePence
+
+      for (const dueDate of getCreditCardAutoRepaymentDueDates(card, todayIso)) {
+        if (linkedPotBalancePence <= 0) {
+          break
+        }
+
+        const repaymentId = getLinkedCreditCardPotRepaymentId(card.id, dueDate)
+
+        if (repayments.some((repayment) => repayment.id === repaymentId)) {
+          continue
+        }
+
+        const cardSummary = getCreditCardAllocationSummary({
+          creditCards: [card],
+          recurringPayments: [],
+          customPayments: [],
+          transactions,
+          repayments,
+          creditCardPots: [],
+          pots: [],
+          payPeriod: null,
+          asOfDate: dueDate,
+        }).cards[0]
+        const repaymentAmountPence = Math.min(cardSummary?.actualOwedPence ?? 0, linkedPotBalancePence)
+
+        if (repaymentAmountPence <= 0) {
+          continue
+        }
+
+        const repayment: CreditCardRepayment = {
+          id: repaymentId,
+          creditCardId: card.id,
+          amountPence: repaymentAmountPence,
+          date: dueDate,
+          note: `Automatic ${card.name} payment from ${linkedPot.name} pot`,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }
+
+        await db.creditCardRepayments.add(repayment)
+        repayments.push(repayment)
+        linkedPotBalancePence -= repaymentAmountPence
+
+        await db.pots.update(linkedPot.id, {
+          balancePence: linkedPotBalancePence,
+          updatedAt: timestamp,
+        })
+      }
+    }
+  })
+}
+
+function getCreditCardAutoRepaymentDueDates(card: CreditCard, todayIso: string): string[] {
+  const startDate = isIsoDateText(card.createdAt.slice(0, 10)) ? card.createdAt.slice(0, 10) : todayIso
+
+  if (card.dueDate) {
+    return card.dueDate >= startDate && card.dueDate <= todayIso ? [card.dueDate] : []
+  }
+
+  if (!card.dueDay) {
+    return []
+  }
+
+  const dueDates: string[] = []
+  const cursor = new Date(`${startDate}T00:00:00.000Z`)
+  const end = new Date(`${todayIso}T00:00:00.000Z`)
+  cursor.setUTCDate(1)
+
+  while (cursor <= end) {
+    const dueDate = getCreditCardMonthlyDueDate(card.dueDay, cursor.getUTCFullYear(), cursor.getUTCMonth())
+
+    if (dueDate >= startDate && dueDate <= todayIso) {
+      dueDates.push(dueDate)
+    }
+
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+  }
+
+  return dueDates
+}
+
+function getCreditCardMonthlyDueDate(dueDay: number, year: number, monthIndex: number): string {
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+  const clampedDay = Math.min(Math.max(1, dueDay), lastDay)
+
+  return toIsoDate(new Date(Date.UTC(year, monthIndex, clampedDay)))
+}
+
+function getLinkedCreditCardPotRepaymentId(creditCardId: string, dueDate: string): string {
+  return `linked-card-pot-repayment-${creditCardId}-${dueDate}`
 }
 
 function getRecurringReserveAllocations(

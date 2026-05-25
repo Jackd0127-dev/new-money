@@ -432,7 +432,7 @@ describe('calendar page', () => {
 
     expect(allocationCard).not.toBeNull()
     await user.click(within(allocationCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
-    expect(within(allocationCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
@@ -500,7 +500,7 @@ describe('calendar page', () => {
     expect(additionalCard).toBeDefined()
     await user.click(within(originalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
     await user.click(within(additionalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£20.00' }))
-    expect(within(originalCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(originalCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
     expect(within(originalCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
     expect(within(originalCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
@@ -536,7 +536,7 @@ describe('calendar page', () => {
     expect(originalCard).toBeDefined()
     await user.click(within(originalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
 
-    expect(within(originalCard as HTMLElement).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(originalCard as HTMLElement).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(originalCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
     expect(within(originalCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
     expect(within(originalCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
@@ -2515,6 +2515,87 @@ describe('dashboard page', () => {
     expect(screen.queryByText('Available after bills')).not.toBeInTheDocument()
   })
 
+  it('previews next paycheck outgoings in a collapsible panel with paycheck navigation', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 200000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      recurringPayments: [
+        {
+          id: 'rent',
+          name: 'Rent',
+          amountPence: 100000,
+          dueDay: 8,
+          frequency: 'monthly',
+          potId: null,
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'phone',
+          name: 'Phone',
+          amountPence: 3300,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: null,
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'mot',
+          name: 'MOT',
+          amountPence: 14950,
+          dueDate: '2026-06-16',
+          status: 'unpaid',
+          creditCardId: null,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
+
+    const previewPanel = screen.getByRole('region', { name: 'What you owe next paycheck' })
+    expect(within(previewPanel).getByText('2026-06-05 to 2026-06-18')).toBeInTheDocument()
+    expect(within(previewPanel).getAllByText('£1,149.50').length).toBeGreaterThan(0)
+    expect(within(previewPanel).queryByText('Rent')).not.toBeInTheDocument()
+
+    await user.click(within(previewPanel).getByRole('button', { name: 'Show next paycheck outgoings' }))
+
+    expect(within(previewPanel).getByText('Rent')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('MOT')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('2026-06-08 · Recurring')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('2026-06-16 · Saved payment')).toBeInTheDocument()
+    expect(within(previewPanel).queryByText('Phone')).not.toBeInTheDocument()
+
+    await user.click(within(previewPanel).getByRole('button', { name: 'Next paycheck preview' }))
+
+    expect(within(previewPanel).getByText('2026-06-19 to 2026-07-02')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('Phone')).toBeInTheDocument()
+    expect(within(previewPanel).getAllByText('£33.00').length).toBeGreaterThan(0)
+    expect(within(previewPanel).queryByText('Rent')).not.toBeInTheDocument()
+
+    await user.click(within(previewPanel).getByRole('button', { name: 'Previous paycheck preview' }))
+
+    expect(within(previewPanel).getByText('2026-06-05 to 2026-06-18')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('Rent')).toBeInTheDocument()
+  })
+
   it('shows a per-paycheck to-do list and marks set-asides complete', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()
@@ -2947,7 +3028,7 @@ describe('dashboard page', () => {
 
     const breakdown = screen.getByRole('region', { name: /Breakdown.*Barclays planned card cover/ })
 
-    expect(within(breakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(breakdown).getByText('Fuel')).toBeInTheDocument()
     expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
     expect(within(breakdown).getByText('£83.57')).toBeInTheDocument()
@@ -2976,7 +3057,7 @@ describe('dashboard page', () => {
 
     const breakdown = screen.getByRole('region', { name: /Breakdown.*Barclays/ })
 
-    expect(within(breakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(breakdown).getByText('Fuel')).toBeInTheDocument()
     expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
     expect(within(breakdown).getByText('£83.57')).toBeInTheDocument()
@@ -3015,7 +3096,7 @@ describe('dashboard page', () => {
 
     const breakdown = screen.getByRole('region', { name: /Breakdown.*Barclays planned card cover/ })
 
-    expect(within(breakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(breakdown).getByText('Coffee')).toBeInTheDocument()
     expect(within(breakdown).getByText('Fuel')).toBeInTheDocument()
     expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
@@ -3113,7 +3194,7 @@ describe('dashboard page', () => {
       name: /Breakdown.*Barclays planned card cover/,
     })
 
-    expect(within(originalBreakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(originalBreakdown).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(originalBreakdown).getByText('Fuel')).toBeInTheDocument()
     expect(within(originalBreakdown).getByText('Gym')).toBeInTheDocument()
     expect(within(originalBreakdown).getByText('£83.57')).toBeInTheDocument()

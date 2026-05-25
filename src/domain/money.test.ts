@@ -1107,6 +1107,203 @@ describe('credit card allocation', () => {
     expect(summary.cards[0].linkedPotPence - summary.cards[0].actualOwedPence).toBe(9500)
   })
 
+  it('uses leftover linked pot money to reduce the next paycheck card cover', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'actual-fuel',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 6700,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-29',
+          note: 'Fuel',
+          createdAt: '2026-05-29T00:00:00.000Z',
+          updatedAt: '2026-05-29T00:00:00.000Z',
+        },
+      ],
+      repayments: [
+        {
+          id: 'repayment-june',
+          creditCardId: 'card-barclays',
+          amountPence: 74705,
+          date: '2026-06-11',
+          note: 'Automatic Barclays payment from Barclays pot',
+          createdAt: '2026-06-11T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 300,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      payPeriod: {
+        id: 'period-next',
+        startDate: '2026-06-05',
+        endDate: '2026-06-18',
+        payday: '2026-06-05',
+        nextPayday: '2026-06-19',
+        payFrequency: 'biweekly',
+        incomePence: 78850,
+        status: 'active',
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
+      asOfDate: '2026-06-12',
+    })
+
+    expect(summary.cards[0]).toMatchObject({
+      actualOwedPence: 0,
+      linkedPotPence: 300,
+      forecastOwedPence: 7000,
+      plannedTopUpNeededPence: 6700,
+    })
+  })
+
+  it('carries an overspent linked-card amount into the next paycheck cover', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'actual-fuel',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 7300,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-29',
+          note: 'Fuel',
+          createdAt: '2026-05-29T00:00:00.000Z',
+          updatedAt: '2026-05-29T00:00:00.000Z',
+        },
+      ],
+      repayments: [
+        {
+          id: 'repayment-june',
+          creditCardId: 'card-barclays',
+          amountPence: 75005,
+          date: '2026-06-11',
+          note: 'Automatic Barclays payment from Barclays pot',
+          createdAt: '2026-06-11T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      payPeriod: {
+        id: 'period-next',
+        startDate: '2026-06-05',
+        endDate: '2026-06-18',
+        payday: '2026-06-05',
+        nextPayday: '2026-06-19',
+        payFrequency: 'biweekly',
+        incomePence: 78850,
+        status: 'active',
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
+      asOfDate: '2026-06-12',
+    })
+
+    expect(summary.cards[0]).toMatchObject({
+      actualOwedPence: 300,
+      actualUncoveredPence: 300,
+      linkedPotPence: 0,
+      forecastOwedPence: 7300,
+      plannedTopUpNeededPence: 7300,
+    })
+  })
+
   it('lists unlinked payments separately from card balances', () => {
     const summary = getCreditCardAllocationSummary({
       creditCards: cards,

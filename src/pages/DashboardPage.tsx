@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 
 import {
+  createNextPayPeriod,
   filterPayPeriodCostSummary,
   formatPence,
   getCostItemIdFromDashboardTodoPeriodCostItemId,
@@ -20,7 +21,7 @@ import {
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { Button, MoneyMetric, Panel, SelectInput, type CalculationBreakdown } from '../components/ui'
-import type { PayPeriod } from '../types/models'
+import type { PayFrequency, PayPeriod, PotAllocation } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
 const dashboardTodoStorageKey = 'new-money.dashboard-todos.v1'
@@ -75,6 +76,8 @@ export function DashboardPage({
   )
   const [pendingTodoIds, setPendingTodoIds] = useState<Set<string>>(() => new Set())
   const [expandedTodoIds, setExpandedTodoIds] = useState<Set<string>>(() => new Set())
+  const [isNextOutgoingsOpen, setIsNextOutgoingsOpen] = useState(false)
+  const [outgoingPreviewOffset, setOutgoingPreviewOffset] = useState(1)
   const viewedPeriod = selectedPayPeriod ?? null
   const baseSummary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
@@ -96,6 +99,29 @@ export function DashboardPage({
   const activeTodoItems = todoItems.filter((item) => !ignoredPaymentIds.has(item.ignoreId))
   const completedTodoCount = activeTodoItems.filter((item) => completedTodoIds.has(item.id)).length
   const ignoredTodoCount = todoItems.length - activeTodoItems.length
+  const outgoingPreviewPeriod = viewedPeriod
+    ? getRelativePaycheckPeriod(
+        viewedPeriod,
+        outgoingPreviewOffset,
+        viewedPeriod.payFrequency ?? snapshot.settings.payFrequency,
+      )
+    : null
+  const outgoingPreviewSummary = getPayPeriodCostSummary({
+    payPeriod: outgoingPreviewPeriod,
+    creditCards: snapshot.creditCards,
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    debts: snapshot.debts,
+    creditCardRepayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
+    debtReserves: snapshot.debtReserves,
+    pots: snapshot.pots,
+    potAllocations: [
+      ...snapshot.potAllocations,
+      ...(outgoingPreviewPeriod ? getPreviewPotTopUps(snapshot, outgoingPreviewPeriod) : []),
+    ],
+  })
 
   async function toggleTodo(item: PaycheckTodoItem, done: boolean) {
     if (!viewedPeriod) {
@@ -426,7 +452,157 @@ export function DashboardPage({
           )}
         </Panel>
       )}
+      {viewedPeriod && (
+        <NextPaycheckOutgoingsPanel
+          period={outgoingPreviewPeriod}
+          summary={outgoingPreviewSummary}
+          offset={outgoingPreviewOffset}
+          isOpen={isNextOutgoingsOpen}
+          onToggleOpen={() => setIsNextOutgoingsOpen((current) => !current)}
+          onPrevious={() => setOutgoingPreviewOffset((current) => current - 1)}
+          onNext={() => setOutgoingPreviewOffset((current) => current + 1)}
+        />
+      )}
     </div>
+  )
+}
+
+function NextPaycheckOutgoingsPanel({
+  period,
+  summary,
+  offset,
+  isOpen,
+  onToggleOpen,
+  onPrevious,
+  onNext,
+}: {
+  period: PayPeriod | null
+  summary: PayPeriodCostSummary
+  offset: number
+  isOpen: boolean
+  onToggleOpen: () => void
+  onPrevious: () => void
+  onNext: () => void
+}) {
+  const periodDescription = period
+    ? `${period.startDate} to ${period.endDate}`
+    : 'Create a paycheck plan to preview future outgoings.'
+  const outgoingItems = summary.items.filter((item) => item.amountPence !== 0)
+  const toggleLabel = isOpen ? 'Hide next paycheck outgoings' : 'Show next paycheck outgoings'
+
+  return (
+    <Panel
+      title="What you owe next paycheck"
+      accent="amber"
+      description={periodDescription}
+      action={
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            aria-label="Previous paycheck preview"
+            onClick={onPrevious}
+            className="inline-flex min-h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            <ChevronLeft size={16} aria-hidden="true" />
+          </button>
+          <span className="hidden min-w-32 rounded-md bg-slate-50 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500 sm:inline-block">
+            {formatPaycheckOffsetLabel(offset)}
+          </span>
+          <button
+            type="button"
+            aria-label="Next paycheck preview"
+            onClick={onNext}
+            className="inline-flex min-h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        </div>
+      }
+    >
+      {period ? (
+        <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_auto] md:items-stretch">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Total outgoing</p>
+              <p className="mt-2 text-3xl font-semibold text-slate-950">{formatPence(summary.totalCostsPence)}</p>
+              <p className="mt-1 text-sm text-amber-800">{outgoingItems.length} payments in this paycheck window</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-1">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Money left estimate</p>
+                <p className={summary.moneyLeftPence < 0 ? 'mt-1 text-lg font-semibold text-red-700' : 'mt-1 text-lg font-semibold text-emerald-700'}>
+                  {formatPence(summary.moneyLeftPence)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paycheck</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">{formatPaycheckOffsetLabel(offset)}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label={toggleLabel}
+              aria-expanded={isOpen}
+              onClick={onToggleOpen}
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950 md:self-stretch"
+            >
+              <CalendarDays size={16} aria-hidden="true" />
+              {isOpen ? 'Hide payments' : 'Show payments'}
+              <ChevronDown size={16} aria-hidden="true" className={isOpen ? 'rotate-180 transition' : 'transition'} />
+            </button>
+          </div>
+
+          {isOpen && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              {outgoingItems.length > 0 ? (
+                <ul className="divide-y divide-slate-200">
+                  {outgoingItems.map((item) => (
+                    <li key={item.id} className="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-950">{item.label}</p>
+                        <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                          {item.date} · {formatCostSource(item.source)}
+                        </p>
+                        {item.coverBreakdown && item.coverBreakdown.length > 0 && (
+                          <ul className="mt-2 space-y-1 rounded-md border border-slate-200 bg-white px-2.5 py-2">
+                            {item.coverBreakdown.map((line) => (
+                              <li key={line.id} className="flex items-start justify-between gap-3 text-xs">
+                                <span className="min-w-0">
+                                  <span className="block truncate font-semibold text-slate-700">{line.label}</span>
+                                  <span className="block leading-4 text-slate-500">
+                                    {line.date} · {line.detail}
+                                  </span>
+                                </span>
+                                <span className={line.amountPence < 0 ? 'shrink-0 font-semibold text-emerald-700' : 'shrink-0 font-semibold text-slate-800'}>
+                                  {line.amountPence < 0 ? '-' : ''}
+                                  {formatPence(Math.abs(line.amountPence))}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <p className={item.amountPence < 0 ? 'text-sm font-semibold text-emerald-700' : 'text-sm font-semibold text-slate-950'}>
+                        {item.amountPence < 0 ? '-' : ''}
+                        {formatPence(Math.abs(item.amountPence))}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="rounded-md bg-white px-3 py-3 text-sm text-slate-500">
+                  No outgoing payments are dated inside this paycheck window yet.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+          No paycheck is selected, so there is no future period to preview yet.
+        </p>
+      )}
+    </Panel>
   )
 }
 
@@ -463,6 +639,155 @@ function getOrdinalSuffix(day: number): string {
   }
 
   return 'th'
+}
+
+function getRelativePaycheckPeriod(currentPeriod: PayPeriod, offset: number, frequency: PayFrequency): PayPeriod {
+  if (offset === 0) {
+    return currentPeriod
+  }
+
+  if (offset > 0) {
+    let payday = currentPeriod.nextPayday
+
+    for (let index = 1; index < offset; index += 1) {
+      payday = createNextPayPeriod(payday, frequency).nextPayday
+    }
+
+    const dates = createNextPayPeriod(payday, frequency)
+
+    return {
+      id: `paycheck-preview-${offset}-${payday}`,
+      startDate: dates.startDate,
+      endDate: dates.endDate,
+      payday,
+      nextPayday: dates.nextPayday,
+      payFrequency: frequency,
+      incomePence: currentPeriod.incomePence,
+      status: 'planned',
+      createdAt: currentPeriod.updatedAt,
+      updatedAt: currentPeriod.updatedAt,
+    }
+  }
+
+  const stepDays = getPaycheckStepDays(currentPeriod, frequency)
+  const payday = shiftIsoDate(currentPeriod.payday, stepDays * offset)
+  const nextPayday = shiftIsoDate(payday, stepDays)
+
+  return {
+    id: `paycheck-preview-${offset}-${payday}`,
+    startDate: payday,
+    endDate: shiftIsoDate(nextPayday, -1),
+    payday,
+    nextPayday,
+    payFrequency: frequency,
+    incomePence: currentPeriod.incomePence,
+    status: 'planned',
+    createdAt: currentPeriod.updatedAt,
+    updatedAt: currentPeriod.updatedAt,
+  }
+}
+
+function getPreviewPotTopUps(snapshot: PlannerSnapshot, period: PayPeriod): PotAllocation[] {
+  const existingAutoPotIds = new Set(
+    snapshot.potAllocations
+      .filter((allocation) => allocation.payPeriodId === period.id && allocation.source === 'pot_auto')
+      .map((allocation) => allocation.potId),
+  )
+
+  return snapshot.pots
+    .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0 && !existingAutoPotIds.has(pot.id))
+    .map((pot) => ({
+      id: `preview-pot-${period.id}-${pot.id}`,
+      payPeriodId: period.id,
+      potId: pot.id,
+      amountPence: pot.targetPence ?? 0,
+      source: 'pot_auto' as const,
+      recurringPaymentId: null,
+      createdAt: period.createdAt,
+      updatedAt: period.updatedAt,
+    }))
+}
+
+function formatPaycheckOffsetLabel(offset: number): string {
+  if (offset === 0) {
+    return 'Selected paycheck'
+  }
+
+  if (offset === 1) {
+    return 'Next paycheck'
+  }
+
+  if (offset === -1) {
+    return 'Previous paycheck'
+  }
+
+  return offset > 1 ? `${offset} paychecks ahead` : `${Math.abs(offset)} paychecks back`
+}
+
+function formatCostSource(source: PayPeriodCostSummary['items'][number]['source']): string {
+  if (source === 'recurring') {
+    return 'Recurring'
+  }
+
+  if (source === 'saved_payment') {
+    return 'Saved payment'
+  }
+
+  if (source === 'manual_spend') {
+    return 'Manual spend'
+  }
+
+  if (source === 'pot_allocation') {
+    return 'Pot top-up'
+  }
+
+  if (source === 'debt_minimum') {
+    return 'Debt due'
+  }
+
+  if (source === 'debt_reserve') {
+    return 'Debt reserve'
+  }
+
+  if (source === 'credit_card_pot') {
+    return 'Credit pot'
+  }
+
+  if (source === 'linked_credit_card_pot') {
+    return 'Card pot'
+  }
+
+  return 'Card repayment'
+}
+
+function getPaycheckStepDays(currentPeriod: PayPeriod, frequency: PayFrequency): number {
+  if (frequency === 'weekly') {
+    return 7
+  }
+
+  if (frequency === 'monthly') {
+    return 31
+  }
+
+  if (frequency === 'custom') {
+    return Math.max(1, getIsoDateDayDifference(currentPeriod.payday, currentPeriod.nextPayday) || 14)
+  }
+
+  return 14
+}
+
+function shiftIsoDate(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+
+  return date.toISOString().slice(0, 10)
+}
+
+function getIsoDateDayDifference(startDate: string, endDate: string): number {
+  const start = new Date(`${startDate}T00:00:00.000Z`).getTime()
+  const end = new Date(`${endDate}T00:00:00.000Z`).getTime()
+
+  return Math.round((end - start) / 86400000)
 }
 
 function getTotalPayBreakdown(

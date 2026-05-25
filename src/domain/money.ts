@@ -1063,7 +1063,7 @@ export function getLinkedCreditCardPotCoverBreakdown({
     if (existingShortfallPence > 0) {
       lines.push({
         id: 'current-shortfall',
-        label: 'Current card shortfall',
+        label: 'Owed from last statement',
         detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
         amountPence: existingShortfallPence,
         date: payPeriod.payday,
@@ -1095,7 +1095,7 @@ export function getLinkedCreditCardPotCoverBreakdown({
     if (remainingActualUncoveredPence > 0) {
       lines.push({
         id: 'current-shortfall',
-        label: 'Current card shortfall',
+        label: 'Owed from last statement',
         detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
         amountPence: remainingActualUncoveredPence,
         date: payPeriod.payday,

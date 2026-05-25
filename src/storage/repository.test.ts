@@ -826,6 +826,58 @@ describe('paycheck plan storage', () => {
     expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
   })
 
+  it('logs spending against a linked credit card pot as card spend without deducting the pot', async () => {
+    await db.creditCards.add({
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: '2026-05-14',
+      dueDay: 1,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+    await db.pots.add({
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 77505,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+
+    await addTransaction({
+      amountPence: 2000,
+      type: 'spending',
+      date: '2026-05-25',
+      note: 'Fuel top-up',
+      paymentMethod: 'pot',
+      potId: 'pot-barclays',
+      creditCardId: null,
+    })
+
+    const snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.transactions[0]).toMatchObject({
+      amountPence: 2000,
+      creditCardId: 'card-barclays',
+      note: 'Fuel top-up',
+      paymentMethod: 'credit_card',
+      potId: null,
+    })
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(77505)
+  })
+
   it('stores, updates, applies, and deletes credit card pots', async () => {
     await createPaycheckPlan({
       payday: '2026-05-22',

@@ -713,20 +713,19 @@ export async function deleteRecurringPayment(paymentId: string): Promise<void> {
 export async function addTransaction(input: TransactionInput): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
-  const paymentMethod = resolveTransactionPaymentMethod(input.paymentMethod, input.potId, input.creditCardId)
 
   await db.transaction('rw', db.transactions, db.pots, db.payPeriods, async () => {
     const periodId = input.payPeriodId ?? (await findStoredPayPeriodIdForDate(input.date))
-    const potId = paymentMethod === 'credit_card' ? null : input.potId ?? null
+    const link = await resolveStoredTransactionLink(input)
 
     await db.transactions.add({
       id: crypto.randomUUID(),
-      potId,
+      potId: link.potId,
       payPeriodId: periodId,
       amountPence,
       type: input.type,
-      paymentMethod,
-      creditCardId: paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
+      paymentMethod: link.paymentMethod,
+      creditCardId: link.creditCardId,
       recurringPaymentId: input.recurringPaymentId ?? null,
       date: input.date,
       note: input.note,
@@ -734,12 +733,10 @@ export async function addTransaction(input: TransactionInput): Promise<void> {
       updatedAt: timestamp,
     })
 
-    const pot = potId ? await db.pots.get(potId) : null
-
-    if (pot && paymentMethod !== 'credit_card') {
+    if (link.pot && link.paymentMethod !== 'credit_card') {
       const delta = input.type === 'spending' ? -amountPence : amountPence
-      await db.pots.update(pot.id, {
-        balancePence: pot.balancePence + delta,
+      await db.pots.update(link.pot.id, {
+        balancePence: link.pot.balancePence + delta,
         updatedAt: timestamp,
       })
     }
@@ -752,7 +749,6 @@ export async function updateTransaction(
 ): Promise<void> {
   const timestamp = nowIso()
   const amountPence = Math.abs(input.amountPence)
-  const paymentMethod = resolveTransactionPaymentMethod(input.paymentMethod, input.potId, input.creditCardId)
 
   await db.transaction('rw', db.transactions, db.pots, db.payPeriods, async () => {
     const current = await db.transactions.get(transactionId)
@@ -761,7 +757,8 @@ export async function updateTransaction(
       return
     }
 
-    const nextPotId = paymentMethod === 'credit_card' ? null : input.potId ?? null
+    const link = await resolveStoredTransactionLink(input)
+    const nextPotId = link.potId
 
     const oldPot = current.potId ? await db.pots.get(current.potId) : null
     let samePotAfterRemovalBalance: number | null = null
@@ -777,12 +774,10 @@ export async function updateTransaction(
     const nextPot =
       nextPotId === current.potId && oldPot && samePotAfterRemovalBalance !== null
         ? { ...oldPot, balancePence: samePotAfterRemovalBalance }
-        : nextPotId
-          ? await db.pots.get(nextPotId)
-          : null
+        : link.pot
 
     if (nextPot) {
-      if (paymentMethod !== 'credit_card') {
+      if (link.paymentMethod !== 'credit_card') {
         const delta = current.type === 'spending' ? -amountPence : amountPence
         await db.pots.update(nextPot.id, {
           balancePence: nextPot.balancePence + delta,
@@ -795,8 +790,8 @@ export async function updateTransaction(
       potId: nextPotId,
       payPeriodId: await findStoredPayPeriodIdForDate(input.date),
       amountPence,
-      paymentMethod,
-      creditCardId: paymentMethod === 'credit_card' ? input.creditCardId ?? null : null,
+      paymentMethod: link.paymentMethod,
+      creditCardId: link.creditCardId,
       date: input.date,
       note: input.note,
       updatedAt: timestamp,
@@ -847,6 +842,57 @@ function resolveTransactionPaymentMethod(
   }
 
   return undefined
+}
+
+interface StoredTransactionLink {
+  paymentMethod: Transaction['paymentMethod'] | undefined
+  potId: string | null
+  creditCardId: string | null
+  pot: Pot | null
+}
+
+async function resolveStoredTransactionLink(input: {
+  paymentMethod?: Transaction['paymentMethod']
+  potId?: string | null
+  creditCardId?: string | null
+}): Promise<StoredTransactionLink> {
+  const paymentMethod = resolveTransactionPaymentMethod(input.paymentMethod, input.potId, input.creditCardId)
+
+  if (paymentMethod === 'credit_card') {
+    return {
+      paymentMethod: 'credit_card',
+      potId: null,
+      creditCardId: input.creditCardId ?? null,
+      pot: null,
+    }
+  }
+
+  if (paymentMethod === 'pot' && input.potId) {
+    const pot = (await db.pots.get(input.potId)) ?? null
+
+    if (pot?.linkedCreditCardId) {
+      return {
+        paymentMethod: 'credit_card',
+        potId: null,
+        creditCardId: pot.linkedCreditCardId,
+        pot: null,
+      }
+    }
+
+    return {
+      paymentMethod: 'pot',
+      potId: input.potId,
+      creditCardId: null,
+      pot,
+    }
+  }
+
+  return {
+    paymentMethod: undefined,
+    potId: null,
+    creditCardId: null,
+    pot: null,
+  }
 }
 
 export async function addDebt(input: DebtInput): Promise<void> {

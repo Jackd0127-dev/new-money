@@ -62,7 +62,7 @@ export function SpendingPage({
       return
     }
 
-    const linkFields = getQuickSpendLinkFields(paymentMethod, potId, creditCardId)
+    const linkFields = getQuickSpendLinkFields(paymentMethod, potId, creditCardId, activePots)
 
     if (editingTransactionId) {
       const updateInput: TransactionUpdateInput = {
@@ -163,12 +163,20 @@ export function SpendingPage({
             </SelectInput>
           </Field>
           {paymentMethod === 'pot' && (
-            <Field label="Pot" hint="Optional. Choose no pot to keep this spend unlinked.">
+            <Field
+              label="Pot"
+              hint={
+                selectedPot?.linkedCreditCardId
+                  ? 'This logs card spend and adds the cover to the linked card pot checklist.'
+                  : 'Spending from a normal pot deducts its balance now.'
+              }
+            >
               <SelectInput aria-label="Pot" value={potId} onChange={(event) => setPotId(event.target.value)}>
                 <option value="">No pot linked</option>
                 {activePots.map((pot) => (
                   <option key={pot.id} value={pot.id}>
                     {pot.name} · {formatPence(pot.balancePence)}
+                    {pot.linkedCreditCardId ? ' · card cover' : ''}
                   </option>
                 ))}
               </SelectInput>
@@ -416,8 +424,19 @@ function getQuickSpendLinkFields(
   paymentMethod: QuickSpendLinkMethod,
   potId: string,
   creditCardId: string,
+  activePots: PlannerSnapshot['pots'],
 ): Pick<TransactionInput, 'potId' | 'paymentMethod' | 'creditCardId'> {
   if (paymentMethod === 'pot' && potId) {
+    const selectedPot = activePots.find((pot) => pot.id === potId)
+
+    if (selectedPot?.linkedCreditCardId) {
+      return {
+        potId: null,
+        paymentMethod: 'credit_card',
+        creditCardId: selectedPot.linkedCreditCardId,
+      }
+    }
+
     return {
       potId,
       paymentMethod: 'pot',

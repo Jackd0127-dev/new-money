@@ -1143,6 +1143,67 @@ describe('spending page', () => {
     })
   })
 
+  it('logs linked credit card pot spending as card cover instead of deducting the pot', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const today = toIsoDate(new Date())
+
+    render(
+      <SpendingPage
+        snapshot={createSnapshot({
+          pots: [
+            {
+              id: 'pot-barclays',
+              name: 'Barclays',
+              type: 'reserved',
+              balancePence: 77505,
+              targetPence: null,
+              color: '#2563eb',
+              linkedCreditCardId: 'card-barclays',
+              linkedDebtId: null,
+              archived: false,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+          creditCards: [
+            {
+              id: 'card-barclays',
+              name: 'Barclays',
+              provider: 'Barclays',
+              limitPence: 80000,
+              openingBalancePence: 68005,
+              dueDay: 1,
+              dueDate: null,
+              color: '#2563eb',
+              archived: false,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={actions}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '£20.00' }))
+    await user.selectOptions(screen.getByLabelText('Link spend to'), 'pot')
+    await user.selectOptions(screen.getByLabelText('Pot'), 'pot-barclays')
+    await user.type(screen.getByLabelText('Note'), 'Fuel top-up')
+    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+
+    expect(actions.addTransaction).toHaveBeenCalledWith({
+      amountPence: 2000,
+      creditCardId: 'card-barclays',
+      date: today,
+      note: 'Fuel top-up',
+      paymentMethod: 'credit_card',
+      payPeriodId: null,
+      potId: null,
+      type: 'spending',
+    })
+  })
+
   it('edits an existing manual spending entry', async () => {
     const user = userEvent.setup()
     const actions = createActions()

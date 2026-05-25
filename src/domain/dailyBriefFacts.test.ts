@@ -39,7 +39,7 @@ describe('getDailyBriefFacts', () => {
       }),
     ])
     expect(facts.creditCards).toMatchObject({
-      totalOwedPence: 11800,
+      totalOwedPence: 0,
       minimumsDueBeforeNextPaydayPence: 0,
       unlinkedCardSpendingPence: 3210,
       cardLinkedPaymentsPence: 11800,

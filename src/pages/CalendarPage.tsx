@@ -134,16 +134,18 @@ export function CalendarPage({
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const monthStart = toIsoDate(visibleMonth)
   const monthEnd = toIsoDate(new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth() + 1, 0)))
+  const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth])
+  const gridStart = monthCells[0]?.date ?? monthStart
+  const gridEnd = monthCells[monthCells.length - 1]?.date ?? monthEnd
   const events = useMemo(
-    () => getCalendarEvents(snapshot, monthStart, monthEnd),
-    [monthEnd, monthStart, snapshot],
+    () => getCalendarEvents(snapshot, gridStart, gridEnd),
+    [gridEnd, gridStart, snapshot],
   )
   const selectedDayEvents = useMemo(
     () => (selectedDate ? getCalendarEvents(snapshot, selectedDate, selectedDate) : []),
     [selectedDate, snapshot],
   )
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events])
-  const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth])
   const selectedDayPayPeriod = selectedDate ? findPayPeriodForDate(snapshot.payPeriods, selectedDate) : null
 
   useEffect(() => {

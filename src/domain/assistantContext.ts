@@ -164,7 +164,7 @@ export function buildAssistantAppContext({
         selectedPayPence: dashboard.payReceivedPence,
         selectedTotalCostsPence: dashboard.totalCostsPence,
         selectedMoneyLeftPence: dashboard.moneyLeftPence,
-        selectedCreditCardOwedPence: creditCards.totalOwedPence,
+        selectedCreditCardOwedPence: creditCards.totalActualOwedPence,
       },
       settings: {
         payFrequency: snapshot.settings.payFrequency,

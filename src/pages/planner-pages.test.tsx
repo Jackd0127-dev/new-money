@@ -75,6 +75,186 @@ describe('app shell navigation', () => {
 })
 
 describe('calendar page', () => {
+  it('shows anchored biweekly payments every 14 days without duplicating them on monthly due days', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDay: 1,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'personal',
+          name: 'Personal',
+          amountPence: 5000,
+          dueDay: 1,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-capital-one',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'card-capital-one',
+          name: 'Capital One',
+          provider: 'Capital One',
+          limitPence: 50000,
+          openingBalancePence: 0,
+          dueDay: 5,
+          dueDate: null,
+          color: '#64748b',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 29 May 2026' }))
+    expect(screen.getByRole('heading', { name: /Friday.*29 May 2026/ })).toBeInTheDocument()
+    expect(screen.getByText('Fuel')).toBeInTheDocument()
+    expect(screen.getByText('Personal')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await user.click(screen.getByRole('button', { name: 'Open 1 June 2026' }))
+    expect(screen.getByText('Gym')).toBeInTheDocument()
+    expect(screen.queryByText('Fuel')).not.toBeInTheDocument()
+    expect(screen.queryByText('Personal')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
+    await user.click(screen.getByRole('button', { name: 'Open 12 June 2026' }))
+    expect(screen.getByText('Fuel')).toBeInTheDocument()
+    expect(screen.getByText('Personal')).toBeInTheDocument()
+  })
+
+  it('shows events on visible next-month cells in the current month grid', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-car-insurance',
+          name: 'Car Insurance',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'car-insurance',
+          name: 'Car insurance',
+          amountPence: 8711,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: 'pot-car-insurance',
+          creditCardId: null,
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    expect(screen.getByRole('button', { name: 'Open 1 June 2026' })).toHaveTextContent('£112.11 out')
+    expect(screen.getByRole('button', { name: 'Open 5 June 2026' })).toHaveTextContent('Next payday starts')
+  })
+
   it('opens a day overview with every money event attached to the clicked date', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod({
@@ -707,6 +887,138 @@ describe('spending page', () => {
 })
 
 describe('allocating payments page', () => {
+  it('labels Barclays actual available credit separately from forecast available credit', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 59648,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <AllocatingPaymentsPage
+        snapshot={snapshot}
+        actions={createActions()}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open Barclays card details' }))
+
+    expect(screen.getByText('Actual balance')).toBeInTheDocument()
+    expect(screen.getByText('Actual available')).toBeInTheDocument()
+    expect(screen.getByText('Forecast balance')).toBeInTheDocument()
+    expect(screen.getByText('Forecast available')).toBeInTheDocument()
+    expect(screen.getAllByText('£680.05').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('£119.95').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('£775.05').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('£24.95').length).toBeGreaterThan(0)
+  })
+
+  it('flags allocation rows linked to a missing credit card', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      recurringPayments: [
+        {
+          id: 'personal',
+          name: 'Personal',
+          amountPence: 5000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-capital-one',
+          priority: 'optional',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [],
+    })
+
+    render(
+      <AllocatingPaymentsPage
+        snapshot={snapshot}
+        actions={createActions()}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    expect(screen.getByText(/missing card card-capital-one/i)).toBeInTheDocument()
+  })
+
   it('creates a credit card and records a card repayment without showing credit pot controls', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -888,30 +1200,30 @@ describe('allocating payments page', () => {
 
     const summaryPanel = screen.getByRole('region', { name: 'Credit card summary' })
     const metricLabels = within(summaryPanel)
-      .getAllByText(/Selected pay|Credit pots|Cards owed/)
+      .getAllByText(/Selected pay|Credit pots|Card cover needed/)
       .filter((element) => element.closest('summary'))
       .map((element) => element.textContent)
 
-    expect(metricLabels).toEqual(['Selected pay', 'Credit pots', 'Cards owed'])
+    expect(metricLabels).toEqual(['Selected pay', 'Credit pots', 'Card cover needed'])
 
     const selectedPay = getMetricDetails(summaryPanel, 'Selected pay')
     const creditPots = getMetricDetails(summaryPanel, 'Credit pots')
-    const cardsOwed = getMetricDetails(summaryPanel, 'Cards owed')
+    const cardCoverNeeded = getMetricDetails(summaryPanel, 'Card cover needed')
 
     await user.click(within(selectedPay).getByText('Show calculation'))
     expect(selectedPay).toHaveAttribute('open')
     expect(creditPots).not.toHaveAttribute('open')
-    expect(cardsOwed).not.toHaveAttribute('open')
+    expect(cardCoverNeeded).not.toHaveAttribute('open')
 
     await user.click(within(creditPots).getByText('Show calculation'))
     expect(selectedPay).not.toHaveAttribute('open')
     expect(creditPots).toHaveAttribute('open')
-    expect(cardsOwed).not.toHaveAttribute('open')
+    expect(cardCoverNeeded).not.toHaveAttribute('open')
 
-    await user.click(within(cardsOwed).getByText('Show calculation'))
+    await user.click(within(cardCoverNeeded).getByText('Show calculation'))
     expect(selectedPay).not.toHaveAttribute('open')
     expect(creditPots).not.toHaveAttribute('open')
-    expect(cardsOwed).toHaveAttribute('open')
+    expect(cardCoverNeeded).toHaveAttribute('open')
   })
 
   it('offers and renders the teal credit card design', async () => {
@@ -1127,8 +1439,8 @@ describe('allocating payments page', () => {
 
     expect(screen.getByRole('region', { name: 'Card activity' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Credit pots for this card' })).not.toBeInTheDocument()
-    expect(screen.getAllByText('Balance').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Available').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Actual balance').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Actual available').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Edit card' }))
 
@@ -1456,6 +1768,113 @@ describe('pots page', () => {
     expect(screen.getByText('62%')).toBeInTheDocument()
     expect(screen.getByText('£557.41 target')).toBeInTheDocument()
   })
+
+  it('shows the real pot percentage when a pot is over target', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-holiday',
+          name: 'Holiday',
+          type: 'spending',
+          category: 'Savings',
+          icon: 'target',
+          balancePence: 15000,
+          targetPence: 10000,
+          color: '#2563eb',
+          linkedCreditCardId: null,
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('150%')).toBeInTheDocument()
+    expect(screen.getByText('£100.00 target')).toBeInTheDocument()
+  })
+
+  it('labels linked credit card pot targets as forecast cover when upcoming card charges are included', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'card',
+          balancePence: 59648,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('77%')).toBeInTheDocument()
+    expect(screen.getByText('£775.05 forecast target')).toBeInTheDocument()
+    expect(screen.getByText('Due now • £178.57 left')).toBeInTheDocument()
+  })
 })
 
 describe('recurring page', () => {
@@ -1615,6 +2034,7 @@ describe('recurring page', () => {
     expect(actions.addRecurringPayment).toHaveBeenCalledWith({
       amountPence: 1199,
       creditCardId: 'card-aqua',
+      dueDate: null,
       dueDay: 12,
       frequency: 'monthly',
       name: 'Spotify',
@@ -1655,12 +2075,38 @@ describe('recurring page', () => {
 
     expect(actions.updateRecurringPayment).toHaveBeenCalledWith('rec-phone', {
       amountPence: 2550,
+      dueDate: null,
       dueDay: 23,
       frequency: 'yearly',
       name: 'Phone',
       potId: 'pot-bills',
       priority: 'important',
     })
+  })
+
+  it('flags recurring payments linked to missing credit cards', () => {
+    const snapshot = createSnapshot({
+      recurringPayments: [
+        {
+          id: 'personal',
+          name: 'Personal',
+          amountPence: 5000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-capital-one',
+          priority: 'optional',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [],
+    })
+
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText(/missing card card-capital-one/i)).toBeInTheDocument()
   })
 })
 
@@ -2082,6 +2528,105 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('applies the exact Barclays planned card cover amount from the dashboard checklist', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const restoreLocalStorage = mockLocalStorage()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 59648,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: /Set aside £178\.57 into "Barclays" pot for "Barclays" planned card cover/,
+      }),
+    )
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+      payPeriodId: 'period-current',
+      potId: 'pot-barclays',
+      amountPence: 17857,
+    })
+
+    restoreLocalStorage()
+  })
+
   it('ignores a checklist payment for the selected paycheck maths', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()
@@ -2247,9 +2792,9 @@ describe('dashboard page', () => {
     expect(within(currentPeriod).getAllByText('£200.00').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('£800.00').length).toBeGreaterThan(0)
     expect(
-      within(todoList).getByText('Set aside £200.00 into "Card Reserve" pot for "Everyday Amex" card amount owed'),
+      within(todoList).getByText('Set aside £200.00 into "Card Reserve" pot for "Everyday Amex" planned card cover'),
     ).toBeInTheDocument()
-    expect(within(todoList).getByText('Linked card balance still owed')).toBeInTheDocument()
+    expect(within(todoList).getByText('Current shortfall plus planned card charges before next payday')).toBeInTheDocument()
   })
 
   it('expands only one dashboard summary card at a time', async () => {

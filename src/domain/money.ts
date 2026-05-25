@@ -193,6 +193,7 @@ interface CreditCardAllocationInput {
   creditCardPots?: CreditCardPot[]
   pots?: Pot[]
   payPeriod: PayPeriod | null
+  asOfDate?: string
 }
 
 export interface CreditCardAllocationItem {
@@ -208,6 +209,15 @@ export interface CreditCardAllocationItem {
 export interface CreditCardAllocationCardSummary {
   card: CreditCard
   openingBalancePence: number
+  actualOwedPence: number
+  actualAvailableCreditPence: number
+  actualUncoveredPence: number
+  forecastOwedPence: number
+  forecastAvailableCreditPence: number
+  forecastUtilisationPercent: number
+  plannedChargesPence: number
+  plannedRepaymentsPence: number
+  plannedTopUpNeededPence: number
   owedPence: number
   creditPotPence: number
   paycheckCreditPotPence: number
@@ -224,6 +234,12 @@ export interface CreditCardAllocationCardSummary {
 export interface CreditCardAllocationSummary {
   cards: CreditCardAllocationCardSummary[]
   unlinkedItems: CreditCardAllocationItem[]
+  totalActualOwedPence: number
+  totalActualAvailableCreditPence: number
+  totalForecastOwedPence: number
+  totalForecastAvailableCreditPence: number
+  totalActualUncoveredPence: number
+  totalPlannedTopUpNeededPence: number
   totalOwedPence: number
   totalCreditPotsPence: number
   totalPaycheckCreditPotsPence: number
@@ -308,18 +324,11 @@ export function getRecurringPaymentsDue(
   startDate: string,
   endDate: string,
 ): RecurringPayment[] {
-  const seenPaymentIds = new Set<string>()
-
   return getRecurringPaymentOccurrences(payments, startDate, endDate)
-    .filter((occurrence) => {
-      if (seenPaymentIds.has(occurrence.payment.id)) {
-        return false
-      }
-
-      seenPaymentIds.add(occurrence.payment.id)
-      return true
-    })
-    .map((occurrence) => occurrence.payment)
+    .map((occurrence) => ({
+      ...occurrence.payment,
+      amountPence: occurrence.amountPence,
+    }))
     .sort((a, b) => getPriorityRank(a.priority) - getPriorityRank(b.priority))
 }
 
@@ -607,7 +616,7 @@ export function getPayPeriodCostSummary({
         pots,
         payPeriod,
       }).cards.flatMap((cardSummary) => {
-        if (!linkedCreditCardIds.has(cardSummary.card.id) || cardSummary.remainingAfterCreditPotsPence <= 0) {
+        if (!linkedCreditCardIds.has(cardSummary.card.id) || cardSummary.plannedTopUpNeededPence <= 0) {
           return []
         }
 
@@ -620,8 +629,8 @@ export function getPayPeriodCostSummary({
         return [
           {
             id: `linked-credit-card-pot-${cardSummary.card.id}`,
-            label: `${cardSummary.card.name} amount owed`,
-            amountPence: cardSummary.remainingAfterCreditPotsPence,
+            label: `${cardSummary.card.name} planned card cover`,
+            amountPence: cardSummary.plannedTopUpNeededPence,
             date: payPeriod.payday,
             source: 'linked_credit_card_pot' as const,
             creditCardId: cardSummary.card.id,
@@ -764,9 +773,11 @@ export function getCreditCardAllocationSummary({
   creditCardPots = [],
   pots = [],
   payPeriod,
+  asOfDate,
 }: CreditCardAllocationInput): CreditCardAllocationSummary {
-  const rangeStart = payPeriod?.startDate ?? '0000-01-01'
-  const rangeEnd = payPeriod?.endDate ?? toIsoDate(new Date())
+  const todayIso = asOfDate ?? toIsoDate(new Date())
+  const rangeStart = payPeriod?.startDate ?? todayIso
+  const rangeEnd = payPeriod?.endDate ?? todayIso
   const activeCards = creditCards.filter((card) => !card.archived)
   const items = [
     ...getRecurringPaymentOccurrences(recurringPayments, rangeStart, rangeEnd).map((occurrence) => ({
@@ -834,17 +845,26 @@ export function getCreditCardAllocationSummary({
   const cards = activeCards.map((card) => {
     const openingBalancePence = getCreditCardOpeningBalancePence(card)
     const cardItems = items.filter((item) => item.creditCardId === card.id)
-    const balanceItems = getCreditCardBalanceItems({
+    const actualBalanceItems = getActualCreditCardBalanceItems({
       card,
-      recurringPayments,
-      customPayments,
       transactions,
       repayments,
-      rangeEnd,
+      asOfDate: todayIso,
     })
-    const owedPence = Math.max(
+    const actualOwedPence = Math.max(
       0,
-      openingBalancePence + balanceItems.reduce((total, item) => total + item.amountPence, 0),
+      openingBalancePence + actualBalanceItems.reduce((total, item) => total + item.amountPence, 0),
+    )
+    const forecastItems = getForecastCreditCardItems(cardItems, todayIso)
+    const forecastDeltaPence = forecastItems.reduce((total, item) => total + item.amountPence, 0)
+    const forecastOwedPence = Math.max(0, actualOwedPence + forecastDeltaPence)
+    const plannedChargesPence = forecastItems
+      .filter((item) => item.amountPence > 0)
+      .reduce((total, item) => total + item.amountPence, 0)
+    const plannedRepaymentsPence = Math.abs(
+      forecastItems
+        .filter((item) => item.amountPence < 0)
+        .reduce((total, item) => total + item.amountPence, 0),
     )
     const activeCreditPots = creditCardPots.filter(
       (creditCardPot) =>
@@ -858,25 +878,43 @@ export function getCreditCardAllocationSummary({
     const externalCreditPotPence = sumCreditCardPots(activeCreditPots.filter((creditCardPot) => creditCardPot.source === 'external'))
     const linkedPotPence = getLinkedCreditCardPotPence(pots, card.id)
     const creditPotPence = storedCreditPotPence + linkedPotPence
-    const availableCreditPence = Math.max(0, card.limitPence - owedPence)
+    const actualAvailableCreditPence = Math.max(0, card.limitPence - actualOwedPence)
+    const forecastAvailableCreditPence = Math.max(0, card.limitPence - forecastOwedPence)
+    const actualUncoveredPence = Math.max(0, actualOwedPence - creditPotPence)
+    const plannedTopUpNeededPence = Math.max(0, forecastOwedPence - creditPotPence)
 
     return {
       card,
       openingBalancePence,
-      owedPence,
+      actualOwedPence,
+      actualAvailableCreditPence,
+      actualUncoveredPence,
+      forecastOwedPence,
+      forecastAvailableCreditPence,
+      forecastUtilisationPercent: card.limitPence > 0 ? Math.round((forecastOwedPence / card.limitPence) * 100) : 0,
+      plannedChargesPence,
+      plannedRepaymentsPence,
+      plannedTopUpNeededPence,
+      owedPence: forecastOwedPence,
       creditPotPence,
       paycheckCreditPotPence,
       externalCreditPotPence,
       linkedPotPence,
-      remainingAfterCreditPotsPence: Math.max(0, owedPence - creditPotPence),
-      availableCreditPence,
-      utilisationPercent: card.limitPence > 0 ? Math.round((owedPence / card.limitPence) * 100) : 0,
+      remainingAfterCreditPotsPence: plannedTopUpNeededPence,
+      availableCreditPence: actualAvailableCreditPence,
+      utilisationPercent: card.limitPence > 0 ? Math.round((actualOwedPence / card.limitPence) * 100) : 0,
       dueLabel: getCreditCardDueLabel(card),
       items: cardItems,
-      balanceItems,
+      balanceItems: actualBalanceItems,
     }
   })
-  const totalOwedPence = cards.reduce((total, card) => total + card.owedPence, 0)
+  const totalActualOwedPence = cards.reduce((total, card) => total + card.actualOwedPence, 0)
+  const totalActualAvailableCreditPence = cards.reduce((total, card) => total + card.actualAvailableCreditPence, 0)
+  const totalForecastOwedPence = cards.reduce((total, card) => total + card.forecastOwedPence, 0)
+  const totalForecastAvailableCreditPence = cards.reduce((total, card) => total + card.forecastAvailableCreditPence, 0)
+  const totalActualUncoveredPence = cards.reduce((total, card) => total + card.actualUncoveredPence, 0)
+  const totalPlannedTopUpNeededPence = cards.reduce((total, card) => total + card.plannedTopUpNeededPence, 0)
+  const totalOwedPence = totalForecastOwedPence
   const totalCreditPotsPence = cards.reduce((total, card) => total + card.creditPotPence, 0)
   const totalPaycheckCreditPotsPence = cards.reduce((total, card) => total + card.paycheckCreditPotPence, 0)
   const totalExternalCreditPotsPence = cards.reduce((total, card) => total + card.externalCreditPotPence, 0)
@@ -889,6 +927,12 @@ export function getCreditCardAllocationSummary({
   return {
     cards,
     unlinkedItems: items.filter((item) => !item.creditCardId),
+    totalActualOwedPence,
+    totalActualAvailableCreditPence,
+    totalForecastOwedPence,
+    totalForecastAvailableCreditPence,
+    totalActualUncoveredPence,
+    totalPlannedTopUpNeededPence,
     totalOwedPence,
     totalCreditPotsPence,
     totalPaycheckCreditPotsPence,
@@ -896,68 +940,29 @@ export function getCreditCardAllocationSummary({
     totalLinkedPotPence,
     totalRemainingAfterCreditPotsPence,
     payReceivedPence: payPeriod?.incomePence ?? 0,
-    paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalOwedPence - totalPaycheckCreditPotsPence,
+    paycheckRemainingAfterCardsPence: (payPeriod?.incomePence ?? 0) - totalPlannedTopUpNeededPence - totalPaycheckCreditPotsPence,
   }
 }
 
-function getCreditCardBalanceItems({
+function getActualCreditCardBalanceItems({
   card,
-  recurringPayments,
-  customPayments,
   transactions,
   repayments,
-  rangeEnd,
+  asOfDate,
 }: {
   card: CreditCard
-  recurringPayments: RecurringPayment[]
-  customPayments: CustomPayment[]
   transactions: Transaction[]
   repayments: CreditCardRepayment[]
-  rangeEnd: string
+  asOfDate: string
 }): CreditCardAllocationItem[] {
-  const cardStart = card.createdAt.slice(0, 10)
-
   return [
-    ...recurringPayments
-      .filter((payment) => payment.creditCardId === card.id)
-      .flatMap((payment) =>
-        getRecurringPaymentOccurrences(
-          [payment],
-          maxIsoDate(cardStart, payment.createdAt.slice(0, 10)),
-          rangeEnd,
-        ).map((occurrence) => ({
-          id: `recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
-          creditCardId: card.id,
-          potId: occurrence.payment.potId,
-          label: occurrence.payment.name,
-          amountPence: occurrence.amountPence,
-          date: occurrence.dueDate,
-          source: 'recurring' as const,
-        })),
-      ),
-    ...customPayments
-      .filter(
-        (payment) =>
-          payment.creditCardId === card.id &&
-          payment.status === 'unpaid' &&
-          payment.dueDate <= rangeEnd,
-      )
-      .map((payment) => ({
-        id: `custom-${payment.id}`,
-        creditCardId: card.id,
-        potId: null,
-        label: payment.name,
-        amountPence: payment.amountPence,
-        date: payment.dueDate,
-        source: 'custom' as const,
-      })),
     ...transactions
       .filter(
         (transaction) =>
           transaction.type === 'spending' &&
           transaction.paymentMethod === 'credit_card' &&
           transaction.creditCardId === card.id &&
-          transaction.date <= rangeEnd,
+          transaction.date <= asOfDate,
       )
       .map((transaction) => ({
         id: `transaction-${transaction.id}`,
@@ -972,7 +977,7 @@ function getCreditCardBalanceItems({
       .filter(
         (repayment) =>
           repayment.creditCardId === card.id &&
-          repayment.date <= rangeEnd,
+          repayment.date <= asOfDate,
       )
       .map((repayment) => ({
         id: `repayment-${repayment.id}`,
@@ -986,12 +991,21 @@ function getCreditCardBalanceItems({
   ].sort(sortCreditCardItems)
 }
 
-function getCreditCardOpeningBalancePence(card: CreditCard): number {
-  return Math.max(0, card.openingBalancePence ?? 0)
+function getForecastCreditCardItems(
+  cardItems: CreditCardAllocationItem[],
+  asOfDate: string,
+): CreditCardAllocationItem[] {
+  return cardItems.filter((item) => {
+    if (item.source === 'recurring' || item.source === 'custom') {
+      return true
+    }
+
+    return item.date > asOfDate
+  })
 }
 
-function maxIsoDate(left: string, right: string): string {
-  return left > right ? left : right
+function getCreditCardOpeningBalancePence(card: CreditCard): number {
+  return Math.max(0, card.openingBalancePence ?? 0)
 }
 
 function sortCreditCardItems(a: CreditCardAllocationItem, b: CreditCardAllocationItem): number {
@@ -1184,38 +1198,41 @@ function isIsoDateBetweenInclusive(date: string, startDate: string, endDate: str
 }
 
 function getRecurringPaymentDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
-  if (payment.dueDate) {
-    return getAnchoredRecurringDates(payment, start, end)
-  }
-
-  if (!payment.dueDay) {
-    return []
-  }
-
   if (payment.frequency === 'weekly') {
-    return getIntervalDueDates(payment.dueDay, start, end, 7)
+    return getIntervalDueDates(payment, start, end, 7)
   }
 
   if (payment.frequency === 'biweekly') {
-    return getIntervalDueDates(payment.dueDay, start, end, 14)
+    return getIntervalDueDates(payment, start, end, 14)
   }
 
   if (payment.frequency === 'yearly') {
     return getYearlyDueDates(payment, start, end)
   }
 
-  return getMonthlyDueDates(payment.dueDay, start, end)
+  if (!payment.dueDay) {
+    return []
+  }
+
+  return getMonthlyDueDates(payment, start, end)
 }
 
-function getMonthlyDueDates(dueDay: number, start: Date, end: Date): Date[] {
+function getMonthlyDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
+  if (!payment.dueDay) {
+    return []
+  }
+
+  const firstEligibleDate = getRecurringStartDate(payment)
+  const effectiveStart = firstEligibleDate && firstEligibleDate > start ? firstEligibleDate : start
   const dueDates: Date[] = []
-  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
+  const cursor = new Date(Date.UTC(effectiveStart.getUTCFullYear(), effectiveStart.getUTCMonth(), 1))
+  const dueDay = Math.min(31, Math.max(1, payment.dueDay))
 
   while (cursor <= end) {
     const lastDay = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0)).getUTCDate()
     const date = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), Math.min(dueDay, lastDay)))
 
-    if (isBetweenInclusive(date, start, end)) {
+    if (date >= effectiveStart && isBetweenInclusive(date, start, end)) {
       dueDates.push(date)
     }
 
@@ -1223,6 +1240,16 @@ function getMonthlyDueDates(dueDay: number, start: Date, end: Date): Date[] {
   }
 
   return dueDates
+}
+
+function getRecurringStartDate(payment: RecurringPayment): Date | null {
+  if (payment.dueDate && isIsoDate(payment.dueDate)) {
+    return parseDate(payment.dueDate)
+  }
+
+  const createdDate = payment.createdAt.slice(0, 10)
+
+  return isIsoDate(createdDate) ? parseDate(createdDate) : null
 }
 
 function getYearlyDueDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
@@ -1241,14 +1268,18 @@ function getYearlyDueDates(payment: RecurringPayment, start: Date, end: Date): D
   return dueDates
 }
 
-function getIntervalDueDates(dueDay: number, start: Date, end: Date, intervalDays: number): Date[] {
+function getIntervalDueDates(payment: RecurringPayment, start: Date, end: Date, intervalDays: number): Date[] {
+  const anchor = getIntervalAnchorDate(payment)
+
+  if (!anchor) {
+    return []
+  }
+
   const dueDates: Date[] = []
-  const boundedDueDay = Math.min(Math.max(1, dueDay), 28)
-  const anchor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), boundedDueDay))
   let cursor = anchor
 
-  while (cursor > start) {
-    cursor = addDays(cursor, -intervalDays)
+  while (cursor < start) {
+    cursor = addDays(cursor, intervalDays)
   }
 
   while (cursor <= end) {
@@ -1262,41 +1293,32 @@ function getIntervalDueDates(dueDay: number, start: Date, end: Date, intervalDay
   return dueDates
 }
 
-function getAnchoredRecurringDates(payment: RecurringPayment, start: Date, end: Date): Date[] {
-  const anchor = parseDate(payment.dueDate!)
-  const dueDates: Date[] = []
-  let cursor = anchor
-
-  while (cursor < start) {
-    cursor = getNextRecurringDate(cursor, payment.frequency)
+function getIntervalAnchorDate(payment: RecurringPayment): Date | null {
+  if (payment.dueDate && isIsoDate(payment.dueDate)) {
+    return parseDate(payment.dueDate)
   }
 
-  while (cursor <= end) {
-    dueDates.push(cursor)
-    cursor = getNextRecurringDate(cursor, payment.frequency)
+  if (!payment.dueDay) {
+    return null
   }
 
-  return dueDates
-}
+  const createdDate = payment.createdAt.slice(0, 10)
+  const created = isIsoDate(createdDate) ? parseDate(createdDate) : new Date()
+  const lastDay = new Date(Date.UTC(created.getUTCFullYear(), created.getUTCMonth() + 1, 0)).getUTCDate()
 
-function getNextRecurringDate(date: Date, frequency: RecurringPayment['frequency']): Date {
-  if (frequency === 'weekly') {
-    return addDays(date, 7)
-  }
-
-  if (frequency === 'biweekly') {
-    return addDays(date, 14)
-  }
-
-  if (frequency === 'yearly') {
-    return new Date(Date.UTC(date.getUTCFullYear() + 1, date.getUTCMonth(), date.getUTCDate()))
-  }
-
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()))
+  return new Date(Date.UTC(
+    created.getUTCFullYear(),
+    created.getUTCMonth(),
+    Math.min(Math.max(1, payment.dueDay), lastDay),
+  ))
 }
 
 function parseDate(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`)
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
 function addDays(date: Date, days: number): Date {

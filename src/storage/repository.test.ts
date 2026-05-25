@@ -25,6 +25,7 @@ import {
   updateCreditCardPot,
   updateDebtReserve,
   updatePot,
+  updateRecurringPayment,
   updateTransaction,
   upsertPaycheckPotAllocation,
   deletePaycheckPotAllocation,
@@ -270,6 +271,137 @@ describe('paycheck plan storage', () => {
       potId: null,
     })
     expect(snapshot.potAllocations.some((allocation) => allocation.recurringPaymentId === payment?.id)).toBe(false)
+  })
+
+  it('persists a biweekly recurring payment anchor date through create and update', async () => {
+    await addRecurringPayment({
+      name: 'Fuel',
+      amountPence: 7000,
+      dueDay: 1,
+      dueDate: '2026-05-29',
+      frequency: 'biweekly',
+      potId: null,
+      priority: 'important',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const payment = snapshot.recurringPayments.find((candidate) => candidate.name === 'Fuel')
+
+    expect(payment).toMatchObject({
+      dueDay: 1,
+      dueDate: '2026-05-29',
+      frequency: 'biweekly',
+    })
+
+    await updateRecurringPayment(payment?.id ?? '', {
+      name: 'Fuel',
+      amountPence: 7000,
+      dueDay: 1,
+      dueDate: '2026-06-12',
+      frequency: 'biweekly',
+      potId: null,
+      priority: 'important',
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.recurringPayments.find((candidate) => candidate.id === payment?.id)).toMatchObject({
+      dueDate: '2026-06-12',
+    })
+  })
+
+  it('reserves the total uncovered amount when an interval recurring payment occurs more than once in a pay period', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-05-16T12:00:00.000Z'))
+
+    await updatePot('pot-food', {
+      name: 'Food',
+      type: 'spending',
+      balancePence: 500,
+      targetPence: null,
+      color: '#16a34a',
+    })
+    await addRecurringPayment({
+      name: 'Travel',
+      amountPence: 1000,
+      dueDate: '2026-05-16',
+      frequency: 'weekly',
+      potId: 'pot-food',
+      priority: 'important',
+    })
+    await createPaycheckPlan({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+
+    const snapshot = await getPlannerSnapshot()
+    const payment = snapshot.recurringPayments.find((candidate) => candidate.name === 'Travel')
+
+    expect(snapshot.potAllocations).toContainEqual(
+      expect.objectContaining({
+        potId: 'pot-food',
+        amountPence: 1500,
+        source: 'recurring',
+        recurringPaymentId: payment?.id,
+      }),
+    )
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(1000)
+  })
+
+  it('moves a linked-card checklist top-up into the pot without changing the card balance seed', async () => {
+    await addCreditCard({
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      dueDay: 11,
+      color: '#2563eb',
+      designId: null,
+    })
+    await updatePot('pot-food', {
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 59648,
+      targetPence: null,
+      color: '#2563eb',
+    })
+    const initialSnapshot = await getPlannerSnapshot()
+    const card = initialSnapshot.creditCards.find((candidate) => candidate.name === 'Barclays')
+
+    await updatePot('pot-food', {
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 59648,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: card?.id ?? null,
+    })
+    await createPaycheckPlan({
+      payday: '2026-05-22',
+      payFrequency: 'biweekly',
+      hoursWorked: 83,
+      hourlyRatePence: 950,
+      actualAmountPence: null,
+      allocations: [],
+    })
+
+    const plannedSnapshot = await getPlannerSnapshot()
+    const payPeriodId = plannedSnapshot.payPeriods[0].id
+
+    await upsertPaycheckPotAllocation({
+      id: `dashboard-todo-${payPeriodId}-linked-credit-card-pot-${card?.id}`,
+      payPeriodId,
+      potId: 'pot-food',
+      amountPence: 17857,
+    })
+
+    const snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.creditCards.find((candidate) => candidate.id === card?.id)?.openingBalancePence).toBe(68005)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(77505)
   })
 
   it('deducts direct recurring payments from the linked pot when the due date arrives', async () => {

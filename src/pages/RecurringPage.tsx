@@ -25,6 +25,7 @@ interface RecurringFormState {
   name: string
   amount: string
   dueDay: string
+  dueDate: string
   frequency: RecurringFrequency
   priority: RecurringPriority
   potId: string
@@ -70,17 +71,26 @@ export function RecurringPage({
   async function submitPayment(form: RecurringFormState, mode: 'create' | 'edit') {
     const amountPence = parsePoundsToPence(form.amount)
     const dueDayNumber = Number.parseInt(form.dueDay, 10)
+    const usesIntervalAnchor = isIntervalFrequency(form.frequency)
 
-    if (!form.name.trim() || amountPence <= 0 || dueDayNumber < 1 || dueDayNumber > 31) {
+    if (
+      !form.name.trim() ||
+      amountPence <= 0 ||
+      (!usesIntervalAnchor && (dueDayNumber < 1 || dueDayNumber > 31)) ||
+      (usesIntervalAnchor && !isIsoDateInput(form.dueDate))
+    ) {
       return
     }
+    const dueDay = usesIntervalAnchor ? null : dueDayNumber
+    const dueDate = usesIntervalAnchor ? form.dueDate : null
 
     if (mode === 'edit' && editingPaymentId) {
       const currentPayment = snapshot.recurringPayments.find((candidate) => candidate.id === editingPaymentId)
       const updateInput = {
         name: form.name.trim(),
         amountPence,
-        dueDay: dueDayNumber,
+        dueDay,
+        dueDate,
         frequency: form.frequency,
         potId: form.potId || null,
         priority: form.priority,
@@ -99,7 +109,8 @@ export function RecurringPage({
     const addInput = {
       name: form.name.trim(),
       amountPence,
-      dueDay: dueDayNumber,
+      dueDay,
+      dueDate,
       frequency: form.frequency,
       potId: form.potId || null,
       priority: form.priority,
@@ -126,6 +137,7 @@ export function RecurringPage({
       name: payment.name,
       amount: (payment.amountPence / 100).toFixed(2),
       dueDay: String(payment.dueDay ?? 1),
+      dueDate: payment.dueDate ?? '',
       frequency: payment.frequency,
       priority: payment.priority,
       potId: payment.potId ?? '',
@@ -175,6 +187,7 @@ export function RecurringPage({
             snapshot.recurringPayments.map((payment) => {
               const pot = snapshot.pots.find((candidate) => candidate.id === payment.potId)
               const card = snapshot.creditCards.find((candidate) => candidate.id === payment.creditCardId)
+              const cardLabel = getRecurringCreditCardLabel(payment.creditCardId, card)
 
               return (
                 <div key={payment.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -184,8 +197,8 @@ export function RecurringPage({
                       <h3 className="text-sm font-semibold text-slate-950">{payment.name}</h3>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Due day {payment.dueDay} · {payment.frequency} · {payment.potId ? `paid from ${pot?.name ?? 'Archived pot'}` : 'no pot linked'}
-                      {card ? ` · ${card.name}` : ''}
+                      {getRecurringScheduleLabel(payment)} · {payment.frequency} · {payment.potId ? `paid from ${pot?.name ?? 'Archived pot'}` : 'no pot linked'}
+                      {cardLabel ? ` · ${cardLabel}` : ''}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -277,11 +290,39 @@ function createEmptyRecurringForm(defaultPotId: string): RecurringFormState {
     name: '',
     amount: '',
     dueDay: '1',
+    dueDate: '',
     frequency: 'monthly',
     priority: 'essential',
     potId: defaultPotId,
     creditCardId: '',
   }
+}
+
+function getRecurringScheduleLabel(payment: { dueDay?: number | null; dueDate?: string | null; frequency: RecurringFrequency }): string {
+  if (isIntervalFrequency(payment.frequency)) {
+    return payment.dueDate ? `First due ${payment.dueDate}` : 'First due date missing'
+  }
+
+  return payment.dueDay ? `Due day ${payment.dueDay}` : 'Due day missing'
+}
+
+function getRecurringCreditCardLabel(
+  creditCardId: string | null | undefined,
+  card: PlannerSnapshot['creditCards'][number] | undefined,
+): string | null {
+  if (!creditCardId) {
+    return null
+  }
+
+  return card ? card.name : `missing card ${creditCardId}`
+}
+
+function isIntervalFrequency(frequency: RecurringFrequency): boolean {
+  return frequency === 'weekly' || frequency === 'biweekly'
+}
+
+function isIsoDateInput(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
 function RecurringPaymentFormFields({
@@ -295,6 +336,8 @@ function RecurringPaymentFormFields({
   activeCards: PlannerSnapshot['creditCards']
   onChange: (form: RecurringFormState) => void
 }) {
+  const usesIntervalAnchor = isIntervalFrequency(form.frequency)
+
   return (
     <>
       <Field label="Name">
@@ -313,13 +356,23 @@ function RecurringPaymentFormFields({
         />
       </Field>
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Due day">
-          <TextInput
-            inputMode="numeric"
-            value={form.dueDay}
-            onChange={(event) => onChange({ ...form, dueDay: event.target.value })}
-          />
-        </Field>
+        {usesIntervalAnchor ? (
+          <Field label="First due date">
+            <TextInput
+              type="date"
+              value={form.dueDate}
+              onChange={(event) => onChange({ ...form, dueDate: event.target.value })}
+            />
+          </Field>
+        ) : (
+          <Field label="Due day">
+            <TextInput
+              inputMode="numeric"
+              value={form.dueDay}
+              onChange={(event) => onChange({ ...form, dueDay: event.target.value })}
+            />
+          </Field>
+        )}
         <Field label="Frequency">
           <SelectInput
             value={form.frequency}

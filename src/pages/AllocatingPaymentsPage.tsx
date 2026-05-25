@@ -146,7 +146,8 @@ export function AllocatingPaymentsPage({
       await actions.updateRecurringPayment(payment.id, {
         name: payment.name,
         amountPence: payment.amountPence,
-        dueDay: payment.dueDay ?? 1,
+        dueDay: payment.dueDay ?? null,
+        dueDate: payment.dueDate ?? null,
         frequency: payment.frequency,
         potId: payment.potId,
         creditCardId: nextCardId,
@@ -373,7 +374,7 @@ export function AllocatingPaymentsPage({
 
   return (
     <div className="space-y-6">
-      <Panel title="Credit card summary" description="Selected pay, card balances, and linked credit pots." accent="cyan">
+      <Panel title="Credit card summary" description="Selected pay, actual card balances, forecasts, and linked credit pots." accent="cyan">
         <div className="grid items-start gap-4 md:grid-cols-3">
           <MoneyMetric
             label="Selected pay"
@@ -405,13 +406,13 @@ export function AllocatingPaymentsPage({
             }
           />
           <MoneyMetric
-            label="Cards owed"
-            value={formatPence(summary.totalRemainingAfterCreditPotsPence)}
-            tone={summary.totalRemainingAfterCreditPotsPence > 0 ? 'warning' : 'neutral'}
-            breakdown={getCardsOwedBreakdown(summary.cards)}
-            open={openSummaryMetric === 'cards-owed'}
+            label="Card cover needed"
+            value={formatPence(summary.totalPlannedTopUpNeededPence)}
+            tone={summary.totalPlannedTopUpNeededPence > 0 ? 'warning' : 'neutral'}
+            breakdown={getCardCoverNeededBreakdown(summary.cards)}
+            open={openSummaryMetric === 'card-cover-needed'}
             onOpenChange={(isOpen) =>
-              setOpenSummaryMetric((current) => isOpen ? 'cards-owed' : current === 'cards-owed' ? null : current)
+              setOpenSummaryMetric((current) => isOpen ? 'card-cover-needed' : current === 'card-cover-needed' ? null : current)
             }
           />
         </div>
@@ -675,8 +676,9 @@ function CreditCardPreviewButton({
       <div className="figma-card-button__summary">
         <p className="figma-card-button__name">{cardSummary.card.name}</p>
         <p className="figma-card-button__meta">
-          <span><strong>{formatPence(cardSummary.remainingAfterCreditPotsPence)}</strong> owed</span>
-          <span><strong>{formatPence(cardSummary.availableCreditPence)}</strong> available</span>
+          <span><strong>{formatPence(cardSummary.actualOwedPence)}</strong> actual</span>
+          <span><strong>{formatPence(cardSummary.actualAvailableCreditPence)}</strong> available</span>
+          <span><strong>{formatPence(cardSummary.forecastAvailableCreditPence)}</strong> forecast available</span>
           <span>{cardSummary.dueLabel}</span>
         </p>
       </div>
@@ -719,7 +721,7 @@ function FigmaCreditCard({ details, design }: { details: CreditCardVisualDetails
         </dl>
       </div>
       <span className="sr-only">
-        {details.name}, due {details.dueDate}, {details.limit} limit, {details.owed} owed after credit pots, {details.available} available.
+        {details.name}, due {details.dueDate}, {details.limit} limit, {details.owed} actual balance, {details.available} actual available.
       </span>
     </div>
   )
@@ -840,8 +842,8 @@ function isCartGeometric4Design(designId: string): boolean {
 function getCreditCardVisualDetails(cardSummary: CreditCardAllocationCardSummary): CreditCardVisualDetails {
   return {
     limit: formatPence(cardSummary.card.limitPence),
-    owed: formatPence(cardSummary.remainingAfterCreditPotsPence),
-    available: formatPence(cardSummary.availableCreditPence),
+    owed: formatPence(cardSummary.actualOwedPence),
+    available: formatPence(cardSummary.actualAvailableCreditPence),
     name: cardSummary.card.name,
     provider: cardSummary.card.provider,
     dueDate: cardSummary.dueLabel,
@@ -903,6 +905,8 @@ function PaymentAllocationRow({
   onDeleteCustomPayment: (paymentId: string, paymentName: string) => void
   onLinkPayment: (row: PaymentRow, creditCardId: string) => Promise<void>
 }) {
+  const missingCardLabel = getMissingCardLabel(row.creditCardId, activeCards)
+
   return (
     <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_auto]">
       <div>
@@ -913,9 +917,15 @@ function PaymentAllocationRow({
         <p className="mt-1 text-xs text-slate-500">
           {row.date} · {formatPence(row.amountPence)}
         </p>
+        {missingCardLabel && (
+          <p className="mt-1 text-xs font-semibold text-red-700">{missingCardLabel}</p>
+        )}
       </div>
       <SelectInput value={row.creditCardId ?? ''} onChange={(event) => void onLinkPayment(row, event.target.value)}>
         <option value="">Unlinked</option>
+        {missingCardLabel && (
+          <option value={row.creditCardId ?? ''}>Missing selected card</option>
+        )}
         {activeCards.map((card) => (
           <option key={card.id} value={card.id}>
             {card.name} ({card.provider})
@@ -931,6 +941,17 @@ function PaymentAllocationRow({
       </div>
     </div>
   )
+}
+
+function getMissingCardLabel(
+  creditCardId: string | null,
+  activeCards: PlannerSnapshot['creditCards'],
+): string | null {
+  if (!creditCardId || activeCards.some((card) => card.id === creditCardId)) {
+    return null
+  }
+
+  return `missing card ${creditCardId}`
 }
 
 function CreditCardOverview({
@@ -989,20 +1010,30 @@ function CreditCardOverview({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <CreditCardStat
-              label="Balance"
-              value={formatPence(cardSummary.remainingAfterCreditPotsPence)}
-              detail={
-                cardSummary.creditPotPence > 0
-                  ? `${formatPence(cardSummary.owedPence)} actual balance`
-                  : undefined
-              }
-              tone={cardSummary.remainingAfterCreditPotsPence > 0 ? 'warning' : 'good'}
+              label="Actual balance"
+              value={formatPence(cardSummary.actualOwedPence)}
+              tone={cardSummary.actualOwedPence > 0 ? 'warning' : 'good'}
             />
-            <CreditCardStat label="Available" value={formatPence(cardSummary.availableCreditPence)} tone="good" />
+            <CreditCardStat
+              label="Actual available"
+              value={formatPence(cardSummary.actualAvailableCreditPence)}
+              tone="good"
+            />
+            <CreditCardStat
+              label="Forecast balance"
+              value={formatPence(cardSummary.forecastOwedPence)}
+              detail={`${formatPence(cardSummary.plannedChargesPence)} planned charges · ${formatPence(cardSummary.plannedRepaymentsPence)} planned repayments`}
+              tone={cardSummary.forecastOwedPence > cardSummary.actualOwedPence ? 'warning' : 'neutral'}
+            />
+            <CreditCardStat
+              label="Forecast available"
+              value={formatPence(cardSummary.forecastAvailableCreditPence)}
+              tone={cardSummary.forecastAvailableCreditPence > 0 ? 'good' : 'bad'}
+            />
             <CreditCardStat label="Reserved" value={formatPence(cardSummary.creditPotPence)} tone={cardSummary.creditPotPence > 0 ? 'good' : 'neutral'} />
             <CreditCardStat label="Due" value={cardSummary.dueLabel} tone="neutral" />
             <CreditCardStat
-              label="Used"
+              label="Actual used"
               value={`${cardSummary.utilisationPercent}%`}
               detail={`${formatPence(cardSummary.card.limitPence)} limit`}
               tone={cardSummary.utilisationPercent >= 80 ? 'bad' : cardSummary.utilisationPercent >= 50 ? 'warning' : 'neutral'}
@@ -1132,28 +1163,28 @@ function CreditCardActivityRow({
   )
 }
 
-function getCardsOwedBreakdown(cards: CreditCardAllocationCardSummary[]): CalculationBreakdown {
-  const totalRemainingPence = cards.reduce((total, cardSummary) => total + cardSummary.remainingAfterCreditPotsPence, 0)
+function getCardCoverNeededBreakdown(cards: CreditCardAllocationCardSummary[]): CalculationBreakdown {
+  const totalCoverNeededPence = cards.reduce((total, cardSummary) => total + cardSummary.plannedTopUpNeededPence, 0)
 
   return {
-    formula: 'Cards owed = actual card balances minus money already reserved in credit pots and linked pots.',
+    formula: 'Card cover needed = forecast card balance minus money already reserved in credit pots and linked pots.',
     lines:
       cards.length > 0
         ? [
             ...cards.map((cardSummary) => ({
               label: cardSummary.card.name,
-              value: formatPence(cardSummary.remainingAfterCreditPotsPence),
-              detail: `${formatPence(cardSummary.owedPence)} actual balance · ${formatPence(cardSummary.creditPotPence)} reserved.`,
-              tone: cardSummary.remainingAfterCreditPotsPence > 0 ? ('add' as const) : ('muted' as const),
+              value: formatPence(cardSummary.plannedTopUpNeededPence),
+              detail: `${formatPence(cardSummary.forecastOwedPence)} forecast balance · ${formatPence(cardSummary.creditPotPence)} reserved.`,
+              tone: cardSummary.plannedTopUpNeededPence > 0 ? ('add' as const) : ('muted' as const),
             })),
             {
-              label: 'Cards owed',
-              value: formatPence(totalRemainingPence),
+              label: 'Card cover needed',
+              value: formatPence(totalCoverNeededPence),
               tone: 'result' as const,
             },
           ]
         : [{ label: 'No active cards', value: formatPence(0), tone: 'result' }],
-    note: 'Card availability still uses the actual balance because reserved pot money has not been paid to the card yet.',
+    note: 'Actual available credit is calculated from actual card balance only. Forecast availability includes planned charges.',
   }
 }
 
@@ -1255,6 +1286,8 @@ function groupPaymentRowsByPeriod(
 }
 
 function recurringPaymentToRow(payment: RecurringPayment): PaymentRow {
+  const isInterval = payment.frequency === 'weekly' || payment.frequency === 'biweekly'
+
   return {
     id: `recurring-${payment.id}`,
     entityId: payment.id,
@@ -1262,7 +1295,7 @@ function recurringPaymentToRow(payment: RecurringPayment): PaymentRow {
     sourceLabel: 'Recurring',
     label: payment.name,
     amountPence: payment.amountPence,
-    date: payment.dueDate ?? `Day ${payment.dueDay ?? 1}`,
+    date: payment.dueDate ?? (isInterval ? 'First due date missing' : `Day ${payment.dueDay ?? 1}`),
     creditCardId: payment.creditCardId ?? null,
   }
 }
@@ -1290,7 +1323,7 @@ function whereFromLabel(item: CreditCardAllocationItem, snapshot: PlannerSnapsho
   }
 
   if (item.creditCardId) {
-    return snapshot.creditCards.find((card) => card.id === item.creditCardId)?.name ?? 'Archived card'
+    return snapshot.creditCards.find((card) => card.id === item.creditCardId)?.name ?? `missing card ${item.creditCardId}`
   }
 
   return 'Unlinked'

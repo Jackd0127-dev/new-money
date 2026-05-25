@@ -86,7 +86,8 @@ export type PotUpdateInput = PotInput
 export interface RecurringPaymentInput {
   name: string
   amountPence: number
-  dueDay: number
+  dueDay?: number | null
+  dueDate?: string | null
   frequency: RecurringFrequency
   potId: string | null
   creditCardId?: string | null
@@ -583,7 +584,8 @@ export async function addRecurringPayment(input: RecurringPaymentInput): Promise
     id: crypto.randomUUID(),
     name: input.name,
     amountPence: input.amountPence,
-    dueDay: input.dueDay,
+    dueDay: input.dueDay ?? undefined,
+    dueDate: input.dueDate ?? undefined,
     frequency: input.frequency,
     potId: input.potId,
     creditCardId: input.creditCardId ?? null,
@@ -615,6 +617,8 @@ export async function updateRecurringPayment(
     const nextPayment: RecurringPayment = {
       ...current,
       ...input,
+      dueDay: input.dueDay ?? undefined,
+      dueDate: input.dueDate ?? undefined,
       updatedAt: timestamp,
     }
 
@@ -1492,10 +1496,16 @@ function getRecurringReserveAllocations(
       .filter((pot) => !pot.archived)
       .map((pot) => [pot.id, Math.max(0, pot.balancePence)]),
   )
+  const uncoveredByPayment = new Map<string, {
+    potId: string
+    amountPence: number
+    source: 'recurring'
+    recurringPaymentId: string
+  }>()
 
-  return duePayments.flatMap((payment) => {
+  for (const payment of duePayments) {
     if (payment.creditCardId || !payment.potId) {
-      return []
+      continue
     }
 
     const availablePence = availableByPot.get(payment.potId) ?? 0
@@ -1505,18 +1515,25 @@ function getRecurringReserveAllocations(
     availableByPot.set(payment.potId, availablePence - coveredPence)
 
     if (uncoveredPence <= 0) {
-      return []
+      continue
     }
 
-    return [
-      {
-        potId: payment.potId,
-        amountPence: uncoveredPence,
-        source: 'recurring' as const,
-        recurringPaymentId: payment.id,
-      },
-    ]
-  })
+    const current = uncoveredByPayment.get(payment.id)
+
+    if (current) {
+      current.amountPence += uncoveredPence
+      continue
+    }
+
+    uncoveredByPayment.set(payment.id, {
+      potId: payment.potId,
+      amountPence: uncoveredPence,
+      source: 'recurring',
+      recurringPaymentId: payment.id,
+    })
+  }
+
+  return [...uncoveredByPayment.values()]
 }
 
 function removeAllocationsFromPotBalances(pots: Pot[], allocations: PotAllocation[]): Pot[] {
@@ -1651,30 +1668,25 @@ async function reserveNewRecurringPaymentForActivePeriod(
   }
 
   const pots = await db.pots.toArray()
-  const [reserveAllocation] = getRecurringReserveAllocations(duePayments, pots)
+  const reserveAllocations = getRecurringReserveAllocations(duePayments, pots)
 
-  if (!reserveAllocation) {
+  if (reserveAllocations.length === 0) {
     return
   }
 
-  await db.potAllocations.add({
-    id: crypto.randomUUID(),
-    payPeriodId: latestPeriod.id,
-    potId: reserveAllocation.potId,
-    amountPence: reserveAllocation.amountPence,
-    source: 'recurring',
-    recurringPaymentId: reserveAllocation.recurringPaymentId,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })
-
-  const pot = await db.pots.get(reserveAllocation.potId)
-
-  if (pot) {
-    await db.pots.update(pot.id, {
-      balancePence: pot.balancePence + reserveAllocation.amountPence,
+  for (const reserveAllocation of reserveAllocations) {
+    await db.potAllocations.add({
+      id: crypto.randomUUID(),
+      payPeriodId: latestPeriod.id,
+      potId: reserveAllocation.potId,
+      amountPence: reserveAllocation.amountPence,
+      source: 'recurring',
+      recurringPaymentId: reserveAllocation.recurringPaymentId,
+      createdAt: timestamp,
       updatedAt: timestamp,
     })
+
+    await addAllocationToPot(reserveAllocation.potId, reserveAllocation.amountPence, timestamp)
   }
 }
 
@@ -1696,7 +1708,8 @@ async function reconcileRecurringPaymentForActivePeriod(
     (allocation) => allocation.recurringPaymentId === payment.id,
   )
   const [existingAllocation, ...duplicateAllocations] = existingAllocations
-  const isDue = getRecurringPaymentsDue([payment], latestPeriod.startDate, latestPeriod.endDate).length > 0
+  const duePayments = getRecurringPaymentsDue([payment], latestPeriod.startDate, latestPeriod.endDate)
+  const isDue = duePayments.length > 0
 
   for (const allocation of duplicateAllocations) {
     await removeAllocationFromPot(allocation, timestamp)
@@ -1720,7 +1733,7 @@ async function reconcileRecurringPaymentForActivePeriod(
           : pot,
       )
     : pots
-  const [reserveAllocation] = getRecurringReserveAllocations([payment], adjustedPots)
+  const [reserveAllocation] = getRecurringReserveAllocations(duePayments, adjustedPots)
 
   if (!reserveAllocation) {
     if (existingAllocation) {

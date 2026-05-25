@@ -249,8 +249,8 @@ export function getDailyBriefFacts(
     id: cardSummaryItem.card.id,
     name: cardSummaryItem.card.name,
     provider: cardSummaryItem.card.provider,
-    owedPence: cardSummaryItem.owedPence,
-    availableCreditPence: cardSummaryItem.availableCreditPence,
+    owedPence: cardSummaryItem.actualOwedPence,
+    availableCreditPence: cardSummaryItem.actualAvailableCreditPence,
     utilisationPercent: cardSummaryItem.utilisationPercent,
     dueIso: getCreditCardDueIso(cardSummaryItem.card, todayIso),
   }))
@@ -302,7 +302,7 @@ export function getDailyBriefFacts(
     },
     creditCards: {
       cards: creditCardBriefs,
-      totalOwedPence: cardSummary.totalOwedPence,
+      totalOwedPence: cardSummary.totalActualOwedPence,
       minimumsDueBeforeNextPaydayPence: 0,
       unlinkedCardSpendingPence,
       cardLinkedPaymentsPence,

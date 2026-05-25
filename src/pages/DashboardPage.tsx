@@ -755,8 +755,8 @@ function linkedCreditCardPotCostToTodoItem(
     id: `${item.id}-todo`,
     ignoreId: item.id,
     ignoreLabel: cardName,
-    label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" card amount owed`,
-    detail: 'Linked card balance still owed',
+    label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" planned card cover`,
+    detail: 'Current shortfall plus planned card charges before next payday',
     amountPence: item.amountPence,
     completion: item.potId
       ? createPaycheckPotCompletion({

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 
 import {
+  findPayPeriodForDate,
   formatPence,
   getCreditCardAllocationSummary,
   parsePoundsToPence,
@@ -755,6 +756,7 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
   const sourceLabels: string[] = []
   let linkedTargetPence = 0
   let dueIso: string | null = null
+  let usesForecastTarget = false
 
   const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
   const recurringTargetPence = linkedRecurringPayments.reduce((total, payment) => total + payment.amountPence, 0)
@@ -766,6 +768,7 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
   }
 
   if (pot.linkedCreditCardId) {
+    const creditCardPayPeriod = getCurrentOrLatestPayPeriod(snapshot.payPeriods)
     const cardSummary = getCreditCardAllocationSummary({
       creditCards: snapshot.creditCards,
       recurringPayments: snapshot.recurringPayments,
@@ -774,13 +777,32 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
       repayments: snapshot.creditCardRepayments,
       creditCardPots: snapshot.creditCardPots,
       pots: snapshot.pots,
-      payPeriod: null,
+      payPeriod: creditCardPayPeriod,
     }).cards.find((summary) => summary.card.id === pot.linkedCreditCardId)
 
-    if (cardSummary && cardSummary.owedPence > 0) {
-      linkedTargetPence += cardSummary.owedPence
-      sourceLabels.push(`${cardSummary.card.name} card`)
-      dueIso = minIsoDate(dueIso, getCreditCardDueIso(cardSummary.card))
+    if (cardSummary) {
+      const cardUsesForecastTarget = cardSummary.forecastOwedPence > cardSummary.actualOwedPence
+      const cardTargetPence = cardUsesForecastTarget
+        ? cardSummary.forecastOwedPence
+        : cardSummary.actualOwedPence
+
+      if (cardTargetPence > 0) {
+        linkedTargetPence += cardTargetPence
+        usesForecastTarget = usesForecastTarget || cardUsesForecastTarget
+        sourceLabels.push(`${cardSummary.card.name} card`)
+        dueIso = minIsoDate(
+          dueIso,
+          cardUsesForecastTarget ? creditCardPayPeriod?.payday ?? getCreditCardDueIso(cardSummary.card) : getCreditCardDueIso(cardSummary.card),
+        )
+      }
+    }
+  }
+
+  if (pot.linkedCreditCardId) {
+    const card = snapshot.creditCards.find((candidate) => candidate.id === pot.linkedCreditCardId)
+
+    if (!card) {
+      sourceLabels.push(`missing card ${pot.linkedCreditCardId}`)
     }
   }
 
@@ -802,12 +824,37 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
   return {
     targetPence,
     coveredPence,
-    percent: targetPence > 0 ? Math.min(100, Math.round((coveredPence / targetPence) * 100)) : 0,
-    targetLabel: targetPence > 0 ? `${formatPence(targetPence)} target` : 'No target yet',
+    percent: targetPence > 0 ? Math.round((coveredPence / targetPence) * 100) : 0,
+    targetLabel: targetPence > 0 ? `${formatPence(targetPence)}${usesForecastTarget ? ' forecast target' : ' target'}` : 'No target yet',
     sourceLabels,
     shortfallPence,
     dueIso,
   }
+}
+
+function getCurrentOrLatestPayPeriod(payPeriods: PlannerSnapshot['payPeriods']): PlannerSnapshot['payPeriods'][number] | null {
+  const todayIso = toIsoDate(new Date())
+  const currentPeriod = findPayPeriodForDate(payPeriods, todayIso)
+
+  if (currentPeriod) {
+    return currentPeriod
+  }
+
+  const activePeriod = payPeriods.find((period) => period.status === 'active')
+
+  if (activePeriod) {
+    return activePeriod
+  }
+
+  const previousPeriods = payPeriods
+    .filter((period) => period.startDate <= todayIso)
+    .sort((left, right) => right.startDate.localeCompare(left.startDate))
+
+  if (previousPeriods[0]) {
+    return previousPeriods[0]
+  }
+
+  return [...payPeriods].sort((left, right) => right.startDate.localeCompare(left.startDate))[0] ?? null
 }
 
 function getPotDueLabel(progress: PotProgress): string | null {

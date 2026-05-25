@@ -1,5 +1,17 @@
-import { useState } from 'react'
-import { PauseCircle, PenLine, PlayCircle, Trash2, X } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { clsx } from 'clsx'
+import {
+  CalendarDays,
+  ChevronDown,
+  CreditCard,
+  PauseCircle,
+  PenLine,
+  PiggyBank,
+  PlayCircle,
+  PlusCircle,
+  Trash2,
+  X,
+} from 'lucide-react'
 
 import {
   createNextPayPeriod,
@@ -12,14 +24,20 @@ import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import {
   Button,
   Field,
-  MoneyMetric,
   Panel,
   SectionGrid,
   SelectInput,
   TextInput,
   type CalculationBreakdown,
 } from '../components/ui'
-import type { PayFrequency, PayPeriod, PotAllocation, RecurringFrequency, RecurringPriority } from '../types/models'
+import type {
+  PayFrequency,
+  PayPeriod,
+  PotAllocation,
+  RecurringFrequency,
+  RecurringPayment,
+  RecurringPriority,
+} from '../types/models'
 
 interface RecurringFormState {
   name: string
@@ -46,6 +64,8 @@ export function RecurringPage({
   const [createForm, setCreateForm] = useState<RecurringFormState>(() =>
     createEmptyRecurringForm(activePots[0]?.id ?? ''),
   )
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [expandedPaymentIds, setExpandedPaymentIds] = useState<Set<string>>(() => new Set())
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<RecurringFormState | null>(null)
   const viewedPeriod = selectedPayPeriod ?? null
@@ -123,6 +143,7 @@ export function RecurringPage({
 
     await actions.addRecurringPayment(addInput)
     resetCreateForm()
+    setIsCreateOpen(false)
   }
 
   function startEditingPayment(paymentId: string) {
@@ -154,98 +175,96 @@ export function RecurringPage({
     setEditForm(null)
   }
 
+  function togglePaymentDetails(paymentId: string) {
+    setExpandedPaymentIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(paymentId)) {
+        next.delete(paymentId)
+      } else {
+        next.add(paymentId)
+      }
+
+      return next
+    })
+  }
+
+  const recurringStats = getRecurringStats(snapshot.recurringPayments)
+  const paymentGroups = getRecurringPaymentGroups(snapshot.recurringPayments)
+
   return (
-    <div className="space-y-6">
-      <SectionGrid variant="wideRight">
-        <Panel
-          title="Add recurring payment"
-          description="Bills use the linked pot balance on their due date."
-          accent="violet"
-          density="compact"
-        >
-          <div className="space-y-4">
-            <RecurringPaymentFormFields
-              form={createForm}
-              activePots={activePots}
-              activeCards={activeCards}
-              onChange={setCreateForm}
-            />
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={() => void submitPayment(createForm, 'create')}>Add recurring payment</Button>
-            </div>
-          </div>
-        </Panel>
+    <div className="space-y-4">
+      <RecurringSummaryBar
+        stats={recurringStats}
+        isCreateOpen={isCreateOpen}
+        onToggleCreate={() => setIsCreateOpen((isOpen) => !isOpen)}
+      />
 
-        <Panel
-          title="Recurring payments"
-          description="Inactive payments are ignored by payday planning."
-          accent="blue"
-          density="compact"
-        >
-        <div className="space-y-3 xl:max-h-[680px] xl:overflow-y-auto xl:pr-1">
-          {snapshot.recurringPayments.length > 0 ? (
-            snapshot.recurringPayments.map((payment) => {
-              const pot = snapshot.pots.find((candidate) => candidate.id === payment.potId)
-              const card = snapshot.creditCards.find((candidate) => candidate.id === payment.creditCardId)
-              const cardLabel = getRecurringCreditCardLabel(payment.creditCardId, card)
-
-              return (
-                <div key={payment.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={payment.active ? 'size-2 rounded-full bg-emerald-500' : 'size-2 rounded-full bg-slate-300'} />
-                      <h3 className="text-sm font-semibold text-slate-950">{payment.name}</h3>
-                    </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {getRecurringScheduleLabel(payment)} · {payment.frequency} · {payment.potId ? `paid from ${pot?.name ?? 'Archived pot'}` : 'no pot linked'}
-                      {cardLabel ? ` · ${cardLabel}` : ''}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
-                    <button
-                      type="button"
-                      onClick={() => actions.toggleRecurringPayment(payment)}
-                      aria-label={`${payment.active ? 'Pause' : 'Resume'} ${payment.name}`}
-                      title={`${payment.active ? 'Pause' : 'Resume'} ${payment.name}`}
-                      className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-                    >
-                      {payment.active ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditingPayment(payment.id)}
-                      aria-label={`Edit ${payment.name}`}
-                      title={`Edit ${payment.name}`}
-                      className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-                    >
-                      <PenLine size={15} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm(`Delete ${payment.name}?`)) {
-                          void actions.deleteRecurringPayment(payment.id)
-                        }
-                      }}
-                      aria-label={`Delete ${payment.name}`}
-                      title={`Delete ${payment.name}`}
-                      className="inline-flex size-8 items-center justify-center rounded-md bg-red-600 text-white transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
+      <SectionGrid variant="wideLeft" className="gap-4">
+        <div className="space-y-4">
+          {isCreateOpen && (
+            <Panel
+              title="Add recurring payment"
+              accent="violet"
+              density="compact"
+            >
+              <div className="space-y-3">
+                <RecurringPaymentFormFields
+                  form={createForm}
+                  activePots={activePots}
+                  activeCards={activeCards}
+                  onChange={setCreateForm}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button className="min-h-9 px-3" onClick={() => void submitPayment(createForm, 'create')}>
+                    Add recurring payment
+                  </Button>
+                  <Button
+                    className="min-h-9 px-3"
+                    variant="secondary"
+                    onClick={() => setIsCreateOpen(false)}
+                  >
+                    Close
+                  </Button>
                 </div>
-              )
-            })
-          ) : (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No recurring payments yet.</p>
+              </div>
+            </Panel>
           )}
-        </div>
-        </Panel>
-      </SectionGrid>
 
-      <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
+          <Panel
+            title="Recurring payments"
+            accent="blue"
+            density="compact"
+          >
+            <div className="space-y-3 xl:max-h-[690px] xl:overflow-y-auto xl:pr-1">
+              {snapshot.recurringPayments.length > 0 ? (
+                paymentGroups.map((group) => (
+                  <RecurringPaymentSection
+                    key={group.id}
+                    label={group.label}
+                    payments={group.payments}
+                    pots={snapshot.pots}
+                    creditCards={snapshot.creditCards}
+                    expandedPaymentIds={expandedPaymentIds}
+                    onToggleDetails={togglePaymentDetails}
+                    onToggleActive={(payment) => actions.toggleRecurringPayment(payment)}
+                    onEdit={startEditingPayment}
+                    onDelete={(payment) => {
+                      if (window.confirm(`Delete ${payment.name}?`)) {
+                        void actions.deleteRecurringPayment(payment.id)
+                      }
+                    }}
+                  />
+                ))
+              ) : (
+                <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No recurring payments yet.</p>
+              )}
+            </div>
+          </Panel>
+        </div>
+
+        <NextPaydayOwedPanel period={nextPaydayPeriod} summary={nextPaydaySummary} />
+      </SectionGrid>
 
       {editingPaymentId && editForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
@@ -264,7 +283,7 @@ export function RecurringPage({
                 <X size={18} />
               </Button>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <RecurringPaymentFormFields
                 form={editForm}
                 activePots={activePots}
@@ -296,6 +315,281 @@ function createEmptyRecurringForm(defaultPotId: string): RecurringFormState {
     potId: defaultPotId,
     creditCardId: '',
   }
+}
+
+function RecurringSummaryBar({
+  stats,
+  isCreateOpen,
+  onToggleCreate,
+}: {
+  stats: RecurringStats
+  isCreateOpen: boolean
+  onToggleCreate: () => void
+}) {
+  return (
+    <section
+      aria-label="Recurring overview"
+      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+    >
+      <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <CompactStat label="Active" value={`${stats.activeCount}/${stats.totalCount}`} />
+          <CompactStat label="Monthly" value={String(stats.monthlyCount)} />
+          <CompactStat label="On cards" value={String(stats.cardLinkedCount)} />
+          <CompactStat label="Active total" value={formatPence(stats.activeTotalPence)} />
+        </div>
+        <Button
+          className="min-h-9 justify-center px-3 lg:min-w-36"
+          variant={isCreateOpen ? 'secondary' : 'primary'}
+          onClick={onToggleCreate}
+        >
+          <PlusCircle size={16} />
+          New payment
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+function CompactStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  )
+}
+
+interface RecurringStats {
+  totalCount: number
+  activeCount: number
+  monthlyCount: number
+  cardLinkedCount: number
+  activeTotalPence: number
+}
+
+function getRecurringStats(payments: RecurringPayment[]): RecurringStats {
+  return {
+    totalCount: payments.length,
+    activeCount: payments.filter((payment) => payment.active).length,
+    monthlyCount: payments.filter((payment) => payment.frequency === 'monthly').length,
+    cardLinkedCount: payments.filter((payment) => Boolean(payment.creditCardId)).length,
+    activeTotalPence: payments
+      .filter((payment) => payment.active)
+      .reduce((total, payment) => total + payment.amountPence, 0),
+  }
+}
+
+function getRecurringPaymentGroups(payments: RecurringPayment[]): Array<{
+  id: string
+  label: string
+  payments: RecurringPayment[]
+}> {
+  return [
+    {
+      id: 'active',
+      label: 'Active',
+      payments: payments.filter((payment) => payment.active),
+    },
+    {
+      id: 'paused',
+      label: 'Paused',
+      payments: payments.filter((payment) => !payment.active),
+    },
+  ].filter((group) => group.payments.length > 0)
+}
+
+function RecurringPaymentSection({
+  label,
+  payments,
+  pots,
+  creditCards,
+  expandedPaymentIds,
+  onToggleDetails,
+  onToggleActive,
+  onEdit,
+  onDelete,
+}: {
+  label: string
+  payments: RecurringPayment[]
+  pots: PlannerSnapshot['pots']
+  creditCards: PlannerSnapshot['creditCards']
+  expandedPaymentIds: Set<string>
+  onToggleDetails: (paymentId: string) => void
+  onToggleActive: (payment: RecurringPayment) => void
+  onEdit: (paymentId: string) => void
+  onDelete: (payment: RecurringPayment) => void
+}) {
+  return (
+    <section aria-label={`${label} recurring payments`} className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</h3>
+        <p className="text-xs font-semibold text-slate-500">{payments.length}</p>
+      </div>
+      <div className="grid gap-2 2xl:grid-cols-2">
+        {payments.map((payment) => {
+          const pot = pots.find((candidate) => candidate.id === payment.potId)
+          const card = creditCards.find((candidate) => candidate.id === payment.creditCardId)
+          const cardLabel = getRecurringCreditCardLabel(payment.creditCardId, card)
+          const isExpanded = expandedPaymentIds.has(payment.id)
+
+          return (
+            <RecurringPaymentCard
+              key={payment.id}
+              payment={payment}
+              pot={pot}
+              cardLabel={cardLabel}
+              isExpanded={isExpanded}
+              onToggleDetails={() => onToggleDetails(payment.id)}
+              onToggleActive={() => onToggleActive(payment)}
+              onEdit={() => onEdit(payment.id)}
+              onDelete={() => onDelete(payment)}
+            />
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function RecurringPaymentCard({
+  payment,
+  pot,
+  cardLabel,
+  isExpanded,
+  onToggleDetails,
+  onToggleActive,
+  onEdit,
+  onDelete,
+}: {
+  payment: RecurringPayment
+  pot: PlannerSnapshot['pots'][number] | undefined
+  cardLabel: string | null
+  isExpanded: boolean
+  onToggleDetails: () => void
+  onToggleActive: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const potLabel = payment.potId ? pot?.name ?? 'Archived pot' : 'No pot'
+
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={payment.active ? 'size-2 rounded-full bg-emerald-500' : 'size-2 rounded-full bg-slate-300'} />
+            <h3 className="min-w-0 truncate text-sm font-semibold text-slate-950">{payment.name}</h3>
+            <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold capitalize text-slate-600">
+              {payment.priority}
+            </span>
+          </div>
+          <p className="mt-1 truncate text-xs text-slate-500">
+            {getRecurringScheduleLabel(payment)} · {payment.frequency}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <CompactMetaPill icon={<PiggyBank size={12} />} label={potLabel} muted={!payment.potId} />
+            {cardLabel && <CompactMetaPill icon={<CreditCard size={12} />} label={cardLabel} />}
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
+          <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
+          <div className="flex items-center gap-1">
+            <IconButton
+              onClick={onToggleDetails}
+              ariaLabel={`${isExpanded ? 'Hide' : 'Show'} ${payment.name} details`}
+              title={`${isExpanded ? 'Hide' : 'Show'} ${payment.name} details`}
+            >
+              <ChevronDown size={15} className={clsx('transition', isExpanded && 'rotate-180')} />
+            </IconButton>
+            <IconButton
+              onClick={onToggleActive}
+              ariaLabel={`${payment.active ? 'Pause' : 'Resume'} ${payment.name}`}
+              title={`${payment.active ? 'Pause' : 'Resume'} ${payment.name}`}
+            >
+              {payment.active ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+            </IconButton>
+            <IconButton onClick={onEdit} ariaLabel={`Edit ${payment.name}`} title={`Edit ${payment.name}`}>
+              <PenLine size={15} />
+            </IconButton>
+            <IconButton
+              onClick={onDelete}
+              ariaLabel={`Delete ${payment.name}`}
+              title={`Delete ${payment.name}`}
+              tone="danger"
+            >
+              <Trash2 size={15} />
+            </IconButton>
+          </div>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 text-xs sm:grid-cols-2">
+          <CompactDetail label="Schedule" value={`${getRecurringScheduleLabel(payment)} · ${payment.frequency}`} />
+          <CompactDetail label="Amount" value={formatPence(payment.amountPence)} />
+          <CompactDetail label="Pot" value={payment.potId ? `Paid from ${pot?.name ?? 'Archived pot'}` : 'No pot linked'} />
+          <CompactDetail label="Card" value={cardLabel ? `Charged to ${cardLabel}` : 'No card linked'} />
+        </div>
+      )}
+    </article>
+  )
+}
+
+function CompactMetaPill({ icon, label, muted = false }: { icon: ReactNode; label: string; muted?: boolean }) {
+  return (
+    <span
+      className={clsx(
+        'inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold',
+        muted
+          ? 'border-slate-200 bg-slate-50 text-slate-500'
+          : 'border-blue-100 bg-blue-50 text-blue-700',
+      )}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate">{label}</span>
+    </span>
+  )
+}
+
+function CompactDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-slate-50 px-2.5 py-2">
+      <p className="font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-0.5 font-semibold text-slate-950">{value}</p>
+    </div>
+  )
+}
+
+function IconButton({
+  children,
+  onClick,
+  ariaLabel,
+  title,
+  tone = 'neutral',
+}: {
+  children: ReactNode
+  onClick: () => void
+  ariaLabel: string
+  title: string
+  tone?: 'neutral' | 'danger'
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      title={title}
+      className={clsx(
+        'inline-flex size-7 items-center justify-center rounded-md transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
+        tone === 'neutral' &&
+          'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-slate-400',
+        tone === 'danger' && 'bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600',
+      )}
+    >
+      {children}
+    </button>
+  )
 }
 
 function getRecurringScheduleLabel(payment: { dueDay?: number | null; dueDate?: string | null; frequency: RecurringFrequency }): string {
@@ -339,26 +633,31 @@ function RecurringPaymentFormFields({
   const usesIntervalAnchor = isIntervalFrequency(form.frequency)
 
   return (
-    <>
-      <Field label="Name">
-        <TextInput
-          value={form.name}
-          onChange={(event) => onChange({ ...form, name: event.target.value })}
-          placeholder="Phone bill"
-        />
-      </Field>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="sm:col-span-2 xl:col-span-1">
+        <Field label="Name">
+          <TextInput
+            className="h-9"
+            value={form.name}
+            onChange={(event) => onChange({ ...form, name: event.target.value })}
+            placeholder="Phone bill"
+          />
+        </Field>
+      </div>
       <Field label="Amount">
         <TextInput
+          className="h-9"
           inputMode="decimal"
           value={form.amount}
           onChange={(event) => onChange({ ...form, amount: event.target.value })}
           placeholder="22.00"
         />
       </Field>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 sm:contents">
         {usesIntervalAnchor ? (
           <Field label="First due date">
             <TextInput
+              className="h-9"
               type="date"
               value={form.dueDate}
               onChange={(event) => onChange({ ...form, dueDate: event.target.value })}
@@ -367,6 +666,7 @@ function RecurringPaymentFormFields({
         ) : (
           <Field label="Due day">
             <TextInput
+              className="h-9"
               inputMode="numeric"
               value={form.dueDay}
               onChange={(event) => onChange({ ...form, dueDay: event.target.value })}
@@ -375,6 +675,7 @@ function RecurringPaymentFormFields({
         )}
         <Field label="Frequency">
           <SelectInput
+            className="h-9"
             value={form.frequency}
             onChange={(event) => onChange({ ...form, frequency: event.target.value as RecurringFrequency })}
           >
@@ -386,7 +687,11 @@ function RecurringPaymentFormFields({
         </Field>
       </div>
       <Field label="Paid from pot">
-        <SelectInput value={form.potId} onChange={(event) => onChange({ ...form, potId: event.target.value })}>
+        <SelectInput
+          className="h-9"
+          value={form.potId}
+          onChange={(event) => onChange({ ...form, potId: event.target.value })}
+        >
           <option value="">No pot</option>
           {activePots.map((pot) => (
             <option key={pot.id} value={pot.id}>
@@ -397,6 +702,7 @@ function RecurringPaymentFormFields({
       </Field>
       <Field label="Paid on credit card">
         <SelectInput
+          className="h-9"
           value={form.creditCardId}
           onChange={(event) => onChange({ ...form, creditCardId: event.target.value })}
         >
@@ -410,6 +716,7 @@ function RecurringPaymentFormFields({
       </Field>
       <Field label="Priority">
         <SelectInput
+          className="h-9"
           value={form.priority}
           onChange={(event) => onChange({ ...form, priority: event.target.value as RecurringPriority })}
         >
@@ -418,7 +725,7 @@ function RecurringPaymentFormFields({
           <option value="optional">Optional</option>
         </SelectInput>
       </Field>
-    </>
+    </div>
   )
 }
 
@@ -441,59 +748,43 @@ function NextPaydayOwedPanel({
       }
     >
       {period ? (
-        <div className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr_0.9fr]">
-            <MoneyMetric
+        <div className="space-y-3">
+          <div className="grid gap-2">
+            <CompactPreviewMetric
               label="Total owed next payday"
               value={formatPence(summary.totalCostsPence)}
               tone={summary.totalCostsPence > 0 ? 'warning' : 'neutral'}
-              breakdown={getNextPaydayOwedBreakdown(summary, period)}
             />
-            <MoneyMetric
+            <CompactPreviewMetric
               label="Debt due"
               value={formatPence(summary.debtMinimumsPence)}
               tone={summary.debtMinimumsPence > 0 ? 'warning' : 'neutral'}
-              breakdown={{
-                formula: 'Debt due = outstanding balances due by the end of this next pay period after planned reserves.',
-                lines: [
-                  {
-                    label: 'Debt due',
-                    value: formatPence(summary.debtMinimumsPence),
-                    detail: `Due by ${period.endDate}, after accepted debt reserves are subtracted.`,
-                    tone: 'result',
-                  },
-                ],
-              }}
             />
-            <MoneyMetric
+            <CompactPreviewMetric
               label="Money left estimate"
               value={formatPence(summary.moneyLeftPence)}
               tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
-              breakdown={{
-                formula: 'Money left estimate = last saved pay - next payday costs.',
-                lines: [
-                  { label: 'Last saved pay', value: formatPence(summary.payReceivedPence), tone: 'add' },
-                  { label: 'Next payday costs', value: `-${formatPence(summary.totalCostsPence)}`, tone: 'subtract' },
-                  { label: 'Money left estimate', value: formatPence(summary.moneyLeftPence), tone: 'result' },
-                ],
-                note: 'This preview uses the last paycheck amount until you save the next payday plan.',
-              }}
             />
           </div>
 
+          <CompactBreakdownDetails title="Cost calculation" breakdown={getNextPaydayOwedBreakdown(summary, period)} />
+
           <details className="rounded-lg border border-slate-200 bg-slate-50">
-            <summary className="cursor-pointer list-none px-4 py-3">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm font-semibold text-slate-950">Dated items in this preview</p>
-                <p className="text-xs font-semibold text-slate-500">{summary.items.length} items</p>
+            <summary className="cursor-pointer list-none px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-950">
+                  <CalendarDays size={15} />
+                  Dated items
+                </span>
+                <span className="text-xs font-semibold text-slate-500">{summary.items.length}</span>
               </div>
             </summary>
-            <div className="space-y-2 border-t border-slate-200 p-3">
+            <div className="max-h-72 space-y-2 overflow-y-auto border-t border-slate-200 p-2.5">
               {summary.items.length > 0 ? (
                 summary.items.map((item) => (
                   <div
                     key={item.id}
-                    className="grid gap-2 rounded-md bg-white px-3 py-2 text-sm sm:grid-cols-[1fr_auto]"
+                    className="grid gap-2 rounded-md bg-white px-2.5 py-2 text-sm sm:grid-cols-[1fr_auto]"
                   >
                     <div>
                       <p className="font-medium text-slate-800">{item.label}</p>
@@ -516,11 +807,70 @@ function NextPaydayOwedPanel({
           </details>
         </div>
       ) : (
-        <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
           No payday plan is available to build a next-period preview.
         </p>
       )}
     </Panel>
+  )
+}
+
+function CompactPreviewMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: 'neutral' | 'good' | 'warning' | 'bad'
+}) {
+  return (
+    <div
+      className={clsx(
+        'flex items-center justify-between gap-3 rounded-md border px-3 py-2',
+        tone === 'neutral' && 'border-slate-200 bg-white',
+        tone === 'good' && 'border-emerald-200 bg-emerald-50',
+        tone === 'warning' && 'border-amber-200 bg-amber-50',
+        tone === 'bad' && 'border-red-200 bg-red-50',
+      )}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  )
+}
+
+function CompactBreakdownDetails({
+  title,
+  breakdown,
+}: {
+  title: string
+  breakdown: CalculationBreakdown
+}) {
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white">
+      <summary className="cursor-pointer list-none px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-slate-950">{title}</p>
+          <ChevronDown size={15} className="text-slate-500" />
+        </div>
+      </summary>
+      <div className="space-y-2 border-t border-slate-100 p-2.5">
+        {breakdown.formula && <p className="text-xs leading-5 text-slate-500">{breakdown.formula}</p>}
+        <div className="space-y-1">
+          {breakdown.lines.map((line) => (
+            <div key={`${line.label}-${line.value}`} className="flex items-start justify-between gap-3 rounded-md bg-slate-50 px-2.5 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-slate-700">{line.label}</p>
+                {line.detail && <p className="mt-0.5 text-xs leading-4 text-slate-500">{line.detail}</p>}
+              </div>
+              <p className="shrink-0 text-xs font-semibold text-slate-950">{line.value}</p>
+            </div>
+          ))}
+        </div>
+        {breakdown.note && <p className="text-xs leading-5 text-slate-500">{breakdown.note}</p>}
+      </div>
+    </details>
   )
 }
 

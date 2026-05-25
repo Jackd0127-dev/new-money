@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, Check, PenLine, PlusCircle, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, PenLine, PlusCircle, Trash2, X } from 'lucide-react'
 
 import {
   creditCardDesigns,
@@ -22,7 +22,6 @@ import {
   Button,
   CalculationDetails,
   Field,
-  MoneyMetric,
   Panel,
   SectionGrid,
   SelectInput,
@@ -78,6 +77,8 @@ export function AllocatingPaymentsPage({
   const selectedCardSummary = selectedCardId
     ? summary.cards.find((cardSummary) => cardSummary.card.id === selectedCardId) ?? null
     : null
+  const [isCardFormOpen, setIsCardFormOpen] = useState(false)
+  const [isRepaymentFormOpen, setIsRepaymentFormOpen] = useState(false)
 
   async function submitCard() {
     const limitPence = parsePoundsToPence(cardLimit)
@@ -204,6 +205,7 @@ export function AllocatingPaymentsPage({
     setCardDueDay(String(card.dueDay ?? 1))
     setCardColor(card.color)
     setCardDesignId(normalizeCreditCardDesignId(card.designId))
+    setIsCardFormOpen(true)
   }
 
   function startEditingRepayment(repaymentId: string) {
@@ -219,6 +221,7 @@ export function AllocatingPaymentsPage({
     setRepaymentAmount((repayment.amountPence / 100).toFixed(2))
     setRepaymentDate(repayment.date)
     setRepaymentNote(repayment.note)
+    setIsRepaymentFormOpen(true)
   }
 
   function resetCardForm() {
@@ -231,6 +234,7 @@ export function AllocatingPaymentsPage({
     setCardColor(cardColors[0])
     setCardDesignId(defaultCreditCardDesignId)
     setIsCardDesignModalOpen(false)
+    setIsCardFormOpen(false)
   }
 
   function resetRepaymentForm() {
@@ -239,28 +243,40 @@ export function AllocatingPaymentsPage({
     setRepaymentNote('')
     setRepaymentDate(toIsoDate(new Date()))
     setRepaymentCardId(activeCards[0]?.id ?? '')
+    setIsRepaymentFormOpen(false)
+  }
+
+  function openNewCardForm() {
+    resetCardForm()
+    setIsCardFormOpen(true)
+  }
+
+  function openNewRepaymentForm() {
+    resetRepaymentForm()
+    setIsRepaymentFormOpen(true)
   }
 
   function renderCardForm(submitLabel: string, showCancel = false) {
     const selectedDesign = getCreditCardDesign(cardDesignId)
 
     return (
-      <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Card name">
-            <TextInput value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
+            <TextInput className="h-9" value={cardName} onChange={(event) => setCardName(event.target.value)} placeholder="Everyday Amex" />
           </Field>
           <Field label="Provider">
-            <TextInput value={cardProvider} onChange={(event) => setCardProvider(event.target.value)} placeholder="Amex" />
+            <TextInput className="h-9" value={cardProvider} onChange={(event) => setCardProvider(event.target.value)} placeholder="Amex" />
           </Field>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Limit">
-            <TextInput inputMode="decimal" value={cardLimit} onChange={(event) => setCardLimit(event.target.value)} placeholder="1000.00" />
+            <TextInput className="h-9" inputMode="decimal" value={cardLimit} onChange={(event) => setCardLimit(event.target.value)} placeholder="1000.00" />
           </Field>
           <Field label="Existing balance" hint="What you already owe on this card before tracking new payments.">
             <TextInput
               aria-label="Existing balance"
+              className="h-9"
               inputMode="decimal"
               value={cardOpeningBalance}
               onChange={(event) => setCardOpeningBalance(event.target.value)}
@@ -272,13 +288,14 @@ export function AllocatingPaymentsPage({
           <Field label="Due date" hint="Day of the month this card is due.">
             <TextInput
               aria-label="Due date"
+              className="h-9"
               inputMode="numeric"
               value={cardDueDay}
               onChange={(event) => setCardDueDay(event.target.value)}
             />
           </Field>
           <Field label="Card design">
-            <div className="flex min-h-10 items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 shadow-sm">
+            <div className="flex min-h-9 items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 shadow-sm">
               <div className="flex min-w-0 items-center gap-3">
                 <div className={`figma-credit-card credit-card-design-summary__art figma-credit-card--${selectedDesign.id}`} aria-hidden="true">
                   <CreditCardArtwork design={selectedDesign} />
@@ -288,7 +305,7 @@ export function AllocatingPaymentsPage({
                   <p className="mt-0.5 text-xs text-slate-500">Selected</p>
                 </div>
               </div>
-              <Button variant="secondary" aria-label="Card design" onClick={() => setIsCardDesignModalOpen(true)}>
+              <Button className="min-h-8 px-3" variant="secondary" aria-label="Card design" onClick={() => setIsCardDesignModalOpen(true)}>
                 Card design
               </Button>
             </div>
@@ -304,13 +321,13 @@ export function AllocatingPaymentsPage({
             }}
           />
         )}
-        <div className="flex flex-wrap gap-3">
-          <Button onClick={submitCard}>
-            <PlusCircle size={18} />
+        <div className="flex flex-wrap gap-2">
+          <Button className="min-h-9 px-3" onClick={submitCard}>
+            <PlusCircle size={16} />
             {submitLabel}
           </Button>
           {showCancel && (
-            <Button variant="secondary" onClick={resetCardForm}>
+            <Button className="min-h-9 px-3" variant="secondary" onClick={resetCardForm}>
               Cancel
             </Button>
           )}
@@ -373,10 +390,27 @@ export function AllocatingPaymentsPage({
   }
 
   return (
-    <div className="space-y-6">
-      <Panel title="Credit card summary" description="Selected pay, actual card balances, forecasts, and linked credit pots." accent="cyan">
-        <div className="grid items-start gap-4 md:grid-cols-3">
-          <MoneyMetric
+    <div className="space-y-4">
+      <Panel
+        title="Credit card summary"
+        description="Selected pay, actual card balances, forecasts, and linked credit pots."
+        accent="cyan"
+        density="compact"
+        action={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button className="min-h-9 px-3" onClick={openNewCardForm}>
+              <PlusCircle size={16} />
+              New card
+            </Button>
+            <Button className="min-h-9 px-3" variant="secondary" onClick={openNewRepaymentForm} disabled={activeCards.length === 0}>
+              <PenLine size={16} />
+              Record repayment
+            </Button>
+          </div>
+        }
+      >
+        <div className="grid items-start gap-2 md:grid-cols-3">
+          <CompactSummaryMetric
             label="Selected pay"
             value={formatPence(summary.payReceivedPence)}
             breakdown={{
@@ -395,7 +429,7 @@ export function AllocatingPaymentsPage({
               setOpenSummaryMetric((current) => isOpen ? 'selected-pay' : current === 'selected-pay' ? null : current)
             }
           />
-          <MoneyMetric
+          <CompactSummaryMetric
             label="Credit pots"
             value={formatPence(summary.totalCreditPotsPence)}
             tone={summary.totalCreditPotsPence > 0 ? 'good' : 'neutral'}
@@ -405,7 +439,7 @@ export function AllocatingPaymentsPage({
               setOpenSummaryMetric((current) => isOpen ? 'credit-pots' : current === 'credit-pots' ? null : current)
             }
           />
-          <MoneyMetric
+          <CompactSummaryMetric
             label="Card cover needed"
             value={formatPence(summary.totalPlannedTopUpNeededPence)}
             tone={summary.totalPlannedTopUpNeededPence > 0 ? 'warning' : 'neutral'}
@@ -418,138 +452,83 @@ export function AllocatingPaymentsPage({
         </div>
       </Panel>
 
-      <SectionGrid variant="balanced">
-        <Panel
-          title="Add credit card"
-          description="Cards group linked payments, spending, and repayments."
-          accent="blue"
-          density="compact"
-        >
-          {renderCardForm('Add card')}
-        </Panel>
-
-        <Panel
-          title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
-          description="Repayments reduce the amount shown as owed."
-          accent="amber"
-          density="compact"
-        >
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Credit card">
-                <SelectInput value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
-                  {activeCards.map((card) => (
-                    <option key={card.id} value={card.id}>
-                      {card.name} ({card.provider})
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Amount">
-                <TextInput inputMode="decimal" value={repaymentAmount} onChange={(event) => setRepaymentAmount(event.target.value)} placeholder="100.00" />
-              </Field>
-            </div>
-            <Field label="Date">
-              <TextInput type="date" value={repaymentDate} onChange={(event) => setRepaymentDate(event.target.value)} />
-            </Field>
-            <Field label="Note">
-              <TextInput value={repaymentNote} onChange={(event) => setRepaymentNote(event.target.value)} placeholder="Statement payment" />
-            </Field>
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={submitRepayment} disabled={activeCards.length === 0}>
-                {editingRepaymentId ? 'Save repayment' : 'Record repayment'}
-              </Button>
-              {editingRepaymentId && (
-                <Button variant="secondary" onClick={resetRepaymentForm}>
-                  Cancel
-                </Button>
-              )}
-            </div>
-          </div>
-        </Panel>
-      </SectionGrid>
-
-      <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan" density="compact">
-        <div className="grid justify-items-center gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {summary.cards.length > 0 ? (
-            summary.cards.map((cardSummary) => (
-              <CreditCardPreviewButton
-                key={cardSummary.card.id}
-                cardSummary={cardSummary}
-                onClick={() => setSelectedCardId(cardSummary.card.id)}
-              />
-            ))
-          ) : (
-            <p className="w-full rounded-lg bg-slate-50 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">
-              No credit cards yet.
-            </p>
+      {(isCardFormOpen || isRepaymentFormOpen) && (
+        <SectionGrid variant="balanced" className="gap-4">
+          {isCardFormOpen && (
+            <Panel
+              title="Add credit card"
+              description="Cards group linked payments, spending, and repayments."
+              accent="blue"
+              density="compact"
+            >
+              {renderCardForm('Add card', true)}
+            </Panel>
           )}
-        </div>
-      </Panel>
 
-      <SectionGrid variant="balanced">
-          <Panel
-            title="Payment allocation list"
-            description="Link payments and card spending into cards by pay period."
-            accent="violet"
-            density="compact"
-          >
-            <div className="space-y-3 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
-              {paymentGroups.length > 0 ? (
-                paymentGroups.map((group, index) => (
-                  <details
-                    key={group.id}
-                    open={group.isSelected || (!viewedPeriod && index === 0)}
-                    className={
-                      group.isSelected
-                        ? 'rounded-lg border border-slate-950 bg-white shadow-sm'
-                        : 'rounded-lg border border-slate-200 bg-white'
-                    }
-                  >
-                    <summary className="cursor-pointer list-none px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-950">{group.label}</p>
-                            {group.isSelected && (
-                              <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
-                                Viewing
-                              </span>
-                            )}
-                          </div>
-                          <p className="mt-1 text-xs text-slate-500">{group.rows.length} payments</p>
-                        </div>
-                        <p className="text-sm font-semibold text-slate-950">{formatPence(group.totalPence)}</p>
-                      </div>
-                    </summary>
-                    <div className="space-y-3 border-t border-slate-100 p-3">
-                      <CalculationDetails breakdown={getPaymentGroupBreakdown(group)} />
-                      {group.rows.map((row) => (
-                        <PaymentAllocationRow
-                          key={row.id}
-                          activeCards={activeCards}
-                          row={row}
-                          onDeleteCustomPayment={(paymentId, paymentName) => {
-                            if (window.confirm(`Delete ${paymentName}?`)) {
-                              void actions.deleteCustomPayment(paymentId)
-                            }
-                          }}
-                          onLinkPayment={linkPayment}
-                        />
+          {isRepaymentFormOpen && (
+            <Panel
+              title={editingRepaymentId ? 'Edit card repayment' : 'Record card repayment'}
+              description="Repayments reduce the amount shown as owed."
+              accent="amber"
+              density="compact"
+            >
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Credit card">
+                    <SelectInput className="h-9" value={repaymentCardId} onChange={(event) => setRepaymentCardId(event.target.value)}>
+                      {activeCards.map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.name} ({card.provider})
+                        </option>
                       ))}
-                    </div>
-                  </details>
+                    </SelectInput>
+                  </Field>
+                  <Field label="Amount">
+                    <TextInput className="h-9" inputMode="decimal" value={repaymentAmount} onChange={(event) => setRepaymentAmount(event.target.value)} placeholder="100.00" />
+                  </Field>
+                </div>
+                <Field label="Date">
+                  <TextInput className="h-9" type="date" value={repaymentDate} onChange={(event) => setRepaymentDate(event.target.value)} />
+                </Field>
+                <Field label="Note">
+                  <TextInput className="h-9" value={repaymentNote} onChange={(event) => setRepaymentNote(event.target.value)} placeholder="Statement payment" />
+                </Field>
+                <div className="flex flex-wrap gap-2">
+                  <Button className="min-h-9 px-3" onClick={submitRepayment} disabled={activeCards.length === 0}>
+                    {editingRepaymentId ? 'Save repayment' : 'Record repayment'}
+                  </Button>
+                  <Button className="min-h-9 px-3" variant="secondary" onClick={resetRepaymentForm}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </Panel>
+          )}
+        </SectionGrid>
+      )}
+
+      <SectionGrid variant="compactLeft" className="gap-4">
+        <div className="space-y-4">
+          <Panel title="Credit cards" description="Tap a card for the full editable overview." accent="cyan" density="compact">
+            <div className="grid justify-items-center gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              {summary.cards.length > 0 ? (
+                summary.cards.map((cardSummary) => (
+                  <CreditCardPreviewButton
+                    key={cardSummary.card.id}
+                    cardSummary={cardSummary}
+                    onClick={() => setSelectedCardId(cardSummary.card.id)}
+                  />
                 ))
               ) : (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
-                  No payments or card spending are available to allocate yet.
+                <p className="w-full rounded-lg bg-slate-50 p-3 text-sm text-slate-500 sm:col-span-2 xl:col-span-1">
+                  No credit cards yet.
                 </p>
               )}
             </div>
           </Panel>
 
           <Panel title="Card repayments" description="Edit or delete repayments already recorded." accent="amber" density="compact">
-            <div className="space-y-3 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
+            <div className="space-y-2 xl:max-h-[420px] xl:overflow-y-auto xl:pr-1">
               {snapshot.creditCardRepayments.length > 0 ? (
                 snapshot.creditCardRepayments.map((repayment) => {
                   const card = snapshot.creditCards.find((candidate) => candidate.id === repayment.creditCardId)
@@ -557,20 +536,21 @@ export function AllocatingPaymentsPage({
                   return (
                     <div
                       key={repayment.id}
-                      className="flex flex-col gap-3 rounded-lg bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      className="grid gap-2 rounded-lg bg-slate-50 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                     >
-                      <div>
-                        <p className="text-sm font-semibold text-slate-950">{repayment.note || 'Card repayment'}</p>
-                        <p className="mt-1 text-xs text-slate-500">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-950">{repayment.note || 'Card repayment'}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
                           {repayment.date} · {card?.name ?? 'Archived card'}
                         </p>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-emerald-700">-{formatPence(repayment.amountPence)}</p>
-                        <Button variant="secondary" onClick={() => startEditingRepayment(repayment.id)} aria-label={`Edit repayment ${repayment.note || repayment.date}`}>
-                          <PenLine size={16} />
+                        <Button className="min-h-8 px-2" variant="secondary" onClick={() => startEditingRepayment(repayment.id)} aria-label={`Edit repayment ${repayment.note || repayment.date}`}>
+                          <PenLine size={15} />
                         </Button>
                         <Button
+                          className="min-h-8 px-2"
                           variant="danger"
                           onClick={() => {
                             if (window.confirm('Delete this card repayment?')) {
@@ -579,17 +559,78 @@ export function AllocatingPaymentsPage({
                           }}
                           aria-label={`Delete repayment ${repayment.note || repayment.date}`}
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </Button>
                       </div>
                     </div>
                   )
                 })
               ) : (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No repayments recorded yet.</p>
+                <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No repayments recorded yet.</p>
               )}
             </div>
           </Panel>
+        </div>
+
+        <Panel
+          title="Payment allocation list"
+          description="Link payments and card spending into cards by pay period."
+          accent="violet"
+          density="compact"
+        >
+          <div className="space-y-2 xl:max-h-[760px] xl:overflow-y-auto xl:pr-1">
+            {paymentGroups.length > 0 ? (
+              paymentGroups.map((group, index) => (
+                <details
+                  key={group.id}
+                  open={group.isSelected || (!viewedPeriod && index === 0)}
+                  className={
+                    group.isSelected
+                      ? 'rounded-lg border border-slate-950 bg-white shadow-sm'
+                      : 'rounded-lg border border-slate-200 bg-white'
+                  }
+                >
+                  <summary className="cursor-pointer list-none px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                          {group.isSelected && (
+                            <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
+                              Viewing
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500">{group.rows.length} payments</p>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-950">{formatPence(group.totalPence)}</p>
+                    </div>
+                  </summary>
+                  <div className="space-y-2 border-t border-slate-100 p-2.5">
+                    <CalculationDetails breakdown={getPaymentGroupBreakdown(group)} />
+                    {group.rows.map((row) => (
+                      <PaymentAllocationRow
+                        key={row.id}
+                        activeCards={activeCards}
+                        row={row}
+                        onDeleteCustomPayment={(paymentId, paymentName) => {
+                          if (window.confirm(`Delete ${paymentName}?`)) {
+                            void actions.deleteCustomPayment(paymentId)
+                          }
+                        }}
+                        onLinkPayment={linkPayment}
+                      />
+                    ))}
+                  </div>
+                </details>
+              ))
+            ) : (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+                No payments or card spending are available to allocate yet.
+              </p>
+            )}
+          </div>
+        </Panel>
       </SectionGrid>
     </div>
   )
@@ -602,6 +643,49 @@ type CreditCardVisualDetails = {
   name: string
   provider: string
   dueDate: string
+}
+
+function CompactSummaryMetric({
+  label,
+  value,
+  tone = 'neutral',
+  breakdown,
+  open,
+  onOpenChange,
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'good' | 'warning'
+  breakdown: CalculationBreakdown
+  open: boolean
+  onOpenChange: (isOpen: boolean) => void
+}) {
+  const toneClassName =
+    tone === 'good'
+      ? 'border-emerald-200 bg-emerald-50'
+      : tone === 'warning'
+        ? 'border-amber-200 bg-amber-50'
+        : 'border-slate-200 bg-white'
+
+  return (
+    <details
+      className={`group rounded-lg border p-3 ${toneClassName}`}
+      open={open}
+      onToggle={(event) => onOpenChange(event.currentTarget.open)}
+    >
+      <summary className="-m-1.5 cursor-pointer list-none rounded-md p-1.5 outline-none transition focus-visible:ring-4 focus-visible:ring-slate-200">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-950">{value}</p>
+          </div>
+          <ChevronDown size={16} className="mt-1 shrink-0 text-slate-500 transition group-open:rotate-180" />
+        </div>
+        <p className="mt-2 text-xs font-semibold text-slate-500">Show calculation</p>
+      </summary>
+      <CalculationDetails breakdown={breakdown} />
+    </details>
+  )
 }
 
 function CreditCardDesignModal({
@@ -670,7 +754,7 @@ function CreditCardPreviewButton({
       type="button"
       onClick={onClick}
       aria-label={`Open ${cardSummary.card.name} card details`}
-      className="figma-card-button"
+      className="figma-card-button figma-card-button--compact"
     >
       <FigmaCreditCard details={getCreditCardVisualDetails(cardSummary)} design={design} />
       <div className="figma-card-button__summary">

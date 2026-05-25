@@ -179,6 +179,10 @@ select {
     box-shadow 160ms ease;
 }
 
+.figma-card-button--compact {
+  max-width: 300px;
+}
+
 .figma-card-button:hover {
   transform: translateY(-2px);
   filter: brightness(1.04);

@@ -1046,6 +1046,42 @@ describe('allocating payments page', () => {
     expect(screen.getByText(/missing card card-capital-one/i)).toBeInTheDocument()
   })
 
+  it('keeps card and repayment forms tucked behind compact controls', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          openingBalancePence: 20000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    expect(screen.getByRole('button', { name: 'New card' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Record repayment' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Add credit card' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Record card repayment' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'New card' }))
+    expect(screen.getByRole('region', { name: 'Add credit card' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Record repayment' }))
+    expect(screen.getByRole('region', { name: 'Record card repayment' })).toBeInTheDocument()
+  })
+
   it('creates a credit card and records a card repayment without showing credit pot controls', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -1077,6 +1113,7 @@ describe('allocating payments page', () => {
 
     render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />)
 
+    await user.click(screen.getByRole('button', { name: 'New card' }))
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Card')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Capital One')
@@ -1104,6 +1141,7 @@ describe('allocating payments page', () => {
     expect(screen.queryByRole('region', { name: 'Credit Pots' })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Credit pots' })).not.toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: 'Record repayment' }))
     const repaymentPanel = screen.getByRole('region', { name: 'Record card repayment' })
     await user.type(within(repaymentPanel).getByLabelText('Amount'), '12.50')
     await user.type(within(repaymentPanel).getByLabelText('Note'), 'Part payment')
@@ -1287,6 +1325,7 @@ describe('allocating payments page', () => {
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4/mastercard-logo.svg"]')).not.toBeNull()
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4/bottom-panel.svg"]')).not.toBeNull()
 
+    await user.click(screen.getByRole('button', { name: 'New card' }))
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Mint Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Mastercard')
@@ -1357,6 +1396,7 @@ describe('allocating payments page', () => {
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4-maroon/mastercard-logo.svg"]')).not.toBeNull()
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4-maroon/bottom-panel.svg"]')).toBeNull()
 
+    await user.click(screen.getByRole('button', { name: 'New card' }))
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
 
     expect(within(cardPanel).queryByRole('button', { name: 'Gold Card' })).not.toBeInTheDocument()
@@ -1411,6 +1451,7 @@ describe('allocating payments page', () => {
     expect(cardVisual).toHaveAttribute('data-node-id', '1730:3774')
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-1/visa-logo.svg"]')).not.toBeNull()
 
+    await user.click(screen.getByRole('button', { name: 'New card' }))
     const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Blue Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Visa')
@@ -1905,6 +1946,40 @@ describe('pots page', () => {
 })
 
 describe('recurring page', () => {
+  it('keeps add and payment details tucked behind compact controls', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot({
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 23,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument()
+    expect(screen.getByText('Phone')).toBeInTheDocument()
+    expect(screen.queryByText('Paid from Bills')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'New payment' }))
+
+    expect(screen.getByLabelText('Name')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Show Phone details' }))
+
+    expect(screen.getByText('Paid from Bills')).toBeInTheDocument()
+  })
+
   it('removes the recurring calendar and keeps the payment list visible', () => {
     const snapshot = createSnapshot({
       recurringPayments: [
@@ -2050,6 +2125,7 @@ describe('recurring page', () => {
 
     render(<RecurringPage snapshot={snapshot} actions={actions} />)
 
+    await user.click(screen.getByRole('button', { name: 'New payment' }))
     await user.type(screen.getByLabelText('Name'), 'Spotify')
     await user.type(screen.getByLabelText('Amount'), '11.99')
     await user.clear(screen.getByLabelText('Due day'))

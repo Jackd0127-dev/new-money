@@ -200,6 +200,29 @@ export class PlannerDatabase extends Dexie {
         pot.linkedDebtId = pot.linkedDebtId ?? null
       }),
     )
+
+    this.version(10).stores({
+      settings: 'id',
+      pots: 'id, type, archived, linkedCreditCardId, linkedDebtId',
+      recurringPayments: 'id, potId, creditCardId, active, frequency',
+      payPeriods: 'id, payday, status',
+      paychecks: 'id, payPeriodId',
+      potAllocations: 'id, payPeriodId, potId',
+      transactions: 'id, potId, payPeriodId, creditCardId, recurringPaymentId, date, type, paymentMethod',
+      debts: 'id, status, dueDate',
+      debtPayments: 'id, debtId, date',
+      debtReserves: 'id, debtId, payPeriodId, payday, status',
+      creditCards: 'id, archived',
+      creditCardPots: 'id, creditCardId, payPeriodId, payday, source, status',
+      customPayments: 'id, creditCardId, dueDate, status',
+      creditCardRepayments: 'id, creditCardId, date',
+      dailyBriefs: 'id, date',
+    }).upgrade((transaction) =>
+      transaction.table('creditCards').toCollection().modify((card) => {
+        card.statementDate = card.statementDate ?? null
+        card.openingStatementBalancePence = Math.max(0, card.openingStatementBalancePence ?? card.openingBalancePence ?? 0)
+      }),
+    )
   }
 }
 

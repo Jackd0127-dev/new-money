@@ -26,6 +26,7 @@ import {
   getCompletedLinkedCreditCardPotAllocation,
   getCoveredAdditionalLinkedCardManualSpendTransactionIds,
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
+  getCreditCardStatementPayments,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
   getLinkedCreditCardPotAllocationExclusionPence,
   getLinkedCreditCardPotCoverBreakdown,
@@ -663,24 +664,56 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
   })
   const cardEvents: CalendarEvent[] = snapshot.creditCards
     .filter((card) => !card.archived)
-    .flatMap((card) => getCardDueDates(card.dueDay ?? null, card.dueDate ?? null, startDate, endDate).map((date) => {
-      const breakdown = getCardPaymentBreakdown(snapshot, card.id, date)
-      const amountPence = breakdown.reduce((total, item) => total + item.amountPence, 0)
-      const hasBreakdown = amountPence > 0
-
-      return {
-        id: `card-${card.id}-${date}`,
-        date,
-        title: hasBreakdown ? `${card.name} card payment` : card.name,
-        amountPence,
-        type: 'card' as const,
-        direction: hasBreakdown ? 'out' as const : 'info' as const,
-        description: hasBreakdown
-          ? `${card.provider || 'Credit card'} due date. Planned card-linked charges for this statement window.`
-          : `${card.provider || 'Credit card'} due date. Limit ${formatPence(card.limitPence)}.`,
-        breakdown: hasBreakdown ? breakdown : undefined,
+    .flatMap((card) => {
+      if (card.statementDate) {
+        return getCreditCardStatementPayments({
+          card,
+          recurringPayments: snapshot.recurringPayments,
+          customPayments: snapshot.customPayments,
+          transactions: snapshot.transactions,
+          repayments: snapshot.creditCardRepayments,
+          startDate,
+          endDate,
+          asOfDate: getAppTodayIso(snapshot.settings),
+        }).map((statementPayment): CalendarEvent => ({
+          id: `card-statement-${card.id}-${statementPayment.statementDate}-${statementPayment.directDebitDate}`,
+          date: statementPayment.directDebitDate,
+          title: statementPayment.forecastDuePence > 0 ? `${card.name} statement payment` : card.name,
+          amountPence: statementPayment.forecastDuePence,
+          type: 'card',
+          direction: statementPayment.forecastDuePence > 0 ? 'out' : 'info',
+          description: `${card.provider || 'Credit card'} direct debit for statement ${statementPayment.statementDate}.`,
+          breakdown: statementPayment.breakdown.length > 0
+            ? statementPayment.breakdown.map((line) => ({
+                id: line.id,
+                label: line.label,
+                amountPence: line.amountPence,
+                date: line.date,
+                source: line.detail,
+              }))
+            : undefined,
+        }))
       }
-    }))
+
+      return getCardDueDates(card.dueDay ?? null, card.dueDate ?? null, startDate, endDate).map((date) => {
+        const breakdown = getCardPaymentBreakdown(snapshot, card.id, date)
+        const amountPence = breakdown.reduce((total, item) => total + item.amountPence, 0)
+        const hasBreakdown = amountPence > 0
+
+        return {
+          id: `card-${card.id}-${date}`,
+          date,
+          title: hasBreakdown ? `${card.name} card payment` : `${card.name} statement setup needed`,
+          amountPence,
+          type: 'card' as const,
+          direction: hasBreakdown ? 'out' as const : 'info' as const,
+          description: hasBreakdown
+            ? `${card.provider || 'Credit card'} statement date missing. Planned card-linked charges are grouped here until setup is completed.`
+            : `${card.provider || 'Credit card'} needs a statement date before linked-pot direct debits can run.`,
+          breakdown: hasBreakdown ? breakdown : undefined,
+        }
+      })
+    })
   const debtEvents: CalendarEvent[] = snapshot.debts
     .filter((debt) => debt.status === 'active' && debt.dueDate >= startDate && debt.dueDate <= endDate)
     .map((debt) => ({
@@ -724,7 +757,12 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       }
     })
   const cardRepaymentEvents: CalendarEvent[] = snapshot.creditCardRepayments
-    .filter((repayment) => repayment.date >= startDate && repayment.date <= endDate)
+    .filter(
+      (repayment) =>
+        repayment.date >= startDate &&
+        repayment.date <= endDate &&
+        !repayment.id.startsWith('linked-card-pot-repayment-'),
+    )
     .map((repayment) => {
       const card = cardById.get(repayment.creditCardId)
 

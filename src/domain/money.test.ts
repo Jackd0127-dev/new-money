@@ -10,6 +10,7 @@ import {
   getPayPeriodCostSummary,
   getPayPeriodMoneySummary,
   getCreditCardAllocationSummary,
+  getCreditCardStatementPayments,
   getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
@@ -1335,6 +1336,156 @@ describe('credit card allocation', () => {
         amountPence: 999,
         source: 'recurring',
       }),
+    ])
+  })
+})
+
+describe('credit card statement direct debits', () => {
+  const card: CreditCard = {
+    id: 'card-barclays',
+    name: 'Barclays',
+    provider: 'Barclays',
+    limitPence: 100000,
+    openingBalancePence: 68005,
+    openingStatementBalancePence: 60000,
+    statementDate: '2026-05-14',
+    dueDay: 1,
+    dueDate: null,
+    color: '#2563eb',
+    archived: false,
+    createdAt: '2026-05-20T00:00:00.000Z',
+    updatedAt: '2026-05-20T00:00:00.000Z',
+  }
+
+  it('uses an existing issued statement for the first direct debit after setup', () => {
+    const payments = getCreditCardStatementPayments({
+      card,
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      startDate: '2026-06-01',
+      endDate: '2026-06-01',
+      asOfDate: '2026-06-01',
+    })
+
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({
+      statementDate: '2026-05-14',
+      directDebitDate: '2026-06-01',
+      actualDuePence: 60000,
+      forecastDuePence: 60000,
+    })
+    expect(payments[0].breakdown.map((line) => `${line.label}:${line.amountPence}:${line.date}`)).toEqual([
+      'Existing statement due:60000:2026-05-14',
+    ])
+  })
+
+  it('assigns spend on the statement date to the new cycle and excludes the next statement date', () => {
+    const payments = getCreditCardStatementPayments({
+      card,
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'txn-statement-day',
+          amountPence: 1000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          date: '2026-05-14',
+          note: 'Statement day spend',
+          createdAt: '2026-05-14T10:00:00.000Z',
+          updatedAt: '2026-05-14T10:00:00.000Z',
+        },
+        {
+          id: 'txn-middle',
+          amountPence: 2000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          date: '2026-05-20',
+          note: 'Middle spend',
+          createdAt: '2026-05-20T10:00:00.000Z',
+          updatedAt: '2026-05-20T10:00:00.000Z',
+        },
+        {
+          id: 'txn-next-statement',
+          amountPence: 3000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          date: '2026-06-14',
+          note: 'Next statement spend',
+          createdAt: '2026-06-14T10:00:00.000Z',
+          updatedAt: '2026-06-14T10:00:00.000Z',
+        },
+      ],
+      repayments: [],
+      startDate: '2026-07-01',
+      endDate: '2026-07-01',
+      asOfDate: '2026-07-01',
+    })
+
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({
+      statementDate: '2026-06-14',
+      directDebitDate: '2026-07-01',
+      actualDuePence: 3000,
+      forecastDuePence: 3000,
+    })
+    expect(payments[0].breakdown.map((line) => line.label)).toEqual([
+      'Statement day spend',
+      'Middle spend',
+    ])
+  })
+
+  it('uses logged recurring spend instead of also counting the planned forecast charge', () => {
+    const payments = getCreditCardStatementPayments({
+      card,
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDay: 29,
+          dueDate: '2026-05-29',
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'txn-fuel',
+          amountPence: 6700,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: 'fuel',
+          date: '2026-05-29',
+          note: 'Fuel',
+          createdAt: '2026-05-29T10:00:00.000Z',
+          updatedAt: '2026-05-29T10:00:00.000Z',
+        },
+      ],
+      repayments: [],
+      startDate: '2026-07-01',
+      endDate: '2026-07-01',
+      asOfDate: '2026-05-30',
+    })
+
+    expect(payments[0]).toMatchObject({
+      actualDuePence: 6700,
+      forecastDuePence: 6700,
+    })
+    expect(payments[0].breakdown.map((line) => `${line.label}:${line.amountPence}`)).toEqual([
+      'Fuel:6700',
     ])
   })
 })

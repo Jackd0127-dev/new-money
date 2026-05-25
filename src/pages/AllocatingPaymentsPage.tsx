@@ -62,6 +62,8 @@ export function AllocatingPaymentsPage({
   const [cardProvider, setCardProvider] = useState('')
   const [cardLimit, setCardLimit] = useState('')
   const [cardOpeningBalance, setCardOpeningBalance] = useState('')
+  const [cardOpeningStatementBalance, setCardOpeningStatementBalance] = useState('')
+  const [cardStatementDate, setCardStatementDate] = useState('')
   const [cardDueDay, setCardDueDay] = useState('1')
   const [cardColor, setCardColor] = useState(cardColors[0])
   const [cardDesignId, setCardDesignId] = useState(defaultCreditCardDesignId)
@@ -85,9 +87,10 @@ export function AllocatingPaymentsPage({
   async function submitCard() {
     const limitPence = parsePoundsToPence(cardLimit)
     const openingBalancePence = parsePoundsToPence(cardOpeningBalance)
+    const openingStatementBalancePence = parsePoundsToPence(cardOpeningStatementBalance)
     const dueDay = Number.parseInt(cardDueDay, 10)
 
-    if (!cardName.trim() || !cardProvider.trim() || limitPence <= 0 || openingBalancePence < 0 || dueDay < 1 || dueDay > 31) {
+    if (!cardName.trim() || !cardProvider.trim() || limitPence <= 0 || openingBalancePence < 0 || openingStatementBalancePence < 0 || dueDay < 1 || dueDay > 31) {
       return
     }
 
@@ -96,6 +99,8 @@ export function AllocatingPaymentsPage({
       provider: cardProvider.trim(),
       limitPence,
       openingBalancePence,
+      openingStatementBalancePence,
+      statementDate: cardStatementDate || null,
       designId: cardDesignId,
       dueDay,
       dueDate: null,
@@ -204,6 +209,8 @@ export function AllocatingPaymentsPage({
     setCardProvider(card.provider)
     setCardLimit((card.limitPence / 100).toFixed(2))
     setCardOpeningBalance(((card.openingBalancePence ?? 0) / 100).toFixed(2))
+    setCardOpeningStatementBalance(((card.openingStatementBalancePence ?? card.openingBalancePence ?? 0) / 100).toFixed(2))
+    setCardStatementDate(card.statementDate ?? '')
     setCardDueDay(String(card.dueDay ?? 1))
     setCardColor(card.color)
     setCardDesignId(normalizeCreditCardDesignId(card.designId))
@@ -232,6 +239,8 @@ export function AllocatingPaymentsPage({
     setCardProvider('')
     setCardLimit('')
     setCardOpeningBalance('')
+    setCardOpeningStatementBalance('')
+    setCardStatementDate('')
     setCardDueDay('1')
     setCardColor(cardColors[0])
     setCardDesignId(defaultCreditCardDesignId)
@@ -286,10 +295,31 @@ export function AllocatingPaymentsPage({
             />
           </Field>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Due date" hint="Day of the month this card is due.">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Existing statement due" hint="Already-issued statement amount that will be taken by direct debit.">
             <TextInput
-              aria-label="Due date"
+              aria-label="Existing statement due"
+              className="h-9"
+              inputMode="decimal"
+              value={cardOpeningStatementBalance}
+              onChange={(event) => setCardOpeningStatementBalance(event.target.value)}
+              placeholder="0.00"
+            />
+          </Field>
+          <Field label="Statement date" hint="Latest statement date. Spend on this date starts the next cycle.">
+            <TextInput
+              aria-label="Statement date"
+              className="h-9"
+              type="date"
+              value={cardStatementDate}
+              onChange={(event) => setCardStatementDate(event.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Direct debit day" hint="Day of the month the card provider takes payment.">
+            <TextInput
+              aria-label="Direct debit day"
               className="h-9"
               inputMode="numeric"
               value={cardDueDay}
@@ -644,7 +674,7 @@ type CreditCardVisualDetails = {
   available: string
   name: string
   provider: string
-  dueDate: string
+  directDebit: string
 }
 
 function CompactSummaryMetric({
@@ -788,8 +818,8 @@ function FigmaCreditCard({ details, design }: { details: CreditCardVisualDetails
           <strong>{details.name}</strong>
         </div>
         <div className="figma-credit-card__due">
-          <span>Due date</span>
-          <strong>{details.dueDate}</strong>
+          <span>Direct debit</span>
+          <strong>{details.directDebit}</strong>
         </div>
         <dl className="figma-credit-card__metrics">
           <div>
@@ -807,7 +837,7 @@ function FigmaCreditCard({ details, design }: { details: CreditCardVisualDetails
         </dl>
       </div>
       <span className="sr-only">
-        {details.name}, due {details.dueDate}, {details.limit} limit, {details.owed} actual balance, {details.available} actual available.
+        {details.name}, direct debit {details.directDebit}, {details.limit} limit, {details.owed} actual balance, {details.available} actual available.
       </span>
     </div>
   )
@@ -932,7 +962,7 @@ function getCreditCardVisualDetails(cardSummary: CreditCardAllocationCardSummary
     available: formatPence(cardSummary.actualAvailableCreditPence),
     name: cardSummary.card.name,
     provider: cardSummary.card.provider,
-    dueDate: cardSummary.dueLabel,
+    directDebit: cardSummary.nextDirectDebitDate ?? cardSummary.dueLabel,
   }
 }
 
@@ -1117,7 +1147,9 @@ function CreditCardOverview({
               tone={cardSummary.forecastAvailableCreditPence > 0 ? 'good' : 'bad'}
             />
             <CreditCardStat label="Reserved" value={formatPence(cardSummary.creditPotPence)} tone={cardSummary.creditPotPence > 0 ? 'good' : 'neutral'} />
-            <CreditCardStat label="Due" value={cardSummary.dueLabel} tone="neutral" />
+            <CreditCardStat label="Statement date" value={cardSummary.statementDate ?? 'Setup needed'} tone={cardSummary.statementSetupNeeded ? 'warning' : 'neutral'} />
+            <CreditCardStat label="Next statement" value={cardSummary.nextStatementDate ?? 'Setup needed'} tone={cardSummary.statementSetupNeeded ? 'warning' : 'neutral'} />
+            <CreditCardStat label="Direct debit" value={cardSummary.nextDirectDebitDate ?? cardSummary.dueLabel} tone={cardSummary.statementSetupNeeded ? 'warning' : 'neutral'} />
             <CreditCardStat
               label="Actual used"
               value={`${cardSummary.utilisationPercent}%`}

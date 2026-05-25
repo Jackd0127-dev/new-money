@@ -213,6 +213,11 @@ export interface CreditCardAllocationItem {
 export interface CreditCardAllocationCardSummary {
   card: CreditCard
   openingBalancePence: number
+  openingStatementBalancePence: number
+  statementDate: string | null
+  nextStatementDate: string | null
+  nextDirectDebitDate: string | null
+  statementSetupNeeded: boolean
   actualOwedPence: number
   actualAvailableCreditPence: number
   actualUncoveredPence: number
@@ -252,6 +257,36 @@ export interface CreditCardAllocationSummary {
   totalRemainingAfterCreditPotsPence: number
   payReceivedPence: number
   paycheckRemainingAfterCardsPence: number
+}
+
+export interface CreditCardStatementBreakdownItem {
+  id: string
+  label: string
+  detail: string
+  amountPence: number
+  date: string
+  source: 'opening_statement' | 'spending' | 'recurring' | 'custom' | 'repayment'
+}
+
+export interface CreditCardStatementPayment {
+  statementDate: string
+  previousStatementDate: string | null
+  nextStatementDate: string
+  directDebitDate: string
+  actualDuePence: number
+  forecastDuePence: number
+  breakdown: CreditCardStatementBreakdownItem[]
+}
+
+interface CreditCardStatementPaymentInput {
+  card: CreditCard
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  repayments: CreditCardRepayment[]
+  startDate: string
+  endDate: string
+  asOfDate?: string
 }
 
 interface LinkedCreditCardPotCoverBreakdownInput {
@@ -911,6 +946,11 @@ export function getCreditCardAllocationSummary({
   })
   const cards = activeCards.map((card) => {
     const openingBalancePence = getCreditCardOpeningBalancePence(card)
+    const openingStatementBalancePence = getCreditCardOpeningStatementBalancePence(card)
+    const statementDate = getCreditCardStatementDate(card)
+    const nextStatementDate = getNextCreditCardStatementDate(card, todayIso)
+    const nextDirectDebitDate = getNextCreditCardDirectDebitDate(card, todayIso)
+    const statementSetupNeeded = !statementDate
     const cardItems = items.filter((item) => item.creditCardId === card.id)
     const actualBalanceItems = getActualCreditCardBalanceItems({
       card,
@@ -953,6 +993,11 @@ export function getCreditCardAllocationSummary({
     return {
       card,
       openingBalancePence,
+      openingStatementBalancePence,
+      statementDate,
+      nextStatementDate,
+      nextDirectDebitDate,
+      statementSetupNeeded,
       actualOwedPence,
       actualAvailableCreditPence,
       actualUncoveredPence,
@@ -1011,6 +1056,221 @@ export function getCreditCardAllocationSummary({
   }
 }
 
+export function getCreditCardStatementPayments({
+  card,
+  recurringPayments,
+  customPayments,
+  transactions,
+  repayments,
+  startDate,
+  endDate,
+  asOfDate,
+}: CreditCardStatementPaymentInput): CreditCardStatementPayment[] {
+  const statementDate = getCreditCardStatementDate(card)
+  const dueDay = card.dueDay ?? null
+
+  if (!statementDate || !dueDay) {
+    return []
+  }
+
+  const todayIso = asOfDate ?? toIsoDate(new Date())
+  const payments: CreditCardStatementPayment[] = []
+  let previousStatementDate: string | null = null
+  let currentStatementDate = statementDate
+
+  for (let guard = 0; guard < 240; guard += 1) {
+    const directDebitDate = getCreditCardDirectDebitDateForStatement(currentStatementDate, dueDay)
+
+    if (directDebitDate > endDate) {
+      break
+    }
+
+    if (directDebitDate >= startDate) {
+      const nextStatementDate = addIsoMonthsClamped(currentStatementDate, 1)
+      const breakdown = getCreditCardStatementBreakdown({
+        card,
+        recurringPayments,
+        customPayments,
+        transactions,
+        repayments,
+        statementDate: currentStatementDate,
+        previousStatementDate,
+        nextStatementDate,
+        directDebitDate,
+        asOfDate: todayIso,
+      })
+      const actualDuePence = Math.max(
+        0,
+        breakdown
+          .filter((line) => line.source === 'opening_statement' || line.source === 'spending' || line.source === 'repayment')
+          .reduce((total, line) => total + line.amountPence, 0),
+      )
+      const forecastDuePence = Math.max(0, breakdown.reduce((total, line) => total + line.amountPence, 0))
+
+      payments.push({
+        statementDate: currentStatementDate,
+        previousStatementDate,
+        nextStatementDate,
+        directDebitDate,
+        actualDuePence,
+        forecastDuePence,
+        breakdown,
+      })
+    }
+
+    previousStatementDate = currentStatementDate
+    currentStatementDate = addIsoMonthsClamped(currentStatementDate, 1)
+  }
+
+  return payments
+}
+
+export function getCreditCardDirectDebitDateForStatement(statementDate: string, dueDay: number): string {
+  const statement = parseDate(statementDate)
+  let candidate = getMonthlyDateIso(
+    statement.getUTCFullYear(),
+    statement.getUTCMonth(),
+    dueDay,
+  )
+
+  if (candidate <= statementDate) {
+    const nextMonth = new Date(Date.UTC(statement.getUTCFullYear(), statement.getUTCMonth() + 1, 1))
+    candidate = getMonthlyDateIso(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth(), dueDay)
+  }
+
+  return candidate
+}
+
+function getCreditCardStatementBreakdown({
+  card,
+  recurringPayments,
+  customPayments,
+  transactions,
+  repayments,
+  statementDate,
+  previousStatementDate,
+  directDebitDate,
+  asOfDate,
+}: {
+  card: CreditCard
+  recurringPayments: RecurringPayment[]
+  customPayments: CustomPayment[]
+  transactions: Transaction[]
+  repayments: CreditCardRepayment[]
+  statementDate: string
+  previousStatementDate: string | null
+  nextStatementDate: string
+  directDebitDate: string
+  asOfDate: string
+}): CreditCardStatementBreakdownItem[] {
+  const cycleStart = previousStatementDate
+  const actualLines: CreditCardStatementBreakdownItem[] = cycleStart
+    ? transactions
+        .filter(
+          (transaction) =>
+            transaction.type === 'spending' &&
+            transaction.paymentMethod === 'credit_card' &&
+            transaction.creditCardId === card.id &&
+            transaction.date >= cycleStart &&
+            transaction.date < statementDate &&
+            transaction.date <= asOfDate,
+        )
+        .map((transaction) => ({
+          id: `statement-spending-${transaction.id}`,
+          label: transaction.note || 'Manual spend',
+          detail: transaction.recurringPaymentId ? `Logged recurring card spend on ${transaction.date}` : `Logged card spend on ${transaction.date}`,
+          amountPence: transaction.amountPence,
+          date: transaction.date,
+          source: 'spending' as const,
+        }))
+    : getCreditCardOpeningStatementBalancePence(card) > 0
+      ? [
+          {
+            id: `opening-statement-${card.id}-${statementDate}`,
+            label: 'Existing statement due',
+            detail: `Statement issued ${statementDate}`,
+            amountPence: getCreditCardOpeningStatementBalancePence(card),
+            date: statementDate,
+            source: 'opening_statement' as const,
+          },
+        ]
+      : []
+  const actualRecurringKeys = cycleStart
+    ? new Set(
+        transactions
+          .filter(
+            (transaction) =>
+              transaction.type === 'spending' &&
+              transaction.paymentMethod === 'credit_card' &&
+              transaction.creditCardId === card.id &&
+              Boolean(transaction.recurringPaymentId) &&
+              transaction.date >= cycleStart &&
+              transaction.date < statementDate,
+          )
+          .map((transaction) => `${transaction.recurringPaymentId}:${transaction.date}`),
+      )
+    : new Set<string>()
+  const recurringLines: CreditCardStatementBreakdownItem[] = cycleStart
+    ? getRecurringPaymentOccurrences(recurringPayments, cycleStart, addIsoDays(statementDate, -1))
+        .filter(
+          (occurrence) =>
+            occurrence.payment.creditCardId === card.id &&
+            !actualRecurringKeys.has(`${occurrence.payment.id}:${occurrence.dueDate}`),
+        )
+        .map((occurrence) => ({
+          id: `statement-recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+          label: occurrence.payment.name,
+          detail: `Forecast card charge due ${occurrence.dueDate}`,
+          amountPence: occurrence.amountPence,
+          date: occurrence.dueDate,
+          source: 'recurring' as const,
+        }))
+    : []
+  const customLines: CreditCardStatementBreakdownItem[] = cycleStart
+    ? customPayments
+        .filter(
+          (payment) =>
+            payment.status !== 'archived' &&
+            payment.creditCardId === card.id &&
+            payment.dueDate >= cycleStart &&
+            payment.dueDate < statementDate,
+        )
+        .map((payment) => ({
+          id: `statement-custom-${payment.id}`,
+          label: payment.name,
+          detail: payment.status === 'paid' ? `Saved card payment paid ${payment.dueDate}` : `Forecast saved card payment due ${payment.dueDate}`,
+          amountPence: payment.amountPence,
+          date: payment.dueDate,
+          source: 'custom' as const,
+        }))
+    : []
+  const repaymentLines: CreditCardStatementBreakdownItem[] = repayments
+    .filter(
+      (repayment) =>
+        repayment.creditCardId === card.id &&
+        repayment.date > statementDate &&
+        repayment.date <= directDebitDate,
+    )
+    .map((repayment) => ({
+      id: `statement-repayment-${repayment.id}`,
+      label: repayment.note || 'Card repayment',
+      detail: `Statement repayment on ${repayment.date}`,
+      amountPence: -repayment.amountPence,
+      date: repayment.date,
+      source: 'repayment' as const,
+    }))
+
+  return [...actualLines, ...recurringLines, ...customLines, ...repaymentLines].sort((a, b) => {
+    const dateSort = a.date.localeCompare(b.date)
+
+    if (dateSort !== 0) {
+      return dateSort
+    }
+
+    return a.label.localeCompare(b.label)
+  })
+}
+
 export function getLinkedCreditCardPotCoverBreakdown({
   creditCards,
   recurringPayments,
@@ -1061,6 +1321,7 @@ export function getLinkedCreditCardPotCoverBreakdown({
   }
 
   const lines: LinkedCreditCardPotCoverBreakdownItem[] = []
+  const currentShortfallLabel = cardSummary.statementDate ? 'Existing statement due' : 'Owed from last statement'
 
   if (cardSummary.actualUncoveredPence > 0) {
     let remainingActualUncoveredPence = cardSummary.actualUncoveredPence
@@ -1077,7 +1338,7 @@ export function getLinkedCreditCardPotCoverBreakdown({
     if (existingShortfallPence > 0) {
       lines.push({
         id: 'current-shortfall',
-        label: 'Owed from last statement',
+        label: currentShortfallLabel,
         detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
         amountPence: existingShortfallPence,
         date: payPeriod.payday,
@@ -1109,7 +1370,7 @@ export function getLinkedCreditCardPotCoverBreakdown({
     if (remainingActualUncoveredPence > 0) {
       lines.push({
         id: 'current-shortfall',
-        label: 'Owed from last statement',
+        label: currentShortfallLabel,
         detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
         amountPence: remainingActualUncoveredPence,
         date: payPeriod.payday,
@@ -1518,7 +1779,7 @@ function getForecastCreditCardItems(
 
 function getCreditCardCoverBreakdownDetail(item: CreditCardAllocationItem): string {
   if (item.source === 'recurring') {
-    return `Recurring card charge due ${item.date}`
+    return `Forecast card charge due ${item.date}`
   }
 
   if (item.source === 'custom') {
@@ -1534,6 +1795,49 @@ function getCreditCardCoverBreakdownDetail(item: CreditCardAllocationItem): stri
 
 function getCreditCardOpeningBalancePence(card: CreditCard): number {
   return Math.max(0, card.openingBalancePence ?? 0)
+}
+
+function getCreditCardOpeningStatementBalancePence(card: CreditCard): number {
+  return Math.max(0, card.openingStatementBalancePence ?? card.openingBalancePence ?? 0)
+}
+
+function getCreditCardStatementDate(card: CreditCard): string | null {
+  return card.statementDate && isIsoDate(card.statementDate) ? card.statementDate : null
+}
+
+function getNextCreditCardStatementDate(card: CreditCard, asOfDate: string): string | null {
+  let statementDate = getCreditCardStatementDate(card)
+
+  if (!statementDate) {
+    return null
+  }
+
+  for (let guard = 0; guard < 240 && statementDate < asOfDate; guard += 1) {
+    statementDate = addIsoMonthsClamped(statementDate, 1)
+  }
+
+  return statementDate
+}
+
+function getNextCreditCardDirectDebitDate(card: CreditCard, asOfDate: string): string | null {
+  const dueDay = card.dueDay ?? null
+  let statementDate = getCreditCardStatementDate(card)
+
+  if (!statementDate || !dueDay) {
+    return null
+  }
+
+  for (let guard = 0; guard < 240; guard += 1) {
+    const directDebitDate = getCreditCardDirectDebitDateForStatement(statementDate, dueDay)
+
+    if (directDebitDate >= asOfDate) {
+      return directDebitDate
+    }
+
+    statementDate = addIsoMonthsClamped(statementDate, 1)
+  }
+
+  return null
 }
 
 function sortCreditCardItems(a: CreditCardAllocationItem, b: CreditCardAllocationItem): number {
@@ -1587,6 +1891,14 @@ export function toIsoDate(date: Date): string {
 
 export function addIsoDays(date: string, days: number): string {
   return toIsoDate(addDays(parseDate(date), days))
+}
+
+export function addIsoMonthsClamped(date: string, months: number): string {
+  const parsed = parseDate(date)
+  const targetMonth = parsed.getUTCMonth() + months
+  const target = new Date(Date.UTC(parsed.getUTCFullYear(), targetMonth, 1))
+
+  return getMonthlyDateIso(target.getUTCFullYear(), target.getUTCMonth(), parsed.getUTCDate())
 }
 
 export function findPayPeriodForDate(payPeriods: PayPeriod[], date: string): PayPeriod | null {
@@ -1851,6 +2163,12 @@ function isIsoDate(value: string): boolean {
 
 function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * dayMs)
+}
+
+function getMonthlyDateIso(year: number, monthIndex: number, day: number): string {
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+
+  return toIsoDate(new Date(Date.UTC(year, monthIndex, Math.min(Math.max(1, day), lastDay))))
 }
 
 function frequencyToDays(frequency: PayFrequency): number {

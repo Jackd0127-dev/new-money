@@ -188,6 +188,8 @@ describe('paycheck plan storage', () => {
       provider: 'Barclays',
       limitPence: 80000,
       openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: '2026-05-14',
       dueDay: 11,
       dueDate: null,
       color: '#2563eb',
@@ -491,6 +493,8 @@ describe('paycheck plan storage', () => {
       provider: 'Barclays',
       limitPence: 80000,
       openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: '2026-05-14',
       dueDay: 11,
       color: '#2563eb',
       designId: null,
@@ -919,7 +923,7 @@ describe('paycheck plan storage', () => {
     expect(snapshot.creditCardPots.some((creditCardPot) => creditCardPot.name === 'Delete me')).toBe(false)
   })
 
-  it('pays an actual linked credit card balance from its linked pot on the card due date', async () => {
+  it('pays an existing statement from its linked pot on the direct debit date', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-06-11T12:00:00.000Z'))
     await db.pots.clear()
@@ -946,6 +950,8 @@ describe('paycheck plan storage', () => {
       provider: 'Barclays',
       limitPence: 80000,
       openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: '2026-05-14',
       dueDay: 11,
       dueDate: null,
       color: '#2563eb',
@@ -958,11 +964,11 @@ describe('paycheck plan storage', () => {
 
     expect(snapshot.creditCardRepayments).toHaveLength(1)
     expect(snapshot.creditCardRepayments[0]).toMatchObject({
-      id: 'linked-card-pot-repayment-card-barclays-2026-06-11',
+      id: 'linked-card-pot-repayment-card-barclays-2026-05-14-2026-06-11',
       creditCardId: 'card-barclays',
       amountPence: 68005,
       date: '2026-06-11',
-      note: 'Automatic Barclays payment from Barclays pot',
+      note: 'Automatic Barclays statement payment from Barclays pot',
     })
     expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(9500)
 
@@ -971,9 +977,119 @@ describe('paycheck plan storage', () => {
     expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(9500)
   })
 
+  it('pays only the existing issued statement from a linked pot on the direct debit date', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'))
+    await db.pots.clear()
+    await db.creditCards.clear()
+    await db.transactions.clear()
+    await db.creditCardRepayments.clear()
+
+    await db.pots.add({
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 77505,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+    await db.creditCards.add({
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      openingStatementBalancePence: 60000,
+      statementDate: '2026-05-14',
+      dueDay: 1,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+    await db.transactions.add({
+      id: 'txn-after-statement',
+      potId: null,
+      payPeriodId: null,
+      amountPence: 8005,
+      type: 'spending',
+      paymentMethod: 'credit_card',
+      creditCardId: 'card-barclays',
+      recurringPaymentId: null,
+      date: '2026-05-20',
+      note: 'New statement spend',
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.creditCardRepayments).toHaveLength(1)
+    expect(snapshot.creditCardRepayments[0]).toMatchObject({
+      id: 'linked-card-pot-repayment-card-barclays-2026-05-14-2026-06-01',
+      creditCardId: 'card-barclays',
+      amountPence: 60000,
+      date: '2026-06-01',
+      note: 'Automatic Barclays statement payment from Barclays pot',
+    })
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(17505)
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.creditCardRepayments).toHaveLength(1)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(17505)
+  })
+
+  it('does not auto-deduct a linked credit card pot until a statement date is set', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'))
+    await db.pots.clear()
+    await db.creditCards.clear()
+    await db.creditCardRepayments.clear()
+
+    await db.pots.add({
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 77505,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+    await db.creditCards.add({
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: null,
+      dueDay: 1,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    })
+
+    const snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.creditCardRepayments).toHaveLength(0)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(77505)
+  })
+
   it('uses logged card spend instead of planned card spend when sweeping a linked pot', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-06-11T12:00:00.000Z'))
+    vi.setSystemTime(new Date('2026-07-11T12:00:00.000Z'))
     await db.pots.clear()
     await db.creditCards.clear()
     await db.recurringPayments.clear()
@@ -999,6 +1115,8 @@ describe('paycheck plan storage', () => {
       provider: 'Barclays',
       limitPence: 80000,
       openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: '2026-05-14',
       dueDay: 11,
       dueDate: null,
       color: '#2563eb',
@@ -1036,10 +1154,11 @@ describe('paycheck plan storage', () => {
 
     const snapshot = await getPlannerSnapshot()
 
-    expect(snapshot.creditCardRepayments[0]).toMatchObject({
+    expect(snapshot.creditCardRepayments).toHaveLength(2)
+    expect(snapshot.creditCardRepayments.find((repayment) => repayment.date === '2026-07-11')).toMatchObject({
       creditCardId: 'card-barclays',
-      amountPence: 74705,
-      date: '2026-06-11',
+      amountPence: 6700,
+      date: '2026-07-11',
     })
     expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(300)
   })
@@ -1058,6 +1177,8 @@ describe('paycheck plan storage', () => {
       provider: 'Barclays',
       limitPence: 80000,
       openingBalancePence: 68005,
+      openingStatementBalancePence: 68005,
+      statementDate: '2026-05-14',
       dueDay: 11,
       dueDate: null,
       color: '#2563eb',
@@ -1093,7 +1214,7 @@ describe('paycheck plan storage', () => {
     expect(repayment).toMatchObject({
       amountPence: 68005,
       date: '2026-06-11',
-      note: 'Automatic Barclays payment from Barclays pot',
+      note: 'Automatic Barclays statement payment from Barclays pot',
     })
     expect(barclaysPot?.balancePence).toBe(9500)
   })

@@ -190,6 +190,84 @@ describe('calendar page', () => {
     expect(within(capitalOneCard).getAllByText('£50.00').length).toBeGreaterThan(0)
   })
 
+  it('shows statement direct debits with the payment breakdown on the calendar', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-june',
+      startDate: '2026-06-15',
+      endDate: '2026-06-28',
+      payday: '2026-06-15',
+      nextPayday: '2026-06-29',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 60000,
+          openingStatementBalancePence: 60000,
+          statementDate: '2026-05-14',
+          dueDay: 1,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 1 June 2026' }))
+    expect(screen.queryByText('Gym')).not.toBeInTheDocument()
+    expect(screen.getByText('Barclays statement payment')).toBeInTheDocument()
+    const juneCard = screen.getByText('Barclays statement payment').closest('article') as HTMLElement
+    await user.click(within(juneCard).getByRole('button', { name: 'Show breakdown for Barclays statement payment -£600.00' }))
+    expect(within(juneCard).getByText('Existing statement due')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
+    await user.click(screen.getByRole('button', { name: 'Open 1 July 2026' }))
+    expect(screen.getByText('Barclays statement payment')).toBeInTheDocument()
+    const julyCard = screen.getByText('Barclays statement payment').closest('article') as HTMLElement
+    await user.click(within(julyCard).getByRole('button', { name: 'Show breakdown for Barclays statement payment -£165.00' }))
+    expect(within(julyCard).getAllByText('Fuel')).toHaveLength(2)
+    expect(within(julyCard).getByText('Gym')).toBeInTheDocument()
+    expect(within(julyCard).getByText('£165.00')).toBeInTheDocument()
+  })
+
   it('shows events on visible next-month cells in the current month grid', () => {
     const selectedPayPeriod = createPayPeriod({
       id: 'period-current',
@@ -1301,8 +1379,10 @@ describe('allocating payments page', () => {
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Capital One')
     await user.type(within(cardPanel).getByLabelText('Limit'), '1200')
     await user.type(within(cardPanel).getByLabelText('Existing balance'), '250')
-    await user.clear(within(cardPanel).getByLabelText('Due date'))
-    await user.type(within(cardPanel).getByLabelText('Due date'), '9')
+    await user.type(within(cardPanel).getByLabelText('Existing statement due'), '200')
+    await user.type(within(cardPanel).getByLabelText('Statement date'), '2026-05-14')
+    await user.clear(within(cardPanel).getByLabelText('Direct debit day'))
+    await user.type(within(cardPanel).getByLabelText('Direct debit day'), '9')
     await user.click(within(cardPanel).getByRole('button', { name: 'Card design' }))
     await user.click(within(screen.getByRole('dialog', { name: 'Card design' })).getByRole('button', { name: 'Blue Card' }))
     await user.click(within(cardPanel).getByRole('button', { name: 'Add card' }))
@@ -1312,9 +1392,11 @@ describe('allocating payments page', () => {
       designId: 'cart-gradient-12',
       dueDate: null,
       dueDay: 9,
+      statementDate: '2026-05-14',
       limitPence: 120000,
       name: 'Gold Card',
       openingBalancePence: 25000,
+      openingStatementBalancePence: 20000,
       provider: 'Capital One',
     })
 
@@ -1707,7 +1789,9 @@ describe('allocating payments page', () => {
       limitPence: 100000,
       name: 'Updated Amex',
       openingBalancePence: 20000,
+      openingStatementBalancePence: 20000,
       provider: 'Amex',
+      statementDate: null,
     })
   })
 })

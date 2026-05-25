@@ -74,6 +74,8 @@ export interface CreateCreditCardPayload {
   provider: string
   limitPence: number
   openingBalancePence?: number
+  openingStatementBalancePence?: number
+  statementDate?: string | null
   dueDay?: number | null
   dueDate?: string | null
   color: string
@@ -310,6 +312,8 @@ export async function runAssistantAction(
       provider: action.payload.provider.trim(),
       limitPence: action.payload.limitPence,
       openingBalancePence: action.payload.openingBalancePence ?? 0,
+      openingStatementBalancePence: action.payload.openingStatementBalancePence ?? action.payload.openingBalancePence ?? 0,
+      statementDate: action.payload.statementDate ?? null,
       dueDay: action.payload.dueDay ?? null,
       dueDate: action.payload.dueDate ?? null,
       color: action.payload.color,
@@ -524,6 +528,8 @@ function normalizeAssistantActionProposal(value: unknown, index: number): Assist
         provider,
         limitPence,
         openingBalancePence: getNumber(payload.openingBalancePence) ?? 0,
+        openingStatementBalancePence: getNumber(payload.openingStatementBalancePence) ?? getNumber(payload.openingBalancePence) ?? 0,
+        statementDate: getNullableString(payload.statementDate),
         dueDay: getNullableNumber(payload.dueDay),
         dueDate: getNullableString(payload.dueDate),
         color: getString(payload.color) || '#2563eb',

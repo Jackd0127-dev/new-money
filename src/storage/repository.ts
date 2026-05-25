@@ -6,6 +6,7 @@ import {
   findPayPeriodForDate,
   getAppTodayIso,
   getCreditCardAllocationSummary,
+  getCreditCardStatementPayments,
   getPayPeriodCostSummary,
   getPotBalanceAfterTransactionRemoval,
   getRecurringPaymentOccurrences,
@@ -126,6 +127,8 @@ export interface CreditCardInput {
   provider: string
   limitPence: number
   openingBalancePence?: number
+  openingStatementBalancePence?: number
+  statementDate?: string | null
   designId?: string | null
   dueDay?: number | null
   dueDate?: string | null
@@ -415,6 +418,8 @@ export async function addCreditCard(input: CreditCardInput): Promise<void> {
     provider: input.provider.trim(),
     limitPence: Math.max(0, input.limitPence),
     openingBalancePence: Math.max(0, input.openingBalancePence ?? 0),
+    openingStatementBalancePence: Math.max(0, input.openingStatementBalancePence ?? input.openingBalancePence ?? 0),
+    statementDate: isIsoDateText(input.statementDate) ? input.statementDate : null,
     designId: normalizeCreditCardDesignId(input.designId),
     dueDay: input.dueDay ?? null,
     dueDate: input.dueDate ?? null,
@@ -431,6 +436,8 @@ export async function updateCreditCard(cardId: string, input: CreditCardUpdateIn
     provider: input.provider.trim(),
     limitPence: Math.max(0, input.limitPence),
     openingBalancePence: Math.max(0, input.openingBalancePence ?? 0),
+    openingStatementBalancePence: Math.max(0, input.openingStatementBalancePence ?? input.openingBalancePence ?? 0),
+    statementDate: isIsoDateText(input.statementDate) ? input.statementDate : null,
     designId: normalizeCreditCardDesignId(input.designId),
     dueDay: input.dueDay ?? null,
     dueDate: input.dueDate ?? null,
@@ -1489,6 +1496,8 @@ async function persistNormalizedCreditCards(timestamp: string): Promise<void> {
       name: normalizedCard.name.trim(),
       provider: normalizedCard.provider.trim(),
       limitPence: Math.max(0, normalizedCard.limitPence),
+      openingStatementBalancePence: Math.max(0, normalizedCard.openingStatementBalancePence ?? normalizedCard.openingBalancePence ?? 0),
+      statementDate: isIsoDateText(normalizedCard.statementDate) ? normalizedCard.statementDate : null,
       dueDay: normalizedCard.dueDay ?? null,
       dueDate: normalizedCard.dueDate ?? null,
       archived: Boolean(normalizedCard.archived),
@@ -1889,12 +1898,24 @@ async function applyDueLinkedCreditCardPotRepayments(todayIso: string): Promise<
 
       let linkedPotBalancePence = linkedPot.balancePence
 
-      for (const dueDate of getCreditCardAutoRepaymentDueDates(card, todayIso)) {
+      const startDate = isIsoDateText(card.createdAt.slice(0, 10)) ? card.createdAt.slice(0, 10) : todayIso
+      const statementPayments = getCreditCardStatementPayments({
+        card,
+        recurringPayments: [],
+        customPayments: [],
+        transactions,
+        repayments,
+        startDate,
+        endDate: todayIso,
+        asOfDate: todayIso,
+      })
+
+      for (const statementPayment of statementPayments) {
         if (linkedPotBalancePence <= 0) {
           break
         }
 
-        const repaymentId = getLinkedCreditCardPotRepaymentId(card.id, dueDate)
+        const repaymentId = getLinkedCreditCardPotRepaymentId(card.id, statementPayment.statementDate, statementPayment.directDebitDate)
 
         if (repayments.some((repayment) => repayment.id === repaymentId)) {
           continue
@@ -1909,9 +1930,13 @@ async function applyDueLinkedCreditCardPotRepayments(todayIso: string): Promise<
           creditCardPots: [],
           pots: [],
           payPeriod: null,
-          asOfDate: dueDate,
+          asOfDate: statementPayment.directDebitDate,
         }).cards[0]
-        const repaymentAmountPence = Math.min(cardSummary?.actualOwedPence ?? 0, linkedPotBalancePence)
+        const repaymentAmountPence = Math.min(
+          statementPayment.actualDuePence,
+          cardSummary?.actualOwedPence ?? 0,
+          linkedPotBalancePence,
+        )
 
         if (repaymentAmountPence <= 0) {
           continue
@@ -1921,8 +1946,8 @@ async function applyDueLinkedCreditCardPotRepayments(todayIso: string): Promise<
           id: repaymentId,
           creditCardId: card.id,
           amountPence: repaymentAmountPence,
-          date: dueDate,
-          note: `Automatic ${card.name} payment from ${linkedPot.name} pot`,
+          date: statementPayment.directDebitDate,
+          note: `Automatic ${card.name} statement payment from ${linkedPot.name} pot`,
           createdAt: timestamp,
           updatedAt: timestamp,
         }
@@ -1940,44 +1965,8 @@ async function applyDueLinkedCreditCardPotRepayments(todayIso: string): Promise<
   })
 }
 
-function getCreditCardAutoRepaymentDueDates(card: CreditCard, todayIso: string): string[] {
-  const startDate = isIsoDateText(card.createdAt.slice(0, 10)) ? card.createdAt.slice(0, 10) : todayIso
-
-  if (card.dueDate) {
-    return card.dueDate >= startDate && card.dueDate <= todayIso ? [card.dueDate] : []
-  }
-
-  if (!card.dueDay) {
-    return []
-  }
-
-  const dueDates: string[] = []
-  const cursor = new Date(`${startDate}T00:00:00.000Z`)
-  const end = new Date(`${todayIso}T00:00:00.000Z`)
-  cursor.setUTCDate(1)
-
-  while (cursor <= end) {
-    const dueDate = getCreditCardMonthlyDueDate(card.dueDay, cursor.getUTCFullYear(), cursor.getUTCMonth())
-
-    if (dueDate >= startDate && dueDate <= todayIso) {
-      dueDates.push(dueDate)
-    }
-
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1)
-  }
-
-  return dueDates
-}
-
-function getCreditCardMonthlyDueDate(dueDay: number, year: number, monthIndex: number): string {
-  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
-  const clampedDay = Math.min(Math.max(1, dueDay), lastDay)
-
-  return toIsoDate(new Date(Date.UTC(year, monthIndex, clampedDay)))
-}
-
-function getLinkedCreditCardPotRepaymentId(creditCardId: string, dueDate: string): string {
-  return `linked-card-pot-repayment-${creditCardId}-${dueDate}`
+function getLinkedCreditCardPotRepaymentId(creditCardId: string, statementDate: string, dueDate: string): string {
+  return `linked-card-pot-repayment-${creditCardId}-${statementDate}-${dueDate}`
 }
 
 function getRecurringReserveAllocations(
@@ -2141,6 +2130,8 @@ function normalizeCreditCard(card: CreditCard): CreditCard {
   return {
     ...card,
     openingBalancePence: Math.max(0, card.openingBalancePence ?? 0),
+    openingStatementBalancePence: Math.max(0, card.openingStatementBalancePence ?? card.openingBalancePence ?? 0),
+    statementDate: isIsoDateText(card.statementDate) ? card.statementDate : null,
     designId: normalizeCreditCardDesignId(card.designId),
   }
 }

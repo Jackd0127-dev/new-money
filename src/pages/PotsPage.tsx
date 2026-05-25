@@ -142,6 +142,26 @@ export function PotsPage({
   const setCreateOpen = onCreateModalOpenChange ?? setLocalCreateModalOpen
   const topUpAmountPence = parsePoundsToPence(topUpAmount)
   const canTopUpPot = Boolean(selectedPayPeriod && topUpPotId && topUpAmountPence > 0)
+  const topUpHistory = useMemo(() => {
+    if (!selectedPayPeriod) {
+      return []
+    }
+
+    const potById = new Map(snapshot.pots.map((pot) => [pot.id, pot]))
+
+    return snapshot.potAllocations
+      .filter(
+        (allocation) =>
+          allocation.payPeriodId === selectedPayPeriod.id &&
+          allocation.amountPence > 0 &&
+          isPotTopUpAllocation(allocation),
+      )
+      .map((allocation) => ({
+        allocation,
+        pot: potById.get(allocation.potId) ?? null,
+      }))
+      .sort((left, right) => right.allocation.createdAt.localeCompare(left.allocation.createdAt))
+  }, [selectedPayPeriod, snapshot.potAllocations, snapshot.pots])
 
   async function submitPot() {
     if (!createForm.name.trim()) {
@@ -211,17 +231,18 @@ export function PotsPage({
       return
     }
 
-    const allocationId = getPotTopUpAllocationId(selectedPayPeriod.id, topUpPotId)
-    const existingTopUpPence = snapshot.potAllocations.find((allocation) => allocation.id === allocationId)?.amountPence ?? 0
-
     await actions.upsertPaycheckPotAllocation({
-      id: allocationId,
+      id: createPotTopUpAllocationId(selectedPayPeriod.id, topUpPotId),
       payPeriodId: selectedPayPeriod.id,
       potId: topUpPotId,
-      amountPence: existingTopUpPence + topUpAmountPence,
+      amountPence: topUpAmountPence,
     })
 
     setTopUpAmount('')
+  }
+
+  async function deleteTopUp(allocationId: string) {
+    await actions.deletePaycheckPotAllocation(allocationId)
   }
 
   return (
@@ -257,6 +278,53 @@ export function PotsPage({
               Top up pot
             </Button>
           </div>
+        </div>
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-950">Top-up history</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {selectedPayPeriod ? `From the ${selectedPayPeriod.payday} paycheck.` : 'Choose a paycheck to see top-ups.'}
+              </p>
+            </div>
+            {topUpHistory.length > 0 && (
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                {formatPence(topUpHistory.reduce((total, item) => total + item.allocation.amountPence, 0))}
+              </span>
+            )}
+          </div>
+          {topUpHistory.length > 0 ? (
+            <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+              {topUpHistory.map(({ allocation, pot }) => {
+                const potName = pot?.name ?? 'Deleted pot'
+
+                return (
+                  <div key={allocation.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-950">{potName}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                        Added {formatTopUpDate(allocation.createdAt)}
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold text-slate-950">{formatPence(allocation.amountPence)}</p>
+                    <button
+                      type="button"
+                      onClick={() => void deleteTopUp(allocation.id)}
+                      aria-label={`Delete ${potName} top-up`}
+                      title={`Delete ${potName} top-up`}
+                      className="inline-flex size-8 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
+              No manual top-ups for this paycheck yet.
+            </p>
+          )}
         </div>
       </Panel>
 
@@ -803,8 +871,26 @@ function potFormToPayload(form: PotFormState) {
   }
 }
 
-function getPotTopUpAllocationId(payPeriodId: string, potId: string): string {
+function getPotTopUpAllocationPrefix(payPeriodId: string, potId: string): string {
   return `pot-top-up-${payPeriodId}-${potId}`
+}
+
+function createPotTopUpAllocationId(payPeriodId: string, potId: string): string {
+  const randomSuffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+  return `${getPotTopUpAllocationPrefix(payPeriodId, potId)}-${randomSuffix}`
+}
+
+function isPotTopUpAllocation(allocation: PotAllocation): boolean {
+  return (
+    allocation.source === 'manual' &&
+    !allocation.recurringPaymentId &&
+    allocation.id.startsWith('pot-top-up-')
+  )
+}
+
+function formatTopUpDate(value: string): string {
+  return value.slice(0, 10)
 }
 
 function getPotLinkType(pot: Pot): PotLinkType {

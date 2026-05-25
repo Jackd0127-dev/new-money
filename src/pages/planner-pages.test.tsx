@@ -2194,14 +2194,14 @@ describe('pots page', () => {
     await user.click(screen.getByRole('button', { name: 'Top up pot' }))
 
     expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
-      id: 'pot-top-up-period-current-pot-food',
+      id: expect.stringMatching(/^pot-top-up-period-current-pot-food-/),
       payPeriodId: 'period-current',
       potId: 'pot-food',
       amountPence: 2500,
     })
   })
 
-  it('adds another top-up to the existing paycheck pot allocation', async () => {
+  it('records another pot top-up as a separate paycheck allocation', async () => {
     const user = userEvent.setup()
     const actions = createActions()
     const selectedPayPeriod = createPayPeriod({
@@ -2240,11 +2240,68 @@ describe('pots page', () => {
     await user.click(screen.getByRole('button', { name: 'Top up pot' }))
 
     expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
-      id: 'pot-top-up-period-current-pot-food',
+      id: expect.stringMatching(/^pot-top-up-period-current-pot-food-/),
       payPeriodId: 'period-current',
       potId: 'pot-food',
-      amountPence: 2500,
+      amountPence: 1500,
     })
+  })
+
+  it('shows top-up history for the selected paycheck and can delete a top-up', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+
+    render(
+      <PotsPage
+        snapshot={createSnapshot({
+          payPeriods: [selectedPayPeriod],
+          potAllocations: [
+            {
+              id: 'pot-top-up-period-current-pot-food',
+              payPeriodId: 'period-current',
+              potId: 'pot-food',
+              amountPence: 1000,
+              source: 'manual',
+              recurringPaymentId: null,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+            {
+              id: 'pot-top-up-period-current-pot-bills-abc123',
+              payPeriodId: 'period-current',
+              potId: 'pot-bills',
+              amountPence: 2250,
+              source: 'manual',
+              recurringPaymentId: null,
+              createdAt: '2026-05-17T00:00:00.000Z',
+              updatedAt: '2026-05-17T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    const topUpPanel = screen.getByRole('region', { name: 'Top up pots' })
+
+    expect(within(topUpPanel).getByText('Top-up history')).toBeInTheDocument()
+    expect(within(topUpPanel).getAllByText('Food').length).toBeGreaterThan(0)
+    expect(within(topUpPanel).getAllByText('Bills').length).toBeGreaterThan(0)
+    expect(within(topUpPanel).getByText('£10.00')).toBeInTheDocument()
+    expect(within(topUpPanel).getByText('£22.50')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Delete Bills top-up' }))
+
+    expect(actions.deletePaycheckPotAllocation).toHaveBeenCalledWith('pot-top-up-period-current-pot-bills-abc123')
   })
 
   it('shows the linked debt balance as the pot target', () => {
@@ -2288,6 +2345,50 @@ describe('pots page', () => {
 
     expect(screen.getByText('£500.00 target')).toBeInTheDocument()
     expect(screen.getByText('25%')).toBeInTheDocument()
+  })
+
+  it('shows the true percentage when a debt-linked pot is over the debt target', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-airbnb',
+          name: 'AIRBNB',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'home',
+          balancePence: 60000,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: null,
+          linkedDebtId: 'debt-airbnb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-airbnb',
+          name: 'AIRBNB',
+          lender: 'AIRBNB',
+          originalAmountPence: 50000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-06-10',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('£500.00 target')).toBeInTheDocument()
+    expect(screen.getByText('120%')).toBeInTheDocument()
+    expect(screen.queryByText('100%')).not.toBeInTheDocument()
   })
 
   it('shows the true percentage when a pot is over target', () => {

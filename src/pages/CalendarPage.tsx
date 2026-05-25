@@ -19,6 +19,7 @@ import {
   findPayPeriodForDate,
   formatPence,
   getAppTodayIso,
+  getDashboardTodoAllocationId,
   getCostItemIdFromDashboardTodoAllocationId,
   getAdditionalLinkedCreditCardPotAllocationPence,
   getAdditionalLinkedCreditCardPotCoverBreakdown,
@@ -31,6 +32,7 @@ import {
   getPayPeriodCostSummary,
   getRecurringPaymentOccurrences,
   isAdditionalLinkedCreditCardPotCostItemId,
+  type PeriodCostItem,
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
@@ -53,6 +55,7 @@ type CalendarEventType =
   | 'spending'
 
 type CalendarEventDirection = 'in' | 'out' | 'info'
+type CalendarEventCompletionStatus = 'completed' | 'not_completed'
 
 interface CalendarEvent {
   id: string
@@ -62,6 +65,7 @@ interface CalendarEvent {
   type: CalendarEventType
   direction: CalendarEventDirection
   description: string
+  completionStatus?: CalendarEventCompletionStatus
   breakdown?: CalendarEventBreakdownItem[]
 }
 
@@ -139,6 +143,11 @@ const eventStyles: Record<CalendarEventType, { label: string; className: string;
     className: 'border-pink-200 bg-pink-50 text-pink-800',
     icon: WalletCards,
   },
+}
+
+const completionStatusStyles: Record<CalendarEventCompletionStatus, string> = {
+  completed: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  not_completed: 'border-amber-200 bg-amber-50 text-amber-800',
 }
 
 export function CalendarPage({
@@ -360,6 +369,7 @@ function CalendarDayDetails({
     ? getPayPeriodCostSummary({
         payPeriod,
         recurringPayments: snapshot.recurringPayments,
+        creditCards: snapshot.creditCards,
         customPayments: snapshot.customPayments,
         transactions: snapshot.transactions,
         debts: snapshot.debts,
@@ -478,6 +488,11 @@ function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
             <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${style.className}`}>
               {style.label}
             </span>
+            {event.completionStatus && (
+              <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${completionStatusStyles[event.completionStatus]}`}>
+                {formatCompletionStatus(event.completionStatus)}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-sm leading-5 text-slate-500">{event.description}</p>
         </div>
@@ -743,6 +758,45 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         description: `${creditCardPot.source === 'paycheck' ? 'Paycheck-funded' : 'External'} set-aside for ${card?.name ?? 'credit card'}${creditCardPot.note ? ` · ${creditCardPot.note}` : ''}.`,
       }
     })
+  const plannedChecklistAllocationEvents: CalendarEvent[] = snapshot.payPeriods.flatMap((period) => {
+    if (period.payday < startDate || period.payday > endDate) {
+      return []
+    }
+
+    const summary = getPayPeriodCostSummary({
+      payPeriod: period,
+      creditCards: snapshot.creditCards,
+      recurringPayments: snapshot.recurringPayments,
+      customPayments: snapshot.customPayments,
+      transactions: snapshot.transactions,
+      debts: snapshot.debts,
+      creditCardRepayments: snapshot.creditCardRepayments,
+      creditCardPots: snapshot.creditCardPots,
+      debtReserves: snapshot.debtReserves,
+      pots: snapshot.pots,
+      potAllocations: snapshot.potAllocations,
+      asOfDate: getAppTodayIso(snapshot.settings),
+    })
+
+    return summary.items
+      .filter((item) => item.source === 'linked_credit_card_pot' && item.amountPence > 0 && item.potId)
+      .filter((item) => !snapshot.potAllocations.some((allocation) => allocation.id === getDashboardTodoAllocationId(period.id, item.id)))
+      .map((item): CalendarEvent => {
+        const pot = item.potId ? potById.get(item.potId) : null
+
+        return {
+          id: `planned-allocation-${period.id}-${item.id}`,
+          date: period.payday,
+          title: pot ? `${pot.name} allocation` : item.label,
+          amountPence: item.amountPence,
+          type: 'allocation',
+          direction: 'out',
+          description: `Not completed dashboard checklist item for ${period.startDate} to ${period.endDate}.`,
+          completionStatus: 'not_completed',
+          breakdown: getPlannedChecklistAllocationBreakdown(snapshot, item, period),
+        }
+      })
+  })
   const allocationEvents: CalendarEvent[] = snapshot.potAllocations
     .flatMap((allocation): CalendarEvent[] => {
       const period = periodById.get(allocation.payPeriodId)
@@ -753,6 +807,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       }
 
       const breakdown = getPotAllocationEventBreakdown(snapshot, allocation, period)
+      const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, period.id)
 
       return [{
         id: `allocation-${allocation.id}`,
@@ -765,7 +820,8 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         amountPence: allocation.amountPence,
         type: 'allocation' as const,
         direction: allocation.source === 'recurring' ? 'info' as const : 'out' as const,
-        description: `${allocation.source === 'recurring' ? 'Bill reserve' : allocation.source === 'pot_auto' ? 'Automatic payday top-up' : 'Manual allocation'} for ${period.startDate} to ${period.endDate}.`,
+        description: `${sourceCostItemId ? 'Completed dashboard checklist item' : allocation.source === 'recurring' ? 'Bill reserve' : allocation.source === 'pot_auto' ? 'Completed automatic payday top-up' : 'Completed manual allocation'} for ${period.startDate} to ${period.endDate}.`,
+        completionStatus: 'completed',
         breakdown,
       }]
     })
@@ -806,6 +862,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
     ...debtPaymentEvents,
     ...cardRepaymentEvents,
     ...creditCardPotEvents,
+    ...plannedChecklistAllocationEvents,
     ...allocationEvents,
     ...spendingEvents,
   ].sort((a, b) => {
@@ -840,6 +897,46 @@ function getPotAllocationEventBreakdown(
 
   return lines.map((line) => ({
     id: `allocation-${allocation.id}-${line.id}`,
+    label: line.label,
+    amountPence: line.amountPence,
+    date: line.date,
+    source: line.detail,
+  }))
+}
+
+function getPlannedChecklistAllocationBreakdown(
+  snapshot: PlannerSnapshot,
+  item: PeriodCostItem,
+  payPeriod: PayPeriod,
+): CalendarEventBreakdownItem[] | undefined {
+  if (item.source !== 'linked_credit_card_pot' || !item.creditCardId) {
+    return item.coverBreakdown?.map((line) => ({
+      id: `planned-${item.id}-${line.id}`,
+      label: line.label,
+      amountPence: line.amountPence,
+      date: line.date,
+      source: line.detail,
+    }))
+  }
+
+  const today = getAppTodayIso(snapshot.settings)
+  const lines = item.coverBreakdown ?? getLinkedCreditCardPotCoverBreakdown({
+    creditCards: snapshot.creditCards,
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    repayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
+    pots: snapshot.pots,
+    payPeriod,
+    creditCardId: item.creditCardId,
+    linkedPotId: item.potId,
+    amountPence: item.amountPence,
+    asOfDate: today,
+  })
+
+  return lines.map((line) => ({
+    id: `planned-${item.id}-${line.id}`,
     label: line.label,
     amountPence: line.amountPence,
     date: line.date,
@@ -1213,6 +1310,10 @@ function formatSignedPence(amountPence: number): string {
   }
 
   return formatPence(0)
+}
+
+function formatCompletionStatus(status: CalendarEventCompletionStatus): string {
+  return status === 'completed' ? 'Completed' : 'Not completed'
 }
 
 function formatEventAmount(event: CalendarEvent): string {

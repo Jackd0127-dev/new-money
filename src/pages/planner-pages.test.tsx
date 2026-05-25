@@ -431,6 +431,7 @@ describe('calendar page', () => {
     const allocationCard = screen.getByText('Barclays allocation').closest('article')
 
     expect(allocationCard).not.toBeNull()
+    expect(within(allocationCard as HTMLElement).getByText('Completed')).toBeInTheDocument()
     await user.click(within(allocationCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
     expect(within(allocationCard as HTMLElement).getByText('Owed from last statement')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
@@ -439,6 +440,27 @@ describe('calendar page', () => {
     expect(within(allocationCard as HTMLElement).getByText('£70.00')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('£25.00')).toBeInTheDocument()
     expect(within(allocationCard as HTMLElement).getByText('£178.57')).toBeInTheDocument()
+  })
+
+  it('shows unticked linked-card pot checklist items on the calendar as not completed', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({ completed: false })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    const allocationCard = screen.getByText('Barclays allocation').closest('article')
+
+    expect(allocationCard).not.toBeNull()
+    expect(within(allocationCard as HTMLElement).getByText('Not completed')).toBeInTheDocument()
+    await user.click(within(allocationCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£178.57' }))
+    expect(within(allocationCard as HTMLElement).getByText('Owed from last statement')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('Fuel')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('Gym')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£83.57')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£70.00')).toBeInTheDocument()
+    expect(within(allocationCard as HTMLElement).getByText('£25.00')).toBeInTheDocument()
   })
 
   it('keeps calendar event breakdowns hidden until the row is expanded', async () => {

@@ -11,6 +11,7 @@ import type {
   Pot,
   PotAllocation,
   RecurringPayment,
+  Settings,
   Transaction,
   TransactionType,
 } from '../types/models.js'
@@ -75,6 +76,7 @@ interface PayPeriodCostSummaryInput {
   debtReserves?: DebtReserve[]
   pots?: Pot[]
   potAllocations?: PotAllocation[]
+  asOfDate?: string
 }
 
 export interface PayPeriodMoneySummary {
@@ -333,6 +335,16 @@ export function getPotBalanceAfterTransactionRemoval(
   return pot.balancePence
 }
 
+export function getAppTodayIso(
+  settings?: Pick<Settings, 'appDateMode' | 'manualTodayIso'> | null,
+): string {
+  if (settings?.appDateMode === 'manual' && settings.manualTodayIso && isIsoDate(settings.manualTodayIso)) {
+    return settings.manualTodayIso
+  }
+
+  return toIsoDate(new Date())
+}
+
 export function createNextPayPeriod(payday: string, frequency: PayFrequency): NextPayPeriod {
   const start = parseDate(payday)
   const days = frequencyToDays(frequency)
@@ -476,6 +488,7 @@ export function getPayPeriodCostSummary({
   debtReserves = [],
   pots = [],
   potAllocations = [],
+  asOfDate,
 }: PayPeriodCostSummaryInput): PayPeriodCostSummary {
   if (!payPeriod) {
     return createEmptyPayPeriodCostSummary()
@@ -651,6 +664,7 @@ export function getPayPeriodCostSummary({
         creditCardPots,
         pots,
         payPeriod,
+        asOfDate,
       }).cards.flatMap((cardSummary) => {
         if (!linkedCreditCardIds.has(cardSummary.card.id) || cardSummary.plannedTopUpNeededPence <= 0) {
           return []

@@ -27,6 +27,7 @@ import {
   updateDebtReserve,
   updatePot,
   updateRecurringPayment,
+  updateSettings,
   updateTransaction,
   upsertPaycheckPotAllocation,
   deletePaycheckPotAllocation,
@@ -1041,6 +1042,60 @@ describe('paycheck plan storage', () => {
       date: '2026-06-11',
     })
     expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(300)
+  })
+
+  it('uses a manual app date when applying linked credit card pot repayments', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-10T12:00:00.000Z'))
+    await db.pots.clear()
+    await db.creditCards.clear()
+    await db.transactions.clear()
+    await db.creditCardRepayments.clear()
+
+    await db.creditCards.add({
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      dueDay: 11,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      designId: null,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await db.pots.add({
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      category: 'Cards',
+      balancePence: 77505,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      icon: 'card',
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await updateSettings({
+      appDateMode: 'manual',
+      manualTodayIso: '2026-06-11',
+    })
+
+    const snapshot = await getPlannerSnapshot()
+    const repayment = snapshot.creditCardRepayments.find((candidate) => candidate.creditCardId === 'card-barclays')
+    const barclaysPot = snapshot.pots.find((pot) => pot.name === 'Barclays')
+
+    expect(repayment).toMatchObject({
+      amountPence: 68005,
+      date: '2026-06-11',
+      note: 'Automatic Barclays payment from Barclays pot',
+    })
+    expect(barclaysPot?.balancePence).toBe(9500)
   })
 
   it('stores, updates, skips, cancels, and applies debt reserves without paying until applied', async () => {

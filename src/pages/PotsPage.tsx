@@ -27,6 +27,7 @@ import {
 import {
   findPayPeriodForDate,
   formatPence,
+  getAppTodayIso,
   getCreditCardAllocationSummary,
   parsePoundsToPence,
   toIsoDate,
@@ -120,6 +121,7 @@ export function PotsPage({
   isCreateModalOpen?: boolean
   onCreateModalOpenChange?: (isOpen: boolean) => void
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const [createForm, setCreateForm] = useState<PotFormState>(emptyPotForm)
   const [editForm, setEditForm] = useState<PotFormState | null>(null)
   const [openPotId, setOpenPotId] = useState<string | null>(null)
@@ -258,7 +260,7 @@ export function PotsPage({
                 const isOpen = openPotId === pot.id
                 const activityItems = getPotActivityItems(pot.id, snapshot)
                 const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
-                const progress = getPotProgress(pot, snapshot)
+                const progress = getPotProgress(pot, snapshot, today)
 
                 return (
                   <PotCard
@@ -267,6 +269,7 @@ export function PotsPage({
                     progress={progress}
                     activityItems={activityItems}
                     linkedRecurringPayments={linkedRecurringPayments}
+                    today={today}
                     isOpen={isOpen}
                     onToggle={() => setOpenPotId(isOpen ? null : pot.id)}
                     onEdit={() => startEditingPot(pot.id)}
@@ -374,6 +377,7 @@ function PotCard({
   progress,
   activityItems,
   linkedRecurringPayments,
+  today,
   isOpen,
   onToggle,
   onEdit,
@@ -383,6 +387,7 @@ function PotCard({
   progress: PotProgress
   activityItems: PotActivityItem[]
   linkedRecurringPayments: RecurringPayment[]
+  today: string
   isOpen: boolean
   onToggle: () => void
   onEdit: () => void
@@ -390,7 +395,7 @@ function PotCard({
 }) {
   const icon = getPotIconOption(pot)
   const Icon = icon.Icon
-  const dueLabel = getPotDueLabel(progress)
+  const dueLabel = getPotDueLabel(progress, today)
   const progressWidth = `${Math.min(100, Math.max(0, progress.percent))}%`
   const sourceLabels = progress.sourceLabels.slice(0, 2)
   const hiddenSourceLabelCount = Math.max(0, progress.sourceLabels.length - sourceLabels.length)
@@ -752,7 +757,7 @@ function getPotLinkType(pot: Pot): PotLinkType {
   return 'none'
 }
 
-function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
+function getPotProgress(pot: Pot, snapshot: PlannerSnapshot, today: string): PotProgress {
   const sourceLabels: string[] = []
   let linkedTargetPence = 0
   let dueIso: string | null = null
@@ -764,11 +769,11 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
   if (recurringTargetPence > 0) {
     linkedTargetPence += recurringTargetPence
     sourceLabels.push('Recurring')
-    dueIso = minIsoDate(dueIso, getEarliestRecurringDueDate(linkedRecurringPayments))
+    dueIso = minIsoDate(dueIso, getEarliestRecurringDueDate(linkedRecurringPayments, today))
   }
 
   if (pot.linkedCreditCardId) {
-    const creditCardPayPeriod = getCurrentOrLatestPayPeriod(snapshot.payPeriods)
+    const creditCardPayPeriod = getCurrentOrLatestPayPeriod(snapshot.payPeriods, today)
     const cardSummary = getCreditCardAllocationSummary({
       creditCards: snapshot.creditCards,
       recurringPayments: snapshot.recurringPayments,
@@ -778,6 +783,7 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
       creditCardPots: snapshot.creditCardPots,
       pots: snapshot.pots,
       payPeriod: creditCardPayPeriod,
+      asOfDate: today,
     }).cards.find((summary) => summary.card.id === pot.linkedCreditCardId)
 
     if (cardSummary) {
@@ -792,7 +798,9 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
         sourceLabels.push(`${cardSummary.card.name} card`)
         dueIso = minIsoDate(
           dueIso,
-          cardUsesForecastTarget ? creditCardPayPeriod?.payday ?? getCreditCardDueIso(cardSummary.card) : getCreditCardDueIso(cardSummary.card),
+          cardUsesForecastTarget
+            ? creditCardPayPeriod?.payday ?? getCreditCardDueIso(cardSummary.card, today)
+            : getCreditCardDueIso(cardSummary.card, today),
         )
       }
     }
@@ -832,9 +840,8 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
   }
 }
 
-function getCurrentOrLatestPayPeriod(payPeriods: PlannerSnapshot['payPeriods']): PlannerSnapshot['payPeriods'][number] | null {
-  const todayIso = toIsoDate(new Date())
-  const currentPeriod = findPayPeriodForDate(payPeriods, todayIso)
+function getCurrentOrLatestPayPeriod(payPeriods: PlannerSnapshot['payPeriods'], today: string): PlannerSnapshot['payPeriods'][number] | null {
+  const currentPeriod = findPayPeriodForDate(payPeriods, today)
 
   if (currentPeriod) {
     return currentPeriod
@@ -847,7 +854,7 @@ function getCurrentOrLatestPayPeriod(payPeriods: PlannerSnapshot['payPeriods']):
   }
 
   const previousPeriods = payPeriods
-    .filter((period) => period.startDate <= todayIso)
+    .filter((period) => period.startDate <= today)
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
 
   if (previousPeriods[0]) {
@@ -857,7 +864,7 @@ function getCurrentOrLatestPayPeriod(payPeriods: PlannerSnapshot['payPeriods']):
   return [...payPeriods].sort((left, right) => right.startDate.localeCompare(left.startDate))[0] ?? null
 }
 
-function getPotDueLabel(progress: PotProgress): string | null {
+function getPotDueLabel(progress: PotProgress, today: string): string | null {
   if (progress.targetPence <= 0 || progress.shortfallPence <= 0) {
     return null
   }
@@ -866,7 +873,7 @@ function getPotDueLabel(progress: PotProgress): string | null {
     return `Top up ${formatPence(progress.shortfallPence)}`
   }
 
-  const days = getDaysUntil(progress.dueIso)
+  const days = getDaysUntil(progress.dueIso, today)
   const dueText = days <= 0 ? 'Due now' : `Due in ${days} day${days === 1 ? '' : 's'}`
 
   return `${dueText} • ${formatPence(progress.shortfallPence)} left`
@@ -1057,20 +1064,20 @@ function getPotIconKey(pot: Pot): string {
   return 'wallet'
 }
 
-function getEarliestRecurringDueDate(payments: RecurringPayment[]): string | null {
+function getEarliestRecurringDueDate(payments: RecurringPayment[], today: string): string | null {
   return payments.reduce<string | null>((earliest, payment) => {
-    const dueDate = payment.dueDate ?? (payment.dueDay ? getNextDueDayIso(payment.dueDay) : null)
+    const dueDate = payment.dueDate ?? (payment.dueDay ? getNextDueDayIso(payment.dueDay, today) : null)
 
     return minIsoDate(earliest, dueDate)
   }, null)
 }
 
-function getCreditCardDueIso(card: PlannerSnapshot['creditCards'][number]): string | null {
-  return card.dueDate ?? (card.dueDay ? getNextDueDayIso(card.dueDay) : null)
+function getCreditCardDueIso(card: PlannerSnapshot['creditCards'][number], today: string): string | null {
+  return card.dueDate ?? (card.dueDay ? getNextDueDayIso(card.dueDay, today) : null)
 }
 
-function getNextDueDayIso(dueDay: number): string {
-  const today = new Date(`${toIsoDate(new Date())}T00:00:00`)
+function getNextDueDayIso(dueDay: number, todayIso: string): string {
+  const today = new Date(`${todayIso}T00:00:00`)
   const candidate = new Date(today)
   candidate.setDate(Math.min(dueDay, getDaysInMonth(candidate)))
 
@@ -1098,8 +1105,8 @@ function minIsoDate(left: string | null, right: string | null): string | null {
   return right < left ? right : left
 }
 
-function getDaysUntil(isoDate: string): number {
-  const today = new Date(`${toIsoDate(new Date())}T00:00:00`).getTime()
+function getDaysUntil(isoDate: string, todayIso: string): number {
+  const today = new Date(`${todayIso}T00:00:00`).getTime()
   const due = new Date(`${isoDate}T00:00:00`).getTime()
 
   return Math.ceil((due - today) / 86_400_000)

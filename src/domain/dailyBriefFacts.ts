@@ -231,6 +231,7 @@ export function getDailyBriefFacts(
     creditCardPots,
     pots,
     payPeriod,
+    asOfDate: todayIso,
   })
   const cardLinkedPaymentsPence = duePayments
     .filter((payment) => payment.creditCardId)

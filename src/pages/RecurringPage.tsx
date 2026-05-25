@@ -16,6 +16,7 @@ import {
 import {
   createNextPayPeriod,
   formatPence,
+  getAppTodayIso,
   getPayPeriodCostSummary,
   parsePoundsToPence,
   type PayPeriodCostSummary,
@@ -59,6 +60,7 @@ export function RecurringPage({
   actions: PlannerActions
   selectedPayPeriod?: PayPeriod | null
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
   const [createForm, setCreateForm] = useState<RecurringFormState>(() =>
@@ -86,6 +88,7 @@ export function RecurringPage({
       ...snapshot.potAllocations,
       ...(nextPaydayPeriod ? getPreviewPotTopUps(snapshot, nextPaydayPeriod) : []),
     ],
+    asOfDate: today,
   })
 
   async function submitPayment(form: RecurringFormState, mode: 'create' | 'edit') {

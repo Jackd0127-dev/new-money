@@ -5,6 +5,7 @@ import {
   createNextPayPeriod,
   filterPayPeriodCostSummary,
   formatPence,
+  getAppTodayIso,
   getCostItemIdFromDashboardTodoPeriodCostItemId,
   getAdditionalLinkedCreditCardPotAllocationPence,
   getAdditionalLinkedCreditCardPotCoverBreakdown,
@@ -78,6 +79,7 @@ export function DashboardPage({
   const [expandedTodoIds, setExpandedTodoIds] = useState<Set<string>>(() => new Set())
   const [isNextOutgoingsOpen, setIsNextOutgoingsOpen] = useState(false)
   const [outgoingPreviewOffset, setOutgoingPreviewOffset] = useState(1)
+  const today = getAppTodayIso(snapshot.settings)
   const viewedPeriod = selectedPayPeriod ?? null
   const baseSummary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
@@ -91,10 +93,11 @@ export function DashboardPage({
     debtReserves: snapshot.debtReserves,
     pots: snapshot.pots,
     potAllocations: snapshot.potAllocations,
+    asOfDate: today,
   })
   const ignoredPaymentIds = new Set(viewedPeriod ? ignoredPaymentsByPeriod[viewedPeriod.id] ?? [] : [])
   const summary = filterPayPeriodCostSummary(baseSummary, ignoredPaymentIds)
-  const todoItems = viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod, baseSummary) : []
+  const todoItems = viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod, baseSummary, today) : []
   const completedTodoIds = new Set(viewedPeriod ? completedTodosByPeriod[viewedPeriod.id] ?? [] : [])
   const activeTodoItems = todoItems.filter((item) => !ignoredPaymentIds.has(item.ignoreId))
   const completedTodoCount = activeTodoItems.filter((item) => completedTodoIds.has(item.id)).length
@@ -121,6 +124,7 @@ export function DashboardPage({
       ...snapshot.potAllocations,
       ...(outgoingPreviewPeriod ? getPreviewPotTopUps(snapshot, outgoingPreviewPeriod) : []),
     ],
+    asOfDate: today,
   })
 
   async function toggleTodo(item: PaycheckTodoItem, done: boolean) {
@@ -911,6 +915,7 @@ function getPaycheckTodoItems(
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
   summary: PayPeriodCostSummary,
+  today: string,
 ): PaycheckTodoItem[] {
   const recurringPaymentIdsInSummary = new Set(
     summary.items
@@ -928,7 +933,7 @@ function getPaycheckTodoItems(
     )
     .map((allocation) => recurringAllocationToTodoItem(allocation, snapshot))
   const todoItems = [
-    ...summary.items.flatMap((item) => periodCostItemToTodoItems(item, snapshot, payPeriod)),
+    ...summary.items.flatMap((item) => periodCostItemToTodoItems(item, snapshot, payPeriod, today)),
     ...recurringAllocationTodos,
   ]
 
@@ -952,6 +957,7 @@ function periodCostItemToTodoItems(
   item: PeriodCostItem,
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
+  today: string,
 ): PaycheckTodoItem[] {
   if (item.amountPence <= 0) {
     return []
@@ -970,7 +976,7 @@ function periodCostItemToTodoItems(
   }
 
   if (item.source === 'pot_allocation') {
-    return [potAllocationCostToTodoItem(item, snapshot, payPeriod)]
+    return [potAllocationCostToTodoItem(item, snapshot, payPeriod, today)]
   }
 
   if (item.source === 'debt_reserve') {
@@ -986,7 +992,7 @@ function periodCostItemToTodoItems(
   }
 
   if (item.source === 'linked_credit_card_pot') {
-    return [linkedCreditCardPotCostToTodoItem(item, snapshot, payPeriod)]
+    return [linkedCreditCardPotCostToTodoItem(item, snapshot, payPeriod, today)]
   }
 
   if (item.source === 'credit_card_repayment') {
@@ -1095,6 +1101,7 @@ function potAllocationCostToTodoItem(
   item: PeriodCostItem,
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
+  today: string,
 ): PaycheckTodoItem {
   const sourceCostItemId = getCostItemIdFromDashboardTodoPeriodCostItemId(item.id, payPeriod.id)
   const todoId = sourceCostItemId ? `${sourceCostItemId}-todo` : `${item.id}-todo`
@@ -1142,6 +1149,7 @@ function potAllocationCostToTodoItem(
           },
           snapshot,
           payPeriod,
+          today,
           getLinkedCreditCardPotAllocationExclusionPence(
             snapshot.potAllocations,
             payPeriod.id,
@@ -1236,6 +1244,7 @@ function linkedCreditCardPotCostToTodoItem(
   item: PeriodCostItem,
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
+  today: string,
 ): PaycheckTodoItem {
   const cardName = getCardName(snapshot, item.creditCardId)
   const isAdditionalCover = Boolean(item.coverBreakdown)
@@ -1253,7 +1262,7 @@ function linkedCreditCardPotCostToTodoItem(
       : 'Current shortfall plus planned card charges before next payday',
     amountPence: item.amountPence,
     breakdownLabel,
-    breakdownLines: getLinkedCreditCardPotBreakdownLines(item, snapshot, payPeriod),
+    breakdownLines: getLinkedCreditCardPotBreakdownLines(item, snapshot, payPeriod, today),
     completion: item.potId
       ? createPaycheckPotCompletion({
           payPeriod,
@@ -1290,6 +1299,7 @@ function getLinkedCreditCardPotBreakdownLines(
   item: PeriodCostItem,
   snapshot: PlannerSnapshot,
   payPeriod: PayPeriod,
+  today: string,
   excludedLinkedPotAllocationPence = 0,
   createdBeforeOrAt?: string,
 ): PaycheckTodoBreakdownLine[] {
@@ -1324,6 +1334,7 @@ function getLinkedCreditCardPotBreakdownLines(
     linkedPotId: item.potId,
     amountPence: item.amountPence,
     excludedLinkedPotAllocationPence: historicalExcludedLinkedPotAllocationPence,
+    asOfDate: today,
   })
 
   return lines.map((line) => ({

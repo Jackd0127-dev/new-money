@@ -4,6 +4,7 @@ import {
   calculatePaycheckAmount,
   createNextPayPeriod,
   findPayPeriodForDate,
+  getAppTodayIso,
   getCreditCardAllocationSummary,
   getPayPeriodCostSummary,
   getPotBalanceAfterTransactionRemoval,
@@ -233,8 +234,9 @@ export interface DebtReserveApplyInput {
 export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   await ensureSeedData()
   await repairDuplicateRecurringAllocations()
-  await applyDueRecurringPayments(toIsoDate(new Date()))
-  await applyDueLinkedCreditCardPotRepayments(toIsoDate(new Date()))
+  const todayIso = getAppTodayIso(normalizeSettings(await db.settings.get('default')))
+  await applyDueRecurringPayments(todayIso)
+  await applyDueLinkedCreditCardPotRepayments(todayIso)
 
   const [
     settings,
@@ -291,14 +293,15 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
 }
 
 export async function updateSettings(
-  updates: Partial<Pick<Settings, 'defaultHoursWorked' | 'hourlyRatePence' | 'payFrequency' | 'aiInstructions' | 'aiProvider'>>,
+  updates: Partial<Pick<Settings, 'defaultHoursWorked' | 'hourlyRatePence' | 'payFrequency' | 'appDateMode' | 'manualTodayIso' | 'aiInstructions' | 'aiProvider'>>,
 ): Promise<void> {
   const current = normalizeSettings(await db.settings.get('default'))
-  await db.settings.put({
+  const next = normalizeSettings({
     ...current,
     ...updates,
     updatedAt: nowIso(),
   })
+  await db.settings.put(next)
 }
 
 export async function updatePlannerDataToLatest(): Promise<void> {
@@ -333,8 +336,9 @@ export async function updatePlannerDataToLatest(): Promise<void> {
   )
 
   await repairDuplicateRecurringAllocations()
-  await applyDueRecurringPayments(toIsoDate(new Date()))
-  await applyDueLinkedCreditCardPotRepayments(toIsoDate(new Date()))
+  const todayIso = getAppTodayIso(normalizeSettings(await db.settings.get('default')))
+  await applyDueRecurringPayments(todayIso)
+  await applyDueLinkedCreditCardPotRepayments(todayIso)
 }
 
 export async function addPot(input: PotInput): Promise<void> {
@@ -2097,9 +2101,14 @@ function sortCreditCardPots(a: CreditCardPot, b: CreditCardPot): number {
 }
 
 function normalizeSettings(settings?: Settings): Settings {
+  const manualTodayIso = isIsoDateText(settings?.manualTodayIso) ? settings.manualTodayIso : null
+  const appDateMode = settings?.appDateMode === 'manual' && manualTodayIso ? 'manual' : 'automatic'
+
   return {
     ...defaultSettings,
     ...settings,
+    appDateMode,
+    manualTodayIso,
     defaultHoursWorked: settings?.defaultHoursWorked ?? defaultSettings.defaultHoursWorked,
     aiInstructions: settings?.aiInstructions ?? defaultSettings.aiInstructions,
     aiProvider: settings?.aiProvider ?? defaultSettings.aiProvider,

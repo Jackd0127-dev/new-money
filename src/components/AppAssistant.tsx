@@ -11,7 +11,7 @@ import {
   type AssistantActionStatus,
 } from '../domain/assistantActions'
 import { getViewLabel } from '../domain/assistantContext'
-import { toIsoDate } from '../domain/money'
+import { getAppTodayIso } from '../domain/money'
 import {
   createAssistantMessage,
   createConversationHistory,
@@ -46,7 +46,7 @@ export function AppAssistant({
   const [isSending, setIsSending] = useState(false)
   const { messages, actionStatuses, appendMessage, setActionStatuses } = useAssistantConversations()
   const { profile } = useAssistantProfile()
-  const todayIso = toIsoDate(new Date())
+  const todayIso = getAppTodayIso(snapshot.settings)
   const viewLabel = getViewLabel(activeView)
 
   async function confirmAssistantAction(action: AssistantActionProposal) {

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
 
-import { findPayPeriodForDate, formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
+import { findPayPeriodForDate, formatPence, getAppTodayIso, parsePoundsToPence } from '../domain/money'
 import type {
   PlannerActions,
   PlannerSnapshot,
@@ -32,13 +32,14 @@ export function SpendingPage({
   actions: PlannerActions
   selectedPayPeriod?: PayPeriod | null
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
   const [potId, setPotId] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<QuickSpendLinkMethod>('unlinked')
   const [creditCardId, setCreditCardId] = useState('')
   const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(toIsoDate(new Date()))
+  const [date, setDate] = useState(today)
   const [note, setNote] = useState('')
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
   const selectedPot = activePots.find((pot) => pot.id === potId)
@@ -111,7 +112,7 @@ export function SpendingPage({
     setPaymentMethod('unlinked')
     setCreditCardId('')
     setAmount('')
-    setDate(toIsoDate(new Date()))
+    setDate(today)
     setNote('')
   }
 
@@ -188,7 +189,7 @@ export function SpendingPage({
           <Field label="Date">
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-              <Button variant="secondary" onClick={() => setDate(toIsoDate(new Date()))}>
+              <Button variant="secondary" onClick={() => setDate(today)}>
                 Today
               </Button>
             </div>

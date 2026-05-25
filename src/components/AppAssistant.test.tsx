@@ -439,6 +439,8 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
       defaultHoursWorked: 72,
+      appDateMode: 'automatic',
+      manualTodayIso: null,
       aiInstructions: '',
       aiProvider: 'gemini',
       createdAt: timestamp,

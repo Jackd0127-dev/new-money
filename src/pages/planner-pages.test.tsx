@@ -565,6 +565,8 @@ describe('settings page', () => {
       defaultHoursWorked: 72,
       hourlyRatePence: 1250,
       payFrequency: 'biweekly',
+      appDateMode: 'automatic',
+      manualTodayIso: null,
       aiInstructions: '',
       aiProvider: 'gemini',
     })
@@ -587,6 +589,8 @@ describe('settings page', () => {
       defaultHoursWorked: 72,
       hourlyRatePence: 1250,
       payFrequency: 'biweekly',
+      appDateMode: 'automatic',
+      manualTodayIso: null,
       aiInstructions: 'Be blunt and prioritise debt deadlines.',
       aiProvider: 'gemini',
     })
@@ -605,8 +609,33 @@ describe('settings page', () => {
       defaultHoursWorked: 72,
       hourlyRatePence: 1250,
       payFrequency: 'biweekly',
+      appDateMode: 'automatic',
+      manualTodayIso: null,
       aiInstructions: '',
       aiProvider: 'openrouter',
+    })
+  })
+
+  it('saves a manual app date for testing future planner behaviour', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.selectOptions(screen.getByLabelText('App date mode'), 'manual')
+    fireEvent.change(screen.getByLabelText('Manual app date'), {
+      target: { value: '2026-06-11' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Save settings' }))
+
+    expect(actions.updateSettings).toHaveBeenCalledWith({
+      defaultHoursWorked: 72,
+      hourlyRatePence: 1250,
+      payFrequency: 'biweekly',
+      appDateMode: 'manual',
+      manualTodayIso: '2026-06-11',
+      aiInstructions: '',
+      aiProvider: 'gemini',
     })
   })
 
@@ -3934,6 +3963,8 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
       defaultHoursWorked: 72,
+      appDateMode: 'automatic',
+      manualTodayIso: null,
       aiInstructions: '',
       aiProvider: 'gemini',
       createdAt: timestamp,

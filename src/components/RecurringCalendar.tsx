@@ -4,8 +4,8 @@ import { AlertTriangle, CalendarDays } from 'lucide-react'
 import {
   addIsoDays,
   formatPence,
+  getAppTodayIso,
   getRecurringPaymentOccurrences,
-  toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
@@ -26,7 +26,7 @@ export function RecurringCalendar({
   const [selectedRangeDays, setSelectedRangeDays] = useState<RecurringRangeDays>(
     isRecurringRangeDays(horizonDays) ? horizonDays : 30,
   )
-  const today = toIsoDate(new Date())
+  const today = getAppTodayIso(snapshot.settings)
   const viewedPeriod = payPeriod ?? null
   const upcomingEndDate = addIsoDays(today, selectedRangeDays)
   const paidRecurringOccurrenceKeys = new Set(

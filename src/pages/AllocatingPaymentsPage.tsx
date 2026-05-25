@@ -11,9 +11,9 @@ import {
 import {
   findPayPeriodForDate,
   formatPence,
+  getAppTodayIso,
   getCreditCardAllocationSummary,
   parsePoundsToPence,
-  toIsoDate,
   type CreditCardAllocationCardSummary,
   type CreditCardAllocationItem,
 } from '../domain/money'
@@ -41,6 +41,7 @@ export function AllocatingPaymentsPage({
   actions: PlannerActions
   selectedPayPeriod?: PayPeriod | null
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
   const viewedPeriod = selectedPayPeriod ?? null
   const summary = getCreditCardAllocationSummary({
@@ -52,6 +53,7 @@ export function AllocatingPaymentsPage({
     creditCardPots: snapshot.creditCardPots,
     pots: snapshot.pots,
     payPeriod: viewedPeriod,
+    asOfDate: today,
   })
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [openSummaryMetric, setOpenSummaryMetric] = useState<string | null>(null)
@@ -67,7 +69,7 @@ export function AllocatingPaymentsPage({
   const [editingRepaymentId, setEditingRepaymentId] = useState<string | null>(null)
   const [repaymentCardId, setRepaymentCardId] = useState(activeCards[0]?.id ?? '')
   const [repaymentAmount, setRepaymentAmount] = useState('')
-  const [repaymentDate, setRepaymentDate] = useState(toIsoDate(new Date()))
+  const [repaymentDate, setRepaymentDate] = useState(today)
   const [repaymentNote, setRepaymentNote] = useState('')
   const paymentRows = useMemo(() => getPaymentRows(snapshot), [snapshot])
   const paymentGroups = useMemo(
@@ -241,7 +243,7 @@ export function AllocatingPaymentsPage({
     setEditingRepaymentId(null)
     setRepaymentAmount('')
     setRepaymentNote('')
-    setRepaymentDate(toIsoDate(new Date()))
+    setRepaymentDate(today)
     setRepaymentCardId(activeCards[0]?.id ?? '')
     setIsRepaymentFormOpen(false)
   }

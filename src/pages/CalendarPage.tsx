@@ -18,6 +18,7 @@ import {
   addIsoDays,
   findPayPeriodForDate,
   formatPence,
+  getAppTodayIso,
   getCostItemIdFromDashboardTodoAllocationId,
   getAdditionalLinkedCreditCardPotAllocationPence,
   getAdditionalLinkedCreditCardPotCoverBreakdown,
@@ -147,8 +148,9 @@ export function CalendarPage({
   snapshot: PlannerSnapshot
   selectedPayPeriod?: PayPeriod | null
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const [visibleMonth, setVisibleMonth] = useState(() =>
-    startOfMonth(selectedPayPeriod ? parseIsoDate(selectedPayPeriod.startDate) : new Date()),
+    startOfMonth(selectedPayPeriod ? parseIsoDate(selectedPayPeriod.startDate) : parseIsoDate(today)),
   )
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const monthStart = toIsoDate(visibleMonth)
@@ -223,7 +225,7 @@ export function CalendarPage({
             <Button variant="secondary" onClick={() => changeMonth(-1)} aria-label="Previous month">
               <ChevronLeft size={18} />
             </Button>
-            <Button variant="secondary" onClick={() => setVisibleMonth(startOfMonth(new Date()))}>
+            <Button variant="secondary" onClick={() => setVisibleMonth(startOfMonth(parseIsoDate(today)))}>
               Today
             </Button>
             <Button variant="secondary" onClick={() => changeMonth(1)} aria-label="Next month">
@@ -255,7 +257,7 @@ export function CalendarPage({
             {monthCells.map((cell) => {
               const dayEvents = eventsByDate.get(cell.date) ?? []
               const isCurrentMonth = cell.date >= monthStart && cell.date <= monthEnd
-              const isToday = cell.date === toIsoDate(new Date())
+              const isToday = cell.date === today
               const isSelectedPeriodDay = selectedPayPeriod
                 ? cell.date >= selectedPayPeriod.startDate && cell.date <= selectedPayPeriod.endDate
                 : false
@@ -345,6 +347,7 @@ function CalendarDayDetails({
   onBack: () => void
   onSelectDate: (date: string) => void
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const moneyInPence = events
     .filter((event) => event.direction === 'in')
     .reduce((total, event) => total + event.amountPence, 0)
@@ -365,6 +368,7 @@ function CalendarDayDetails({
         debtReserves: snapshot.debtReserves,
         pots: snapshot.pots,
         potAllocations: snapshot.potAllocations,
+        asOfDate: today,
       })
     : null
 
@@ -820,6 +824,7 @@ function getPotAllocationEventBreakdown(
   allocation: PlannerSnapshot['potAllocations'][number],
   payPeriod: PayPeriod,
 ): CalendarEventBreakdownItem[] | undefined {
+  const today = getAppTodayIso(snapshot.settings)
   const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, allocation.payPeriodId)
   const linkedCreditCardId = sourceCostItemId
     ? getCreditCardIdFromLinkedCreditCardPotCostItemId(sourceCostItemId)
@@ -830,8 +835,8 @@ function getPotAllocationEventBreakdown(
   }
 
   const lines = isAdditionalLinkedCreditCardPotCostItemId(sourceCostItemId)
-    ? getAdditionalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId)
-    : getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId)
+    ? getAdditionalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)
+    : getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)
 
   return lines.map((line) => ({
     id: `allocation-${allocation.id}-${line.id}`,
@@ -847,6 +852,7 @@ function getHistoricalLinkedCreditCardPotAllocationBreakdown(
   allocation: PlannerSnapshot['potAllocations'][number],
   payPeriod: PayPeriod,
   linkedCreditCardId: string,
+  today: string,
 ) {
   const additionalCoverPence = getAdditionalLinkedCreditCardPotAllocationPence(
     snapshot.potAllocations,
@@ -888,6 +894,7 @@ function getHistoricalLinkedCreditCardPotAllocationBreakdown(
     linkedPotId: allocation.potId,
     amountPence: allocation.amountPence,
     excludedLinkedPotAllocationPence,
+    asOfDate: today,
   })
 }
 
@@ -896,6 +903,7 @@ function getAdditionalLinkedCreditCardPotAllocationBreakdown(
   allocation: PlannerSnapshot['potAllocations'][number],
   payPeriod: PayPeriod,
   linkedCreditCardId: string,
+  today: string,
 ) {
   const completedAllocation = getCompletedLinkedCreditCardPotAllocation(
     snapshot.potAllocations,
@@ -904,7 +912,7 @@ function getAdditionalLinkedCreditCardPotAllocationBreakdown(
   )
 
   if (!completedAllocation) {
-    return getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId)
+    return getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)
   }
 
   return getAdditionalLinkedCreditCardPotCoverBreakdown({

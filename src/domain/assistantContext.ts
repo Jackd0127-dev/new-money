@@ -85,6 +85,7 @@ export function buildAssistantAppContext({
     debtReserves: snapshot.debtReserves,
     pots: snapshot.pots,
     potAllocations: snapshot.potAllocations,
+    asOfDate: todayIso,
   })
   const creditCards = getCreditCardAllocationSummary({
     creditCards: snapshot.creditCards,
@@ -95,6 +96,7 @@ export function buildAssistantAppContext({
     creditCardPots: snapshot.creditCardPots,
     pots: snapshot.pots,
     payPeriod: selectedPayPeriod,
+    asOfDate: todayIso,
   })
   const debts = getDebtSummary(
     snapshot.debts,

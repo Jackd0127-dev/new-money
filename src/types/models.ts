@@ -2,6 +2,8 @@ export type PayFrequency = 'weekly' | 'biweekly' | 'monthly' | 'custom'
 
 export type AiProvider = 'gemini' | 'openrouter'
 
+export type AppDateMode = 'automatic' | 'manual'
+
 export type PotType = 'spending' | 'reserved' | 'saving' | 'investment' | 'buffer'
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly' | 'yearly'
@@ -40,6 +42,8 @@ export interface Settings extends Timestamped {
   defaultPayPeriodDays: number
   hourlyRatePence: number
   defaultHoursWorked: number
+  appDateMode: AppDateMode
+  manualTodayIso: string | null
   aiInstructions: string
   aiProvider: AiProvider
 }

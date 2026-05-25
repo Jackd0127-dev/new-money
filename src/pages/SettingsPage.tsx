@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Apple, CheckCircle2, KeyRound, LogOut, Mail, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
+import { Apple, CalendarDays, CheckCircle2, KeyRound, LogOut, Mail, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 
-import { parsePoundsToPence } from '../domain/money'
+import { getAppTodayIso, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
 import { Button, Field, Panel, SectionGrid, SelectInput, TextArea, TextInput } from '../components/ui'
-import type { AiProvider, PayFrequency } from '../types/models'
+import type { AiProvider, AppDateMode, PayFrequency } from '../types/models'
 
 export function SettingsPage({
   snapshot,
@@ -19,6 +19,8 @@ export function SettingsPage({
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
   const [defaultHoursWorked, setDefaultHoursWorked] = useState(String(snapshot.settings.defaultHoursWorked))
   const [payFrequency, setPayFrequency] = useState<PayFrequency>(snapshot.settings.payFrequency)
+  const [appDateMode, setAppDateMode] = useState<AppDateMode>(snapshot.settings.appDateMode)
+  const [manualTodayIso, setManualTodayIso] = useState(snapshot.settings.manualTodayIso ?? getAppTodayIso(snapshot.settings))
   const [aiInstructions, setAiInstructions] = useState(snapshot.settings.aiInstructions)
   const [aiProvider, setAiProvider] = useState<AiProvider>(snapshot.settings.aiProvider)
   const [saved, setSaved] = useState(false)
@@ -30,6 +32,8 @@ export function SettingsPage({
       defaultHoursWorked: Number.parseFloat(defaultHoursWorked) || 0,
       hourlyRatePence: parsePoundsToPence(hourlyRate),
       payFrequency,
+      appDateMode,
+      manualTodayIso: appDateMode === 'manual' ? manualTodayIso : null,
       aiInstructions: aiInstructions.trim(),
       aiProvider,
     })
@@ -46,6 +50,11 @@ export function SettingsPage({
     } finally {
       setUpdatingPlanner(false)
     }
+  }
+
+  function updateManualTodayIso(value: string) {
+    setManualTodayIso(value)
+    setSaved(false)
   }
 
   return (
@@ -93,6 +102,44 @@ export function SettingsPage({
                   <option value="custom">Custom</option>
                 </SelectInput>
               </Field>
+            </div>
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+              <div className="flex items-start gap-3">
+                <CalendarDays className="mt-0.5 shrink-0 text-violet-700" size={18} />
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-violet-950">App date</p>
+                    <p className="mt-1 text-xs leading-5 text-violet-800">
+                      Automatic uses your device date. Manual lets you simulate due dates, pay periods, and planner updates.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="App date mode">
+                      <SelectInput
+                        aria-label="App date mode"
+                        value={appDateMode}
+                        onChange={(event) => {
+                          setAppDateMode(event.target.value as AppDateMode)
+                          setSaved(false)
+                        }}
+                      >
+                        <option value="automatic">Automatic date</option>
+                        <option value="manual">Manual date</option>
+                      </SelectInput>
+                    </Field>
+                    <Field label="Manual app date">
+                      <TextInput
+                        aria-label="Manual app date"
+                        type="date"
+                        value={manualTodayIso}
+                        disabled={appDateMode !== 'manual'}
+                        onInput={(event) => updateManualTodayIso(event.currentTarget.value)}
+                        onChange={(event) => updateManualTodayIso(event.target.value)}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </div>
             </div>
             <Field
               label="AI provider"

@@ -5,8 +5,8 @@ import {
   calculatePaycheckAmount,
   createNextPayPeriod,
   formatPence,
+  getAppTodayIso,
   parsePoundsToPence,
-  toIsoDate,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { PayPeriodHistoryPanel } from './HistoryPage'
@@ -34,7 +34,7 @@ export function PaydayWizardPage({
 }) {
   const initialDraft = getPaydayDraft(
     snapshot,
-    selectedPayPeriod?.payday ?? snapshot.payPeriods[0]?.payday ?? toIsoDate(new Date()),
+    selectedPayPeriod?.payday ?? snapshot.payPeriods[0]?.payday ?? getAppTodayIso(snapshot.settings),
   )
   const [payday, setPayday] = useState(initialDraft.payday)
   const [hoursWorked, setHoursWorked] = useState(initialDraft.hoursWorked)

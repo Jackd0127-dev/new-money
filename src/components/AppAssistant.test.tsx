@@ -424,6 +424,7 @@ function createActions(): PlannerActions {
     deletePaycheckPotAllocation: vi.fn(async () => {}),
     deletePayPeriod: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),
+    updatePlannerDataToLatest: vi.fn(async () => {}),
   }
 }
 

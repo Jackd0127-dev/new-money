@@ -22,6 +22,7 @@ import {
   getPlannerSnapshot,
   resetPlannerData,
   skipDebtReserve,
+  updatePlannerDataToLatest,
   updateCreditCardPot,
   updateDebtReserve,
   updatePot,
@@ -155,6 +156,138 @@ describe('paycheck plan storage', () => {
     snapshot = await getPlannerSnapshot()
     expect(snapshot.potAllocations.some((allocation) => allocation.id === allocationId)).toBe(false)
     expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
+  })
+
+  it('updates stale dashboard card-pot allocations to the latest card forecast maths', async () => {
+    vi.setSystemTime(new Date('2026-05-25T12:00:00.000Z'))
+    await db.pots.clear()
+    await db.creditCards.clear()
+    await db.recurringPayments.clear()
+    await db.payPeriods.clear()
+    await db.paychecks.clear()
+    await db.potAllocations.clear()
+    await db.creditCardPots.clear()
+
+    await db.pots.add({
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 77498,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await db.creditCards.add({
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      dueDay: 11,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await db.payPeriods.add({
+      id: 'period-current',
+      payday: '2026-05-22',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 78850,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await db.paychecks.add({
+      id: 'paycheck-current',
+      payPeriodId: 'period-current',
+      hoursWorked: 83,
+      hourlyRatePence: 950,
+      calculatedAmountPence: 78850,
+      actualAmountPence: null,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await db.recurringPayments.bulkAdd([
+      {
+        id: 'fuel',
+        name: 'Fuel',
+        amountPence: 7000,
+        dueDate: '2026-05-29',
+        frequency: 'biweekly',
+        potId: null,
+        creditCardId: 'card-barclays',
+        priority: 'important',
+        active: true,
+        createdAt: '2026-05-22T00:00:00.000Z',
+        updatedAt: '2026-05-22T00:00:00.000Z',
+      },
+      {
+        id: 'gym',
+        name: 'Gym',
+        amountPence: 2500,
+        dueDay: 1,
+        frequency: 'monthly',
+        potId: null,
+        creditCardId: 'card-barclays',
+        priority: 'important',
+        active: true,
+        createdAt: '2026-05-22T00:00:00.000Z',
+        updatedAt: '2026-05-22T00:00:00.000Z',
+      },
+    ])
+    await db.potAllocations.add({
+      id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+      payPeriodId: 'period-current',
+      potId: 'pot-barclays',
+      amountPence: 17850,
+      source: 'manual',
+      recurringPaymentId: null,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+
+    await updatePlannerDataToLatest()
+
+    const snapshot = await getPlannerSnapshot()
+    const allocation = snapshot.potAllocations.find(
+      (candidate) => candidate.id === 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+    )
+
+    expect(allocation?.amountPence).toBe(17857)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(77505)
+    expect(snapshot.creditCards.find((card) => card.id === 'card-barclays')?.openingBalancePence).toBe(68005)
+  })
+
+  it('stores stable interval anchors for legacy weekly and biweekly payments', async () => {
+    await db.recurringPayments.add({
+      id: 'fuel',
+      name: 'Fuel',
+      amountPence: 7000,
+      dueDay: 29,
+      frequency: 'biweekly',
+      potId: null,
+      creditCardId: 'card-barclays',
+      priority: 'important',
+      active: true,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+
+    await updatePlannerDataToLatest()
+
+    const payment = await db.recurringPayments.get('fuel')
+
+    expect(payment?.dueDate).toBe('2026-05-29')
+    expect(payment?.dueDay).toBeUndefined()
   })
 
   it('automatically adds pot top-ups when a paycheck plan is confirmed', async () => {

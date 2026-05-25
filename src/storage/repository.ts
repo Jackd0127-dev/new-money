@@ -4,6 +4,7 @@ import {
   calculatePaycheckAmount,
   createNextPayPeriod,
   findPayPeriodForDate,
+  getPayPeriodCostSummary,
   getPotBalanceAfterTransactionRemoval,
   getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
@@ -21,6 +22,7 @@ import type {
   DebtReserve,
   DebtReserveSource,
   DebtStatus,
+  PayFrequency,
   PayPeriod,
   Paycheck,
   Pot,
@@ -295,6 +297,41 @@ export async function updateSettings(
     ...updates,
     updatedAt: nowIso(),
   })
+}
+
+export async function updatePlannerDataToLatest(): Promise<void> {
+  await ensureSeedData()
+
+  const timestamp = nowIso()
+
+  await db.transaction(
+    'rw',
+    [
+      db.settings,
+      db.pots,
+      db.recurringPayments,
+      db.payPeriods,
+      db.potAllocations,
+      db.transactions,
+      db.debts,
+      db.debtReserves,
+      db.creditCards,
+      db.creditCardPots,
+      db.customPayments,
+      db.creditCardRepayments,
+    ],
+    async () => {
+      await persistNormalizedSettings(timestamp)
+      await persistNormalizedPots(timestamp)
+      await persistNormalizedCreditCards(timestamp)
+      await persistNormalizedRecurringPayments(timestamp)
+      await persistNormalizedPayPeriods(timestamp)
+      await recalculateOpenPayPeriodAllocations(timestamp)
+    },
+  )
+
+  await repairDuplicateRecurringAllocations()
+  await applyDueRecurringPayments(toIsoDate(new Date()))
 }
 
 export async function addPot(input: PotInput): Promise<void> {
@@ -1407,6 +1444,346 @@ async function repairDuplicateRecurringAllocations(): Promise<void> {
       }
     }
   })
+}
+
+async function persistNormalizedSettings(timestamp: string): Promise<void> {
+  const settings = normalizeSettings(await db.settings.get('default'))
+
+  await db.settings.put({
+    ...settings,
+    updatedAt: timestamp,
+  })
+}
+
+async function persistNormalizedPots(timestamp: string): Promise<void> {
+  const pots = await db.pots.toArray()
+
+  for (const pot of pots) {
+    const normalizedPot = normalizePot(pot)
+
+    await db.pots.put({
+      ...normalizedPot,
+      name: normalizedPot.name.trim(),
+      targetPence: normalizedPot.targetPence === null ? null : Math.max(0, normalizedPot.targetPence),
+      archived: Boolean(normalizedPot.archived),
+      updatedAt: timestamp,
+    })
+  }
+}
+
+async function persistNormalizedCreditCards(timestamp: string): Promise<void> {
+  const cards = await db.creditCards.toArray()
+
+  for (const card of cards) {
+    const normalizedCard = normalizeCreditCard(card)
+
+    await db.creditCards.put({
+      ...normalizedCard,
+      name: normalizedCard.name.trim(),
+      provider: normalizedCard.provider.trim(),
+      limitPence: Math.max(0, normalizedCard.limitPence),
+      dueDay: normalizedCard.dueDay ?? null,
+      dueDate: normalizedCard.dueDate ?? null,
+      archived: Boolean(normalizedCard.archived),
+      updatedAt: timestamp,
+    })
+  }
+}
+
+async function persistNormalizedRecurringPayments(timestamp: string): Promise<void> {
+  const payments = await db.recurringPayments.toArray()
+
+  for (const payment of payments) {
+    await db.recurringPayments.put(normalizeRecurringPaymentForLatestMaths(payment, timestamp))
+  }
+}
+
+async function persistNormalizedPayPeriods(timestamp: string): Promise<void> {
+  const settings = normalizeSettings(await db.settings.get('default'))
+  const periods = await db.payPeriods.toArray()
+
+  for (const period of periods) {
+    await db.payPeriods.put({
+      ...period,
+      payFrequency: period.payFrequency ?? inferPayFrequencyFromPayPeriod(period, settings.payFrequency),
+      incomePence: Math.max(0, Math.round(period.incomePence)),
+      updatedAt: timestamp,
+    })
+  }
+}
+
+function normalizeRecurringPaymentForLatestMaths(payment: RecurringPayment, timestamp: string): RecurringPayment {
+  const frequency = payment.frequency
+  const nextPayment: RecurringPayment = {
+    ...payment,
+    name: payment.name.trim(),
+    amountPence: Math.max(0, Math.round(payment.amountPence)),
+    potId: payment.potId ?? null,
+    creditCardId: payment.creditCardId ?? null,
+    active: Boolean(payment.active),
+    updatedAt: timestamp,
+  }
+
+  if (frequency === 'weekly' || frequency === 'biweekly') {
+    return {
+      ...nextPayment,
+      dueDate: isIsoDateText(payment.dueDate) ? payment.dueDate : getLegacyIntervalAnchorIso(payment),
+      dueDay: undefined,
+    }
+  }
+
+  if (frequency === 'monthly' && !payment.dueDay && isIsoDateText(payment.dueDate)) {
+    return {
+      ...nextPayment,
+      dueDay: Number(payment.dueDate.slice(8, 10)),
+    }
+  }
+
+  return nextPayment
+}
+
+async function recalculateOpenPayPeriodAllocations(timestamp: string): Promise<void> {
+  const periods = (await db.payPeriods.toArray())
+    .filter((period) => period.status !== 'closed')
+    .sort((a, b) => a.payday.localeCompare(b.payday))
+
+  for (const period of periods) {
+    await recalculatePayPeriodAllocations(period, timestamp)
+  }
+}
+
+async function recalculatePayPeriodAllocations(period: PayPeriod, timestamp: string): Promise<void> {
+  const [
+    pots,
+    allAllocations,
+    recurringPayments,
+    creditCards,
+    customPayments,
+    transactions,
+    debts,
+    debtReserves,
+    creditCardPots,
+    creditCardRepayments,
+  ] = await Promise.all([
+    db.pots.toArray(),
+    db.potAllocations.toArray(),
+    db.recurringPayments.toArray(),
+    db.creditCards.toArray(),
+    db.customPayments.toArray(),
+    db.transactions.toArray(),
+    db.debts.toArray(),
+    db.debtReserves.toArray(),
+    db.creditCardPots.toArray(),
+    db.creditCardRepayments.toArray(),
+  ])
+  const periodAllocations = allAllocations.filter((allocation) => allocation.payPeriodId === period.id)
+  const dashboardPrefix = getDashboardTodoAllocationPrefix(period.id)
+  const recalculatedAllocations = periodAllocations.filter(
+    (allocation) =>
+      allocation.source === 'recurring' ||
+      allocation.source === 'pot_auto' ||
+      allocation.id.startsWith(dashboardPrefix),
+  )
+
+  if (recalculatedAllocations.length === 0) {
+    return
+  }
+
+  const allocationsToKeep = allAllocations.filter(
+    (allocation) => !recalculatedAllocations.some((candidate) => candidate.id === allocation.id),
+  )
+  const basePots = removeAllocationsFromPotBalances(pots, recalculatedAllocations)
+  const recurringReserveAllocations = getRecurringReserveAllocations(
+    getRecurringPaymentsDue(recurringPayments, period.startDate, period.endDate),
+    basePots,
+  )
+  const desiredRecurringAllocations = recurringReserveAllocations.map((allocation) =>
+    createRecalculatedAllocation({
+      id: `recurring-reserve-${period.id}-${allocation.recurringPaymentId}`,
+      period,
+      allocation,
+      source: 'recurring',
+      timestamp,
+    }),
+  )
+  const desiredPotAutoAllocations = basePots
+    .filter((pot) => !pot.archived && (pot.targetPence ?? 0) > 0)
+    .map((pot) =>
+      createRecalculatedAllocation({
+        id: `pot-auto-${period.id}-${pot.id}`,
+        period,
+        allocation: {
+          potId: pot.id,
+          amountPence: pot.targetPence ?? 0,
+          recurringPaymentId: null,
+        },
+        source: 'pot_auto',
+        timestamp,
+      }),
+    )
+  const automaticAllocations = [...desiredRecurringAllocations, ...desiredPotAutoAllocations]
+  const potsForDashboard = applyAllocationsToPots(basePots, automaticAllocations)
+  const allocationsForDashboard = [...allocationsToKeep, ...automaticAllocations]
+  const summary = getPayPeriodCostSummary({
+    payPeriod: period,
+    creditCards,
+    recurringPayments,
+    customPayments,
+    transactions,
+    debts,
+    creditCardRepayments,
+    creditCardPots,
+    debtReserves,
+    pots: potsForDashboard,
+    potAllocations: allocationsForDashboard,
+  })
+  const desiredDashboardAllocations = recalculatedAllocations
+    .filter((allocation) => allocation.id.startsWith(dashboardPrefix))
+    .flatMap((allocation) => {
+      const costItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, period.id)
+      const costItem = costItemId ? summary.items.find((item) => item.id === costItemId) : null
+
+      if (!costItem?.potId || costItem.amountPence <= 0) {
+        return []
+      }
+
+      return [
+        createRecalculatedAllocation({
+          id: allocation.id,
+          period,
+          allocation: {
+            potId: costItem.potId,
+            amountPence: costItem.amountPence,
+            recurringPaymentId: null,
+          },
+          source: 'manual',
+          createdAt: allocation.createdAt,
+          timestamp,
+        }),
+      ]
+    })
+
+  for (const allocation of recalculatedAllocations) {
+    await removeAllocationFromPot(allocation, timestamp)
+    await db.potAllocations.delete(allocation.id)
+  }
+
+  for (const allocation of [...automaticAllocations, ...desiredDashboardAllocations]) {
+    if (allocation.amountPence <= 0) {
+      continue
+    }
+
+    await db.potAllocations.put(allocation)
+    await addAllocationToPot(allocation.potId, allocation.amountPence, timestamp)
+  }
+}
+
+function createRecalculatedAllocation({
+  id,
+  period,
+  allocation,
+  source,
+  createdAt,
+  timestamp,
+}: {
+  id: string
+  period: PayPeriod
+  allocation: {
+    potId: string
+    amountPence: number
+    recurringPaymentId?: string | null
+  }
+  source: PotAllocation['source']
+  createdAt?: string
+  timestamp: string
+}): PotAllocation {
+  return {
+    id,
+    payPeriodId: period.id,
+    potId: allocation.potId,
+    amountPence: Math.max(0, Math.round(allocation.amountPence)),
+    source,
+    recurringPaymentId: allocation.recurringPaymentId ?? null,
+    createdAt: createdAt ?? timestamp,
+    updatedAt: timestamp,
+  }
+}
+
+function applyAllocationsToPots(pots: Pot[], allocations: Array<Pick<PotAllocation, 'potId' | 'amountPence'>>): Pot[] {
+  const allocationTotalsByPot = new Map<string, number>()
+
+  for (const allocation of allocations) {
+    allocationTotalsByPot.set(
+      allocation.potId,
+      (allocationTotalsByPot.get(allocation.potId) ?? 0) + allocation.amountPence,
+    )
+  }
+
+  return pots.map((pot) => ({
+    ...pot,
+    balancePence: pot.balancePence + (allocationTotalsByPot.get(pot.id) ?? 0),
+  }))
+}
+
+function getDashboardTodoAllocationPrefix(payPeriodId: string): string {
+  return `dashboard-todo-${payPeriodId}-`
+}
+
+function getCostItemIdFromDashboardTodoAllocationId(allocationId: string, payPeriodId: string): string | null {
+  const prefix = getDashboardTodoAllocationPrefix(payPeriodId)
+
+  if (!allocationId.startsWith(prefix)) {
+    return null
+  }
+
+  return allocationId.slice(prefix.length) || null
+}
+
+function inferPayFrequencyFromPayPeriod(period: PayPeriod, fallback: PayFrequency): PayFrequency {
+  const daysBetweenPaydays =
+    Math.round(
+      (new Date(`${period.nextPayday}T00:00:00.000Z`).getTime() -
+        new Date(`${period.payday}T00:00:00.000Z`).getTime()) /
+        86_400_000,
+    ) || 0
+
+  if (daysBetweenPaydays === 7) {
+    return 'weekly'
+  }
+
+  if (daysBetweenPaydays >= 28) {
+    return 'monthly'
+  }
+
+  if (daysBetweenPaydays > 0) {
+    return 'biweekly'
+  }
+
+  return fallback
+}
+
+function getLegacyIntervalAnchorIso(payment: RecurringPayment): string {
+  const createdDate = payment.createdAt.slice(0, 10)
+
+  if (!payment.dueDay) {
+    return isIsoDateText(createdDate) ? createdDate : toIsoDate(new Date())
+  }
+
+  const created = isIsoDateText(createdDate) ? new Date(`${createdDate}T00:00:00.000Z`) : new Date()
+  const lastDay = new Date(Date.UTC(created.getUTCFullYear(), created.getUTCMonth() + 1, 0)).getUTCDate()
+  const dueDay = Math.min(Math.max(1, payment.dueDay), lastDay)
+
+  return toIsoDate(new Date(Date.UTC(created.getUTCFullYear(), created.getUTCMonth(), dueDay)))
+}
+
+function isIsoDateText(value?: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`)
+
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
 async function seedDefaults(): Promise<void> {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Apple, CheckCircle2, KeyRound, LogOut, Mail, ShieldAlert, Trash2 } from 'lucide-react'
+import { Apple, CheckCircle2, KeyRound, LogOut, Mail, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 
 import { parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -22,6 +22,8 @@ export function SettingsPage({
   const [aiInstructions, setAiInstructions] = useState(snapshot.settings.aiInstructions)
   const [aiProvider, setAiProvider] = useState<AiProvider>(snapshot.settings.aiProvider)
   const [saved, setSaved] = useState(false)
+  const [updatingPlanner, setUpdatingPlanner] = useState(false)
+  const [plannerUpdated, setPlannerUpdated] = useState(false)
 
   async function saveSettings() {
     await actions.updateSettings({
@@ -32,6 +34,18 @@ export function SettingsPage({
       aiProvider,
     })
     setSaved(true)
+  }
+
+  async function updatePlannerData() {
+    setPlannerUpdated(false)
+    setUpdatingPlanner(true)
+
+    try {
+      await actions.updatePlannerDataToLatest()
+      setPlannerUpdated(true)
+    } finally {
+      setUpdatingPlanner(false)
+    }
   }
 
   return (
@@ -126,6 +140,21 @@ export function SettingsPage({
 
         <AccountPanel auth={auth} />
       </SectionGrid>
+
+      <Panel title="Update" description="Refresh saved planner data." accent="emerald" density="compact">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={updatePlannerData} disabled={updatingPlanner}>
+            <RefreshCw size={16} aria-hidden="true" />
+            Update
+          </Button>
+          {plannerUpdated && (
+            <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
+              <CheckCircle2 size={18} />
+              Planner updated
+            </span>
+          )}
+        </div>
+      </Panel>
     </div>
   )
 }

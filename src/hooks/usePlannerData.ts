@@ -31,6 +31,7 @@ import {
   resetPlannerData,
   skipDebtReserve,
   toggleRecurringPayment,
+  updatePlannerDataToLatest,
   updateCreditCard,
   updateCreditCardPot,
   updateCreditCardRepayment,
@@ -113,6 +114,7 @@ export interface PlannerActions {
   deletePaycheckPotAllocation: typeof deletePaycheckPotAllocation
   deletePayPeriod: typeof deletePayPeriod
   resetPlannerData: typeof resetPlannerData
+  updatePlannerDataToLatest: typeof updatePlannerDataToLatest
 }
 
 export function usePlannerData() {
@@ -181,6 +183,7 @@ export function usePlannerData() {
       deletePaycheckPotAllocation: withRefresh(deletePaycheckPotAllocation, refresh),
       deletePayPeriod: withRefresh(deletePayPeriod, refresh),
       resetPlannerData: withRefresh(resetPlannerData, refresh),
+      updatePlannerDataToLatest: withRefresh(updatePlannerDataToLatest, refresh),
     }),
     [refresh],
   )

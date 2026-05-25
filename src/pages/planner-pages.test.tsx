@@ -46,6 +46,7 @@ type TestActions = PlannerActions & {
   cancelDebtReserve: ReturnType<typeof vi.fn>
   skipDebtReserve: ReturnType<typeof vi.fn>
   applyDebtReserve: ReturnType<typeof vi.fn>
+  updatePlannerDataToLatest: ReturnType<typeof vi.fn>
 }
 
 describe('app shell navigation', () => {
@@ -471,6 +472,18 @@ describe('settings page', () => {
       aiInstructions: '',
       aiProvider: 'openrouter',
     })
+  })
+
+  it('runs the planner update action from settings', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    expect(actions.updatePlannerDataToLatest).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Planner updated')).toBeVisible()
   })
 
   it('sends a password reset email from account actions', async () => {
@@ -3271,6 +3284,7 @@ function createActions(): TestActions {
     cancelDebtReserve: vi.fn(async () => {}),
     skipDebtReserve: vi.fn(async () => {}),
     applyDebtReserve: vi.fn(async () => {}),
+    updatePlannerDataToLatest: vi.fn(async () => {}),
     createPaycheckPlan: vi.fn(async () => {}),
     deletePayPeriod: vi.fn(async () => {}),
     resetPlannerData: vi.fn(async () => {}),

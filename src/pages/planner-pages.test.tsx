@@ -1262,6 +1262,127 @@ describe('pots page', () => {
     })
   })
 
+  it('tops up a pot from the selected paycheck allocation', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+
+    render(
+      <PotsPage
+        snapshot={createSnapshot({ payPeriods: [selectedPayPeriod] })}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    await user.selectOptions(screen.getByLabelText('Pot to top up'), 'pot-food')
+    await user.type(screen.getByLabelText('Top up amount'), '25.00')
+    await user.click(screen.getByRole('button', { name: 'Top up pot' }))
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'pot-top-up-period-current-pot-food',
+      payPeriodId: 'period-current',
+      potId: 'pot-food',
+      amountPence: 2500,
+    })
+  })
+
+  it('adds another top-up to the existing paycheck pot allocation', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+
+    render(
+      <PotsPage
+        snapshot={createSnapshot({
+          payPeriods: [selectedPayPeriod],
+          potAllocations: [
+            {
+              id: 'pot-top-up-period-current-pot-food',
+              payPeriodId: 'period-current',
+              potId: 'pot-food',
+              amountPence: 1000,
+              source: 'manual',
+              recurringPaymentId: null,
+              createdAt: '2026-05-16T00:00:00.000Z',
+              updatedAt: '2026-05-16T00:00:00.000Z',
+            },
+          ],
+        })}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    await user.selectOptions(screen.getByLabelText('Pot to top up'), 'pot-food')
+    await user.type(screen.getByLabelText('Top up amount'), '15.00')
+    await user.click(screen.getByRole('button', { name: 'Top up pot' }))
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'pot-top-up-period-current-pot-food',
+      payPeriodId: 'period-current',
+      potId: 'pot-food',
+      amountPence: 2500,
+    })
+  })
+
+  it('shows the linked debt balance as the pot target', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-airbnb',
+          name: 'AIRBNB',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'home',
+          balancePence: 12500,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: null,
+          linkedDebtId: 'debt-airbnb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-airbnb',
+          name: 'AIRBNB',
+          lender: 'AIRBNB',
+          originalAmountPence: 50000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-06-10',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('Target £500.00')).toBeInTheDocument()
+    expect(screen.getByText('25%')).toBeInTheDocument()
+  })
+
   it('expands a pot to show spending, recurring payments, and allocations tied to it', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
@@ -1450,11 +1571,11 @@ describe('pots page', () => {
     render(<PotsPage snapshot={snapshot} actions={createActions()} />)
 
     expect(screen.getByText('100%')).toBeInTheDocument()
-    expect(screen.getByText('£87.11 target')).toBeInTheDocument()
+    expect(screen.getByText('Target £87.11')).toBeInTheDocument()
     expect(screen.getByText('67%')).toBeInTheDocument()
-    expect(screen.getByText('£600.00 target')).toBeInTheDocument()
+    expect(screen.getByText('Target £600.00')).toBeInTheDocument()
     expect(screen.getByText('62%')).toBeInTheDocument()
-    expect(screen.getByText('£557.41 target')).toBeInTheDocument()
+    expect(screen.getByText('Target £557.41')).toBeInTheDocument()
   })
 })
 

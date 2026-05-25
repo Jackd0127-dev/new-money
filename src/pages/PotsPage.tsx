@@ -40,7 +40,7 @@ import {
   TextInput,
   type CalculationBreakdown,
 } from '../components/ui'
-import type { Pot, PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
+import type { PayPeriod, Pot, PotAllocation, PotType, RecurringPayment, Transaction } from '../types/models'
 
 const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0f766e', '#4338ca', '#475569']
 const builtinCategories = ['All Pots', 'Spending', 'Bills', 'Savings'] as const
@@ -111,11 +111,13 @@ const emptyPotForm = (): PotFormState => ({
 export function PotsPage({
   snapshot,
   actions,
+  selectedPayPeriod,
   isCreateModalOpen,
   onCreateModalOpenChange,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
+  selectedPayPeriod?: PayPeriod | null
   isCreateModalOpen?: boolean
   onCreateModalOpenChange?: (isOpen: boolean) => void
 }) {
@@ -128,11 +130,15 @@ export function PotsPage({
   const [isAddingCategory, setIsAddingCategory] = useState(false)
   const [newCategory, setNewCategory] = useState('')
   const [customCategories, setCustomCategories] = useState<string[]>([])
+  const [topUpPotId, setTopUpPotId] = useState('')
+  const [topUpAmount, setTopUpAmount] = useState('')
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const categoryOptions = useMemo(() => getPotCategoryOptions(activePots, customCategories), [activePots, customCategories])
   const visiblePots = activePots.filter((pot) => isPotInCategory(pot, activeCategory))
   const isCreateOpen = isCreateModalOpen ?? localCreateModalOpen
   const setCreateOpen = onCreateModalOpenChange ?? setLocalCreateModalOpen
+  const topUpAmountPence = parsePoundsToPence(topUpAmount)
+  const canTopUpPot = Boolean(selectedPayPeriod && topUpPotId && topUpAmountPence > 0)
 
   async function submitPot() {
     if (!createForm.name.trim()) {
@@ -197,8 +203,60 @@ export function PotsPage({
     setIsAddingCategory(false)
   }
 
+  async function submitPotTopUp() {
+    if (!selectedPayPeriod || !topUpPotId || topUpAmountPence <= 0) {
+      return
+    }
+
+    const allocationId = getPotTopUpAllocationId(selectedPayPeriod.id, topUpPotId)
+    const existingTopUpPence = snapshot.potAllocations.find((allocation) => allocation.id === allocationId)?.amountPence ?? 0
+
+    await actions.upsertPaycheckPotAllocation({
+      id: allocationId,
+      payPeriodId: selectedPayPeriod.id,
+      potId: topUpPotId,
+      amountPence: existingTopUpPence + topUpAmountPence,
+    })
+
+    setTopUpAmount('')
+  }
+
   return (
     <div className="space-y-6">
+      <Panel
+        title="Top up pots"
+        description={selectedPayPeriod ? `Comes out of ${selectedPayPeriod.payday} pay.` : 'Create a paycheck first.'}
+        accent="emerald"
+        density="compact"
+      >
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]">
+          <Field label="Pot to top up">
+            <SelectInput value={topUpPotId} onChange={(event) => setTopUpPotId(event.target.value)}>
+              <option value="">Choose pot</option>
+              {activePots.map((pot) => (
+                <option key={pot.id} value={pot.id}>
+                  {pot.name}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Top up amount">
+            <TextInput
+              inputMode="decimal"
+              value={topUpAmount}
+              onChange={(event) => setTopUpAmount(event.target.value)}
+              placeholder="25.00"
+            />
+          </Field>
+          <div className="flex items-end">
+            <Button onClick={submitPotTopUp} disabled={!canTopUpPot}>
+              <Plus size={18} />
+              Top up pot
+            </Button>
+          </div>
+        </div>
+      </Panel>
+
       <Panel
         title="Pots"
         description="Click a pot to see spending, recurring payments, and allocations tied to it."
@@ -739,6 +797,10 @@ function potFormToPayload(form: PotFormState) {
   }
 }
 
+function getPotTopUpAllocationId(payPeriodId: string, potId: string): string {
+  return `pot-top-up-${payPeriodId}-${potId}`
+}
+
 function getPotLinkType(pot: Pot): PotLinkType {
   if (pot.linkedCreditCardId) {
     return 'credit_card'
@@ -803,7 +865,7 @@ function getPotProgress(pot: Pot, snapshot: PlannerSnapshot): PotProgress {
     targetPence,
     coveredPence,
     percent: targetPence > 0 ? Math.min(100, Math.round((coveredPence / targetPence) * 100)) : 0,
-    targetLabel: targetPence > 0 ? `${formatPence(targetPence)} target` : 'No target yet',
+    targetLabel: targetPence > 0 ? `Target ${formatPence(targetPence)}` : 'No target yet',
     sourceLabels,
     shortfallPence,
     dueIso,

@@ -77,6 +77,7 @@ function App() {
       <PotsPage
         snapshot={snapshot}
         actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
         isCreateModalOpen={isCreatePotModalOpen}
         onCreateModalOpenChange={setIsCreatePotModalOpen}
       />

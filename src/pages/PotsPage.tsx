@@ -142,6 +142,8 @@ export function PotsPage({
   const setCreateOpen = onCreateModalOpenChange ?? setLocalCreateModalOpen
   const topUpAmountPence = parsePoundsToPence(topUpAmount)
   const canTopUpPot = Boolean(selectedPayPeriod && topUpPotId && topUpAmountPence > 0)
+  const canSaveCreatePot = canSubmitPotForm(createForm, snapshot)
+  const canSaveEditPot = editForm ? canSubmitPotForm(editForm, snapshot) : false
   const topUpHistory = useMemo(() => {
     if (!selectedPayPeriod) {
       return []
@@ -164,7 +166,7 @@ export function PotsPage({
   }, [selectedPayPeriod, snapshot.potAllocations, snapshot.pots])
 
   async function submitPot() {
-    if (!createForm.name.trim()) {
+    if (!canSaveCreatePot) {
       return
     }
 
@@ -174,7 +176,7 @@ export function PotsPage({
   }
 
   async function submitEditedPot() {
-    if (!editingPotId || !editForm?.name.trim()) {
+    if (!editingPotId || !editForm || !canSaveEditPot) {
       return
     }
 
@@ -444,7 +446,7 @@ export function PotsPage({
                 onChange={setCreateForm}
               />
               <div className="flex flex-wrap gap-3">
-                <Button onClick={submitPot}>Add pot</Button>
+                <Button onClick={submitPot} disabled={!canSaveCreatePot}>Add pot</Button>
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -485,7 +487,7 @@ export function PotsPage({
                 onChange={setEditForm}
               />
               <div className="flex flex-wrap gap-3">
-                <Button onClick={submitEditedPot}>Save pot</Button>
+                <Button onClick={submitEditedPot} disabled={!canSaveEditPot}>Save pot</Button>
                 <Button variant="secondary" onClick={closeEditModal}>
                   Cancel
                 </Button>
@@ -697,12 +699,28 @@ function PotFormFields({
   categoryOptions: string[]
   onChange: (form: PotFormState) => void
 }) {
-  const creditCards = snapshot.creditCards.filter(
-    (card) => !card.archived || card.id === form.linkedEntityId,
-  )
-  const debts = snapshot.debts.filter(
-    (debt) => debt.status !== 'archived' || debt.id === form.linkedEntityId,
-  )
+  const creditCards = getSelectableCreditCards(snapshot, form.linkedEntityId)
+  const debts = getSelectableDebts(snapshot, form.linkedEntityId)
+  const activeCreditCards = creditCards.filter((card) => !card.archived)
+  const activeDebts = debts.filter((debt) => debt.status !== 'archived' && debt.currentBalancePence > 0)
+  const creditCardHint = activeCreditCards.length === 0
+    ? 'Create an active credit card before linking this pot.'
+    : !form.linkedEntityId
+      ? 'Choose which credit card this pot is covering.'
+      : undefined
+  const debtHint = activeDebts.length === 0
+    ? 'Create an active debt before linking this pot.'
+    : !form.linkedEntityId
+      ? 'Choose which debt this pot is covering.'
+      : undefined
+
+  function changeLinkType(linkType: PotLinkType) {
+    onChange({
+      ...form,
+      linkType,
+      linkedEntityId: getDefaultLinkedEntityId(linkType, activeCreditCards, activeDebts),
+    })
+  }
 
   return (
     <>
@@ -767,13 +785,7 @@ function PotFormFields({
       <Field label="Link this pot to">
         <SelectInput
           value={form.linkType}
-          onChange={(event) =>
-            onChange({
-              ...form,
-              linkType: event.target.value as PotLinkType,
-              linkedEntityId: '',
-            })
-          }
+          onChange={(event) => changeLinkType(event.target.value as PotLinkType)}
         >
           <option value="none">No link</option>
           <option value="credit_card">Credit card</option>
@@ -781,7 +793,7 @@ function PotFormFields({
         </SelectInput>
       </Field>
       {form.linkType === 'credit_card' && (
-        <Field label="Credit card">
+        <Field label="Credit card" hint={creditCardHint}>
           <SelectInput
             value={form.linkedEntityId}
             onChange={(event) => onChange({ ...form, linkedEntityId: event.target.value })}
@@ -796,7 +808,7 @@ function PotFormFields({
         </Field>
       )}
       {form.linkType === 'debt' && (
-        <Field label="Debt">
+        <Field label="Debt" hint={debtHint}>
           <SelectInput
             value={form.linkedEntityId}
             onChange={(event) => onChange({ ...form, linkedEntityId: event.target.value })}
@@ -804,7 +816,7 @@ function PotFormFields({
             <option value="">Choose debt</option>
             {debts.map((debt) => (
               <option key={debt.id} value={debt.id}>
-                {debt.name}
+                {debt.name} · {formatPence(debt.currentBalancePence)}
               </option>
             ))}
           </SelectInput>
@@ -869,6 +881,51 @@ function potFormToPayload(form: PotFormState) {
     linkedCreditCardId: form.linkType === 'credit_card' ? form.linkedEntityId || null : null,
     linkedDebtId: form.linkType === 'debt' ? form.linkedEntityId || null : null,
   }
+}
+
+function canSubmitPotForm(form: PotFormState, snapshot: PlannerSnapshot): boolean {
+  if (!form.name.trim()) {
+    return false
+  }
+
+  if (form.linkType === 'credit_card') {
+    return snapshot.creditCards.some((card) => card.id === form.linkedEntityId && !card.archived)
+  }
+
+  if (form.linkType === 'debt') {
+    return snapshot.debts.some(
+      (debt) =>
+        debt.id === form.linkedEntityId &&
+        debt.status !== 'archived' &&
+        debt.currentBalancePence > 0,
+    )
+  }
+
+  return true
+}
+
+function getSelectableCreditCards(snapshot: PlannerSnapshot, linkedEntityId: string) {
+  return snapshot.creditCards.filter((card) => !card.archived || card.id === linkedEntityId)
+}
+
+function getSelectableDebts(snapshot: PlannerSnapshot, linkedEntityId: string) {
+  return snapshot.debts.filter((debt) => debt.status !== 'archived' || debt.id === linkedEntityId)
+}
+
+function getDefaultLinkedEntityId(
+  linkType: PotLinkType,
+  creditCards: PlannerSnapshot['creditCards'],
+  debts: PlannerSnapshot['debts'],
+): string {
+  if (linkType === 'credit_card') {
+    return creditCards.length === 1 ? creditCards[0].id : ''
+  }
+
+  if (linkType === 'debt') {
+    return debts.length === 1 ? debts[0].id : ''
+  }
+
+  return ''
 }
 
 function getPotTopUpAllocationPrefix(payPeriodId: string, potId: string): string {

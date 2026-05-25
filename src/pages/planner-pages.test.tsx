@@ -2138,6 +2138,63 @@ describe('pots page', () => {
     })
   })
 
+  it('creates a pot linked to the selected debt target', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      debts: [
+        {
+          id: 'debt-airbnb',
+          name: 'AIRBNB',
+          lender: 'AIRBNB',
+          originalAmountPence: 50000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-06-10',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Create pot' }))
+    const createDialog = screen.getByRole('dialog', { name: 'Create pot' })
+    await user.type(within(createDialog).getByLabelText('Pot name'), 'AIRBNB')
+    await user.selectOptions(within(createDialog).getByLabelText('Link this pot to'), 'debt')
+    await user.click(within(createDialog).getByRole('button', { name: 'Add pot' }))
+
+    expect(actions.addPot).toHaveBeenCalledWith({
+      balancePence: 0,
+      category: 'Spending',
+      color: '#2563eb',
+      icon: 'wallet',
+      linkedCreditCardId: null,
+      linkedDebtId: 'debt-airbnb',
+      name: 'AIRBNB',
+      targetPence: null,
+      type: 'spending',
+    })
+  })
+
+  it('does not save a debt-linked pot until a debt is available', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+
+    render(<PotsPage snapshot={createSnapshot()} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Create pot' }))
+    const createDialog = screen.getByRole('dialog', { name: 'Create pot' })
+    await user.type(within(createDialog).getByLabelText('Pot name'), 'Debt pot')
+    await user.selectOptions(within(createDialog).getByLabelText('Link this pot to'), 'debt')
+
+    expect(within(createDialog).getByRole('button', { name: 'Add pot' })).toBeDisabled()
+  })
+
   it('creates a custom pot section and saves the selected symbol', async () => {
     const user = userEvent.setup()
     const actions = createActions()

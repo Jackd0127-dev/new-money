@@ -240,6 +240,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
   const todayIso = getAppTodayIso(normalizeSettings(await db.settings.get('default')))
   await applyDueRecurringPayments(todayIso)
   await applyDueLinkedCreditCardPotRepayments(todayIso)
+  await applyDueLinkedDebtPotPayments(todayIso)
 
   const [
     settings,
@@ -342,6 +343,7 @@ export async function updatePlannerDataToLatest(): Promise<void> {
   const todayIso = getAppTodayIso(normalizeSettings(await db.settings.get('default')))
   await applyDueRecurringPayments(todayIso)
   await applyDueLinkedCreditCardPotRepayments(todayIso)
+  await applyDueLinkedDebtPotPayments(todayIso)
 }
 
 export async function addPot(input: PotInput): Promise<void> {
@@ -1967,6 +1969,81 @@ async function applyDueLinkedCreditCardPotRepayments(todayIso: string): Promise<
 
 function getLinkedCreditCardPotRepaymentId(creditCardId: string, statementDate: string, dueDate: string): string {
   return `linked-card-pot-repayment-${creditCardId}-${statementDate}-${dueDate}`
+}
+
+async function applyDueLinkedDebtPotPayments(todayIso: string): Promise<void> {
+  const timestamp = nowIso()
+
+  await db.transaction('rw', [db.debts, db.pots, db.debtPayments], async () => {
+    const [debts, pots, debtPayments] = await Promise.all([
+      db.debts.toArray(),
+      db.pots.toArray(),
+      db.debtPayments.toArray(),
+    ])
+
+    for (const debt of debts.filter((candidate) => candidate.status === 'active' && candidate.currentBalancePence > 0 && candidate.dueDate <= todayIso)) {
+      const linkedPots = pots
+        .filter((pot) => !pot.archived && pot.linkedDebtId === debt.id && pot.balancePence > 0)
+        .sort((a, b) => a.name.localeCompare(b.name))
+
+      if (linkedPots.length === 0) {
+        continue
+      }
+
+      const paymentId = getLinkedDebtPotPaymentId(debt.id, debt.dueDate)
+
+      if (debtPayments.some((payment) => payment.id === paymentId)) {
+        continue
+      }
+
+      const availableInLinkedPotsPence = linkedPots.reduce((total, pot) => total + Math.max(0, pot.balancePence), 0)
+      const paymentAmountPence = Math.min(debt.currentBalancePence, availableInLinkedPotsPence)
+
+      if (paymentAmountPence <= 0) {
+        continue
+      }
+
+      let remainingToDeductPence = paymentAmountPence
+
+      for (const pot of linkedPots) {
+        if (remainingToDeductPence <= 0) {
+          break
+        }
+
+        const potDeductionPence = Math.min(pot.balancePence, remainingToDeductPence)
+        pot.balancePence -= potDeductionPence
+        remainingToDeductPence -= potDeductionPence
+
+        await db.pots.update(pot.id, {
+          balancePence: pot.balancePence,
+          updatedAt: timestamp,
+        })
+      }
+
+      const nextBalancePence = debt.currentBalancePence - paymentAmountPence
+
+      await db.debtPayments.add({
+        id: paymentId,
+        debtId: debt.id,
+        amountPence: paymentAmountPence,
+        date: debt.dueDate,
+        note: linkedPots.length === 1
+          ? `Automatic ${debt.name} payment from ${linkedPots[0].name}`
+          : `Automatic ${debt.name} payment from linked debt pots`,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      await db.debts.update(debt.id, {
+        currentBalancePence: nextBalancePence,
+        status: nextBalancePence > 0 ? 'active' : 'paid',
+        updatedAt: timestamp,
+      })
+    }
+  })
+}
+
+function getLinkedDebtPotPaymentId(debtId: string, dueDate: string): string {
+  return `linked-debt-pot-payment-${debtId}-${dueDate}`
 }
 
 function getRecurringReserveAllocations(

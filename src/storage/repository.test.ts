@@ -1219,6 +1219,66 @@ describe('paycheck plan storage', () => {
     expect(barclaysPot?.balancePence).toBe(9500)
   })
 
+  it('automatically pays a due debt from its linked pot on the debt due date', async () => {
+    await addDebt({
+      name: 'Personal loan',
+      lender: 'Loan Provider',
+      currentBalancePence: 50000,
+      minimumPaymentPence: 0,
+      dueDate: '2026-06-10',
+      interestRateApr: null,
+      note: '',
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    const debt = snapshot.debts.find((candidate) => candidate.name === 'Personal loan')
+
+    expect(debt).toBeDefined()
+
+    await updatePot('pot-food', {
+      name: 'Loan pot',
+      type: 'reserved',
+      balancePence: 50000,
+      targetPence: null,
+      color: '#2563eb',
+      linkedDebtId: debt!.id,
+    })
+    await updateSettings({
+      appDateMode: 'manual',
+      manualTodayIso: '2026-06-01',
+    })
+
+    snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.debtPayments).toHaveLength(0)
+    expect(snapshot.debts.find((candidate) => candidate.id === debt!.id)?.currentBalancePence).toBe(50000)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(50000)
+
+    await updateSettings({
+      appDateMode: 'manual',
+      manualTodayIso: '2026-06-10',
+    })
+
+    snapshot = await getPlannerSnapshot()
+
+    expect(snapshot.debtPayments).toEqual([
+      expect.objectContaining({
+        debtId: debt!.id,
+        amountPence: 50000,
+        date: '2026-06-10',
+        note: 'Automatic Personal loan payment from Loan pot',
+      }),
+    ])
+    expect(snapshot.debts.find((candidate) => candidate.id === debt!.id)).toMatchObject({
+      currentBalancePence: 0,
+      status: 'paid',
+    })
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.debtPayments.filter((payment) => payment.debtId === debt!.id)).toHaveLength(1)
+  })
+
   it('stores, updates, skips, cancels, and applies debt reserves without paying until applied', async () => {
     await createPaycheckPlan({
       payday: '2026-01-02',

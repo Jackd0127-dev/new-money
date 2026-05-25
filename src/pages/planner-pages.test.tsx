@@ -343,6 +343,62 @@ describe('calendar page', () => {
     expect(screen.getByRole('button', { name: 'Open 5 June 2026' })).toHaveTextContent('Next payday starts')
   })
 
+  it('shows the full linked-pot debt amount due on the calendar before the due date is paid', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-june',
+      startDate: '2026-06-01',
+      endDate: '2026-06-14',
+      payday: '2026-06-01',
+      nextPayday: '2026-06-15',
+      incomePence: 100000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-loan',
+          name: 'Loan pot',
+          type: 'reserved',
+          balancePence: 50000,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: null,
+          linkedDebtId: 'debt-loan',
+          archived: false,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-loan',
+          name: 'Personal loan',
+          lender: 'Loan Provider',
+          originalAmountPence: 50000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 0,
+          dueDate: '2026-06-10',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    expect(screen.getByRole('button', { name: 'Open 10 June 2026' })).toHaveTextContent('£500.00 out')
+
+    await user.click(screen.getByRole('button', { name: 'Open 10 June 2026' }))
+
+    expect(screen.getByText('Personal loan')).toBeInTheDocument()
+    expect(screen.getAllByText('-£500.00').length).toBeGreaterThan(0)
+    expect(screen.getByText('Loan Provider due date. £0.00 still to cover after linked pots and planned reserves.')).toBeInTheDocument()
+  })
+
   it('opens a day overview with every money event attached to the clicked date', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod({

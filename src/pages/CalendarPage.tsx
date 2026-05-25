@@ -28,6 +28,7 @@ import {
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getCreditCardStatementPayments,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
+  getDebtDueAmountPence,
   getLinkedCreditCardPotAllocationExclusionPence,
   getLinkedCreditCardPotCoverBreakdown,
   getPayPeriodCostSummary,
@@ -716,15 +717,20 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
     })
   const debtEvents: CalendarEvent[] = snapshot.debts
     .filter((debt) => debt.status === 'active' && debt.dueDate >= startDate && debt.dueDate <= endDate)
-    .map((debt) => ({
-      id: `debt-${debt.id}`,
-      date: debt.dueDate,
-      title: debt.name,
-      amountPence: getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots),
-      type: 'debt' as const,
-      direction: 'out' as const,
-      description: `${debt.lender || 'Debt'} due date. Linked pots and planned reserves reduce the amount still to cover.`,
-    }))
+    .map((debt) => {
+      const amountDuePence = getDebtDueAmountPence(debt)
+      const stillToCoverPence = getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots)
+
+      return {
+        id: `debt-${debt.id}`,
+        date: debt.dueDate,
+        title: debt.name,
+        amountPence: amountDuePence,
+        type: 'debt' as const,
+        direction: amountDuePence > 0 ? 'out' as const : 'info' as const,
+        description: `${debt.lender || 'Debt'} due date. ${formatPence(stillToCoverPence)} still to cover after linked pots and planned reserves.`,
+      }
+    })
   const reserveEvents: CalendarEvent[] = snapshot.debtReserves
     .filter((reserve) => reserve.status !== 'cancelled' && reserve.payday >= startDate && reserve.payday <= endDate)
     .map((reserve) => {

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
 
-import { findPayPeriodForDate, formatPence, parsePoundsToPence, toIsoDate } from '../domain/money'
+import { findPayPeriodForDate, formatPence, getAppTodayIso, parsePoundsToPence } from '../domain/money'
 import type {
   PlannerActions,
   PlannerSnapshot,
@@ -32,13 +32,14 @@ export function SpendingPage({
   actions: PlannerActions
   selectedPayPeriod?: PayPeriod | null
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
   const activeCards = snapshot.creditCards.filter((card) => !card.archived)
   const [potId, setPotId] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<QuickSpendLinkMethod>('unlinked')
   const [creditCardId, setCreditCardId] = useState('')
   const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(toIsoDate(new Date()))
+  const [date, setDate] = useState(today)
   const [note, setNote] = useState('')
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
   const selectedPot = activePots.find((pot) => pot.id === potId)
@@ -61,7 +62,7 @@ export function SpendingPage({
       return
     }
 
-    const linkFields = getQuickSpendLinkFields(paymentMethod, potId, creditCardId)
+    const linkFields = getQuickSpendLinkFields(paymentMethod, potId, creditCardId, activePots)
 
     if (editingTransactionId) {
       const updateInput: TransactionUpdateInput = {
@@ -111,7 +112,7 @@ export function SpendingPage({
     setPaymentMethod('unlinked')
     setCreditCardId('')
     setAmount('')
-    setDate(toIsoDate(new Date()))
+    setDate(today)
     setNote('')
   }
 
@@ -162,12 +163,20 @@ export function SpendingPage({
             </SelectInput>
           </Field>
           {paymentMethod === 'pot' && (
-            <Field label="Pot" hint="Optional. Choose no pot to keep this spend unlinked.">
+            <Field
+              label="Pot"
+              hint={
+                selectedPot?.linkedCreditCardId
+                  ? 'This logs card spend and adds the cover to the linked card pot checklist.'
+                  : 'Spending from a normal pot deducts its balance now.'
+              }
+            >
               <SelectInput aria-label="Pot" value={potId} onChange={(event) => setPotId(event.target.value)}>
                 <option value="">No pot linked</option>
                 {activePots.map((pot) => (
                   <option key={pot.id} value={pot.id}>
                     {pot.name} · {formatPence(pot.balancePence)}
+                    {pot.linkedCreditCardId ? ' · card cover' : ''}
                   </option>
                 ))}
               </SelectInput>
@@ -188,7 +197,7 @@ export function SpendingPage({
           <Field label="Date">
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-              <Button variant="secondary" onClick={() => setDate(toIsoDate(new Date()))}>
+              <Button variant="secondary" onClick={() => setDate(today)}>
                 Today
               </Button>
             </div>
@@ -415,8 +424,19 @@ function getQuickSpendLinkFields(
   paymentMethod: QuickSpendLinkMethod,
   potId: string,
   creditCardId: string,
+  activePots: PlannerSnapshot['pots'],
 ): Pick<TransactionInput, 'potId' | 'paymentMethod' | 'creditCardId'> {
   if (paymentMethod === 'pot' && potId) {
+    const selectedPot = activePots.find((pot) => pot.id === potId)
+
+    if (selectedPot?.linkedCreditCardId) {
+      return {
+        potId: null,
+        paymentMethod: 'credit_card',
+        creditCardId: selectedPot.linkedCreditCardId,
+      }
+    }
+
     return {
       potId,
       paymentMethod: 'pot',

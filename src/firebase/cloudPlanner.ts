@@ -139,7 +139,11 @@ function normalizePlannerSnapshot(snapshot: Partial<PlannerSnapshot>): PlannerSn
     debts: snapshot.debts ?? [],
     debtPayments: snapshot.debtPayments ?? [],
     debtReserves: snapshot.debtReserves ?? [],
-    creditCards: snapshot.creditCards ?? [],
+    creditCards: (snapshot.creditCards ?? []).map((card) => ({
+      ...card,
+      openingStatementBalancePence: Math.max(0, card.openingStatementBalancePence ?? card.openingBalancePence ?? 0),
+      statementDate: card.statementDate ?? null,
+    })),
     creditCardPots: snapshot.creditCardPots ?? [],
     customPayments: snapshot.customPayments ?? [],
     creditCardRepayments: snapshot.creditCardRepayments ?? [],

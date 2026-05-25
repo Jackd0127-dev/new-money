@@ -69,6 +69,8 @@ export interface BriefCreditCard {
   availableCreditPence: number
   utilisationPercent: number
   dueIso: string | null
+  statementDate: string | null
+  statementSetupNeeded: boolean
 }
 
 export interface BriefPot {
@@ -231,6 +233,7 @@ export function getDailyBriefFacts(
     creditCardPots,
     pots,
     payPeriod,
+    asOfDate: todayIso,
   })
   const cardLinkedPaymentsPence = duePayments
     .filter((payment) => payment.creditCardId)
@@ -249,10 +252,12 @@ export function getDailyBriefFacts(
     id: cardSummaryItem.card.id,
     name: cardSummaryItem.card.name,
     provider: cardSummaryItem.card.provider,
-    owedPence: cardSummaryItem.owedPence,
-    availableCreditPence: cardSummaryItem.availableCreditPence,
+    owedPence: cardSummaryItem.actualOwedPence,
+    availableCreditPence: cardSummaryItem.actualAvailableCreditPence,
     utilisationPercent: cardSummaryItem.utilisationPercent,
     dueIso: getCreditCardDueIso(cardSummaryItem.card, todayIso),
+    statementDate: cardSummaryItem.statementDate,
+    statementSetupNeeded: cardSummaryItem.statementSetupNeeded,
   }))
   const overspentPots = pots
     .filter((pot) => !pot.archived && pot.balancePence < 0)
@@ -302,7 +307,7 @@ export function getDailyBriefFacts(
     },
     creditCards: {
       cards: creditCardBriefs,
-      totalOwedPence: cardSummary.totalOwedPence,
+      totalOwedPence: cardSummary.totalActualOwedPence,
       minimumsDueBeforeNextPaydayPence: 0,
       unlinkedCardSpendingPence,
       cardLinkedPaymentsPence,
@@ -349,6 +354,10 @@ function getMissingData({
   for (const card of creditCardBriefs) {
     if (card.owedPence > 0 && !card.dueIso) {
       missingData.push(`${card.name} credit card due date is missing.`)
+    }
+
+    if (card.owedPence > 0 && card.statementSetupNeeded) {
+      missingData.push(`${card.name} credit card statement date is missing.`)
     }
   }
 

@@ -16,7 +16,7 @@ import { RecurringPage } from './pages/RecurringPage'
 import { SavingsInvestmentsPage } from './pages/SavingsInvestmentsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SpendingPage } from './pages/SpendingPage'
-import { findPayPeriodForDate, toIsoDate } from './domain/money'
+import { findPayPeriodForDate, getAppTodayIso } from './domain/money'
 import { useCloudSync } from './hooks/useCloudSync'
 import { useFirebaseAuth } from './hooks/useFirebaseAuth'
 import { usePlannerData } from './hooks/usePlannerData'
@@ -55,7 +55,7 @@ function App() {
     )
   }
 
-  const today = toIsoDate(new Date())
+  const today = getAppTodayIso(snapshot.settings)
   const selectedPayPeriod =
     (selectedPayPeriodId
       ? snapshot.payPeriods.find((period) => period.id === selectedPayPeriodId)

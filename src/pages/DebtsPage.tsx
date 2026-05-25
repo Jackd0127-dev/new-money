@@ -4,11 +4,11 @@ import { PenLine, Trash2 } from 'lucide-react'
 import {
   findPayPeriodForDate,
   formatPence,
+  getAppTodayIso,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
   getLinkedDebtPotPence,
   getDebtSummary,
   parsePoundsToPence,
-  toIsoDate,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import {
@@ -34,12 +34,12 @@ interface DebtFormState {
   status: DebtStatus
 }
 
-const emptyDebtForm = (): DebtFormState => ({
+const emptyDebtForm = (today: string): DebtFormState => ({
   name: '',
   lender: '',
   currentBalance: '',
   minimumPayment: '',
-  dueDate: toIsoDate(new Date()),
+  dueDate: today,
   interestRateApr: '',
   note: '',
   status: 'active',
@@ -54,18 +54,18 @@ export function DebtsPage({
   actions: PlannerActions
   selectedPayPeriod?: PayPeriod | null
 }) {
-  const [debtForm, setDebtForm] = useState<DebtFormState>(emptyDebtForm)
+  const today = getAppTodayIso(snapshot.settings)
+  const [debtForm, setDebtForm] = useState<DebtFormState>(() => emptyDebtForm(today))
   const [editingDebtId, setEditingDebtId] = useState<string | null>(null)
   const activeDebts = snapshot.debts.filter((debt) => debt.status === 'active' && debt.currentBalancePence > 0)
   const visibleDebts = snapshot.debts.filter((debt) => debt.status !== 'archived')
   const [paymentDebtId, setPaymentDebtId] = useState(activeDebts[0]?.id ?? '')
   const [paymentAmount, setPaymentAmount] = useState('')
-  const [paymentDate, setPaymentDate] = useState(toIsoDate(new Date()))
+  const [paymentDate, setPaymentDate] = useState(today)
   const [paymentNote, setPaymentNote] = useState('')
   const selectedPaymentDebt =
     activeDebts.find((debt) => debt.id === paymentDebtId) ?? activeDebts[0] ?? null
   const selectedPaymentDebtId = selectedPaymentDebt?.id ?? ''
-  const today = toIsoDate(new Date())
   const currentPayPeriod = selectedPayPeriod ?? findPayPeriodForDate(snapshot.payPeriods, today)
   const nextPayPeriod = snapshot.payPeriods
     .filter((period) => period.startDate > today)
@@ -134,7 +134,7 @@ export function DebtsPage({
       note: paymentNote.trim(),
     })
     setPaymentAmount('')
-    setPaymentDate(toIsoDate(new Date()))
+    setPaymentDate(today)
     setPaymentNote('')
   }
 
@@ -154,7 +154,7 @@ export function DebtsPage({
 
   function resetDebtForm() {
     setEditingDebtId(null)
-    setDebtForm(emptyDebtForm())
+    setDebtForm(emptyDebtForm(today))
   }
 
   return (

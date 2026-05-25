@@ -10,7 +10,7 @@ import {
   type AssistantActionProposal,
   type AssistantActionStatus,
 } from '../domain/assistantActions'
-import { toIsoDate } from '../domain/money'
+import { getAppTodayIso } from '../domain/money'
 import {
   createAssistantMessage,
   createConversationHistory,
@@ -141,7 +141,7 @@ export function AiPlanPage({
         },
         body: JSON.stringify({
           question,
-          todayIso: toIsoDate(new Date()),
+          todayIso: getAppTodayIso(snapshot.settings),
           activeView: 'aiPlan',
           selectedPayPeriodId: viewedPeriod?.id ?? null,
           conversationHistory: createConversationHistory(messages),

@@ -10,6 +10,7 @@ import {
   getPayPeriodCostSummary,
   getPayPeriodMoneySummary,
   getCreditCardAllocationSummary,
+  getCreditCardStatementPayments,
   getRecurringPaymentOccurrences,
   getRecurringPaymentsDue,
   getUncoveredRecurringPence,
@@ -122,6 +123,146 @@ describe('pay period planning', () => {
     expect(due.map((occurrence) => occurrence.dueDate)).toEqual([
       '2026-05-18',
       '2026-05-25',
+    ])
+  })
+
+  it('anchors biweekly recurring payments to dueDate instead of also using monthly due day logic', () => {
+    const due = getRecurringPaymentOccurrences(
+      [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDay: 1,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'personal',
+          name: 'Personal',
+          amountPence: 5000,
+          dueDay: 1,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-capital-one',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      '2026-05-22',
+      '2026-06-12',
+    )
+
+    expect(due.map((occurrence) => `${occurrence.payment.id}:${occurrence.dueDate}`)).toEqual([
+      'fuel:2026-05-29',
+      'personal:2026-05-29',
+      'fuel:2026-06-12',
+      'personal:2026-06-12',
+    ])
+    expect(due.some((occurrence) => occurrence.dueDate === '2026-06-01')).toBe(false)
+  })
+
+  it('does not backfill interval payments before their first due date', () => {
+    const due = getRecurringPaymentOccurrences(
+      [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'personal',
+          name: 'Personal',
+          amountPence: 5000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-capital-one',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      '2026-05-01',
+      '2026-05-31',
+    )
+
+    expect(due.map((occurrence) => `${occurrence.payment.id}:${occurrence.dueDate}`)).toEqual([
+      'fuel:2026-05-29',
+      'personal:2026-05-29',
+    ])
+  })
+
+  it('uses monthly dueDate as the first monthly occurrence when present', () => {
+    const due = getRecurringPaymentOccurrences(
+      [
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          dueDate: '2026-06-01',
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      '2026-05-01',
+      '2026-07-31',
+    )
+
+    expect(due.map((occurrence) => occurrence.dueDate)).toEqual([
+      '2026-06-01',
+      '2026-07-01',
+    ])
+  })
+
+  it('keeps monthly recurring payments on their monthly due day', () => {
+    const due = getRecurringPaymentOccurrences(
+      [
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      '2026-06-01',
+      '2026-07-31',
+    )
+
+    expect(due.map((occurrence) => occurrence.dueDate)).toEqual([
+      '2026-06-01',
+      '2026-07-01',
     ])
   })
 
@@ -691,20 +832,26 @@ describe('credit card allocation', () => {
       payPeriod,
     })
 
-    expect(summary.totalOwedPence).toBe(13000)
+    expect(summary.totalActualOwedPence).toBe(3000)
+    expect(summary.totalForecastOwedPence).toBe(10600)
+    expect(summary.totalOwedPence).toBe(10600)
     expect(summary.totalCreditPotsPence).toBe(7000)
     expect(summary.totalPaycheckCreditPotsPence).toBe(4000)
     expect(summary.totalExternalCreditPotsPence).toBe(3000)
-    expect(summary.paycheckRemainingAfterCardsPence).toBe(73000)
+    expect(summary.paycheckRemainingAfterCardsPence).toBe(82400)
     expect(summary.cards[0]).toMatchObject({
       openingBalancePence: 0,
-      owedPence: 13000,
+      actualOwedPence: 3000,
+      forecastOwedPence: 10600,
+      owedPence: 10600,
       creditPotPence: 7000,
       paycheckCreditPotPence: 4000,
       externalCreditPotPence: 3000,
-      remainingAfterCreditPotsPence: 6000,
-      availableCreditPence: 87000,
-      utilisationPercent: 13,
+      remainingAfterCreditPotsPence: 3600,
+      availableCreditPence: 97000,
+      actualAvailableCreditPence: 97000,
+      forecastAvailableCreditPence: 89400,
+      utilisationPercent: 3,
       dueLabel: 'Day 12',
     })
     expect(summary.cards[0].items.map((item) => item.label)).toEqual([
@@ -821,6 +968,343 @@ describe('credit card allocation', () => {
     expect(summary.cards[0].availableCreditPence).toBe(20000)
   })
 
+  it('keeps Barclays actual card balance separate from linked pot balance and forecast charges', () => {
+    const barclaysCard: CreditCard = {
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      dueDay: 11,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const barclaysPot: Pot = {
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 59648,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const periodToNextPayday: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 78850,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const recurringPayments: RecurringPayment[] = [
+      {
+        id: 'fuel',
+        name: 'Fuel',
+        amountPence: 7000,
+        dueDate: '2026-05-29',
+        frequency: 'biweekly',
+        potId: null,
+        creditCardId: 'card-barclays',
+        priority: 'important',
+        active: true,
+        createdAt: '2026-05-22T00:00:00.000Z',
+        updatedAt: '2026-05-22T00:00:00.000Z',
+      },
+      {
+        id: 'gym',
+        name: 'Gym',
+        amountPence: 2500,
+        dueDay: 1,
+        frequency: 'monthly',
+        potId: null,
+        creditCardId: 'card-barclays',
+        priority: 'important',
+        active: true,
+        createdAt: '2026-05-22T00:00:00.000Z',
+        updatedAt: '2026-05-22T00:00:00.000Z',
+      },
+    ]
+
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [barclaysCard],
+      recurringPayments,
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      pots: [barclaysPot],
+      payPeriod: periodToNextPayday,
+    })
+
+    expect(summary.cards[0]).toMatchObject({
+      actualOwedPence: 68005,
+      actualAvailableCreditPence: 11995,
+      linkedPotPence: 59648,
+      actualUncoveredPence: 8357,
+      forecastOwedPence: 77505,
+      forecastAvailableCreditPence: 2495,
+      plannedTopUpNeededPence: 17857,
+    })
+    expect(summary.totalActualOwedPence).toBe(68005)
+    expect(summary.totalForecastOwedPence).toBe(77505)
+    expect(summary.totalPlannedTopUpNeededPence).toBe(17857)
+  })
+
+  it('keeps actual Barclays card values unchanged when the linked pot is topped up', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 77505,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      payPeriod: null,
+    })
+
+    expect(summary.cards[0]).toMatchObject({
+      actualOwedPence: 68005,
+      actualAvailableCreditPence: 11995,
+      linkedPotPence: 77505,
+      actualUncoveredPence: 0,
+    })
+    expect(summary.cards[0].linkedPotPence - summary.cards[0].actualOwedPence).toBe(9500)
+  })
+
+  it('uses leftover linked pot money to reduce the next paycheck card cover', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'actual-fuel',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 6700,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-29',
+          note: 'Fuel',
+          createdAt: '2026-05-29T00:00:00.000Z',
+          updatedAt: '2026-05-29T00:00:00.000Z',
+        },
+      ],
+      repayments: [
+        {
+          id: 'repayment-june',
+          creditCardId: 'card-barclays',
+          amountPence: 74705,
+          date: '2026-06-11',
+          note: 'Automatic Barclays payment from Barclays pot',
+          createdAt: '2026-06-11T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 300,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      payPeriod: {
+        id: 'period-next',
+        startDate: '2026-06-05',
+        endDate: '2026-06-18',
+        payday: '2026-06-05',
+        nextPayday: '2026-06-19',
+        payFrequency: 'biweekly',
+        incomePence: 78850,
+        status: 'active',
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
+      asOfDate: '2026-06-12',
+    })
+
+    expect(summary.cards[0]).toMatchObject({
+      actualOwedPence: 0,
+      linkedPotPence: 300,
+      forecastOwedPence: 7000,
+      plannedTopUpNeededPence: 6700,
+    })
+  })
+
+  it('carries an overspent linked-card amount into the next paycheck cover', () => {
+    const summary = getCreditCardAllocationSummary({
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'actual-fuel',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 7300,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-29',
+          note: 'Fuel',
+          createdAt: '2026-05-29T00:00:00.000Z',
+          updatedAt: '2026-05-29T00:00:00.000Z',
+        },
+      ],
+      repayments: [
+        {
+          id: 'repayment-june',
+          creditCardId: 'card-barclays',
+          amountPence: 75005,
+          date: '2026-06-11',
+          note: 'Automatic Barclays payment from Barclays pot',
+          createdAt: '2026-06-11T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-06-11T00:00:00.000Z',
+        },
+      ],
+      payPeriod: {
+        id: 'period-next',
+        startDate: '2026-06-05',
+        endDate: '2026-06-18',
+        payday: '2026-06-05',
+        nextPayday: '2026-06-19',
+        payFrequency: 'biweekly',
+        incomePence: 78850,
+        status: 'active',
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
+      asOfDate: '2026-06-12',
+    })
+
+    expect(summary.cards[0]).toMatchObject({
+      actualOwedPence: 300,
+      actualUncoveredPence: 300,
+      linkedPotPence: 0,
+      forecastOwedPence: 7300,
+      plannedTopUpNeededPence: 7300,
+    })
+  })
+
   it('lists unlinked payments separately from card balances', () => {
     const summary = getCreditCardAllocationSummary({
       creditCards: cards,
@@ -852,6 +1336,156 @@ describe('credit card allocation', () => {
         amountPence: 999,
         source: 'recurring',
       }),
+    ])
+  })
+})
+
+describe('credit card statement direct debits', () => {
+  const card: CreditCard = {
+    id: 'card-barclays',
+    name: 'Barclays',
+    provider: 'Barclays',
+    limitPence: 100000,
+    openingBalancePence: 68005,
+    openingStatementBalancePence: 60000,
+    statementDate: '2026-05-14',
+    dueDay: 1,
+    dueDate: null,
+    color: '#2563eb',
+    archived: false,
+    createdAt: '2026-05-20T00:00:00.000Z',
+    updatedAt: '2026-05-20T00:00:00.000Z',
+  }
+
+  it('uses an existing issued statement for the first direct debit after setup', () => {
+    const payments = getCreditCardStatementPayments({
+      card,
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [],
+      startDate: '2026-06-01',
+      endDate: '2026-06-01',
+      asOfDate: '2026-06-01',
+    })
+
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({
+      statementDate: '2026-05-14',
+      directDebitDate: '2026-06-01',
+      actualDuePence: 60000,
+      forecastDuePence: 60000,
+    })
+    expect(payments[0].breakdown.map((line) => `${line.label}:${line.amountPence}:${line.date}`)).toEqual([
+      'Existing statement due:60000:2026-05-14',
+    ])
+  })
+
+  it('assigns spend on the statement date to the new cycle and excludes the next statement date', () => {
+    const payments = getCreditCardStatementPayments({
+      card,
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'txn-statement-day',
+          amountPence: 1000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          date: '2026-05-14',
+          note: 'Statement day spend',
+          createdAt: '2026-05-14T10:00:00.000Z',
+          updatedAt: '2026-05-14T10:00:00.000Z',
+        },
+        {
+          id: 'txn-middle',
+          amountPence: 2000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          date: '2026-05-20',
+          note: 'Middle spend',
+          createdAt: '2026-05-20T10:00:00.000Z',
+          updatedAt: '2026-05-20T10:00:00.000Z',
+        },
+        {
+          id: 'txn-next-statement',
+          amountPence: 3000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          date: '2026-06-14',
+          note: 'Next statement spend',
+          createdAt: '2026-06-14T10:00:00.000Z',
+          updatedAt: '2026-06-14T10:00:00.000Z',
+        },
+      ],
+      repayments: [],
+      startDate: '2026-07-01',
+      endDate: '2026-07-01',
+      asOfDate: '2026-07-01',
+    })
+
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({
+      statementDate: '2026-06-14',
+      directDebitDate: '2026-07-01',
+      actualDuePence: 3000,
+      forecastDuePence: 3000,
+    })
+    expect(payments[0].breakdown.map((line) => line.label)).toEqual([
+      'Statement day spend',
+      'Middle spend',
+    ])
+  })
+
+  it('uses logged recurring spend instead of also counting the planned forecast charge', () => {
+    const payments = getCreditCardStatementPayments({
+      card,
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDay: 29,
+          dueDate: '2026-05-29',
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [
+        {
+          id: 'txn-fuel',
+          amountPence: 6700,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: 'fuel',
+          date: '2026-05-29',
+          note: 'Fuel',
+          createdAt: '2026-05-29T10:00:00.000Z',
+          updatedAt: '2026-05-29T10:00:00.000Z',
+        },
+      ],
+      repayments: [],
+      startDate: '2026-07-01',
+      endDate: '2026-07-01',
+      asOfDate: '2026-05-30',
+    })
+
+    expect(payments[0]).toMatchObject({
+      actualDuePence: 6700,
+      forecastDuePence: 6700,
+    })
+    expect(payments[0].breakdown.map((line) => `${line.label}:${line.amountPence}`)).toEqual([
+      'Fuel:6700',
     ])
   })
 })
@@ -916,13 +1550,106 @@ describe('pay period cost summary', () => {
     expect(summary.items).toEqual([
       expect.objectContaining({
         id: 'linked-credit-card-pot-card-amex',
-        label: 'Everyday Amex amount owed',
+        label: 'Everyday Amex planned card cover',
         amountPence: 20000,
         source: 'linked_credit_card_pot',
         creditCardId: 'card-amex',
         potId: 'pot-card-reserve',
       }),
     ])
+  })
+
+  it('uses current card shortfall plus upcoming linked-card charges for linked pot top-ups', () => {
+    const payPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 78850,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+
+    const summary = getPayPeriodCostSummary({
+      payPeriod,
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions: [],
+      debts: [],
+      creditCardRepayments: [],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 59648,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    expect(summary.items).toContainEqual(
+      expect.objectContaining({
+        id: 'linked-credit-card-pot-card-barclays',
+        label: 'Barclays planned card cover',
+        amountPence: 17857,
+        source: 'linked_credit_card_pot',
+        creditCardId: 'card-barclays',
+        potId: 'pot-barclays',
+      }),
+    )
+    expect(summary.creditCardPotsPence).toBe(17857)
   })
 
   it('calculates dashboard costs from due payments, saved payments, manual spending, debts, and net card costs', () => {

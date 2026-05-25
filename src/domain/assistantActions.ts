@@ -51,7 +51,8 @@ export interface CreatePotPayload {
 export interface CreateRecurringPaymentPayload {
   name: string
   amountPence: number
-  dueDay: number
+  dueDay?: number | null
+  dueDate?: string | null
   frequency: RecurringFrequency
   potId?: string | null
   creditCardId?: string | null
@@ -73,6 +74,8 @@ export interface CreateCreditCardPayload {
   provider: string
   limitPence: number
   openingBalancePence?: number
+  openingStatementBalancePence?: number
+  statementDate?: string | null
   dueDay?: number | null
   dueDate?: string | null
   color: string
@@ -181,8 +184,14 @@ export function getAssistantActionValidationError(
       return 'The recurring payment needs a name and amount.'
     }
 
-    if (action.payload.dueDay < 1 || action.payload.dueDay > 31) {
+    const usesIntervalAnchor = action.payload.frequency === 'weekly' || action.payload.frequency === 'biweekly'
+
+    if (!usesIntervalAnchor && ((action.payload.dueDay ?? 0) < 1 || (action.payload.dueDay ?? 0) > 31)) {
       return 'The due day must be between 1 and 31.'
+    }
+
+    if (usesIntervalAnchor && !action.payload.dueDate && !action.payload.dueDay) {
+      return 'The recurring payment needs a first due date.'
     }
 
     if (!validRecurringFrequencies.has(action.payload.frequency) || !validRecurringPriorities.has(action.payload.priority)) {
@@ -274,7 +283,8 @@ export async function runAssistantAction(
     await actions.addRecurringPayment({
       name: action.payload.name.trim(),
       amountPence: action.payload.amountPence,
-      dueDay: action.payload.dueDay,
+      dueDay: action.payload.dueDay ?? null,
+      dueDate: action.payload.dueDate ?? null,
       frequency: action.payload.frequency,
       potId: action.payload.potId ?? null,
       creditCardId: action.payload.creditCardId ?? null,
@@ -302,6 +312,8 @@ export async function runAssistantAction(
       provider: action.payload.provider.trim(),
       limitPence: action.payload.limitPence,
       openingBalancePence: action.payload.openingBalancePence ?? 0,
+      openingStatementBalancePence: action.payload.openingStatementBalancePence ?? action.payload.openingBalancePence ?? 0,
+      statementDate: action.payload.statementDate ?? null,
       dueDay: action.payload.dueDay ?? null,
       dueDate: action.payload.dueDate ?? null,
       color: action.payload.color,
@@ -349,7 +361,7 @@ export function getAssistantActionDetails(action: AssistantActionProposal, snaps
   if (action.type === 'create_recurring_payment') {
     return [
       `${formatPence(action.payload.amountPence)} ${action.payload.frequency}`,
-      `Due day ${action.payload.dueDay}`,
+      action.payload.dueDate ? `First due ${action.payload.dueDate}` : `Due day ${action.payload.dueDay}`,
       `Pot: ${getPotName(snapshot, action.payload.potId)}`,
     ]
   }
@@ -445,12 +457,13 @@ function normalizeAssistantActionProposal(value: unknown, index: number): Assist
   if (type === 'create_recurring_payment') {
     const name = getString(payload.name)
     const amountPence = getNumber(payload.amountPence)
-    const dueDay = getNumber(payload.dueDay)
+    const dueDay = getNullableNumber(payload.dueDay)
+    const dueDate = getNullableString(payload.dueDate)
     const frequency = normalizeRecurringFrequency(payload.frequency)
     const priority = normalizeRecurringPriority(payload.priority)
     const potId = getNullableString(payload.potId)
 
-    if (!name || amountPence === null || dueDay === null || !frequency || !priority) {
+    if (!name || amountPence === null || !frequency || !priority) {
       return null
     }
 
@@ -462,6 +475,7 @@ function normalizeAssistantActionProposal(value: unknown, index: number): Assist
         name,
         amountPence,
         dueDay,
+        dueDate,
         frequency,
         potId,
         creditCardId: getNullableString(payload.creditCardId),
@@ -514,6 +528,8 @@ function normalizeAssistantActionProposal(value: unknown, index: number): Assist
         provider,
         limitPence,
         openingBalancePence: getNumber(payload.openingBalancePence) ?? 0,
+        openingStatementBalancePence: getNumber(payload.openingStatementBalancePence) ?? getNumber(payload.openingBalancePence) ?? 0,
+        statementDate: getNullableString(payload.statementDate),
         dueDay: getNullableNumber(payload.dueDay),
         dueDate: getNullableString(payload.dueDate),
         color: getString(payload.color) || '#2563eb',

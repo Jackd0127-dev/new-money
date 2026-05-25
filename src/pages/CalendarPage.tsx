@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import {
   Banknote,
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -17,13 +18,27 @@ import {
   addIsoDays,
   findPayPeriodForDate,
   formatPence,
+  getAppTodayIso,
+  getDashboardTodoAllocationId,
+  getCostItemIdFromDashboardTodoAllocationId,
+  getAdditionalLinkedCreditCardPotAllocationPence,
+  getAdditionalLinkedCreditCardPotCoverBreakdown,
+  getCompletedLinkedCreditCardPotAllocation,
+  getCoveredAdditionalLinkedCardManualSpendTransactionIds,
+  getCreditCardIdFromLinkedCreditCardPotCostItemId,
+  getCreditCardStatementPayments,
   getDebtDueAmountAfterReservesAndLinkedPotsPence,
+  getDebtDueAmountPence,
+  getLinkedCreditCardPotAllocationExclusionPence,
+  getLinkedCreditCardPotCoverBreakdown,
   getPayPeriodCostSummary,
   getRecurringPaymentOccurrences,
+  isAdditionalLinkedCreditCardPotCostItemId,
+  type PeriodCostItem,
   toIsoDate,
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
-import type { PayPeriod } from '../types/models'
+import type { PayPeriod, Transaction } from '../types/models'
 import { Button, Panel, SectionGrid } from '../components/ui'
 
 type CalendarEventType =
@@ -42,6 +57,7 @@ type CalendarEventType =
   | 'spending'
 
 type CalendarEventDirection = 'in' | 'out' | 'info'
+type CalendarEventCompletionStatus = 'completed' | 'not_completed'
 
 interface CalendarEvent {
   id: string
@@ -51,6 +67,16 @@ interface CalendarEvent {
   type: CalendarEventType
   direction: CalendarEventDirection
   description: string
+  completionStatus?: CalendarEventCompletionStatus
+  breakdown?: CalendarEventBreakdownItem[]
+}
+
+interface CalendarEventBreakdownItem {
+  id: string
+  label: string
+  amountPence: number
+  date: string
+  source: string
 }
 
 const eventStyles: Record<CalendarEventType, { label: string; className: string; icon: typeof CalendarDays }> = {
@@ -121,6 +147,11 @@ const eventStyles: Record<CalendarEventType, { label: string; className: string;
   },
 }
 
+const completionStatusStyles: Record<CalendarEventCompletionStatus, string> = {
+  completed: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  not_completed: 'border-amber-200 bg-amber-50 text-amber-800',
+}
+
 export function CalendarPage({
   snapshot,
   selectedPayPeriod,
@@ -128,22 +159,25 @@ export function CalendarPage({
   snapshot: PlannerSnapshot
   selectedPayPeriod?: PayPeriod | null
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const [visibleMonth, setVisibleMonth] = useState(() =>
-    startOfMonth(selectedPayPeriod ? parseIsoDate(selectedPayPeriod.startDate) : new Date()),
+    startOfMonth(selectedPayPeriod ? parseIsoDate(selectedPayPeriod.startDate) : parseIsoDate(today)),
   )
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const monthStart = toIsoDate(visibleMonth)
   const monthEnd = toIsoDate(new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth() + 1, 0)))
+  const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth])
+  const gridStart = monthCells[0]?.date ?? monthStart
+  const gridEnd = monthCells[monthCells.length - 1]?.date ?? monthEnd
   const events = useMemo(
-    () => getCalendarEvents(snapshot, monthStart, monthEnd),
-    [monthEnd, monthStart, snapshot],
+    () => getCalendarEvents(snapshot, gridStart, gridEnd),
+    [gridEnd, gridStart, snapshot],
   )
   const selectedDayEvents = useMemo(
     () => (selectedDate ? getCalendarEvents(snapshot, selectedDate, selectedDate) : []),
     [selectedDate, snapshot],
   )
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events])
-  const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth])
   const selectedDayPayPeriod = selectedDate ? findPayPeriodForDate(snapshot.payPeriods, selectedDate) : null
 
   useEffect(() => {
@@ -202,7 +236,7 @@ export function CalendarPage({
             <Button variant="secondary" onClick={() => changeMonth(-1)} aria-label="Previous month">
               <ChevronLeft size={18} />
             </Button>
-            <Button variant="secondary" onClick={() => setVisibleMonth(startOfMonth(new Date()))}>
+            <Button variant="secondary" onClick={() => setVisibleMonth(startOfMonth(parseIsoDate(today)))}>
               Today
             </Button>
             <Button variant="secondary" onClick={() => changeMonth(1)} aria-label="Next month">
@@ -234,7 +268,7 @@ export function CalendarPage({
             {monthCells.map((cell) => {
               const dayEvents = eventsByDate.get(cell.date) ?? []
               const isCurrentMonth = cell.date >= monthStart && cell.date <= monthEnd
-              const isToday = cell.date === toIsoDate(new Date())
+              const isToday = cell.date === today
               const isSelectedPeriodDay = selectedPayPeriod
                 ? cell.date >= selectedPayPeriod.startDate && cell.date <= selectedPayPeriod.endDate
                 : false
@@ -324,6 +358,7 @@ function CalendarDayDetails({
   onBack: () => void
   onSelectDate: (date: string) => void
 }) {
+  const today = getAppTodayIso(snapshot.settings)
   const moneyInPence = events
     .filter((event) => event.direction === 'in')
     .reduce((total, event) => total + event.amountPence, 0)
@@ -336,6 +371,7 @@ function CalendarDayDetails({
     ? getPayPeriodCostSummary({
         payPeriod,
         recurringPayments: snapshot.recurringPayments,
+        creditCards: snapshot.creditCards,
         customPayments: snapshot.customPayments,
         transactions: snapshot.transactions,
         debts: snapshot.debts,
@@ -344,6 +380,7 @@ function CalendarDayDetails({
         debtReserves: snapshot.debtReserves,
         pots: snapshot.pots,
         potAllocations: snapshot.potAllocations,
+        asOfDate: today,
       })
     : null
 
@@ -433,32 +470,81 @@ function CalendarDayDetails({
 }
 
 function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
   const style = eventStyles[event.type]
   const Icon = style.icon
+  const hasBreakdown = Boolean(event.breakdown && event.breakdown.length > 0)
+  const breakdownTotalPence = event.breakdown?.reduce((total, item) => total + item.amountPence, 0) ?? 0
+  const breakdownId = `calendar-event-breakdown-${event.id}`
+  const breakdownLabel = `${event.title} ${formatEventAmount(event)}`
 
   return (
-    <article className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
-      <div className={`flex size-11 items-center justify-center rounded-lg border ${style.className}`}>
-        <Icon size={19} />
-      </div>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-semibold text-slate-950">{event.title}</h3>
-          <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${style.className}`}>
-            {style.label}
-          </span>
+    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto] sm:items-center">
+        <div className={`flex size-11 items-center justify-center rounded-lg border ${style.className}`}>
+          <Icon size={19} />
         </div>
-        <p className="mt-1 text-sm leading-5 text-slate-500">{event.description}</p>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-semibold text-slate-950">{event.title}</h3>
+            <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${style.className}`}>
+              {style.label}
+            </span>
+            {event.completionStatus && (
+              <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${completionStatusStyles[event.completionStatus]}`}>
+                {formatCompletionStatus(event.completionStatus)}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-sm leading-5 text-slate-500">{event.description}</p>
+        </div>
+        <p className={clsx(
+          'text-lg font-semibold',
+          event.direction === 'in' && 'text-emerald-700',
+          event.direction === 'out' && 'text-red-700',
+          event.direction === 'info' && 'text-slate-500',
+        )}
+        >
+          {formatEventAmount(event)}
+        </p>
+        {hasBreakdown && (
+          <button
+            type="button"
+            aria-label={`${isBreakdownOpen ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
+            aria-expanded={isBreakdownOpen}
+            aria-controls={breakdownId}
+            onClick={() => setIsBreakdownOpen((current) => !current)}
+            className="inline-flex min-h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            <ChevronDown
+              size={16}
+              aria-hidden="true"
+              className={isBreakdownOpen ? 'rotate-180 transition' : 'transition'}
+            />
+          </button>
+        )}
       </div>
-      <p className={clsx(
-        'text-lg font-semibold',
-        event.direction === 'in' && 'text-emerald-700',
-        event.direction === 'out' && 'text-red-700',
-        event.direction === 'info' && 'text-slate-500',
+
+      {hasBreakdown && isBreakdownOpen && event.breakdown && (
+        <div id={breakdownId} role="region" aria-label={`Breakdown for ${breakdownLabel}`} className="mt-3 border-t border-slate-100 pt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Breakdown</p>
+          <div className="mt-2 divide-y divide-slate-100">
+            {event.breakdown.map((item) => (
+              <div key={item.id} className="flex items-start justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-950">{item.label}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{item.source} · {formatShortDate(item.date)}</p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold text-slate-950">{formatPence(item.amountPence)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
+            <p className="text-sm font-semibold text-slate-700">Total</p>
+            <p className="text-sm font-semibold text-slate-950">{formatPence(breakdownTotalPence)}</p>
+          </div>
+        </div>
       )}
-      >
-        {formatEventAmount(event)}
-      </p>
     </article>
   )
 }
@@ -509,10 +595,12 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
   const potById = new Map(snapshot.pots.map((pot) => [pot.id, pot]))
   const debtById = new Map(snapshot.debts.map((debt) => [debt.id, debt]))
   const cardById = new Map(snapshot.creditCards.map((card) => [card.id, card]))
+  const activeCardIds = new Set(snapshot.creditCards.filter((card) => !card.archived).map((card) => card.id))
   const periodById = new Map(snapshot.payPeriods.map((period) => [period.id, period]))
   const savedPaydays = new Set(snapshot.payPeriods.map((period) => period.payday))
-  const recurringEvents: CalendarEvent[] = getRecurringPaymentOccurrences(snapshot.recurringPayments, startDate, endDate).map(
-    (occurrence) => {
+  const recurringEvents: CalendarEvent[] = getRecurringPaymentOccurrences(snapshot.recurringPayments, startDate, endDate)
+    .filter((occurrence) => !isLinkedToActiveCard(occurrence.payment.creditCardId, activeCardIds))
+    .map((occurrence) => {
       const card = occurrence.payment.creditCardId ? cardById.get(occurrence.payment.creditCardId) : null
 
       return {
@@ -524,10 +612,15 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         direction: 'out',
         description: `${occurrence.payment.frequency} payment${card ? ` charged to ${card.name}` : ''}.`,
       }
-    },
-  )
+    })
   const savedEvents: CalendarEvent[] = snapshot.customPayments
-    .filter((payment) => payment.status !== 'archived' && payment.dueDate >= startDate && payment.dueDate <= endDate)
+    .filter(
+      (payment) =>
+        payment.status !== 'archived' &&
+        !isLinkedToActiveCard(payment.creditCardId, activeCardIds) &&
+        payment.dueDate >= startDate &&
+        payment.dueDate <= endDate,
+    )
     .map((payment) => {
       const card = payment.creditCardId ? cardById.get(payment.creditCardId) : null
 
@@ -572,26 +665,72 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
   })
   const cardEvents: CalendarEvent[] = snapshot.creditCards
     .filter((card) => !card.archived)
-    .flatMap((card) => getCardDueDates(card.dueDay ?? null, card.dueDate ?? null, startDate, endDate).map((date) => ({
-      id: `card-${card.id}-${date}`,
-      date,
-      title: card.name,
-      amountPence: 0,
-      type: 'card' as const,
-      direction: 'info' as const,
-      description: `${card.provider || 'Credit card'} due date. Limit ${formatPence(card.limitPence)}.`,
-    })))
+    .flatMap((card) => {
+      if (card.statementDate) {
+        return getCreditCardStatementPayments({
+          card,
+          recurringPayments: snapshot.recurringPayments,
+          customPayments: snapshot.customPayments,
+          transactions: snapshot.transactions,
+          repayments: snapshot.creditCardRepayments,
+          startDate,
+          endDate,
+          asOfDate: getAppTodayIso(snapshot.settings),
+        }).map((statementPayment): CalendarEvent => ({
+          id: `card-statement-${card.id}-${statementPayment.statementDate}-${statementPayment.directDebitDate}`,
+          date: statementPayment.directDebitDate,
+          title: statementPayment.forecastDuePence > 0 ? `${card.name} statement payment` : card.name,
+          amountPence: statementPayment.forecastDuePence,
+          type: 'card',
+          direction: statementPayment.forecastDuePence > 0 ? 'out' : 'info',
+          description: `${card.provider || 'Credit card'} direct debit for statement ${statementPayment.statementDate}.`,
+          breakdown: statementPayment.breakdown.length > 0
+            ? statementPayment.breakdown.map((line) => ({
+                id: line.id,
+                label: line.label,
+                amountPence: line.amountPence,
+                date: line.date,
+                source: line.detail,
+              }))
+            : undefined,
+        }))
+      }
+
+      return getCardDueDates(card.dueDay ?? null, card.dueDate ?? null, startDate, endDate).map((date) => {
+        const breakdown = getCardPaymentBreakdown(snapshot, card.id, date)
+        const amountPence = breakdown.reduce((total, item) => total + item.amountPence, 0)
+        const hasBreakdown = amountPence > 0
+
+        return {
+          id: `card-${card.id}-${date}`,
+          date,
+          title: hasBreakdown ? `${card.name} card payment` : `${card.name} statement setup needed`,
+          amountPence,
+          type: 'card' as const,
+          direction: hasBreakdown ? 'out' as const : 'info' as const,
+          description: hasBreakdown
+            ? `${card.provider || 'Credit card'} statement date missing. Planned card-linked charges are grouped here until setup is completed.`
+            : `${card.provider || 'Credit card'} needs a statement date before linked-pot direct debits can run.`,
+          breakdown: hasBreakdown ? breakdown : undefined,
+        }
+      })
+    })
   const debtEvents: CalendarEvent[] = snapshot.debts
     .filter((debt) => debt.status === 'active' && debt.dueDate >= startDate && debt.dueDate <= endDate)
-    .map((debt) => ({
-      id: `debt-${debt.id}`,
-      date: debt.dueDate,
-      title: debt.name,
-      amountPence: getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots),
-      type: 'debt' as const,
-      direction: 'out' as const,
-      description: `${debt.lender || 'Debt'} due date. Linked pots and planned reserves reduce the amount still to cover.`,
-    }))
+    .map((debt) => {
+      const amountDuePence = getDebtDueAmountPence(debt)
+      const stillToCoverPence = getDebtDueAmountAfterReservesAndLinkedPotsPence(debt, snapshot.debtReserves, snapshot.pots)
+
+      return {
+        id: `debt-${debt.id}`,
+        date: debt.dueDate,
+        title: debt.name,
+        amountPence: amountDuePence,
+        type: 'debt' as const,
+        direction: amountDuePence > 0 ? 'out' as const : 'info' as const,
+        description: `${debt.lender || 'Debt'} due date. ${formatPence(stillToCoverPence)} still to cover after linked pots and planned reserves.`,
+      }
+    })
   const reserveEvents: CalendarEvent[] = snapshot.debtReserves
     .filter((reserve) => reserve.status !== 'cancelled' && reserve.payday >= startDate && reserve.payday <= endDate)
     .map((reserve) => {
@@ -624,7 +763,12 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       }
     })
   const cardRepaymentEvents: CalendarEvent[] = snapshot.creditCardRepayments
-    .filter((repayment) => repayment.date >= startDate && repayment.date <= endDate)
+    .filter(
+      (repayment) =>
+        repayment.date >= startDate &&
+        repayment.date <= endDate &&
+        !repayment.id.startsWith('linked-card-pot-repayment-'),
+    )
     .map((repayment) => {
       const card = cardById.get(repayment.creditCardId)
 
@@ -658,6 +802,45 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         description: `${creditCardPot.source === 'paycheck' ? 'Paycheck-funded' : 'External'} set-aside for ${card?.name ?? 'credit card'}${creditCardPot.note ? ` · ${creditCardPot.note}` : ''}.`,
       }
     })
+  const plannedChecklistAllocationEvents: CalendarEvent[] = snapshot.payPeriods.flatMap((period) => {
+    if (period.payday < startDate || period.payday > endDate) {
+      return []
+    }
+
+    const summary = getPayPeriodCostSummary({
+      payPeriod: period,
+      creditCards: snapshot.creditCards,
+      recurringPayments: snapshot.recurringPayments,
+      customPayments: snapshot.customPayments,
+      transactions: snapshot.transactions,
+      debts: snapshot.debts,
+      creditCardRepayments: snapshot.creditCardRepayments,
+      creditCardPots: snapshot.creditCardPots,
+      debtReserves: snapshot.debtReserves,
+      pots: snapshot.pots,
+      potAllocations: snapshot.potAllocations,
+      asOfDate: getAppTodayIso(snapshot.settings),
+    })
+
+    return summary.items
+      .filter((item) => item.source === 'linked_credit_card_pot' && item.amountPence > 0 && item.potId)
+      .filter((item) => !snapshot.potAllocations.some((allocation) => allocation.id === getDashboardTodoAllocationId(period.id, item.id)))
+      .map((item): CalendarEvent => {
+        const pot = item.potId ? potById.get(item.potId) : null
+
+        return {
+          id: `planned-allocation-${period.id}-${item.id}`,
+          date: period.payday,
+          title: pot ? `${pot.name} allocation` : item.label,
+          amountPence: item.amountPence,
+          type: 'allocation',
+          direction: 'out',
+          description: `Not completed dashboard checklist item for ${period.startDate} to ${period.endDate}.`,
+          completionStatus: 'not_completed',
+          breakdown: getPlannedChecklistAllocationBreakdown(snapshot, item, period),
+        }
+      })
+  })
   const allocationEvents: CalendarEvent[] = snapshot.potAllocations
     .flatMap((allocation): CalendarEvent[] => {
       const period = periodById.get(allocation.payPeriodId)
@@ -666,6 +849,9 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       if (!period || period.payday < startDate || period.payday > endDate) {
         return []
       }
+
+      const breakdown = getPotAllocationEventBreakdown(snapshot, allocation, period)
+      const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, period.id)
 
       return [{
         id: `allocation-${allocation.id}`,
@@ -678,7 +864,9 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         amountPence: allocation.amountPence,
         type: 'allocation' as const,
         direction: allocation.source === 'recurring' ? 'info' as const : 'out' as const,
-        description: `${allocation.source === 'recurring' ? 'Bill reserve' : allocation.source === 'pot_auto' ? 'Automatic payday top-up' : 'Manual allocation'} for ${period.startDate} to ${period.endDate}.`,
+        description: `${sourceCostItemId ? 'Completed dashboard checklist item' : allocation.source === 'recurring' ? 'Bill reserve' : allocation.source === 'pot_auto' ? 'Completed automatic payday top-up' : 'Completed manual allocation'} for ${period.startDate} to ${period.endDate}.`,
+        completionStatus: 'completed',
+        breakdown,
       }]
     })
   const spendingEvents: CalendarEvent[] = snapshot.transactions
@@ -686,6 +874,10 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       (transaction) =>
         transaction.type === 'spending' &&
         !transaction.recurringPaymentId &&
+        (
+          !(transaction.paymentMethod === 'credit_card' && isLinkedToActiveCard(transaction.creditCardId, activeCardIds)) ||
+          isLinkedCardSpendAfterCompletedCover(snapshot, transaction, periodById)
+        ) &&
         transaction.date >= startDate &&
         transaction.date <= endDate,
     )
@@ -714,6 +906,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
     ...debtPaymentEvents,
     ...cardRepaymentEvents,
     ...creditCardPotEvents,
+    ...plannedChecklistAllocationEvents,
     ...allocationEvents,
     ...spendingEvents,
   ].sort((a, b) => {
@@ -725,6 +918,287 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
 
     return getEventRank(a.type) - getEventRank(b.type)
   })
+}
+
+function getPotAllocationEventBreakdown(
+  snapshot: PlannerSnapshot,
+  allocation: PlannerSnapshot['potAllocations'][number],
+  payPeriod: PayPeriod,
+): CalendarEventBreakdownItem[] | undefined {
+  const today = getAppTodayIso(snapshot.settings)
+  const sourceCostItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, allocation.payPeriodId)
+  const linkedCreditCardId = sourceCostItemId
+    ? getCreditCardIdFromLinkedCreditCardPotCostItemId(sourceCostItemId)
+    : null
+
+  if (!sourceCostItemId || !linkedCreditCardId) {
+    return undefined
+  }
+
+  const lines = isAdditionalLinkedCreditCardPotCostItemId(sourceCostItemId)
+    ? getAdditionalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)
+    : getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)
+
+  return lines.map((line) => ({
+    id: `allocation-${allocation.id}-${line.id}`,
+    label: line.label,
+    amountPence: line.amountPence,
+    date: line.date,
+    source: line.detail,
+  }))
+}
+
+function getPlannedChecklistAllocationBreakdown(
+  snapshot: PlannerSnapshot,
+  item: PeriodCostItem,
+  payPeriod: PayPeriod,
+): CalendarEventBreakdownItem[] | undefined {
+  if (item.source !== 'linked_credit_card_pot' || !item.creditCardId) {
+    return item.coverBreakdown?.map((line) => ({
+      id: `planned-${item.id}-${line.id}`,
+      label: line.label,
+      amountPence: line.amountPence,
+      date: line.date,
+      source: line.detail,
+    }))
+  }
+
+  const today = getAppTodayIso(snapshot.settings)
+  const lines = item.coverBreakdown ?? getLinkedCreditCardPotCoverBreakdown({
+    creditCards: snapshot.creditCards,
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    repayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
+    pots: snapshot.pots,
+    payPeriod,
+    creditCardId: item.creditCardId,
+    linkedPotId: item.potId,
+    amountPence: item.amountPence,
+    asOfDate: today,
+  })
+
+  return lines.map((line) => ({
+    id: `planned-${item.id}-${line.id}`,
+    label: line.label,
+    amountPence: line.amountPence,
+    date: line.date,
+    source: line.detail,
+  }))
+}
+
+function getHistoricalLinkedCreditCardPotAllocationBreakdown(
+  snapshot: PlannerSnapshot,
+  allocation: PlannerSnapshot['potAllocations'][number],
+  payPeriod: PayPeriod,
+  linkedCreditCardId: string,
+  today: string,
+) {
+  const additionalCoverPence = getAdditionalLinkedCreditCardPotAllocationPence(
+    snapshot.potAllocations,
+    payPeriod.id,
+    allocation.potId,
+    linkedCreditCardId,
+  )
+  const coveredManualSpendIds = getCoveredAdditionalLinkedCardManualSpendTransactionIds(
+    snapshot.transactions,
+    payPeriod,
+    linkedCreditCardId,
+    additionalCoverPence,
+  )
+  const breakdownSnapshot = filterSnapshotForHistoricalAllocation(
+    snapshot,
+    allocation.createdAt,
+    coveredManualSpendIds,
+  )
+  const excludedLinkedPotAllocationPence = Math.max(
+    getLinkedCreditCardPotAllocationExclusionPence(
+      snapshot.potAllocations,
+      payPeriod.id,
+      allocation.potId,
+      allocation.createdAt,
+    ) || 0,
+    allocation.amountPence + additionalCoverPence,
+  )
+
+  return getLinkedCreditCardPotCoverBreakdown({
+    creditCards: breakdownSnapshot.creditCards,
+    recurringPayments: breakdownSnapshot.recurringPayments,
+    customPayments: breakdownSnapshot.customPayments,
+    transactions: breakdownSnapshot.transactions,
+    repayments: breakdownSnapshot.creditCardRepayments,
+    creditCardPots: breakdownSnapshot.creditCardPots,
+    pots: breakdownSnapshot.pots,
+    payPeriod,
+    creditCardId: linkedCreditCardId,
+    linkedPotId: allocation.potId,
+    amountPence: allocation.amountPence,
+    excludedLinkedPotAllocationPence,
+    asOfDate: today,
+  })
+}
+
+function getAdditionalLinkedCreditCardPotAllocationBreakdown(
+  snapshot: PlannerSnapshot,
+  allocation: PlannerSnapshot['potAllocations'][number],
+  payPeriod: PayPeriod,
+  linkedCreditCardId: string,
+  today: string,
+) {
+  const completedAllocation = getCompletedLinkedCreditCardPotAllocation(
+    snapshot.potAllocations,
+    payPeriod.id,
+    linkedCreditCardId,
+  )
+
+  if (!completedAllocation) {
+    return getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)
+  }
+
+  return getAdditionalLinkedCreditCardPotCoverBreakdown({
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    payPeriod,
+    creditCardId: linkedCreditCardId,
+    amountPence: allocation.amountPence,
+    completedAllocation,
+  })
+}
+
+function filterSnapshotForHistoricalAllocation(
+  snapshot: PlannerSnapshot,
+  cutoffTimestamp: string,
+  excludedTransactionIds: Set<string>,
+): PlannerSnapshot {
+  return {
+    ...snapshot,
+    recurringPayments: snapshot.recurringPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
+    customPayments: snapshot.customPayments.filter((payment) => payment.createdAt <= cutoffTimestamp),
+    transactions: snapshot.transactions.filter(
+      (transaction) => transaction.createdAt <= cutoffTimestamp && !excludedTransactionIds.has(transaction.id),
+    ),
+    creditCardRepayments: snapshot.creditCardRepayments.filter((repayment) => repayment.createdAt <= cutoffTimestamp),
+  }
+}
+
+function isLinkedToActiveCard(creditCardId: string | null | undefined, activeCardIds: Set<string>): boolean {
+  return Boolean(creditCardId && activeCardIds.has(creditCardId))
+}
+
+function isLinkedCardSpendAfterCompletedCover(
+  snapshot: PlannerSnapshot,
+  transaction: Transaction,
+  periodById: Map<string, PayPeriod>,
+): boolean {
+  if (transaction.paymentMethod !== 'credit_card' || !transaction.creditCardId) {
+    return false
+  }
+
+  const period = transaction.payPeriodId
+    ? periodById.get(transaction.payPeriodId) ?? findPayPeriodForDate(snapshot.payPeriods, transaction.date)
+    : findPayPeriodForDate(snapshot.payPeriods, transaction.date)
+  const completedAllocation = period
+    ? getCompletedLinkedCreditCardPotAllocation(snapshot.potAllocations, period.id, transaction.creditCardId)
+    : null
+
+  return Boolean(completedAllocation && transaction.createdAt > completedAllocation.createdAt)
+}
+
+function getCardPaymentBreakdown(
+  snapshot: PlannerSnapshot,
+  creditCardId: string,
+  dueDate: string,
+): CalendarEventBreakdownItem[] {
+  const window = getCardPaymentWindow(snapshot, creditCardId, dueDate)
+  const recurringItems: CalendarEventBreakdownItem[] = getRecurringPaymentOccurrences(
+    snapshot.recurringPayments,
+    window.startDate,
+    window.endDate,
+  )
+    .filter((occurrence) => occurrence.payment.creditCardId === creditCardId)
+    .map((occurrence) => ({
+      id: `card-recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+      label: occurrence.payment.name,
+      amountPence: occurrence.amountPence,
+      date: occurrence.dueDate,
+      source: 'Recurring payment',
+    }))
+  const savedItems: CalendarEventBreakdownItem[] = snapshot.customPayments
+    .filter(
+      (payment) =>
+        payment.status !== 'archived' &&
+        payment.creditCardId === creditCardId &&
+        payment.dueDate >= window.startDate &&
+        payment.dueDate <= window.endDate,
+    )
+    .map((payment) => ({
+      id: `card-saved-${payment.id}`,
+      label: payment.name,
+      amountPence: payment.amountPence,
+      date: payment.dueDate,
+      source: payment.status === 'paid' ? 'Saved payment paid' : 'Saved payment',
+    }))
+  const spendingItems: CalendarEventBreakdownItem[] = snapshot.transactions
+    .filter(
+      (transaction) =>
+        transaction.type === 'spending' &&
+        transaction.paymentMethod === 'credit_card' &&
+        transaction.creditCardId === creditCardId &&
+        !transaction.recurringPaymentId &&
+        transaction.date >= window.startDate &&
+        transaction.date <= window.endDate,
+    )
+    .map((transaction) => ({
+      id: `card-spending-${transaction.id}`,
+      label: transaction.note || 'Manual spend',
+      amountPence: transaction.amountPence,
+      date: transaction.date,
+      source: 'Manual card spend',
+    }))
+
+  return [...recurringItems, ...savedItems, ...spendingItems].sort((a, b) => {
+    const dateSort = a.date.localeCompare(b.date)
+
+    if (dateSort !== 0) {
+      return dateSort
+    }
+
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function getCardPaymentWindow(
+  snapshot: PlannerSnapshot,
+  creditCardId: string,
+  dueDate: string,
+): { startDate: string; endDate: string } {
+  const card = snapshot.creditCards.find((candidate) => candidate.id === creditCardId)
+
+  if (card?.dueDay) {
+    return {
+      startDate: addIsoDays(getPreviousMonthlyDueDate(card.dueDay, dueDate), 1),
+      endDate: dueDate,
+    }
+  }
+
+  const payPeriod =
+    findPayPeriodForDate(snapshot.payPeriods, dueDate) ??
+    snapshot.payPeriods.find((period) => period.nextPayday === dueDate) ??
+    null
+
+  if (payPeriod) {
+    return {
+      startDate: payPeriod.startDate,
+      endDate: payPeriod.endDate,
+    }
+  }
+
+  return {
+    startDate: dueDate,
+    endDate: dueDate,
+  }
 }
 
 function getMonthCells(month: Date): Array<{ date: string }> {
@@ -781,10 +1255,34 @@ function getCardDueDates(
   }
 
   const start = new Date(`${startDate}T00:00:00.000Z`)
-  const lastDay = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate()
-  const due = toIsoDate(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), Math.min(dueDay, lastDay))))
+  const end = new Date(`${endDate}T00:00:00.000Z`)
+  const dueDates: string[] = []
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
 
-  return due >= startDate && due <= endDate ? [due] : []
+  while (cursor <= end) {
+    const due = getMonthlyDueDate(dueDay, cursor.getUTCFullYear(), cursor.getUTCMonth())
+
+    if (due >= startDate && due <= endDate) {
+      dueDates.push(due)
+    }
+
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+  }
+
+  return dueDates
+}
+
+function getMonthlyDueDate(dueDay: number, year: number, monthIndex: number): string {
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+
+  return toIsoDate(new Date(Date.UTC(year, monthIndex, Math.min(Math.max(1, dueDay), lastDay))))
+}
+
+function getPreviousMonthlyDueDate(dueDay: number, dueDate: string): string {
+  const current = parseIsoDate(dueDate)
+  const previousMonth = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() - 1, 1))
+
+  return getMonthlyDueDate(dueDay, previousMonth.getUTCFullYear(), previousMonth.getUTCMonth())
 }
 
 function getEventRank(type: CalendarEventType): number {
@@ -839,6 +1337,13 @@ function formatDateForAria(date: string): string {
   }).format(parseIsoDate(date))
 }
 
+function formatShortDate(date: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+  }).format(parseIsoDate(date))
+}
+
 function formatSignedPence(amountPence: number): string {
   if (amountPence > 0) {
     return `+${formatPence(amountPence)}`
@@ -849,6 +1354,10 @@ function formatSignedPence(amountPence: number): string {
   }
 
   return formatPence(0)
+}
+
+function formatCompletionStatus(status: CalendarEventCompletionStatus): string {
+  return status === 'completed' ? 'Completed' : 'Not completed'
 }
 
 function formatEventAmount(event: CalendarEvent): string {

@@ -97,6 +97,8 @@ function createSnapshot(potName: string, updatedAt: string): PlannerSnapshot {
       defaultPayPeriodDays: 14,
       hourlyRatePence: 1250,
       defaultHoursWorked: 72,
+      appDateMode: 'automatic',
+      manualTodayIso: null,
       aiInstructions: '',
       aiProvider: 'gemini',
       createdAt: '2026-05-24T09:00:00.000Z',

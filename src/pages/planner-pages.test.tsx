@@ -76,7 +76,7 @@ describe('app shell navigation', () => {
 })
 
 describe('calendar page', () => {
-  it('shows anchored biweekly payments every 14 days without duplicating them on monthly due days', async () => {
+  it('groups card-linked recurring payments under the card payment instead of showing them twice', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod({
       id: 'period-current',
@@ -138,7 +138,7 @@ describe('calendar page', () => {
           provider: 'Barclays',
           limitPence: 80000,
           openingBalancePence: 68005,
-          dueDay: 11,
+          dueDay: 5,
           dueDate: null,
           color: '#2563eb',
           archived: false,
@@ -165,20 +165,25 @@ describe('calendar page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open 29 May 2026' }))
     expect(screen.getByRole('heading', { name: /Friday.*29 May 2026/ })).toBeInTheDocument()
-    expect(screen.getByText('Fuel')).toBeInTheDocument()
-    expect(screen.getByText('Personal')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
-    await user.click(screen.getByRole('button', { name: 'Next month' }))
-    await user.click(screen.getByRole('button', { name: 'Open 1 June 2026' }))
-    expect(screen.getByText('Gym')).toBeInTheDocument()
     expect(screen.queryByText('Fuel')).not.toBeInTheDocument()
     expect(screen.queryByText('Personal')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
-    await user.click(screen.getByRole('button', { name: 'Open 12 June 2026' }))
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await user.click(screen.getByRole('button', { name: 'Open 1 June 2026' }))
+    expect(screen.queryByText('Gym')).not.toBeInTheDocument()
+    expect(screen.queryByText('Fuel')).not.toBeInTheDocument()
+    expect(screen.queryByText('Personal')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to calendar' }))
+    await user.click(screen.getByRole('button', { name: 'Open 5 June 2026' }))
+    expect(screen.getByText('Barclays card payment')).toBeInTheDocument()
     expect(screen.getByText('Fuel')).toBeInTheDocument()
+    expect(screen.getByText('Gym')).toBeInTheDocument()
+    expect(screen.getByText('£95.00')).toBeInTheDocument()
+    expect(screen.getByText('Capital One card payment')).toBeInTheDocument()
     expect(screen.getByText('Personal')).toBeInTheDocument()
+    expect(screen.getAllByText('£50.00').length).toBeGreaterThan(0)
   })
 
   it('shows events on visible next-month cells in the current month grid', () => {
@@ -252,7 +257,7 @@ describe('calendar page', () => {
 
     render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
 
-    expect(screen.getByRole('button', { name: 'Open 1 June 2026' })).toHaveTextContent('£112.11 out')
+    expect(screen.getByRole('button', { name: 'Open 1 June 2026' })).toHaveTextContent('£87.11 out')
     expect(screen.getByRole('button', { name: 'Open 5 June 2026' })).toHaveTextContent('Next payday starts')
   })
 
@@ -403,7 +408,7 @@ describe('calendar page', () => {
     expect(screen.getByText('Everyday Amex repayment')).toBeInTheDocument()
     expect(screen.getByText('Food allocation')).toBeInTheDocument()
     expect(screen.getByText('Lunch')).toBeInTheDocument()
-    expect(screen.getAllByText('Everyday Amex').length).toBeGreaterThan(0)
+    expect(screen.getByText('Everyday Amex card payment')).toBeInTheDocument()
     expect(screen.getByText('Actual payment')).toBeInTheDocument()
     expect(screen.getByText('Card autopay')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Back to calendar' })).toBeInTheDocument()
@@ -2645,6 +2650,103 @@ describe('dashboard page', () => {
       potId: 'pot-barclays',
       amountPence: 17857,
     })
+
+    restoreLocalStorage()
+  })
+
+  it('expands a checklist row to show the payments that make up the amount', async () => {
+    const user = userEvent.setup()
+    const restoreLocalStorage = mockLocalStorage()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 59648,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={createActions()}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Show breakdown.*Barclays planned card cover/ }))
+
+    const breakdown = screen.getByRole('region', { name: /Breakdown.*Barclays planned card cover/ })
+
+    expect(within(breakdown).getByText('Current card shortfall')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Fuel')).toBeInTheDocument()
+    expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£83.57')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£70.00')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£25.00')).toBeInTheDocument()
+    expect(within(breakdown).getByText('£178.57')).toBeInTheDocument()
 
     restoreLocalStorage()
   })

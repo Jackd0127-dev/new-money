@@ -1,9 +1,12 @@
 import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 
 import {
   filterPayPeriodCostSummary,
   formatPence,
+  getCreditCardAllocationSummary,
   getPayPeriodCostSummary,
+  toIsoDate,
   type PeriodCostItem,
   type PayPeriodCostSummary,
 } from '../domain/money'
@@ -22,7 +25,16 @@ interface PaycheckTodoItem {
   label: string
   detail: string
   amountPence: number
+  breakdownLabel?: string
+  breakdownLines: PaycheckTodoBreakdownLine[]
   completion?: PaycheckTodoCompletion
+}
+
+interface PaycheckTodoBreakdownLine {
+  id: string
+  label: string
+  detail: string
+  amountPence: number
 }
 
 interface PaycheckTodoCompletion {
@@ -54,6 +66,7 @@ export function DashboardPage({
     () => readIgnoredPayments(),
   )
   const [pendingTodoIds, setPendingTodoIds] = useState<Set<string>>(() => new Set())
+  const [expandedTodoIds, setExpandedTodoIds] = useState<Set<string>>(() => new Set())
   const viewedPeriod = selectedPayPeriod ?? null
   const baseSummary = getPayPeriodCostSummary({
     payPeriod: viewedPeriod,
@@ -165,6 +178,20 @@ export function DashboardPage({
     }
   }
 
+  function toggleTodoBreakdown(itemId: string) {
+    setExpandedTodoIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+
+      return next
+    })
+  }
+
   return (
     <div className="space-y-6">
       <Panel
@@ -259,6 +286,9 @@ export function DashboardPage({
                 const isDone = completedTodoIds.has(item.id)
                 const isIgnored = ignoredPaymentIds.has(item.ignoreId)
                 const isPending = pendingTodoIds.has(item.id)
+                const isExpanded = expandedTodoIds.has(item.id)
+                const breakdownId = `dashboard-todo-breakdown-${item.id}`
+                const breakdownLabel = item.breakdownLabel ?? item.ignoreLabel
 
                 return (
                   <li
@@ -269,9 +299,9 @@ export function DashboardPage({
                         : isDone
                           ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3'
                           : 'rounded-lg border border-slate-200 bg-white px-3 py-3'
-                    }
+                      }
                   >
-                    <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto] sm:items-start">
+                    <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-start">
                       <input
                         id={`dashboard-todo-${item.id}`}
                         type="checkbox"
@@ -318,6 +348,24 @@ export function DashboardPage({
                       </span>
                       <button
                         type="button"
+                        aria-label={`${isExpanded ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
+                        aria-expanded={isExpanded}
+                        aria-controls={breakdownId}
+                        onClick={() => toggleTodoBreakdown(item.id)}
+                        className={
+                          isIgnored
+                            ? 'inline-flex min-h-8 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-400 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                            : 'inline-flex min-h-8 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                        }
+                      >
+                        <ChevronDown
+                          size={16}
+                          aria-hidden="true"
+                          className={isExpanded ? 'rotate-180 transition' : 'transition'}
+                        />
+                      </button>
+                      <button
+                        type="button"
                         aria-label={`Ignore Payment for ${item.ignoreLabel}`}
                         aria-pressed={isIgnored}
                         onClick={() => toggleIgnoredPayment(item, !isIgnored)}
@@ -330,6 +378,32 @@ export function DashboardPage({
                         Ignore Payment
                       </button>
                     </div>
+                    {isExpanded && (
+                      <div
+                        id={breakdownId}
+                        role="region"
+                        aria-label={`Breakdown for ${breakdownLabel}`}
+                        className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3"
+                      >
+                        <ul className="space-y-2">
+                          {item.breakdownLines.map((line) => (
+                            <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm">
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold text-slate-900">{line.label}</p>
+                                <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
+                              </div>
+                              <p className={line.amountPence < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-950'}>
+                                {formatPence(line.amountPence)}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
+                          <span className="font-semibold text-slate-700">Total</span>
+                          <span className="font-semibold text-slate-950">{formatPence(item.amountPence)}</span>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 )
               })}
@@ -607,6 +681,14 @@ function recurringAllocationToTodoItem(
       : `Set aside ${formatPence(allocation.amountPence)} into "${potName}" pot`,
     detail: 'Recurring bill reserve',
     amountPence: allocation.amountPence,
+    breakdownLines: [
+      {
+        id: `breakdown-${allocation.id}`,
+        label: payment?.name ?? potName,
+        detail: `Recurring reserve into ${potName} pot`,
+        amountPence: allocation.amountPence,
+      },
+    ],
   }
 }
 
@@ -637,6 +719,7 @@ function recurringCostToTodoItem(
       : `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
     detail: `Recurring bill due ${item.date}`,
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, item.potId ? `${getPotName(snapshot, item.potId)} pot` : 'Recurring bill')],
     completion,
   }
 }
@@ -653,6 +736,7 @@ function savedPaymentCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnaps
     label: `Pay ${formatPence(item.amountPence)} for "${item.label}"`,
     detail: `Saved payment due ${item.date}`,
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, 'Saved payment')],
   }
 }
 
@@ -670,6 +754,7 @@ function manualSpendCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
       : `Cover ${formatPence(item.amountPence)} for "${item.label}"`,
     detail: item.potId ? `Logged pot spend on ${item.date}` : `Logged spend on ${item.date}`,
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, item.potId ? `${getPotName(snapshot, item.potId)} pot spend` : 'Logged spend')],
   }
 }
 
@@ -700,6 +785,16 @@ function potAllocationCostToTodoItem(
         ? 'Automatic payday top-up'
         : 'Manual pot allocation',
     amountPence: item.amountPence,
+    breakdownLines: [
+      periodCostItemToBreakdownLine(
+        item,
+        sourceCostItemId
+          ? 'Moved from dashboard checklist'
+          : item.label.toLowerCase().includes('payday top-up')
+            ? 'Automatic payday top-up'
+            : 'Manual pot allocation',
+      ),
+    ],
     completion,
   }
 }
@@ -716,6 +811,7 @@ function debtReserveCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsh
     label: `Set aside ${formatPence(item.amountPence)} for "${debtName}" debt`,
     detail: reserve?.note || 'Debt reserve',
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, reserve?.note || 'Debt reserve')],
   }
 }
 
@@ -727,6 +823,7 @@ function debtMinimumCostToTodoItem(item: PeriodCostItem): PaycheckTodoItem {
     label: `Pay ${formatPence(item.amountPence)} toward "${item.label}" debt`,
     detail: `Debt due ${item.date}`,
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, 'Debt due this pay period')],
   }
 }
 
@@ -741,6 +838,7 @@ function creditCardPotCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnap
     label: `Set aside ${formatPence(item.amountPence)} for "${cardName}" card`,
     detail: creditCardPot?.note || item.label,
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, creditCardPot?.note || 'Card pot reserve')],
   }
 }
 
@@ -758,6 +856,8 @@ function linkedCreditCardPotCostToTodoItem(
     label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" planned card cover`,
     detail: 'Current shortfall plus planned card charges before next payday',
     amountPence: item.amountPence,
+    breakdownLabel: `${cardName} planned card cover`,
+    breakdownLines: getLinkedCreditCardPotBreakdownLines(item, snapshot, payPeriod),
     completion: item.potId
       ? createPaycheckPotCompletion({
           payPeriod,
@@ -777,7 +877,102 @@ function cardChargeCostToTodoItem(item: PeriodCostItem, snapshot: PlannerSnapsho
     label: `Set aside ${formatPence(item.amountPence)} for "${getCardName(snapshot, item.creditCardId)}" card charge "${item.label}"`,
     detail,
     amountPence: item.amountPence,
+    breakdownLines: [periodCostItemToBreakdownLine(item, detail)],
   }
+}
+
+function periodCostItemToBreakdownLine(item: PeriodCostItem, detail: string): PaycheckTodoBreakdownLine {
+  return {
+    id: `breakdown-${item.id}`,
+    label: item.label,
+    detail: `${detail} · ${item.date}`,
+    amountPence: item.amountPence,
+  }
+}
+
+function getLinkedCreditCardPotBreakdownLines(
+  item: PeriodCostItem,
+  snapshot: PlannerSnapshot,
+  payPeriod: PayPeriod,
+): PaycheckTodoBreakdownLine[] {
+  const cardSummary = getCreditCardAllocationSummary({
+    creditCards: snapshot.creditCards,
+    recurringPayments: snapshot.recurringPayments,
+    customPayments: snapshot.customPayments,
+    transactions: snapshot.transactions,
+    repayments: snapshot.creditCardRepayments,
+    creditCardPots: snapshot.creditCardPots,
+    pots: snapshot.pots,
+    payPeriod,
+  }).cards.find((candidate) => candidate.card.id === item.creditCardId)
+
+  if (!cardSummary) {
+    return [periodCostItemToBreakdownLine(item, 'Planned card cover')]
+  }
+
+  const todayIso = toIsoDate(new Date())
+  const lines: PaycheckTodoBreakdownLine[] = []
+
+  if (cardSummary.actualUncoveredPence > 0) {
+    lines.push({
+      id: `breakdown-${item.id}-current-shortfall`,
+      label: 'Current card shortfall',
+      detail: `${formatPence(cardSummary.actualOwedPence)} owed minus ${formatPence(cardSummary.creditPotPence)} already set aside`,
+      amountPence: cardSummary.actualUncoveredPence,
+    })
+  }
+
+  for (const cardItem of cardSummary.items.filter((cardItem) => isForecastCardBreakdownItem(cardItem, todayIso))) {
+    lines.push({
+      id: `breakdown-${item.id}-${cardItem.id}`,
+      label: cardItem.label,
+      detail: getCardBreakdownDetail(cardItem),
+      amountPence: cardItem.amountPence,
+    })
+  }
+
+  const lineTotalPence = lines.reduce((total, line) => total + line.amountPence, 0)
+  const adjustmentPence = item.amountPence - lineTotalPence
+
+  if (adjustmentPence !== 0) {
+    lines.push({
+      id: `breakdown-${item.id}-cover-adjustment`,
+      label: adjustmentPence < 0 ? 'Existing card cover already set aside' : 'Additional forecast cover',
+      detail: 'Linked pot balance and active card reserves are applied before this paycheck top-up',
+      amountPence: adjustmentPence,
+    })
+  }
+
+  return lines.length > 0 ? lines : [periodCostItemToBreakdownLine(item, 'Planned card cover')]
+}
+
+function isForecastCardBreakdownItem(
+  item: ReturnType<typeof getCreditCardAllocationSummary>['cards'][number]['items'][number],
+  todayIso: string,
+): boolean {
+  if (item.source === 'recurring' || item.source === 'custom') {
+    return true
+  }
+
+  return item.date > todayIso
+}
+
+function getCardBreakdownDetail(
+  item: ReturnType<typeof getCreditCardAllocationSummary>['cards'][number]['items'][number],
+): string {
+  if (item.source === 'recurring') {
+    return `Recurring card charge due ${item.date}`
+  }
+
+  if (item.source === 'custom') {
+    return `Saved card payment due ${item.date}`
+  }
+
+  if (item.source === 'repayment') {
+    return `Planned card repayment on ${item.date}`
+  }
+
+  return `Logged card spend on ${item.date}`
 }
 
 function createPaycheckPotCompletion({

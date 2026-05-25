@@ -51,6 +51,15 @@ interface CalendarEvent {
   type: CalendarEventType
   direction: CalendarEventDirection
   description: string
+  breakdown?: CalendarEventBreakdownItem[]
+}
+
+interface CalendarEventBreakdownItem {
+  id: string
+  label: string
+  amountPence: number
+  date: string
+  source: string
 }
 
 const eventStyles: Record<CalendarEventType, { label: string; className: string; icon: typeof CalendarDays }> = {
@@ -437,30 +446,54 @@ function CalendarDayDetails({
 function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
   const style = eventStyles[event.type]
   const Icon = style.icon
+  const breakdownTotalPence = event.breakdown?.reduce((total, item) => total + item.amountPence, 0) ?? 0
 
   return (
-    <article className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
-      <div className={`flex size-11 items-center justify-center rounded-lg border ${style.className}`}>
-        <Icon size={19} />
-      </div>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-semibold text-slate-950">{event.title}</h3>
-          <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${style.className}`}>
-            {style.label}
-          </span>
+    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+        <div className={`flex size-11 items-center justify-center rounded-lg border ${style.className}`}>
+          <Icon size={19} />
         </div>
-        <p className="mt-1 text-sm leading-5 text-slate-500">{event.description}</p>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-semibold text-slate-950">{event.title}</h3>
+            <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${style.className}`}>
+              {style.label}
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-5 text-slate-500">{event.description}</p>
+        </div>
+        <p className={clsx(
+          'text-lg font-semibold',
+          event.direction === 'in' && 'text-emerald-700',
+          event.direction === 'out' && 'text-red-700',
+          event.direction === 'info' && 'text-slate-500',
+        )}
+        >
+          {formatEventAmount(event)}
+        </p>
       </div>
-      <p className={clsx(
-        'text-lg font-semibold',
-        event.direction === 'in' && 'text-emerald-700',
-        event.direction === 'out' && 'text-red-700',
-        event.direction === 'info' && 'text-slate-500',
+
+      {event.breakdown && event.breakdown.length > 0 && (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Breakdown</p>
+          <div className="mt-2 divide-y divide-slate-100">
+            {event.breakdown.map((item) => (
+              <div key={item.id} className="flex items-start justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-950">{item.label}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{item.source} · {formatShortDate(item.date)}</p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold text-slate-950">{formatPence(item.amountPence)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
+            <p className="text-sm font-semibold text-slate-700">Total</p>
+            <p className="text-sm font-semibold text-slate-950">{formatPence(breakdownTotalPence)}</p>
+          </div>
+        </div>
       )}
-      >
-        {formatEventAmount(event)}
-      </p>
     </article>
   )
 }
@@ -511,10 +544,12 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
   const potById = new Map(snapshot.pots.map((pot) => [pot.id, pot]))
   const debtById = new Map(snapshot.debts.map((debt) => [debt.id, debt]))
   const cardById = new Map(snapshot.creditCards.map((card) => [card.id, card]))
+  const activeCardIds = new Set(snapshot.creditCards.filter((card) => !card.archived).map((card) => card.id))
   const periodById = new Map(snapshot.payPeriods.map((period) => [period.id, period]))
   const savedPaydays = new Set(snapshot.payPeriods.map((period) => period.payday))
-  const recurringEvents: CalendarEvent[] = getRecurringPaymentOccurrences(snapshot.recurringPayments, startDate, endDate).map(
-    (occurrence) => {
+  const recurringEvents: CalendarEvent[] = getRecurringPaymentOccurrences(snapshot.recurringPayments, startDate, endDate)
+    .filter((occurrence) => !isLinkedToActiveCard(occurrence.payment.creditCardId, activeCardIds))
+    .map((occurrence) => {
       const card = occurrence.payment.creditCardId ? cardById.get(occurrence.payment.creditCardId) : null
 
       return {
@@ -526,10 +561,15 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         direction: 'out',
         description: `${occurrence.payment.frequency} payment${card ? ` charged to ${card.name}` : ''}.`,
       }
-    },
-  )
+    })
   const savedEvents: CalendarEvent[] = snapshot.customPayments
-    .filter((payment) => payment.status !== 'archived' && payment.dueDate >= startDate && payment.dueDate <= endDate)
+    .filter(
+      (payment) =>
+        payment.status !== 'archived' &&
+        !isLinkedToActiveCard(payment.creditCardId, activeCardIds) &&
+        payment.dueDate >= startDate &&
+        payment.dueDate <= endDate,
+    )
     .map((payment) => {
       const card = payment.creditCardId ? cardById.get(payment.creditCardId) : null
 
@@ -574,15 +614,24 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
   })
   const cardEvents: CalendarEvent[] = snapshot.creditCards
     .filter((card) => !card.archived)
-    .flatMap((card) => getCardDueDates(card.dueDay ?? null, card.dueDate ?? null, startDate, endDate).map((date) => ({
-      id: `card-${card.id}-${date}`,
-      date,
-      title: card.name,
-      amountPence: 0,
-      type: 'card' as const,
-      direction: 'info' as const,
-      description: `${card.provider || 'Credit card'} due date. Limit ${formatPence(card.limitPence)}.`,
-    })))
+    .flatMap((card) => getCardDueDates(card.dueDay ?? null, card.dueDate ?? null, startDate, endDate).map((date) => {
+      const breakdown = getCardPaymentBreakdown(snapshot, card.id, date)
+      const amountPence = breakdown.reduce((total, item) => total + item.amountPence, 0)
+      const hasBreakdown = amountPence > 0
+
+      return {
+        id: `card-${card.id}-${date}`,
+        date,
+        title: hasBreakdown ? `${card.name} card payment` : card.name,
+        amountPence,
+        type: 'card' as const,
+        direction: hasBreakdown ? 'out' as const : 'info' as const,
+        description: hasBreakdown
+          ? `${card.provider || 'Credit card'} due date. Planned card-linked charges for this statement window.`
+          : `${card.provider || 'Credit card'} due date. Limit ${formatPence(card.limitPence)}.`,
+        breakdown: hasBreakdown ? breakdown : undefined,
+      }
+    }))
   const debtEvents: CalendarEvent[] = snapshot.debts
     .filter((debt) => debt.status === 'active' && debt.dueDate >= startDate && debt.dueDate <= endDate)
     .map((debt) => ({
@@ -688,6 +737,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
       (transaction) =>
         transaction.type === 'spending' &&
         !transaction.recurringPaymentId &&
+        !(transaction.paymentMethod === 'credit_card' && isLinkedToActiveCard(transaction.creditCardId, activeCardIds)) &&
         transaction.date >= startDate &&
         transaction.date <= endDate,
     )
@@ -727,6 +777,105 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
 
     return getEventRank(a.type) - getEventRank(b.type)
   })
+}
+
+function isLinkedToActiveCard(creditCardId: string | null | undefined, activeCardIds: Set<string>): boolean {
+  return Boolean(creditCardId && activeCardIds.has(creditCardId))
+}
+
+function getCardPaymentBreakdown(
+  snapshot: PlannerSnapshot,
+  creditCardId: string,
+  dueDate: string,
+): CalendarEventBreakdownItem[] {
+  const window = getCardPaymentWindow(snapshot, creditCardId, dueDate)
+  const recurringItems: CalendarEventBreakdownItem[] = getRecurringPaymentOccurrences(
+    snapshot.recurringPayments,
+    window.startDate,
+    window.endDate,
+  )
+    .filter((occurrence) => occurrence.payment.creditCardId === creditCardId)
+    .map((occurrence) => ({
+      id: `card-recurring-${occurrence.payment.id}-${occurrence.dueDate}`,
+      label: occurrence.payment.name,
+      amountPence: occurrence.amountPence,
+      date: occurrence.dueDate,
+      source: 'Recurring payment',
+    }))
+  const savedItems: CalendarEventBreakdownItem[] = snapshot.customPayments
+    .filter(
+      (payment) =>
+        payment.status !== 'archived' &&
+        payment.creditCardId === creditCardId &&
+        payment.dueDate >= window.startDate &&
+        payment.dueDate <= window.endDate,
+    )
+    .map((payment) => ({
+      id: `card-saved-${payment.id}`,
+      label: payment.name,
+      amountPence: payment.amountPence,
+      date: payment.dueDate,
+      source: payment.status === 'paid' ? 'Saved payment paid' : 'Saved payment',
+    }))
+  const spendingItems: CalendarEventBreakdownItem[] = snapshot.transactions
+    .filter(
+      (transaction) =>
+        transaction.type === 'spending' &&
+        transaction.paymentMethod === 'credit_card' &&
+        transaction.creditCardId === creditCardId &&
+        !transaction.recurringPaymentId &&
+        transaction.date >= window.startDate &&
+        transaction.date <= window.endDate,
+    )
+    .map((transaction) => ({
+      id: `card-spending-${transaction.id}`,
+      label: transaction.note || 'Manual spend',
+      amountPence: transaction.amountPence,
+      date: transaction.date,
+      source: 'Manual card spend',
+    }))
+
+  return [...recurringItems, ...savedItems, ...spendingItems].sort((a, b) => {
+    const dateSort = a.date.localeCompare(b.date)
+
+    if (dateSort !== 0) {
+      return dateSort
+    }
+
+    return a.label.localeCompare(b.label)
+  })
+}
+
+function getCardPaymentWindow(
+  snapshot: PlannerSnapshot,
+  creditCardId: string,
+  dueDate: string,
+): { startDate: string; endDate: string } {
+  const card = snapshot.creditCards.find((candidate) => candidate.id === creditCardId)
+
+  if (card?.dueDay) {
+    return {
+      startDate: addIsoDays(getPreviousMonthlyDueDate(card.dueDay, dueDate), 1),
+      endDate: dueDate,
+    }
+  }
+
+  const payPeriod =
+    findPayPeriodForDate(snapshot.payPeriods, dueDate) ??
+    snapshot.payPeriods.find((period) => period.nextPayday === dueDate) ??
+    null
+
+  if (payPeriod) {
+    return {
+      startDate: payPeriod.startDate,
+      endDate: payPeriod.endDate,
+    }
+  }
+
+  return {
+    startDate: dueDate,
+    endDate: dueDate,
+  }
 }
 
 function getMonthCells(month: Date): Array<{ date: string }> {
@@ -783,10 +932,34 @@ function getCardDueDates(
   }
 
   const start = new Date(`${startDate}T00:00:00.000Z`)
-  const lastDay = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate()
-  const due = toIsoDate(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), Math.min(dueDay, lastDay))))
+  const end = new Date(`${endDate}T00:00:00.000Z`)
+  const dueDates: string[] = []
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
 
-  return due >= startDate && due <= endDate ? [due] : []
+  while (cursor <= end) {
+    const due = getMonthlyDueDate(dueDay, cursor.getUTCFullYear(), cursor.getUTCMonth())
+
+    if (due >= startDate && due <= endDate) {
+      dueDates.push(due)
+    }
+
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+  }
+
+  return dueDates
+}
+
+function getMonthlyDueDate(dueDay: number, year: number, monthIndex: number): string {
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+
+  return toIsoDate(new Date(Date.UTC(year, monthIndex, Math.min(Math.max(1, dueDay), lastDay))))
+}
+
+function getPreviousMonthlyDueDate(dueDay: number, dueDate: string): string {
+  const current = parseIsoDate(dueDate)
+  const previousMonth = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() - 1, 1))
+
+  return getMonthlyDueDate(dueDay, previousMonth.getUTCFullYear(), previousMonth.getUTCMonth())
 }
 
 function getEventRank(type: CalendarEventType): number {
@@ -838,6 +1011,13 @@ function formatDateForAria(date: string): string {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+  }).format(parseIsoDate(date))
+}
+
+function formatShortDate(date: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
   }).format(parseIsoDate(date))
 }
 

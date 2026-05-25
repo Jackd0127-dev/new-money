@@ -43,8 +43,9 @@ export function PaydayWizardPage({
   const [actualReceived, setActualReceived] = useState(initialDraft.actualReceived)
   const [saved, setSaved] = useState(false)
 
+  const hasValidPayday = isValidIsoDateInput(payday)
   const existingPeriod = snapshot.payPeriods.find((candidate) => candidate.payday === payday) ?? null
-  const period = createNextPayPeriod(payday, payFrequency)
+  const period = hasValidPayday ? createNextPayPeriod(payday, payFrequency) : null
   const hours = Number.parseFloat(hoursWorked) || 0
   const hourlyRatePence = parsePoundsToPence(hourlyRate)
   const actualAmountPence = actualReceived ? parsePoundsToPence(actualReceived) : null
@@ -57,7 +58,7 @@ export function PaydayWizardPage({
     hoursWorked: hours,
     hourlyRatePence,
   })
-  const canSubmit = incomePence > 0
+  const canSubmit = hasValidPayday && incomePence > 0
 
   function loadPayday(nextPayday: string) {
     const draft = getPaydayDraft(snapshot, nextPayday)
@@ -146,7 +147,7 @@ export function PaydayWizardPage({
               />
             </Field>
             <Field label="Pay period">
-              <TextInput value={`${period.startDate} to ${period.endDate}`} disabled />
+              <TextInput value={period ? `${period.startDate} to ${period.endDate}` : 'Choose a valid payday'} disabled />
             </Field>
           </div>
 
@@ -266,6 +267,16 @@ function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
         ? ''
         : (paycheck.actualAmountPence / 100).toFixed(2),
   }
+}
+
+function isValidIsoDateInput(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`)
+
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
 function inferPayFrequency(period: PayPeriod): PayFrequency {

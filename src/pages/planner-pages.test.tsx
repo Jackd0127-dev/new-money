@@ -652,6 +652,15 @@ describe('AI page', () => {
 })
 
 describe('payday wizard', () => {
+  it('does not crash while the payday date is temporarily invalid', () => {
+    render(<PaydayWizardPage snapshot={createSnapshot()} actions={createActions()} />)
+
+    fireEvent.change(screen.getByLabelText('Payday'), { target: { value: '' } })
+
+    expect(screen.getByDisplayValue('Choose a valid payday')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm paycheck plan' })).toBeDisabled()
+  })
+
   it('lets the paycheck frequency change the visible pay period', async () => {
     const user = userEvent.setup()
 

@@ -101,4 +101,22 @@ describe('useFirebaseAuth', () => {
     expect(result.current.error).toBeNull()
     expect(firebaseAuthMock.getRedirectResult).not.toHaveBeenCalled()
   })
+
+  it('explains popup startup failures clearly', async () => {
+    firebaseAuthMock.signInWithPopup.mockRejectedValueOnce(
+      Object.assign(new Error('Firebase: Error (auth/internal-error).'), {
+        code: 'auth/internal-error',
+      }),
+    )
+
+    const { result } = renderHook(() => useFirebaseAuth())
+
+    await act(async () => {
+      await result.current.signInWithGoogle()
+    })
+
+    expect(result.current.error).toBe(
+      'The sign-in window could not open in this browser. Allow pop-ups for this site, then try again.',
+    )
+  })
 })

@@ -191,6 +191,10 @@ function toAuthMessage(error: unknown): string {
       return 'The sign-in window was blocked by the browser. Try again or allow pop-ups for this site.'
     }
 
+    if (matchesAuthError('auth/internal-error')) {
+      return 'The sign-in window could not open in this browser. Allow pop-ups for this site, then try again.'
+    }
+
     if (matchesAuthError('auth/account-exists-with-different-credential')) {
       return 'That email already has a Money Manager account using another sign-in method. Sign in with the original method for that account.'
     }

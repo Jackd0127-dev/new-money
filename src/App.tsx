@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 
 import { AppAssistant } from './components/AppAssistant'
+import { AuthScreen } from './components/AuthScreen'
 import { AppShell } from './components/AppShell'
 import { Button } from './components/ui'
 import { AiPlanPage } from './pages/AiPlanPage'
@@ -33,6 +34,11 @@ function App() {
     snapshot,
     refresh: actions.refresh,
   })
+
+  if (auth.isLoading || !auth.isConfigured || !auth.user) {
+    return <AuthScreen auth={auth} />
+  }
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">

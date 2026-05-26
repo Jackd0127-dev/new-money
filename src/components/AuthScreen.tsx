@@ -1,0 +1,171 @@
+import { useState } from 'react'
+import { Apple, Loader2, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
+
+import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
+import { Button, Field, TextInput } from './ui'
+
+export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [mode, setMode] = useState<'sign-in' | 'create'>('sign-in')
+  const [busyAction, setBusyAction] = useState<'google' | 'apple' | 'email' | null>(null)
+  const canSubmitEmail = email.trim().length > 0 && password.length >= 6 && busyAction === null
+
+  async function runAuthAction(action: 'google' | 'apple' | 'email', callback: () => Promise<boolean>) {
+    setBusyAction(action)
+
+    try {
+      await callback()
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  async function submitEmailAuth() {
+    if (!canSubmitEmail) {
+      return
+    }
+
+    await runAuthAction('email', () =>
+      mode === 'sign-in'
+        ? auth.signInWithEmail(email.trim(), password)
+        : auth.createEmailAccount(email.trim(), password),
+    )
+  }
+
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-slate-100 px-4 py-6 text-slate-950 sm:px-6">
+      <section
+        aria-label="Sign in to Money Manager"
+        className="grid w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70 lg:grid-cols-[0.9fr_1.1fr]"
+      >
+        <div className="bg-slate-950 px-5 py-7 text-white sm:px-8 sm:py-10">
+          <div className="flex items-center gap-3">
+            <div className="flex size-11 items-center justify-center rounded-xl bg-white p-2 text-slate-950">
+              <img src="/favicon.svg" alt="" className="size-full" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">Money Manager</p>
+              <p className="text-xs text-slate-300">Private paycheck planning</p>
+            </div>
+          </div>
+
+          <div className="mt-10 max-w-sm">
+            <h1 className="text-3xl font-semibold leading-tight tracking-normal sm:text-4xl">
+              Sign in to open your planner.
+            </h1>
+            <p className="mt-4 text-sm leading-6 text-slate-300">
+              This app is account-only. Your dashboard, pots, cards, and paycheck checklist stay hidden until you sign in.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-3 text-sm text-slate-200">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 shrink-0 text-emerald-300" size={18} />
+              <p>Cloud sync runs only after Firebase confirms your account.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <LockKeyhole className="mt-0.5 shrink-0 text-cyan-300" size={18} />
+              <p>Opening the app signed out always returns to this login screen.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 py-7 sm:px-8 sm:py-10">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-950">Account login</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Use your saved account to continue.
+              </p>
+            </div>
+            {auth.isLoading && <Loader2 className="animate-spin text-slate-400" size={20} aria-label="Checking sign-in" />}
+          </div>
+
+          {!auth.isConfigured && (
+            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-5 text-amber-900">
+              Sign-in is not configured for this deployment, so the planner cannot be opened.
+            </div>
+          )}
+
+          {auth.isConfigured && (
+            <div className="mt-6 space-y-5">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  variant="secondary"
+                  disabled={busyAction !== null || auth.isLoading}
+                  onClick={() => void runAuthAction('google', auth.signInWithGoogle)}
+                >
+                  {busyAction === 'google' ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
+                  Continue with Google
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={busyAction !== null || auth.isLoading || !auth.isAppleEnabled}
+                  onClick={() => void runAuthAction('apple', auth.signInWithApple)}
+                >
+                  {busyAction === 'apple' ? <Loader2 className="animate-spin" size={18} /> : <Apple size={18} />}
+                  Continue with Apple
+                </Button>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="grid gap-3">
+                  <Field label="Email">
+                    <TextInput
+                      autoComplete="email"
+                      inputMode="email"
+                      value={email}
+                      onChange={(event) => {
+                        auth.clearError()
+                        setEmail(event.target.value)
+                      }}
+                      placeholder="you@example.com"
+                      type="email"
+                    />
+                  </Field>
+                  <Field label="Password">
+                    <TextInput
+                      autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
+                      minLength={6}
+                      value={password}
+                      onChange={(event) => {
+                        auth.clearError()
+                        setPassword(event.target.value)
+                      }}
+                      placeholder="6+ characters"
+                      type="password"
+                    />
+                  </Field>
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <Button onClick={() => void submitEmailAuth()} disabled={!canSubmitEmail || auth.isLoading}>
+                      {busyAction === 'email' ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
+                      {mode === 'sign-in' ? 'Sign in' : 'Create account'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busyAction !== null || auth.isLoading}
+                      onClick={() => {
+                        auth.clearError()
+                        setMode((current) => current === 'sign-in' ? 'create' : 'sign-in')
+                      }}
+                    >
+                      {mode === 'sign-in' ? 'Create instead' : 'Sign in instead'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {auth.error && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-5 text-red-700">
+              {auth.error}
+            </div>
+          )}
+        </div>
+      </section>
+    </main>
+  )
+}

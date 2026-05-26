@@ -15,6 +15,7 @@ import { SavingsInvestmentsPage } from './SavingsInvestmentsPage'
 import { SettingsPage } from './SettingsPage'
 import { SpendingPage } from './SpendingPage'
 import { AppAssistant } from '../components/AppAssistant'
+import { AuthScreen } from '../components/AuthScreen'
 import { AppShell } from '../components/AppShell'
 import { creditCardDesigns } from '../domain/creditCardDesigns'
 import { toIsoDate } from '../domain/money'
@@ -74,6 +75,29 @@ describe('app shell navigation', () => {
       'AI',
       'Settings',
     ])
+  })
+})
+
+describe('auth screen', () => {
+  it('signs in with email from the app entry screen', async () => {
+    const user = userEvent.setup()
+    const auth = createAuth()
+
+    render(<AuthScreen auth={auth} />)
+
+    await user.type(screen.getByLabelText('Email'), 'money@example.com')
+    await user.type(screen.getByLabelText('Password'), 'secret12')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(auth.signInWithEmail).toHaveBeenCalledWith('money@example.com', 'secret12')
+    expect(screen.queryByRole('button', { name: 'Dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('blocks the planner when Firebase sign-in is unavailable', () => {
+    render(<AuthScreen auth={createAuth({ isConfigured: false })} />)
+
+    expect(screen.getByText('Sign-in is not configured for this deployment, so the planner cannot be opened.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
   })
 })
 

@@ -2859,6 +2859,79 @@ describe('pots page', () => {
     expect(screen.getByText('£775.05 forecast target')).toBeInTheDocument()
     expect(screen.getByText('Due now • £178.57 left')).toBeInTheDocument()
   })
+
+  it('increases a linked credit card pot target when new card spend is logged', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      settings: {
+        ...createSnapshot().settings,
+        appDateMode: 'manual',
+        manualTodayIso: '2026-05-26',
+      },
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'card',
+          balancePence: 68005,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-barclays-coffee',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 2000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-25',
+          note: 'Coffee',
+          createdAt: '2026-05-25T10:00:00.000Z',
+          updatedAt: '2026-05-25T10:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.getByText('97%')).toBeInTheDocument()
+    expect(screen.getByText('£700.05 target')).toBeInTheDocument()
+    expect(screen.getByText('Due in 16 days • £20.00 left')).toBeInTheDocument()
+  })
 })
 
 describe('recurring page', () => {
@@ -3887,6 +3960,99 @@ describe('dashboard page', () => {
     expect(within(breakdown).getByText('Gym')).toBeInTheDocument()
     expect(within(breakdown).getByText('£20.00')).toBeInTheDocument()
     expect(within(breakdown).getByText('£198.57')).toBeInTheDocument()
+
+    restoreLocalStorage()
+  })
+
+  it('carries an unchecked linked-card spend into the next paycheck checklist', () => {
+    const restoreLocalStorage = mockLocalStorage()
+    const currentPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 78850,
+    })
+    const nextPeriod = createPayPeriod({
+      id: 'period-next',
+      startDate: '2026-06-05',
+      endDate: '2026-06-18',
+      payday: '2026-06-05',
+      nextPayday: '2026-06-19',
+      incomePence: 78850,
+      status: 'planned',
+    })
+    const snapshot = createSnapshot({
+      settings: {
+        ...createSnapshot().settings,
+        appDateMode: 'manual',
+        manualTodayIso: '2026-06-05',
+      },
+      payPeriods: [currentPeriod, nextPeriod],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 68005,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 68005,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-barclays-coffee',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 2000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-25',
+          note: 'Coffee',
+          createdAt: '2026-05-25T10:00:00.000Z',
+          updatedAt: '2026-05-25T10:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <DashboardPage
+        snapshot={snapshot}
+        selectedPayPeriod={nextPeriod}
+        actions={createActions()}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    const carriedItem = screen.getByRole('checkbox', {
+      name: /Set aside £20\.00 into "Barclays" pot for "Barclays" planned card cover/,
+    })
+
+    expect(carriedItem).not.toBeChecked()
+    expect(screen.getByText('Current shortfall plus planned card charges before next payday')).toBeInTheDocument()
 
     restoreLocalStorage()
   })

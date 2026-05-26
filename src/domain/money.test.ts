@@ -1695,6 +1695,106 @@ describe('pay period cost summary', () => {
     expect(summary.creditCardPotsPence).toBe(17857)
   })
 
+  it('carries unchecked linked-card spend into the next paycheck pot cover', () => {
+    const card: CreditCard = {
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      dueDay: 11,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const linkedPot: Pot = {
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 68005,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const loggedSpend: Transaction = {
+      id: 'txn-barclays-coffee',
+      potId: null,
+      payPeriodId: 'period-current',
+      amountPence: 2000,
+      type: 'spending',
+      paymentMethod: 'credit_card',
+      creditCardId: 'card-barclays',
+      recurringPaymentId: null,
+      date: '2026-05-25',
+      note: 'Coffee',
+      createdAt: '2026-05-25T10:00:00.000Z',
+      updatedAt: '2026-05-25T10:00:00.000Z',
+    }
+    const currentPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 78850,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const nextPeriod: PayPeriod = {
+      id: 'period-next',
+      startDate: '2026-06-05',
+      endDate: '2026-06-18',
+      payday: '2026-06-05',
+      nextPayday: '2026-06-19',
+      payFrequency: 'biweekly',
+      incomePence: 78850,
+      status: 'planned',
+      createdAt: '2026-06-05T00:00:00.000Z',
+      updatedAt: '2026-06-05T00:00:00.000Z',
+    }
+    const input = {
+      creditCards: [card],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [loggedSpend],
+      debts: [],
+      creditCardRepayments: [],
+      pots: [linkedPot],
+      potAllocations: [],
+      asOfDate: '2026-06-05',
+    }
+
+    const currentSummary = getPayPeriodCostSummary({ ...input, payPeriod: currentPeriod })
+    const nextSummary = getPayPeriodCostSummary({ ...input, payPeriod: nextPeriod })
+
+    expect(currentSummary.items).toContainEqual(
+      expect.objectContaining({
+        id: 'linked-credit-card-pot-card-barclays',
+        amountPence: 2000,
+        source: 'linked_credit_card_pot',
+        creditCardId: 'card-barclays',
+        potId: 'pot-barclays',
+      }),
+    )
+    expect(nextSummary.items).toContainEqual(
+      expect.objectContaining({
+        id: 'linked-credit-card-pot-card-barclays',
+        amountPence: 2000,
+        source: 'linked_credit_card_pot',
+        creditCardId: 'card-barclays',
+        potId: 'pot-barclays',
+      }),
+    )
+  })
+
   it('calculates dashboard costs from due payments, saved payments, manual spending, debts, and net card costs', () => {
     const payPeriod: PayPeriod = {
       id: 'period-current',

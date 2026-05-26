@@ -30,7 +30,6 @@ import {
   getAppTodayIso,
   getCreditCardAllocationSummary,
   parsePoundsToPence,
-  toIsoDate,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import {
@@ -1282,20 +1281,33 @@ function getCreditCardDueIso(card: PlannerSnapshot['creditCards'][number], today
 }
 
 function getNextDueDayIso(dueDay: number, todayIso: string): string {
-  const today = new Date(`${todayIso}T00:00:00`)
-  const candidate = new Date(today)
-  candidate.setDate(Math.min(dueDay, getDaysInMonth(candidate)))
+  const [year, month] = todayIso.split('-').map(Number)
+  let targetYear = year
+  let targetMonthIndex = month - 1
+  let candidate = getDueDayIso(targetYear, targetMonthIndex, dueDay)
 
-  if (candidate < today) {
-    candidate.setMonth(candidate.getMonth() + 1)
-    candidate.setDate(Math.min(dueDay, getDaysInMonth(candidate)))
+  if (candidate < todayIso) {
+    targetMonthIndex += 1
+
+    if (targetMonthIndex > 11) {
+      targetMonthIndex = 0
+      targetYear += 1
+    }
+
+    candidate = getDueDayIso(targetYear, targetMonthIndex, dueDay)
   }
 
-  return toIsoDate(candidate)
+  return candidate
 }
 
-function getDaysInMonth(date: Date): number {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+function getDueDayIso(year: number, monthIndex: number, dueDay: number): string {
+  const day = Math.min(Math.max(1, dueDay), getDaysInMonth(year, monthIndex))
+
+  return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function getDaysInMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
 }
 
 function minIsoDate(left: string | null, right: string | null): string | null {
@@ -1311,10 +1323,16 @@ function minIsoDate(left: string | null, right: string | null): string | null {
 }
 
 function getDaysUntil(isoDate: string, todayIso: string): number {
-  const today = new Date(`${todayIso}T00:00:00`).getTime()
-  const due = new Date(`${isoDate}T00:00:00`).getTime()
+  const today = isoDateToUtcMillis(todayIso)
+  const due = isoDateToUtcMillis(isoDate)
 
   return Math.ceil((due - today) / 86_400_000)
+}
+
+function isoDateToUtcMillis(value: string): number {
+  const [year, month, day] = value.split('-').map(Number)
+
+  return Date.UTC(year, month - 1, day)
 }
 
 function withAlpha(color: string, alpha: number): string {

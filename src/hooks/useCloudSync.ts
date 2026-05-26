@@ -28,6 +28,7 @@ export interface CloudSyncController {
   message: string
   cloudUpdatedAtIso: string | null
   isBusy: boolean
+  saveNow: () => Promise<boolean>
   retryCloudCheck: () => Promise<void>
 }
 
@@ -255,11 +256,40 @@ export function useCloudSync({
     return () => window.clearTimeout(timeout)
   }, [autoSyncEnabled, snapshot, user])
 
+  const saveNow = useCallback(async () => {
+    if (!isFirebaseConfigured || !user || !snapshot) {
+      return false
+    }
+
+    const signature = getSnapshotSignature(snapshot)
+
+    syncGenerationRef.current += 1
+    checkedUserRef.current = user.uid
+    setStatus('syncing')
+    setMessage('Saving account data before logout.')
+
+    try {
+      const updatedAtIso = await saveCloudPlannerSnapshot(user.uid, snapshot)
+
+      lastUploadedSignatureRef.current = signature
+      setCloudUpdatedAtIso(updatedAtIso)
+      setStatus('synced')
+      setMessage('Account data is up to date.')
+      setAutoSyncEnabled(true)
+      return true
+    } catch (caughtError) {
+      setStatus('error')
+      setMessage(toSyncMessage(caughtError))
+      return false
+    }
+  }, [snapshot, user])
+
   return {
     status,
     message,
     cloudUpdatedAtIso,
     isBusy: status === 'checking' || status === 'syncing',
+    saveNow,
     retryCloudCheck: checkCloud,
   }
 }

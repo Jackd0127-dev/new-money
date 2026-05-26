@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Apple, CalendarDays, CheckCircle2, KeyRound, LogOut, Mail, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 
 import { getAppTodayIso, parsePoundsToPence } from '../domain/money'
+import type { CloudSyncController } from '../hooks/useCloudSync'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
 import { Button, Field, Panel, SectionGrid, SelectInput, TextArea, TextInput } from '../components/ui'
@@ -11,10 +12,12 @@ export function SettingsPage({
   snapshot,
   actions,
   auth,
+  cloudSync,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
   auth?: FirebaseAuthController
+  cloudSync?: Pick<CloudSyncController, 'saveNow'>
 }) {
   const [hourlyRate, setHourlyRate] = useState((snapshot.settings.hourlyRatePence / 100).toFixed(2))
   const [defaultHoursWorked, setDefaultHoursWorked] = useState(String(snapshot.settings.defaultHoursWorked))
@@ -185,7 +188,7 @@ export function SettingsPage({
           </div>
         </Panel>
 
-        <AccountPanel auth={auth} />
+        <AccountPanel auth={auth} cloudSync={cloudSync} />
       </SectionGrid>
 
       <Panel title="Update" description="Refresh saved planner data." accent="emerald" density="compact">
@@ -206,17 +209,28 @@ export function SettingsPage({
   )
 }
 
-function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
+function AccountPanel({
+  auth,
+  cloudSync,
+}: {
+  auth?: FirebaseAuthController
+  cloudSync?: Pick<CloudSyncController, 'saveNow'>
+}) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [accountMessage, setAccountMessage] = useState<string | null>(null)
-  const [busyAccountAction, setBusyAccountAction] = useState<'password' | 'delete' | null>(null)
+  const [accountError, setAccountError] = useState<string | null>(null)
+  const [busyAccountAction, setBusyAccountAction] = useState<'password' | 'delete' | 'logout' | null>(null)
 
   async function signInWithEmail() {
+    setAccountMessage(null)
+    setAccountError(null)
     await auth?.signInWithEmail(email, password)
   }
 
   async function createEmailAccount() {
+    setAccountMessage(null)
+    setAccountError(null)
     await auth?.createEmailAccount(email, password)
   }
 
@@ -228,6 +242,7 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
     }
 
     setAccountMessage(null)
+    setAccountError(null)
     setBusyAccountAction('password')
 
     const resetSent = await auth.sendPasswordResetEmail(resetEmail)
@@ -253,12 +268,46 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
     }
 
     setAccountMessage(null)
+    setAccountError(null)
     setBusyAccountAction('delete')
 
     const deleted = await auth.deleteAccount()
 
     if (deleted) {
       setAccountMessage('Account deleted. Local app data remains on this device.')
+    }
+
+    setBusyAccountAction(null)
+  }
+
+  async function logOut() {
+    if (!auth?.user) {
+      return
+    }
+
+    const confirmed = window.confirm('Log out on this device?')
+
+    if (!confirmed) {
+      return
+    }
+
+    setAccountMessage(null)
+    setAccountError(null)
+    setBusyAccountAction('logout')
+
+    const saved = cloudSync ? await cloudSync.saveNow() : true
+
+    if (!saved) {
+      setAccountError('Could not save your latest account data. Stay signed in and try again.')
+      setBusyAccountAction(null)
+      return
+    }
+
+    const signedOut = await auth.signOut()
+
+    if (!signedOut) {
+      setBusyAccountAction(null)
+      return
     }
 
     setBusyAccountAction(null)
@@ -347,6 +396,12 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
           </div>
         )}
 
+        {accountError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-5 text-red-700">
+            {accountError}
+          </div>
+        )}
+
         {accountMessage && (
           <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-5 text-emerald-800">
             <CheckCircle2 className="mt-0.5 shrink-0" size={16} />
@@ -375,14 +430,10 @@ function AccountPanel({ auth }: { auth?: FirebaseAuthController }) {
           <Button
             variant="secondary"
             disabled={!isSignedIn || busyAccountAction !== null}
-            onClick={() => {
-              if (window.confirm('Log out on this device?')) {
-                void auth?.signOut()
-              }
-            }}
+            onClick={() => void logOut()}
           >
             <LogOut size={18} />
-            Log out
+            {busyAccountAction === 'logout' ? 'Saving and logging out' : 'Log out'}
           </Button>
         </div>
 

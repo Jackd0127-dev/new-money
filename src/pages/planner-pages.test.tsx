@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -1063,6 +1063,62 @@ describe('settings page', () => {
     )
     expect(auth.deleteAccount).toHaveBeenCalled()
     expect(screen.getByText('Account deleted. Local app data remains on this device.')).toBeVisible()
+
+    confirmSpy.mockRestore()
+  })
+
+  it('saves the latest cloud snapshot before logging out', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const signOut = vi.fn(async () => true)
+    const saveNow = vi.fn(async () => true)
+    const auth = createAuth({
+      user: createAuthUser({ email: 'money@example.com' }),
+      signOut,
+    })
+
+    render(
+      <SettingsPage
+        snapshot={createSnapshot()}
+        actions={createActions()}
+        auth={auth}
+        cloudSync={{ saveNow }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1))
+    expect(saveNow).toHaveBeenCalledTimes(1)
+    expect(saveNow.mock.invocationCallOrder[0]).toBeLessThan(signOut.mock.invocationCallOrder[0])
+
+    confirmSpy.mockRestore()
+  })
+
+  it('keeps the user signed in when the final cloud save fails', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const signOut = vi.fn(async () => true)
+    const saveNow = vi.fn(async () => false)
+    const auth = createAuth({
+      user: createAuthUser({ email: 'money@example.com' }),
+      signOut,
+    })
+
+    render(
+      <SettingsPage
+        snapshot={createSnapshot()}
+        actions={createActions()}
+        auth={auth}
+        cloudSync={{ saveNow }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+
+    await waitFor(() => expect(saveNow).toHaveBeenCalledTimes(1))
+    expect(signOut).not.toHaveBeenCalled()
+    expect(screen.getByText('Could not save your latest account data. Stay signed in and try again.')).toBeVisible()
 
     confirmSpy.mockRestore()
   })

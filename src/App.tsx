@@ -29,7 +29,7 @@ function App() {
   const [isCreatePotModalOpen, setIsCreatePotModalOpen] = useState(false)
   const { snapshot, isLoading, error, actions } = usePlannerData()
   const auth = useFirebaseAuth()
-  useCloudSync({
+  const cloudSync = useCloudSync({
     user: auth.user,
     snapshot,
     refresh: actions.refresh,
@@ -104,7 +104,7 @@ function App() {
     recurring: <RecurringPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
     calendar: <CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />,
     history: <HistoryPage snapshot={snapshot} actions={actions} />,
-    settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} />,
+    settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} cloudSync={cloudSync} />,
   }
 
   return (

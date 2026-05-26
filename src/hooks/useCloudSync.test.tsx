@@ -86,6 +86,30 @@ describe('useCloudSync', () => {
     expect(storageMock.replacePlannerSnapshot).not.toHaveBeenCalled()
     expect(refresh).not.toHaveBeenCalled()
   })
+
+  it('can force-save the latest local snapshot before logout', async () => {
+    cloudPlannerMock.getCloudPlannerSnapshot.mockResolvedValue(null)
+    cloudPlannerMock.saveCloudPlannerSnapshot.mockResolvedValue('2026-05-24T10:02:00.000Z')
+
+    const user = { uid: 'user-1' } as User
+    const refresh = vi.fn(async () => {})
+    const snapshot = createSnapshot('Latest Bills', '2026-05-24T10:02:00.000Z')
+
+    const { result } = renderHook(() => useCloudSync({ user, snapshot, refresh }))
+    const controller = result.current as unknown as {
+      saveNow: () => Promise<boolean>
+    }
+
+    let saved = false
+    await act(async () => {
+      saved = await controller.saveNow()
+    })
+
+    expect(saved).toBe(true)
+    expect(cloudPlannerMock.saveCloudPlannerSnapshot).toHaveBeenCalledWith('user-1', snapshot)
+    expect(result.current.status).toBe('synced')
+    expect(result.current.message).toBe('Account data is up to date.')
+  })
 })
 
 function createSnapshot(potName: string, updatedAt: string): PlannerSnapshot {

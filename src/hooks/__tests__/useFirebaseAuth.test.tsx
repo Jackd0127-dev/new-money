@@ -36,7 +36,7 @@ describe('useFirebaseAuth', () => {
     firebaseAuthMock.signInWithRedirect.mockResolvedValue(undefined)
   })
 
-  it('uses redirect sign-in for Google and Apple providers', async () => {
+  it('uses popup sign-in for Google and Apple providers on the custom domain app', async () => {
     const { result } = renderHook(() => useFirebaseAuth())
 
     await act(async () => {
@@ -44,19 +44,19 @@ describe('useFirebaseAuth', () => {
       await result.current.signInWithApple()
     })
 
-    expect(firebaseAuthMock.signInWithRedirect).toHaveBeenCalledWith(
+    expect(firebaseAuthMock.signInWithPopup).toHaveBeenCalledWith(
       firebaseClientMock.firebaseAuth,
       firebaseClientMock.googleAuthProvider,
     )
-    expect(firebaseAuthMock.signInWithRedirect).toHaveBeenCalledWith(
+    expect(firebaseAuthMock.signInWithPopup).toHaveBeenCalledWith(
       firebaseClientMock.firebaseAuth,
       firebaseClientMock.appleAuthProvider,
     )
-    expect(firebaseAuthMock.signInWithPopup).not.toHaveBeenCalled()
+    expect(firebaseAuthMock.signInWithRedirect).not.toHaveBeenCalled()
   })
 
   it('shows provider setup errors instead of a generic auth failure', async () => {
-    firebaseAuthMock.signInWithRedirect.mockRejectedValueOnce(
+    firebaseAuthMock.signInWithPopup.mockRejectedValueOnce(
       Object.assign(new Error('Firebase: Error (auth/operation-not-allowed).'), {
         code: 'auth/operation-not-allowed',
       }),
@@ -69,5 +69,23 @@ describe('useFirebaseAuth', () => {
     })
 
     expect(result.current.error).toBe('This sign-in provider is not enabled in Firebase Authentication.')
+  })
+
+  it('explains provider account conflicts after OAuth verification', async () => {
+    firebaseAuthMock.signInWithPopup.mockRejectedValueOnce(
+      Object.assign(new Error('Firebase: Error (auth/account-exists-with-different-credential).'), {
+        code: 'auth/account-exists-with-different-credential',
+      }),
+    )
+
+    const { result } = renderHook(() => useFirebaseAuth())
+
+    await act(async () => {
+      await result.current.signInWithGoogle()
+    })
+
+    expect(result.current.error).toBe(
+      'That email already has a Money Manager account using another sign-in method. Sign in with the original method for that account.',
+    )
   })
 })

@@ -5,7 +5,7 @@ import {
   onAuthStateChanged,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithRedirect,
+  signInWithPopup,
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth'
@@ -95,7 +95,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
   const signInWithGoogle = useCallback(
     () =>
       runAuthAction(async () => {
-        await signInWithRedirect(requireAuth(), googleAuthProvider)
+        await signInWithPopup(requireAuth(), googleAuthProvider)
       }),
     [requireAuth, runAuthAction],
   )
@@ -107,7 +107,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
           throw new Error('Apple sign-in is not enabled yet.')
         }
 
-        await signInWithRedirect(requireAuth(), appleAuthProvider)
+        await signInWithPopup(requireAuth(), appleAuthProvider)
       }),
     [requireAuth, runAuthAction],
   )
@@ -203,6 +203,14 @@ function toAuthMessage(error: unknown): string {
       return 'The sign-in window was blocked by the browser. Try again or allow pop-ups for this site.'
     }
 
+    if (matchesAuthError('auth/account-exists-with-different-credential')) {
+      return 'That email already has a Money Manager account using another sign-in method. Sign in with the original method for that account.'
+    }
+
+    if (matchesAuthError('auth/credential-already-in-use')) {
+      return 'That Google or Apple account is already connected to another Money Manager account.'
+    }
+
     if (matchesAuthError('auth/operation-not-allowed')) {
       return 'This sign-in provider is not enabled in Firebase Authentication.'
     }
@@ -233,6 +241,19 @@ function toAuthMessage(error: unknown): string {
 
     if (matchesAuthError('auth/too-many-requests')) {
       return 'Too many attempts. Wait a moment, then try again.'
+    }
+
+    if (
+      matchesAuthError('auth/web-storage-unsupported') ||
+      matchesAuthError('auth/redirect-cancelled-by-user') ||
+      message.includes('missing initial state') ||
+      message.includes('sessionStorage is inaccessible')
+    ) {
+      return 'The previous redirect sign-in could not be completed. Try again using the sign-in window.'
+    }
+
+    if (code) {
+      return `Authentication failed (${code}). Please try again.`
     }
 
     return 'Authentication failed. Please try again.'

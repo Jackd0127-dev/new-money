@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   onAuthStateChanged,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth'
@@ -43,6 +44,16 @@ export function useFirebaseAuth(): FirebaseAuthController {
       return undefined
     }
 
+    let isMounted = true
+    void getRedirectResult(firebaseAuth).catch((caughtError) => {
+      if (!isMounted) {
+        return
+      }
+
+      setError(toAuthMessage(caughtError))
+      setIsLoading(false)
+    })
+
     const unsubscribe = onAuthStateChanged(
       firebaseAuth,
       (nextUser) => {
@@ -56,6 +67,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
     )
 
     return () => {
+      isMounted = false
       unsubscribe()
     }
   }, [])
@@ -83,7 +95,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
   const signInWithGoogle = useCallback(
     () =>
       runAuthAction(async () => {
-        await signInWithPopup(requireAuth(), googleAuthProvider)
+        await signInWithRedirect(requireAuth(), googleAuthProvider)
       }),
     [requireAuth, runAuthAction],
   )
@@ -95,7 +107,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
           throw new Error('Apple sign-in is not enabled yet.')
         }
 
-        await signInWithPopup(requireAuth(), appleAuthProvider)
+        await signInWithRedirect(requireAuth(), appleAuthProvider)
       }),
     [requireAuth, runAuthAction],
   )
@@ -191,10 +203,6 @@ function toAuthMessage(error: unknown): string {
       return 'The sign-in window was blocked by the browser. Try again or allow pop-ups for this site.'
     }
 
-    if (matchesAuthError('auth/internal-error')) {
-      return 'The sign-in window could not open in this browser. Allow pop-ups for this site, then try again.'
-    }
-
     if (matchesAuthError('auth/account-exists-with-different-credential')) {
       return 'That email already has a Money Manager account using another sign-in method. Sign in with the original method for that account.'
     }
@@ -241,7 +249,7 @@ function toAuthMessage(error: unknown): string {
       message.includes('missing initial state') ||
       message.includes('sessionStorage is inaccessible')
     ) {
-      return 'The previous redirect sign-in could not be completed. Try again using the sign-in window.'
+      return 'The sign-in redirect could not finish in this browser. Try again, or use email sign-in.'
     }
 
     if (code) {

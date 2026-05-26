@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useFirebaseAuth } from '../useFirebaseAuth'
@@ -36,7 +36,7 @@ describe('useFirebaseAuth', () => {
     firebaseAuthMock.signInWithRedirect.mockResolvedValue(undefined)
   })
 
-  it('uses popup sign-in for Google and Apple providers on the custom domain app', async () => {
+  it('uses redirect sign-in for Google and Apple providers through the same-origin auth proxy', async () => {
     const { result } = renderHook(() => useFirebaseAuth())
 
     await act(async () => {
@@ -44,19 +44,19 @@ describe('useFirebaseAuth', () => {
       await result.current.signInWithApple()
     })
 
-    expect(firebaseAuthMock.signInWithPopup).toHaveBeenCalledWith(
+    expect(firebaseAuthMock.signInWithRedirect).toHaveBeenCalledWith(
       firebaseClientMock.firebaseAuth,
       firebaseClientMock.googleAuthProvider,
     )
-    expect(firebaseAuthMock.signInWithPopup).toHaveBeenCalledWith(
+    expect(firebaseAuthMock.signInWithRedirect).toHaveBeenCalledWith(
       firebaseClientMock.firebaseAuth,
       firebaseClientMock.appleAuthProvider,
     )
-    expect(firebaseAuthMock.signInWithRedirect).not.toHaveBeenCalled()
+    expect(firebaseAuthMock.signInWithPopup).not.toHaveBeenCalled()
   })
 
   it('shows provider setup errors instead of a generic auth failure', async () => {
-    firebaseAuthMock.signInWithPopup.mockRejectedValueOnce(
+    firebaseAuthMock.signInWithRedirect.mockRejectedValueOnce(
       Object.assign(new Error('Firebase: Error (auth/operation-not-allowed).'), {
         code: 'auth/operation-not-allowed',
       }),
@@ -72,7 +72,7 @@ describe('useFirebaseAuth', () => {
   })
 
   it('explains provider account conflicts after OAuth verification', async () => {
-    firebaseAuthMock.signInWithPopup.mockRejectedValueOnce(
+    firebaseAuthMock.signInWithRedirect.mockRejectedValueOnce(
       Object.assign(new Error('Firebase: Error (auth/account-exists-with-different-credential).'), {
         code: 'auth/account-exists-with-different-credential',
       }),
@@ -89,34 +89,25 @@ describe('useFirebaseAuth', () => {
     )
   })
 
-  it('does not surface stale redirect errors when the login screen opens', async () => {
-    firebaseAuthMock.getRedirectResult.mockRejectedValueOnce(
-      Object.assign(new Error('Firebase: Error (auth/internal-error).'), {
-        code: 'auth/internal-error',
-      }),
-    )
+  it('checks redirect results when the login screen opens', () => {
+    renderHook(() => useFirebaseAuth())
 
-    const { result } = renderHook(() => useFirebaseAuth())
-
-    expect(result.current.error).toBeNull()
-    expect(firebaseAuthMock.getRedirectResult).not.toHaveBeenCalled()
+    expect(firebaseAuthMock.getRedirectResult).toHaveBeenCalledWith(firebaseClientMock.firebaseAuth)
   })
 
-  it('explains popup startup failures clearly', async () => {
-    firebaseAuthMock.signInWithPopup.mockRejectedValueOnce(
-      Object.assign(new Error('Firebase: Error (auth/internal-error).'), {
-        code: 'auth/internal-error',
+  it('explains redirect storage failures clearly', async () => {
+    firebaseAuthMock.getRedirectResult.mockRejectedValueOnce(
+      Object.assign(new Error('Firebase: Error (auth/web-storage-unsupported).'), {
+        code: 'auth/web-storage-unsupported',
       }),
     )
 
     const { result } = renderHook(() => useFirebaseAuth())
 
-    await act(async () => {
-      await result.current.signInWithGoogle()
+    await waitFor(() => {
+      expect(result.current.error).toBe('The sign-in redirect could not finish in this browser. Try again, or use email sign-in.')
     })
 
-    expect(result.current.error).toBe(
-      'The sign-in window could not open in this browser. Allow pop-ups for this site, then try again.',
-    )
+    expect(firebaseAuthMock.getRedirectResult).toHaveBeenCalledWith(firebaseClientMock.firebaseAuth)
   })
 })

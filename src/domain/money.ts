@@ -1260,15 +1260,50 @@ function getCreditCardStatementBreakdown({
       source: 'repayment' as const,
     }))
 
-  return [...actualLines, ...recurringLines, ...customLines, ...repaymentLines].sort((a, b) => {
-    const dateSort = a.date.localeCompare(b.date)
+  return capStatementRepaymentsToStatementDue([...actualLines, ...recurringLines, ...customLines, ...repaymentLines])
+}
 
-    if (dateSort !== 0) {
-      return dateSort
+function capStatementRepaymentsToStatementDue(
+  lines: CreditCardStatementBreakdownItem[],
+): CreditCardStatementBreakdownItem[] {
+  const sortedLines = [...lines].sort(sortCreditCardStatementBreakdownItems)
+  let remainingStatementDuePence = sortedLines
+    .filter((line) => line.source !== 'repayment' && line.amountPence > 0)
+    .reduce((total, line) => total + line.amountPence, 0)
+
+  return sortedLines.map((line) => {
+    if (line.source !== 'repayment' || line.amountPence >= 0) {
+      return line
     }
 
-    return a.label.localeCompare(b.label)
+    const paidPence = Math.abs(line.amountPence)
+    const appliedPence = Math.min(paidPence, remainingStatementDuePence)
+    const extraPence = paidPence - appliedPence
+    remainingStatementDuePence -= appliedPence
+
+    if (extraPence <= 0) {
+      return line
+    }
+
+    return {
+      ...line,
+      amountPence: -appliedPence,
+      detail: `${line.detail} · ${formatPence(extraPence)} extra was already recorded and is not counted against this statement.`,
+    }
   })
+}
+
+function sortCreditCardStatementBreakdownItems(
+  a: CreditCardStatementBreakdownItem,
+  b: CreditCardStatementBreakdownItem,
+): number {
+  const dateSort = a.date.localeCompare(b.date)
+
+  if (dateSort !== 0) {
+    return dateSort
+  }
+
+  return a.label.localeCompare(b.label)
 }
 
 export function getLinkedCreditCardPotCoverBreakdown({

@@ -412,6 +412,64 @@ describe('calendar page', () => {
     expect(within(julyCard).getByText('£165.00')).toBeInTheDocument()
   })
 
+  it('shows overpaid statement direct debits as covered instead of a negative total', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-june',
+      startDate: '2026-06-01',
+      endDate: '2026-06-14',
+      payday: '2026-06-01',
+      nextPayday: '2026-06-15',
+      incomePence: 78850,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-capital-one',
+          name: 'Capital One',
+          provider: 'Capital One',
+          limitPence: 80000,
+          openingBalancePence: 37238,
+          openingStatementBalancePence: 22271,
+          statementDate: '2026-05-09',
+          dueDay: 5,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+      creditCardRepayments: [
+        {
+          id: 'linked-card-pot-repayment-card-capital-one-2026-05-09-2026-06-05',
+          creditCardId: 'card-capital-one',
+          amountPence: 37238,
+          date: '2026-06-05',
+          note: 'Automatic Capital One payment from Capital One pot',
+          createdAt: '2026-06-05T09:00:00.000Z',
+          updatedAt: '2026-06-05T09:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 5 June 2026' }))
+    const capitalOneCard = screen.getByText('Capital One statement covered').closest('article') as HTMLElement
+    await user.click(within(capitalOneCard).getByRole('button', { name: 'Show breakdown for Capital One statement covered Info' }))
+
+    expect(within(capitalOneCard).getByText('Existing statement due')).toBeInTheDocument()
+    expect(within(capitalOneCard).getByText('Automatic Capital One payment from Capital One pot')).toBeInTheDocument()
+    expect(within(capitalOneCard).getByText('£222.71')).toBeInTheDocument()
+    expect(within(capitalOneCard).getByText('-£222.71')).toBeInTheDocument()
+    expect(within(capitalOneCard).getByText(/£149\.67 extra was already recorded/)).toBeInTheDocument()
+    expect(within(capitalOneCard).getByText('Still due')).toBeInTheDocument()
+    expect(within(capitalOneCard).getByText('£0.00')).toBeInTheDocument()
+    expect(within(capitalOneCard).queryByText('-£149.67')).not.toBeInTheDocument()
+  })
+
   it('shows events on visible next-month cells in the current month grid', () => {
     const selectedPayPeriod = createPayPeriod({
       id: 'period-current',

@@ -69,6 +69,7 @@ interface CalendarEvent {
   description: string
   completionStatus?: CalendarEventCompletionStatus
   breakdown?: CalendarEventBreakdownItem[]
+  breakdownTotalLabel?: string
 }
 
 interface CalendarEventBreakdownItem {
@@ -535,12 +536,14 @@ function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
                   <p className="truncate text-sm font-semibold text-slate-950">{item.label}</p>
                   <p className="mt-0.5 text-xs text-slate-500">{item.source} · {formatShortDate(item.date)}</p>
                 </div>
-                <p className="shrink-0 text-sm font-semibold text-slate-950">{formatPence(item.amountPence)}</p>
+                <p className={clsx('shrink-0 text-sm font-semibold', item.amountPence < 0 ? 'text-emerald-700' : 'text-slate-950')}>
+                  {formatPence(item.amountPence)}
+                </p>
               </div>
             ))}
           </div>
           <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
-            <p className="text-sm font-semibold text-slate-700">Total</p>
+            <p className="text-sm font-semibold text-slate-700">{event.breakdownTotalLabel ?? 'Total'}</p>
             <p className="text-sm font-semibold text-slate-950">{formatPence(breakdownTotalPence)}</p>
           </div>
         </div>
@@ -679,11 +682,13 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
         }).map((statementPayment): CalendarEvent => ({
           id: `card-statement-${card.id}-${statementPayment.statementDate}-${statementPayment.directDebitDate}`,
           date: statementPayment.directDebitDate,
-          title: statementPayment.forecastDuePence > 0 ? `${card.name} statement payment` : card.name,
+          title: statementPayment.forecastDuePence > 0 ? `${card.name} statement payment` : `${card.name} statement covered`,
           amountPence: statementPayment.forecastDuePence,
           type: 'card',
           direction: statementPayment.forecastDuePence > 0 ? 'out' : 'info',
-          description: `${card.provider || 'Credit card'} direct debit for statement ${statementPayment.statementDate}.`,
+          description: statementPayment.forecastDuePence > 0
+            ? `${card.provider || 'Credit card'} direct debit for statement ${statementPayment.statementDate}.`
+            : `${card.provider || 'Credit card'} statement ${statementPayment.statementDate} is fully covered. No more is due on this date.`,
           breakdown: statementPayment.breakdown.length > 0
             ? statementPayment.breakdown.map((line) => ({
                 id: line.id,
@@ -693,6 +698,7 @@ function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate
                 source: line.detail,
               }))
             : undefined,
+          breakdownTotalLabel: 'Still due',
         }))
       }
 

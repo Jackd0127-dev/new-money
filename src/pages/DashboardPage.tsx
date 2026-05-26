@@ -430,7 +430,7 @@ export function DashboardPage({
                                 <p className="truncate font-semibold text-slate-900">{line.label}</p>
                                 <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
                               </div>
-                              <p className={line.amountPence < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-950'}>
+                              <p className={line.amountPence < 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-950'}>
                                 {formatPence(line.amountPence)}
                               </p>
                             </li>

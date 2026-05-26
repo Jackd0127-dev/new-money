@@ -1381,6 +1381,49 @@ describe('credit card statement direct debits', () => {
     ])
   })
 
+  it('caps overlarge statement repayments so a statement breakdown never goes negative', () => {
+    const payments = getCreditCardStatementPayments({
+      card: {
+        ...card,
+        id: 'card-capital-one',
+        name: 'Capital One',
+        provider: 'Capital One',
+        openingStatementBalancePence: 22271,
+        statementDate: '2026-05-09',
+        dueDay: 5,
+      },
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      repayments: [
+        {
+          id: 'linked-card-pot-repayment-card-capital-one-2026-05-09-2026-06-05',
+          creditCardId: 'card-capital-one',
+          amountPence: 37238,
+          date: '2026-06-05',
+          note: 'Automatic Capital One payment from Capital One pot',
+          createdAt: '2026-06-05T09:00:00.000Z',
+          updatedAt: '2026-06-05T09:00:00.000Z',
+        },
+      ],
+      startDate: '2026-06-05',
+      endDate: '2026-06-05',
+      asOfDate: '2026-06-05',
+    })
+
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({
+      actualDuePence: 0,
+      forecastDuePence: 0,
+    })
+    expect(payments[0].breakdown.map((line) => `${line.label}:${line.amountPence}`)).toEqual([
+      'Existing statement due:22271',
+      'Automatic Capital One payment from Capital One pot:-22271',
+    ])
+    expect(payments[0].breakdown[1].detail).toContain('£149.67 extra was already recorded')
+    expect(payments[0].breakdown.reduce((total, line) => total + line.amountPence, 0)).toBe(0)
+  })
+
   it('assigns spend on the statement date to the new cycle and excludes the next statement date', () => {
     const payments = getCreditCardStatementPayments({
       card,

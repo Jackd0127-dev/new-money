@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
+  getRedirectResult,
   onAuthStateChanged,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth'
@@ -43,7 +44,17 @@ export function useFirebaseAuth(): FirebaseAuthController {
       return undefined
     }
 
-    return onAuthStateChanged(
+    let isMounted = true
+    void getRedirectResult(firebaseAuth).catch((caughtError) => {
+      if (!isMounted) {
+        return
+      }
+
+      setError(toAuthMessage(caughtError))
+      setIsLoading(false)
+    })
+
+    const unsubscribe = onAuthStateChanged(
       firebaseAuth,
       (nextUser) => {
         setUser(nextUser)
@@ -54,6 +65,11 @@ export function useFirebaseAuth(): FirebaseAuthController {
         setIsLoading(false)
       },
     )
+
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
   }, [])
 
   const requireAuth = useCallback(() => {
@@ -79,7 +95,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
   const signInWithGoogle = useCallback(
     () =>
       runAuthAction(async () => {
-        await signInWithPopup(requireAuth(), googleAuthProvider)
+        await signInWithRedirect(requireAuth(), googleAuthProvider)
       }),
     [requireAuth, runAuthAction],
   )
@@ -91,7 +107,7 @@ export function useFirebaseAuth(): FirebaseAuthController {
           throw new Error('Apple sign-in is not enabled yet.')
         }
 
-        await signInWithPopup(requireAuth(), appleAuthProvider)
+        await signInWithRedirect(requireAuth(), appleAuthProvider)
       }),
     [requireAuth, runAuthAction],
   )
@@ -174,35 +190,48 @@ export function useFirebaseAuth(): FirebaseAuthController {
 
 function toAuthMessage(error: unknown): string {
   if (error instanceof Error) {
-    if (error.message.includes('auth/popup-closed-by-user')) {
+    const firebaseError = error as Error & { code?: unknown }
+    const code = typeof firebaseError.code === 'string' ? firebaseError.code : null
+    const message = error.message
+    const matchesAuthError = (authCode: string) => code === authCode || message.includes(authCode)
+
+    if (matchesAuthError('auth/popup-closed-by-user')) {
       return 'The sign-in popup was closed before it finished.'
     }
 
-    if (error.message.includes('auth/unauthorized-domain')) {
+    if (matchesAuthError('auth/popup-blocked')) {
+      return 'The sign-in window was blocked by the browser. Try again or allow pop-ups for this site.'
+    }
+
+    if (matchesAuthError('auth/operation-not-allowed')) {
+      return 'This sign-in provider is not enabled in Firebase Authentication.'
+    }
+
+    if (matchesAuthError('auth/unauthorized-domain')) {
       return 'This website domain is not authorised in Firebase Authentication.'
     }
 
-    if (error.message.includes('auth/invalid-credential')) {
+    if (matchesAuthError('auth/invalid-credential')) {
       return 'The email or password was not accepted.'
     }
 
-    if (error.message.includes('auth/email-already-in-use')) {
+    if (matchesAuthError('auth/email-already-in-use')) {
       return 'That email already has an account. Try signing in instead.'
     }
 
-    if (error.message.includes('auth/requires-recent-login')) {
+    if (matchesAuthError('auth/requires-recent-login')) {
       return 'For security, sign out and sign back in, then try again.'
     }
 
-    if (error.message.includes('auth/user-not-found')) {
+    if (matchesAuthError('auth/user-not-found')) {
       return 'No account was found for that email address.'
     }
 
-    if (error.message.includes('auth/missing-email')) {
+    if (matchesAuthError('auth/missing-email')) {
       return 'This account does not have an email address for password reset.'
     }
 
-    if (error.message.includes('auth/too-many-requests')) {
+    if (matchesAuthError('auth/too-many-requests')) {
       return 'Too many attempts. Wait a moment, then try again.'
     }
 

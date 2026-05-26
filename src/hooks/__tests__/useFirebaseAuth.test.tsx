@@ -88,4 +88,17 @@ describe('useFirebaseAuth', () => {
       'That email already has a Money Manager account using another sign-in method. Sign in with the original method for that account.',
     )
   })
+
+  it('does not surface stale redirect errors when the login screen opens', async () => {
+    firebaseAuthMock.getRedirectResult.mockRejectedValueOnce(
+      Object.assign(new Error('Firebase: Error (auth/internal-error).'), {
+        code: 'auth/internal-error',
+      }),
+    )
+
+    const { result } = renderHook(() => useFirebaseAuth())
+
+    expect(result.current.error).toBeNull()
+    expect(firebaseAuthMock.getRedirectResult).not.toHaveBeenCalled()
+  })
 })

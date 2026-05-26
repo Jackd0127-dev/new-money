@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
-  getRedirectResult,
   onAuthStateChanged,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -44,16 +43,6 @@ export function useFirebaseAuth(): FirebaseAuthController {
       return undefined
     }
 
-    let isMounted = true
-    void getRedirectResult(firebaseAuth).catch((caughtError) => {
-      if (!isMounted) {
-        return
-      }
-
-      setError(toAuthMessage(caughtError))
-      setIsLoading(false)
-    })
-
     const unsubscribe = onAuthStateChanged(
       firebaseAuth,
       (nextUser) => {
@@ -67,7 +56,6 @@ export function useFirebaseAuth(): FirebaseAuthController {
     )
 
     return () => {
-      isMounted = false
       unsubscribe()
     }
   }, [])

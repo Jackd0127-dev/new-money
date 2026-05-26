@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useFirebaseAuth } from './useFirebaseAuth'
+import { useFirebaseAuth } from '../useFirebaseAuth'
 
 const firebaseAuthMock = vi.hoisted(() => ({
   createUserWithEmailAndPassword: vi.fn(),
@@ -23,7 +23,7 @@ const firebaseClientMock = vi.hoisted(() => ({
 }))
 
 vi.mock('firebase/auth', () => firebaseAuthMock)
-vi.mock('../firebase/client', () => firebaseClientMock)
+vi.mock('../../firebase/client', () => firebaseClientMock)
 
 describe('useFirebaseAuth', () => {
   beforeEach(() => {

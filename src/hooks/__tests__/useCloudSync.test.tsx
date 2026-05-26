@@ -2,8 +2,8 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { User } from 'firebase/auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useCloudSync } from './useCloudSync'
-import type { PlannerSnapshot } from '../storage/repository'
+import { useCloudSync } from '../useCloudSync'
+import type { PlannerSnapshot } from '../../storage/repository'
 
 const cloudPlannerMock = vi.hoisted(() => ({
   getCloudPlannerSnapshot: vi.fn(),
@@ -36,13 +36,13 @@ const storageMock = vi.hoisted(() => ({
   replacePlannerSnapshot: vi.fn(),
 }))
 
-vi.mock('../firebase/client', () => ({
+vi.mock('../../firebase/client', () => ({
   isFirebaseConfigured: true,
 }))
 
-vi.mock('../firebase/cloudPlanner', () => cloudPlannerMock)
+vi.mock('../../firebase/cloudPlanner', () => cloudPlannerMock)
 
-vi.mock('../storage/repository', () => storageMock)
+vi.mock('../../storage/repository', () => storageMock)
 
 describe('useCloudSync', () => {
   beforeEach(() => {

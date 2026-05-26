@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import App from './App'
+import App from '../App'
 
 const mockAuthState = vi.hoisted(() => ({
   value: {
@@ -21,11 +21,11 @@ const mockAuthState = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('./hooks/useFirebaseAuth', () => ({
+vi.mock('../hooks/useFirebaseAuth', () => ({
   useFirebaseAuth: () => mockAuthState.value,
 }))
 
-vi.mock('./hooks/usePlannerData', () => ({
+vi.mock('../hooks/usePlannerData', () => ({
   usePlannerData: () => ({
     snapshot: null,
     isLoading: false,
@@ -36,7 +36,7 @@ vi.mock('./hooks/usePlannerData', () => ({
   }),
 }))
 
-vi.mock('./hooks/useCloudSync', () => ({
+vi.mock('../hooks/useCloudSync', () => ({
   useCloudSync: vi.fn(),
 }))
 

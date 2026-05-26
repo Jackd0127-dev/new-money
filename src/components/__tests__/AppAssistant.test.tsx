@@ -2,9 +2,9 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AppAssistant } from './AppAssistant'
-import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import type { PayPeriod } from '../types/models'
+import { AppAssistant } from '../AppAssistant'
+import type { PlannerActions, PlannerSnapshot } from '../../hooks/usePlannerData'
+import type { PayPeriod } from '../../types/models'
 
 describe('AppAssistant', () => {
   let restoreLocalStorage: (() => void) | null = null

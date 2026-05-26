@@ -66,10 +66,15 @@ Vercel serves security headers from `vercel.json`, including CSP, frame blocking
 ## Checks
 
 ```bash
+npm run check
+npm run test:backend
+npm run test:ui
 npm run test
 npm run lint
 npm run build
 ```
+
+Backend/domain behavior is locked for UI-focused work. Read `docs/BACKEND_LOCK.md` before changing calculation, storage, Firebase sync, authentication, API, or model files. The current code layout is documented in `docs/PROJECT_STRUCTURE.md`.
 
 ## Deployment
 

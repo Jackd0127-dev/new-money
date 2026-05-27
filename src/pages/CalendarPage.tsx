@@ -31,6 +31,7 @@ import {
   getDebtDueAmountPence,
   getLinkedCreditCardPotAllocationExclusionPence,
   getLinkedCreditCardPotCoverBreakdown,
+  getPreviousCompletedLinkedCreditCardPotAllocation,
   getPayPeriodCostSummary,
   getRecurringPaymentOccurrences,
   isAdditionalLinkedCreditCardPotCostItemId,
@@ -1052,11 +1053,17 @@ function getAdditionalLinkedCreditCardPotAllocationBreakdown(
   linkedCreditCardId: string,
   today: string,
 ) {
-  const completedAllocation = getCompletedLinkedCreditCardPotAllocation(
-    snapshot.potAllocations,
-    payPeriod.id,
-    linkedCreditCardId,
-  )
+  const completedAllocation =
+    getPreviousCompletedLinkedCreditCardPotAllocation(
+      snapshot.potAllocations,
+      payPeriod.id,
+      linkedCreditCardId,
+      allocation,
+    ) ?? getCompletedLinkedCreditCardPotAllocation(
+      snapshot.potAllocations,
+      payPeriod.id,
+      linkedCreditCardId,
+    )
 
   if (!completedAllocation) {
     return getHistoricalLinkedCreditCardPotAllocationBreakdown(snapshot, allocation, payPeriod, linkedCreditCardId, today)

@@ -1795,6 +1795,158 @@ describe('pay period cost summary', () => {
     )
   })
 
+  it('creates a new linked-card cover batch after a completed additional top-up', () => {
+    const payPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      payFrequency: 'biweekly',
+      incomePence: 78850,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const card: CreditCard = {
+      id: 'card-barclays',
+      name: 'Barclays',
+      provider: 'Barclays',
+      limitPence: 80000,
+      openingBalancePence: 68005,
+      dueDay: 11,
+      dueDate: null,
+      color: '#2563eb',
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const pot: Pot = {
+      id: 'pot-barclays',
+      name: 'Barclays',
+      type: 'reserved',
+      balancePence: 79505,
+      targetPence: null,
+      color: '#2563eb',
+      linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-24T11:00:00.000Z',
+    }
+    const allocations: PotAllocation[] = [
+      {
+        id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+        payPeriodId: 'period-current',
+        potId: 'pot-barclays',
+        amountPence: 17857,
+        source: 'manual',
+        recurringPaymentId: null,
+        createdAt: '2026-05-22T12:00:00.000Z',
+        updatedAt: '2026-05-22T12:00:00.000Z',
+      },
+      {
+        id: 'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays',
+        payPeriodId: 'period-current',
+        potId: 'pot-barclays',
+        amountPence: 2000,
+        source: 'manual',
+        recurringPaymentId: null,
+        createdAt: '2026-05-24T11:00:00.000Z',
+        updatedAt: '2026-05-24T11:00:00.000Z',
+      },
+    ]
+    const transactions: Transaction[] = [
+      {
+        id: 'txn-barclays-coffee',
+        potId: null,
+        payPeriodId: 'period-current',
+        amountPence: 2000,
+        type: 'spending',
+        paymentMethod: 'credit_card',
+        creditCardId: 'card-barclays',
+        recurringPaymentId: null,
+        date: '2026-05-24',
+        note: 'Coffee',
+        createdAt: '2026-05-24T10:00:00.000Z',
+        updatedAt: '2026-05-24T10:00:00.000Z',
+      },
+      {
+        id: 'txn-barclays-snack',
+        potId: null,
+        payPeriodId: 'period-current',
+        amountPence: 295,
+        type: 'spending',
+        paymentMethod: 'credit_card',
+        creditCardId: 'card-barclays',
+        recurringPaymentId: null,
+        date: '2026-05-25',
+        note: 'Snack',
+        createdAt: '2026-05-25T10:00:00.000Z',
+        updatedAt: '2026-05-25T10:00:00.000Z',
+      },
+    ]
+
+    const summary = getPayPeriodCostSummary({
+      payPeriod,
+      creditCards: [card],
+      recurringPayments: [
+        {
+          id: 'fuel',
+          name: 'Fuel',
+          amountPence: 7000,
+          dueDate: '2026-05-29',
+          frequency: 'biweekly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'gym',
+          name: 'Gym',
+          amountPence: 2500,
+          dueDay: 1,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-barclays',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      customPayments: [],
+      transactions,
+      debts: [],
+      creditCardRepayments: [],
+      pots: [pot],
+      potAllocations: allocations,
+      asOfDate: '2026-05-27',
+    })
+
+    const openCover = summary.items.find((item) => item.source === 'linked_credit_card_pot')
+
+    expect(openCover).toEqual(
+      expect.objectContaining({
+        id: 'linked-credit-card-pot-additional-card-barclays--transaction-txn-barclays-snack',
+        amountPence: 295,
+        source: 'linked_credit_card_pot',
+        creditCardId: 'card-barclays',
+        potId: 'pot-barclays',
+      }),
+    )
+    expect(openCover?.coverBreakdown).toEqual([
+      expect.objectContaining({
+        id: 'transaction-txn-barclays-snack',
+        label: 'Snack',
+        amountPence: 295,
+      }),
+    ])
+  })
+
   it('calculates dashboard costs from due payments, saved payments, manual spending, debts, and net card costs', () => {
     const payPeriod: PayPeriod = {
       id: 'period-current',

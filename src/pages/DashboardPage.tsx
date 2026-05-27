@@ -10,6 +10,7 @@ import {
   getAdditionalLinkedCreditCardPotAllocationPence,
   getAdditionalLinkedCreditCardPotCoverBreakdown,
   getCompletedLinkedCreditCardPotAllocation,
+  getPreviousCompletedLinkedCreditCardPotAllocation,
   getCoveredAdditionalLinkedCardManualSpendTransactionIds,
   getCreditCardIdFromLinkedCreditCardPotCostItemId,
   getDashboardTodoAllocationId,
@@ -1123,10 +1124,20 @@ function potAllocationCostToTodoItem(
     const breakdownLabel = isAdditionalCover
       ? `${cardName} additional planned card cover`
       : `${cardName} planned card cover`
-    const completedAllocation = isAdditionalCover
-      ? getCompletedLinkedCreditCardPotAllocation(snapshot.potAllocations, payPeriod.id, linkedCreditCardId)
+    const allocation = item.id.startsWith('pot-allocation-')
+      ? snapshot.potAllocations.find((candidate) => candidate.id === item.id.slice('pot-allocation-'.length))
       : null
-    const breakdownLines = isAdditionalCover && completedAllocation
+    const previousAllocation = isAdditionalCover
+      ? allocation
+        ? getPreviousCompletedLinkedCreditCardPotAllocation(
+            snapshot.potAllocations,
+            payPeriod.id,
+            linkedCreditCardId,
+            allocation,
+          ) ?? getCompletedLinkedCreditCardPotAllocation(snapshot.potAllocations, payPeriod.id, linkedCreditCardId)
+        : getCompletedLinkedCreditCardPotAllocation(snapshot.potAllocations, payPeriod.id, linkedCreditCardId)
+      : null
+    const breakdownLines = isAdditionalCover && previousAllocation
       ? mapLinkedCreditCardPotCoverBreakdownLines(
           sourceCostItemId,
           getAdditionalLinkedCreditCardPotCoverBreakdown({
@@ -1136,7 +1147,7 @@ function potAllocationCostToTodoItem(
             payPeriod,
             creditCardId: linkedCreditCardId,
             amountPence: item.amountPence,
-            completedAllocation,
+            completedAllocation: previousAllocation,
           }),
         )
       : getLinkedCreditCardPotBreakdownLines(

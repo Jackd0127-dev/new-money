@@ -79,6 +79,12 @@ interface PayPeriodCostSummaryInput {
   asOfDate?: string
 }
 
+interface LinkedCreditCardPotCostItemParts {
+  type: 'base' | 'additional'
+  creditCardId: string
+  batchKey: string | null
+}
+
 export interface PayPeriodMoneySummary {
   payReceivedPence: number
   allocatedPence: number
@@ -685,7 +691,7 @@ export function getPayPeriodCostSummary({
     [...linkedCreditCardIds]
       .map((creditCardId) => [
         creditCardId,
-        getCompletedLinkedCreditCardPotAllocation(potAllocations, payPeriod.id, creditCardId),
+        getLatestCompletedLinkedCreditCardPotAllocation(potAllocations, payPeriod.id, creditCardId),
       ] as const)
       .filter((entry): entry is readonly [string, PotAllocation] => Boolean(entry[1])),
   )
@@ -713,8 +719,22 @@ export function getPayPeriodCostSummary({
 
         const completedAllocation = completedLinkedCardAllocationByCardId.get(cardSummary.card.id) ?? null
         const isAdditionalCover = Boolean(completedAllocation)
+        const coverBreakdown = completedAllocation
+          ? getAdditionalLinkedCreditCardPotCoverBreakdown({
+              recurringPayments,
+              customPayments,
+              transactions,
+              payPeriod,
+              creditCardId: cardSummary.card.id,
+              amountPence: cardSummary.plannedTopUpNeededPence,
+              completedAllocation,
+            })
+          : undefined
         const itemId = isAdditionalCover
-          ? getAdditionalLinkedCreditCardPotCostItemId(cardSummary.card.id)
+          ? getAdditionalLinkedCreditCardPotCostItemId(
+              cardSummary.card.id,
+              getAdditionalLinkedCreditCardPotBatchKey(coverBreakdown ?? [], completedAllocation),
+            )
           : getLinkedCreditCardPotCostItemId(cardSummary.card.id)
 
         return [
@@ -726,17 +746,7 @@ export function getPayPeriodCostSummary({
             source: 'linked_credit_card_pot' as const,
             creditCardId: cardSummary.card.id,
             potId: linkedPot.id,
-            coverBreakdown: completedAllocation
-              ? getAdditionalLinkedCreditCardPotCoverBreakdown({
-                  recurringPayments,
-                  customPayments,
-                  transactions,
-                  payPeriod,
-                  creditCardId: cardSummary.card.id,
-                  amountPence: cardSummary.plannedTopUpNeededPence,
-                  completedAllocation,
-                })
-              : undefined,
+            coverBreakdown,
           },
         ]
       })
@@ -1592,6 +1602,17 @@ function sortCoverBreakdownItems(
   return a.label.localeCompare(b.label)
 }
 
+function getAdditionalLinkedCreditCardPotBatchKey(
+  lines: LinkedCreditCardPotCoverBreakdownItem[],
+  completedAllocation: PotAllocation | null,
+): string {
+  const firstLine = lines.find((line) => line.amountPence > 0)
+  const rawKey = firstLine?.id
+    ?? (completedAllocation ? `after-${completedAllocation.updatedAt || completedAllocation.createdAt}` : 'open')
+
+  return rawKey.replace(/--+/g, '-').replace(/[^a-zA-Z0-9._:-]+/g, '-')
+}
+
 function isCreatedAfter(
   record: Pick<RecurringPayment | CustomPayment | Transaction, 'createdAt' | 'updatedAt'>,
   cutoffTimestamp: string,
@@ -1603,12 +1624,14 @@ function getLinkedCreditCardPotCostItemId(creditCardId: string): string {
   return `linked-credit-card-pot-${creditCardId}`
 }
 
-function getAdditionalLinkedCreditCardPotCostItemId(creditCardId: string): string {
-  return `linked-credit-card-pot-additional-${creditCardId}`
+function getAdditionalLinkedCreditCardPotCostItemId(creditCardId: string, batchKey?: string | null): string {
+  const baseId = `linked-credit-card-pot-additional-${creditCardId}`
+
+  return batchKey ? `${baseId}--${batchKey}` : baseId
 }
 
 export function isAdditionalLinkedCreditCardPotCostItemId(costItemId: string): boolean {
-  return costItemId.startsWith('linked-credit-card-pot-additional-')
+  return getLinkedCreditCardPotCostItemParts(costItemId)?.type === 'additional'
 }
 
 export function getLinkedCreditCardPotAllocationExclusionPence(
@@ -1714,6 +1737,63 @@ export function getCompletedLinkedCreditCardPotAllocation(
   return potAllocations.find((allocation) => allocation.id === allocationId && allocation.amountPence > 0) ?? null
 }
 
+export function getLatestCompletedLinkedCreditCardPotAllocation(
+  potAllocations: PotAllocation[],
+  payPeriodId: string,
+  creditCardId: string,
+): PotAllocation | null {
+  return getCompletedLinkedCreditCardPotAllocations(potAllocations, payPeriodId, creditCardId)[0] ?? null
+}
+
+export function getPreviousCompletedLinkedCreditCardPotAllocation(
+  potAllocations: PotAllocation[],
+  payPeriodId: string,
+  creditCardId: string,
+  allocation: PotAllocation,
+): PotAllocation | null {
+  const allocationTimestamp = allocation.updatedAt || allocation.createdAt
+
+  return getCompletedLinkedCreditCardPotAllocations(potAllocations, payPeriodId, creditCardId)
+    .filter((candidate) => {
+      if (candidate.id === allocation.id) {
+        return false
+      }
+
+      const candidateTimestamp = candidate.updatedAt || candidate.createdAt
+
+      return candidateTimestamp < allocationTimestamp
+    })[0] ?? null
+}
+
+function getCompletedLinkedCreditCardPotAllocations(
+  potAllocations: PotAllocation[],
+  payPeriodId: string,
+  creditCardId: string,
+): PotAllocation[] {
+  return potAllocations
+    .filter((allocation) => {
+      const costItemId = getCostItemIdFromDashboardTodoAllocationId(allocation.id, payPeriodId)
+      const parts = costItemId ? getLinkedCreditCardPotCostItemParts(costItemId) : null
+
+      return (
+        allocation.payPeriodId === payPeriodId &&
+        allocation.amountPence > 0 &&
+        parts?.creditCardId === creditCardId
+      )
+    })
+    .sort(sortPotAllocationsNewestFirst)
+}
+
+function sortPotAllocationsNewestFirst(a: PotAllocation, b: PotAllocation): number {
+  const timestampSort = (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+
+  if (timestampSort !== 0) {
+    return timestampSort
+  }
+
+  return b.id.localeCompare(a.id)
+}
+
 export function getDashboardTodoAllocationId(payPeriodId: string, costItemId: string): string {
   return `dashboard-todo-${payPeriodId}-${costItemId}`
 }
@@ -1738,18 +1818,42 @@ export function getCostItemIdFromDashboardTodoPeriodCostItemId(itemId: string, p
 }
 
 export function getCreditCardIdFromLinkedCreditCardPotCostItemId(costItemId: string): string | null {
+  return getLinkedCreditCardPotCostItemParts(costItemId)?.creditCardId ?? null
+}
+
+function getLinkedCreditCardPotCostItemParts(costItemId: string): LinkedCreditCardPotCostItemParts | null {
   const additionalLinkedCardPotPrefix = 'linked-credit-card-pot-additional-'
   const linkedCardPotPrefix = 'linked-credit-card-pot-'
+  const additionalBatchSeparator = '--'
 
   if (costItemId.startsWith(additionalLinkedCardPotPrefix)) {
-    return costItemId.slice(additionalLinkedCardPotPrefix.length) || null
+    const rest = costItemId.slice(additionalLinkedCardPotPrefix.length)
+    const separatorIndex = rest.indexOf(additionalBatchSeparator)
+    const creditCardId = separatorIndex >= 0 ? rest.slice(0, separatorIndex) : rest
+    const batchKey = separatorIndex >= 0 ? rest.slice(separatorIndex + additionalBatchSeparator.length) || null : null
+
+    return creditCardId
+      ? {
+          type: 'additional',
+          creditCardId,
+          batchKey,
+        }
+      : null
   }
 
   if (!costItemId.startsWith(linkedCardPotPrefix)) {
     return null
   }
 
-  return costItemId.slice(linkedCardPotPrefix.length) || null
+  const creditCardId = costItemId.slice(linkedCardPotPrefix.length)
+
+  return creditCardId
+    ? {
+        type: 'base',
+        creditCardId,
+        batchKey: null,
+      }
+    : null
 }
 
 function getActualCreditCardBalanceItems({

@@ -896,6 +896,59 @@ describe('calendar page', () => {
     expect(within(additionalCard as HTMLElement).queryByText('Existing card cover already set aside')).not.toBeInTheDocument()
   })
 
+  it('shows a fresh linked-card top-up separately from a completed additional top-up on the calendar', async () => {
+    const user = userEvent.setup()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+      additionalCoverCompleted: true,
+    })
+    const snapshotWithNewSpend = {
+      ...snapshot,
+      transactions: [
+        ...snapshot.transactions,
+        {
+          id: 'txn-barclays-snack',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 295,
+          type: 'spending' as const,
+          paymentMethod: 'credit_card' as const,
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-25',
+          note: 'Snack',
+          createdAt: '2026-05-25T10:00:00.000Z',
+          updatedAt: '2026-05-25T10:00:00.000Z',
+        },
+      ],
+    }
+
+    render(<CalendarPage snapshot={snapshotWithNewSpend} selectedPayPeriod={selectedPayPeriod} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open 22 May 2026' }))
+
+    const allocationCards = screen
+      .getAllByText('Barclays allocation')
+      .map((heading) => heading.closest('article'))
+      .filter((article): article is HTMLElement => article instanceof HTMLElement)
+    const completedAdditionalCard = allocationCards.find((article) => article.textContent?.includes('-£20.00'))
+    const freshAdditionalCard = allocationCards.find((article) => article.textContent?.includes('-£2.95'))
+
+    expect(completedAdditionalCard).toBeDefined()
+    expect(freshAdditionalCard).toBeDefined()
+    expect(within(completedAdditionalCard as HTMLElement).getByText('Completed')).toBeInTheDocument()
+    expect(within(freshAdditionalCard as HTMLElement).getByText('Not completed')).toBeInTheDocument()
+
+    await user.click(within(completedAdditionalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£20.00' }))
+    await user.click(within(freshAdditionalCard as HTMLElement).getByRole('button', { name: 'Show breakdown for Barclays allocation -£2.95' }))
+
+    expect(within(completedAdditionalCard as HTMLElement).getByText('Coffee')).toBeInTheDocument()
+    expect(within(completedAdditionalCard as HTMLElement).queryByText('Snack')).not.toBeInTheDocument()
+    expect(within(freshAdditionalCard as HTMLElement).getByText('Snack')).toBeInTheDocument()
+    expect(within(freshAdditionalCard as HTMLElement).queryByText('Coffee')).not.toBeInTheDocument()
+  })
+
   it('does not show a separately covered manual spend inside the original allocation breakdown', async () => {
     const user = userEvent.setup()
     const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
@@ -4184,11 +4237,93 @@ describe('dashboard page', () => {
     await user.click(extraItem)
 
     expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
-      id: 'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays',
+      id: 'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays--transaction-txn-barclays-coffee',
       payPeriodId: 'period-current',
       potId: 'pot-barclays',
       amountPence: 2000,
     })
+
+    restoreLocalStorage()
+  })
+
+  it('keeps a new same-card spend unticked after an earlier additional cover was completed', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({
+      completed: true,
+      extraCardSpendPence: 2000,
+      additionalCoverCompleted: true,
+    })
+    const snapshotWithNewSpend = {
+      ...snapshot,
+      transactions: [
+        ...snapshot.transactions,
+        {
+          id: 'txn-barclays-snack',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 295,
+          type: 'spending' as const,
+          paymentMethod: 'credit_card' as const,
+          creditCardId: 'card-barclays',
+          recurringPaymentId: null,
+          date: '2026-05-25',
+          note: 'Snack',
+          createdAt: '2026-05-25T10:00:00.000Z',
+          updatedAt: '2026-05-25T10:00:00.000Z',
+        },
+      ],
+    }
+    const freshAllocationId =
+      'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays--transaction-txn-barclays-snack'
+
+    window.localStorage.setItem(
+      'new-money.dashboard-todos.v1',
+      JSON.stringify({
+        'period-current': [
+          'linked-credit-card-pot-card-barclays-todo',
+          'linked-credit-card-pot-additional-card-barclays-todo',
+        ],
+      }),
+    )
+
+    render(
+      <DashboardPage
+        snapshot={snapshotWithNewSpend}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    expect(
+      screen.getByRole('checkbox', {
+        name: /Set aside £20\.00 into "Barclays" pot for "Barclays" planned card cover/,
+      }),
+    ).toBeChecked()
+
+    const freshItem = screen.getByRole('checkbox', {
+      name: /Set aside £2\.95 into "Barclays" pot for "Barclays" planned card cover/,
+    })
+
+    expect(freshItem).not.toBeChecked()
+
+    await user.click(freshItem)
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: freshAllocationId,
+      payPeriodId: 'period-current',
+      potId: 'pot-barclays',
+      amountPence: 295,
+    })
+
+    await user.click(freshItem)
+
+    expect(actions.deletePaycheckPotAllocation).toHaveBeenCalledWith(freshAllocationId)
+    expect(actions.deletePaycheckPotAllocation).not.toHaveBeenCalledWith(
+      'dashboard-todo-period-current-linked-credit-card-pot-additional-card-barclays',
+    )
 
     restoreLocalStorage()
   })

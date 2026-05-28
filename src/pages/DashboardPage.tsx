@@ -1,5 +1,17 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowRight, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, PiggyBank, ReceiptText } from 'lucide-react'
+import {
+  ArrowRight,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleDollarSign,
+  Clock3,
+  EyeOff,
+  PiggyBank,
+  ReceiptText,
+} from 'lucide-react'
 
 import {
   createNextPayPeriod,
@@ -103,6 +115,14 @@ export function DashboardPage({
   const activeTodoItems = todoItems.filter((item) => !ignoredPaymentIds.has(item.ignoreId))
   const completedTodoCount = activeTodoItems.filter((item) => completedTodoIds.has(item.id)).length
   const ignoredTodoCount = todoItems.length - activeTodoItems.length
+  const activeTodoAmountPence = activeTodoItems.reduce(
+    (totalPence, item) => totalPence + Math.max(0, item.amountPence),
+    0,
+  )
+  const completedTodoAmountPence = activeTodoItems
+    .filter((item) => completedTodoIds.has(item.id))
+    .reduce((totalPence, item) => totalPence + Math.max(0, item.amountPence), 0)
+  const remainingTodoAmountPence = Math.max(0, activeTodoAmountPence - completedTodoAmountPence)
   const outgoingPreviewPeriod = viewedPeriod
     ? getRelativePaycheckPeriod(
         viewedPeriod,
@@ -326,133 +346,143 @@ export function DashboardPage({
             description={`Tick off where this paycheck needs to go. ${completedTodoCount} of ${activeTodoItems.length} done.${ignoredTodoCount > 0 ? ` ${ignoredTodoCount} ignored.` : ''}`}
           >
             {todoItems.length > 0 ? (
-              <ul className="space-y-2">
-                {todoItems.map((item) => {
-                  const isDone = completedTodoIds.has(item.id)
-                  const isIgnored = ignoredPaymentIds.has(item.ignoreId)
-                  const isPending = pendingTodoIds.has(item.id)
-                  const isExpanded = expandedTodoIds.has(item.id)
-                  const breakdownId = `dashboard-todo-breakdown-${item.id}`
-                  const breakdownLabel = item.breakdownLabel ?? item.ignoreLabel
+              <div className="space-y-3">
+                <ChecklistProgressCard
+                  activeCount={activeTodoItems.length}
+                  completedCount={completedTodoCount}
+                  ignoredCount={ignoredTodoCount}
+                  completedAmountPence={completedTodoAmountPence}
+                  remainingAmountPence={remainingTodoAmountPence}
+                  totalAmountPence={activeTodoAmountPence}
+                />
+                <ul className="space-y-2">
+                  {todoItems.map((item) => {
+                    const isDone = completedTodoIds.has(item.id)
+                    const isIgnored = ignoredPaymentIds.has(item.ignoreId)
+                    const isPending = pendingTodoIds.has(item.id)
+                    const isExpanded = expandedTodoIds.has(item.id)
+                    const breakdownId = `dashboard-todo-breakdown-${item.id}`
+                    const breakdownLabel = item.breakdownLabel ?? item.ignoreLabel
 
-                  return (
-                    <li
-                      key={item.id}
-                      className={
-                        isIgnored
-                          ? 'rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-3 opacity-75'
-                          : isDone
-                            ? 'rounded-lg border border-emerald-200/90 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] px-3 py-3 shadow-sm shadow-emerald-100/70'
-                            : 'rounded-lg border border-slate-200/90 bg-white/95 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200'
-                      }
-                    >
-                      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-start">
-                        <input
-                          id={`dashboard-todo-${item.id}`}
-                          type="checkbox"
-                          className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={item.label}
-                          checked={isDone && !isIgnored}
-                          disabled={isIgnored || isPending}
-                          onChange={(event) => void toggleTodo(item, event.target.checked)}
-                        />
-                        <label htmlFor={`dashboard-todo-${item.id}`} className={isIgnored ? 'min-w-0 cursor-default' : 'min-w-0 cursor-pointer'}>
-                          <span
-                            className={
-                              isIgnored
-                                ? 'block text-sm font-semibold text-slate-500 line-through decoration-2'
-                                : isDone
-                                  ? 'block text-sm font-semibold text-emerald-950 line-through decoration-2'
-                                  : 'block text-sm font-semibold text-slate-950'
-                            }
-                          >
-                            {item.label}
-                          </span>
-                          <span
-                            className={
-                              isIgnored
-                                ? 'mt-1 block text-xs font-semibold text-slate-500'
-                                : isDone
-                                  ? 'mt-1 block text-xs text-emerald-700'
-                                  : 'mt-1 block text-xs text-slate-500'
-                            }
-                          >
-                            {isIgnored ? 'Ignored for this paycheck' : item.detail}
-                          </span>
-                        </label>
-                        <span
-                          className={
-                            isIgnored
-                              ? 'text-sm font-semibold text-slate-500 line-through decoration-2 sm:text-right'
-                              : isDone
-                                ? 'text-sm font-semibold text-emerald-800 sm:text-right'
-                                : 'text-sm font-semibold text-slate-950 sm:text-right'
-                          }
-                        >
-                          {formatPence(item.amountPence)}
-                        </span>
-                        <button
-                          type="button"
-                          aria-label={`${isExpanded ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
-                          aria-expanded={isExpanded}
-                          aria-controls={breakdownId}
-                          onClick={() => toggleTodoBreakdown(item.id)}
-                          className={
-                            isIgnored
-                              ? 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-400 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
-                              : 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
-                          }
-                        >
-                          <ChevronDown
-                            size={16}
-                            aria-hidden="true"
-                            className={isExpanded ? 'rotate-180 transition' : 'transition'}
+                    return (
+                      <li
+                        key={item.id}
+                        className={
+                          isIgnored
+                            ? 'rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-3 opacity-75'
+                            : isDone
+                              ? 'rounded-lg border border-emerald-200/90 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] px-3 py-3 shadow-sm shadow-emerald-100/70'
+                              : 'rounded-lg border border-slate-200/90 bg-white/95 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200'
+                        }
+                      >
+                        <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-start">
+                          <input
+                            id={`dashboard-todo-${item.id}`}
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label={item.label}
+                            checked={isDone && !isIgnored}
+                            disabled={isIgnored || isPending}
+                            onChange={(event) => void toggleTodo(item, event.target.checked)}
                           />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Ignore Payment for ${item.ignoreLabel}`}
-                          aria-pressed={isIgnored}
-                          onClick={() => toggleIgnoredPayment(item, !isIgnored)}
-                          className={
-                            isIgnored
-                              ? 'inline-flex min-h-8 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
-                              : 'inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 text-xs font-semibold text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
-                          }
-                        >
-                          Ignore Payment
-                        </button>
-                      </div>
-                      {isExpanded && (
-                        <div
-                          id={breakdownId}
-                          role="region"
-                          aria-label={`Breakdown for ${breakdownLabel}`}
-                          className="mt-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60"
-                        >
-                          <ul className="space-y-2">
-                            {item.breakdownLines.map((line) => (
-                              <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-sm shadow-sm shadow-slate-200/50">
-                                <div className="min-w-0">
-                                  <p className="truncate font-semibold text-slate-900">{line.label}</p>
-                                  <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
-                                </div>
-                                <p className={line.amountPence < 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-950'}>
-                                  {formatPence(line.amountPence)}
-                                </p>
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
-                            <span className="font-semibold text-slate-700">Total</span>
-                            <span className="font-semibold text-slate-950">{formatPence(item.amountPence)}</span>
-                          </div>
+                          <label htmlFor={`dashboard-todo-${item.id}`} className={isIgnored ? 'min-w-0 cursor-default' : 'min-w-0 cursor-pointer'}>
+                            <span
+                              className={
+                                isIgnored
+                                  ? 'block text-sm font-semibold text-slate-500 line-through decoration-2'
+                                  : isDone
+                                    ? 'block text-sm font-semibold text-emerald-950 line-through decoration-2'
+                                    : 'block text-sm font-semibold text-slate-950'
+                              }
+                            >
+                              {item.label}
+                            </span>
+                            <span
+                              className={
+                                isIgnored
+                                  ? 'mt-1 block text-xs font-semibold text-slate-500'
+                                  : isDone
+                                    ? 'mt-1 block text-xs text-emerald-700'
+                                    : 'mt-1 block text-xs text-slate-500'
+                              }
+                            >
+                              {isIgnored ? 'Ignored for this paycheck' : item.detail}
+                            </span>
+                          </label>
+                          <span
+                            className={
+                              isIgnored
+                                ? 'text-sm font-semibold text-slate-500 line-through decoration-2 sm:text-right'
+                                : isDone
+                                  ? 'text-sm font-semibold text-emerald-800 sm:text-right'
+                                  : 'text-sm font-semibold text-slate-950 sm:text-right'
+                            }
+                          >
+                            {formatPence(item.amountPence)}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={`${isExpanded ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
+                            aria-expanded={isExpanded}
+                            aria-controls={breakdownId}
+                            onClick={() => toggleTodoBreakdown(item.id)}
+                            className={
+                              isIgnored
+                                ? 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-400 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                                : 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                            }
+                          >
+                            <ChevronDown
+                              size={16}
+                              aria-hidden="true"
+                              className={isExpanded ? 'rotate-180 transition' : 'transition'}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Ignore Payment for ${item.ignoreLabel}`}
+                            aria-pressed={isIgnored}
+                            onClick={() => toggleIgnoredPayment(item, !isIgnored)}
+                            className={
+                              isIgnored
+                                ? 'inline-flex min-h-8 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
+                                : 'inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 text-xs font-semibold text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                            }
+                          >
+                            Ignore Payment
+                          </button>
                         </div>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
+                        {isExpanded && (
+                          <div
+                            id={breakdownId}
+                            role="region"
+                            aria-label={`Breakdown for ${breakdownLabel}`}
+                            className="mt-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60"
+                          >
+                            <ul className="space-y-2">
+                              {item.breakdownLines.map((line) => (
+                                <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-sm shadow-sm shadow-slate-200/50">
+                                  <div className="min-w-0">
+                                    <p className="truncate font-semibold text-slate-900">{line.label}</p>
+                                    <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
+                                  </div>
+                                  <p className={line.amountPence < 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-950'}>
+                                    {formatPence(line.amountPence)}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
+                              <span className="font-semibold text-slate-700">Total</span>
+                              <span className="font-semibold text-slate-950">{formatPence(item.amountPence)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
             ) : (
               <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
                 <p className="text-sm font-semibold text-slate-950">No set-asides for this paycheck</p>
@@ -473,6 +503,112 @@ export function DashboardPage({
           />
         </SectionGrid>
       )}
+    </div>
+  )
+}
+
+function ChecklistProgressCard({
+  activeCount,
+  completedCount,
+  ignoredCount,
+  completedAmountPence,
+  remainingAmountPence,
+  totalAmountPence,
+}: {
+  activeCount: number
+  completedCount: number
+  ignoredCount: number
+  completedAmountPence: number
+  remainingAmountPence: number
+  totalAmountPence: number
+}) {
+  const countPercent = activeCount > 0 ? Math.round((completedCount / activeCount) * 100) : 0
+  const amountPercent = totalAmountPence > 0
+    ? Math.min(100, Math.round((completedAmountPence / totalAmountPence) * 100))
+    : countPercent
+  const openCount = Math.max(0, activeCount - completedCount)
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#ecfdf5,#f8fafc_55%,#ecfeff)] shadow-[0_18px_45px_rgba(16,185,129,0.12)]">
+      <div className="grid gap-4 p-4 md:grid-cols-[auto_1fr] md:items-center">
+        <div className="flex items-center gap-4">
+          <div
+            className="relative flex size-20 shrink-0 items-center justify-center rounded-full shadow-inner shadow-emerald-200/80"
+            style={{ background: `conic-gradient(#10b981 ${countPercent * 3.6}deg, #dbeafe 0deg)` }}
+            aria-hidden="true"
+          >
+            <div className="flex size-14 items-center justify-center rounded-full border border-white/80 bg-white text-lg font-semibold tracking-[-0.02em] text-slate-950 shadow-sm">
+              {countPercent}%
+            </div>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Checklist progress</p>
+            <p className="mt-1 text-xl font-semibold tracking-[-0.02em] text-slate-950">
+              {completedCount} of {activeCount} sorted
+            </p>
+            <p className="mt-1 text-sm leading-5 text-slate-600">
+              {openCount > 0
+                ? `${openCount} item${openCount === 1 ? '' : 's'} still need attention.`
+                : 'Every active set-aside is complete.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <ChecklistProgressStat
+            icon={<CheckCircle2 size={16} />}
+            label="Done"
+            value={formatPence(completedAmountPence)}
+            className="border-emerald-200/90 bg-white/80 text-emerald-700"
+          />
+          <ChecklistProgressStat
+            icon={<Clock3 size={16} />}
+            label="Left"
+            value={formatPence(remainingAmountPence)}
+            className="border-amber-200/90 bg-white/80 text-amber-700"
+          />
+          <ChecklistProgressStat
+            icon={<EyeOff size={16} />}
+            label="Ignored"
+            value={`${ignoredCount}`}
+            className="border-slate-200/90 bg-white/80 text-slate-500"
+          />
+        </div>
+      </div>
+      <div className="border-t border-emerald-100/80 bg-white/55 p-4">
+        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span>Amount covered</span>
+          <span>{formatPence(completedAmountPence)} of {formatPence(totalAmountPence)}</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-white shadow-inner shadow-slate-200/80">
+          <div
+            className="h-full rounded-full bg-[linear-gradient(90deg,#10b981,#06b6d4)] shadow-sm transition-all"
+            style={{ width: `${amountPercent}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ChecklistProgressStat({
+  icon,
+  label,
+  value,
+  className,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  className: string
+}) {
+  return (
+    <div className={`rounded-xl border p-3 shadow-sm shadow-slate-200/60 ${className}`}>
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+        {icon}
+        {label}
+      </div>
+      <p className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-950">{value}</p>
     </div>
   )
 }

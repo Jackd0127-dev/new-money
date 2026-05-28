@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { CalendarDays, CircleDollarSign, Trash2, WalletCards } from 'lucide-react'
+import { BadgePoundSterling, CalendarDays, CircleDollarSign, Trash2, TrendingUp, WalletCards } from 'lucide-react'
 
 import { formatPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -30,6 +30,8 @@ export function PayPeriodHistoryPanel({
 
     return total + allocated
   }, 0)
+  const allocationRate = totalIncomePence > 0 ? Math.round((totalAllocatedPence / totalIncomePence) * 100) : 0
+  const unallocatedPence = Math.max(0, totalIncomePence - totalAllocatedPence)
   const latestPeriods = snapshot.payPeriods.slice(0, 10)
   const maxHistoryIncomePence = Math.max(1, ...latestPeriods.map((period) => period.incomePence))
 
@@ -41,35 +43,22 @@ export function PayPeriodHistoryPanel({
 
   return (
     <Panel title="Pay period history" description="Previous paycheck plans and their allocations." accent="blue">
-      <div className="mb-4 grid gap-3 md:grid-cols-3">
+      <HistoryOverview
+        latestPeriods={latestPeriods}
+        maxHistoryIncomePence={maxHistoryIncomePence}
+        totalIncomePence={totalIncomePence}
+        totalAllocatedPence={totalAllocatedPence}
+        unallocatedPence={unallocatedPence}
+        allocationRate={allocationRate}
+      />
+
+      <div className="mb-4 mt-4 grid gap-3 md:grid-cols-3">
         <HistoryStat icon={<CalendarDays size={17} />} label="Paychecks" value={String(snapshot.payPeriods.length)} tone="blue" />
         <HistoryStat icon={<CircleDollarSign size={17} />} label="Total income" value={formatPence(totalIncomePence)} tone="emerald" />
         <HistoryStat icon={<WalletCards size={17} />} label="Total allocated" value={formatPence(totalAllocatedPence)} tone="violet" />
       </div>
 
-      {latestPeriods.length > 0 && (
-        <div className="mb-4 rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#eff6ff,#ecfeff)] p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Pay rhythm</p>
-              <p className="mt-1 text-sm text-blue-900">Recent paycheck sizes, newest first.</p>
-            </div>
-            <p className="text-sm font-semibold text-slate-950">{formatPence(latestPeriods[0].incomePence)}</p>
-          </div>
-          <div className="mt-4 flex h-24 items-end gap-1.5" aria-hidden="true">
-            {latestPeriods.map((period) => (
-              <span
-                key={period.id}
-                className="min-w-3 flex-1 rounded-t-lg bg-blue-500/75 shadow-sm"
-                style={{ height: `${Math.max(12, Math.round((period.incomePence / maxHistoryIncomePence) * 100))}%` }}
-                title={`${period.payday}: ${formatPence(period.incomePence)}`}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
           <thead className="bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -87,6 +76,8 @@ export function PayPeriodHistoryPanel({
                 const allocated = snapshot.potAllocations
                   .filter((allocation) => allocation.payPeriodId === period.id)
                   .reduce((total, allocation) => total + allocation.amountPence, 0)
+                const rowAllocationPercent = period.incomePence > 0 ? Math.round((allocated / period.incomePence) * 100) : 0
+                const rowAllocationWidth = `${Math.min(100, Math.max(0, rowAllocationPercent))}%`
 
                 return (
                   <tr key={period.id} className="transition hover:bg-slate-50/80">
@@ -99,7 +90,11 @@ export function PayPeriodHistoryPanel({
                       <details>
                         <summary className="cursor-pointer list-none font-semibold text-slate-950">
                           {formatPence(allocated)}
+                          <span className="ml-2 text-xs font-semibold text-slate-500">{rowAllocationPercent}%</span>
                         </summary>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 shadow-inner shadow-slate-200/80">
+                          <div className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb,#06b6d4)]" style={{ width: rowAllocationWidth }} />
+                        </div>
                         <CalculationDetails
                           breakdown={getHistoryAllocationBreakdown(
                             snapshot.potAllocations.filter((allocation) => allocation.payPeriodId === period.id),
@@ -136,6 +131,74 @@ export function PayPeriodHistoryPanel({
         </table>
       </div>
     </Panel>
+  )
+}
+
+function HistoryOverview({
+  latestPeriods,
+  maxHistoryIncomePence,
+  totalIncomePence,
+  totalAllocatedPence,
+  unallocatedPence,
+  allocationRate,
+}: {
+  latestPeriods: PlannerSnapshot['payPeriods']
+  maxHistoryIncomePence: number
+  totalIncomePence: number
+  totalAllocatedPence: number
+  unallocatedPence: number
+  allocationRate: number
+}) {
+  const allocationWidth = `${Math.min(100, Math.max(0, allocationRate))}%`
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_22px_65px_rgba(15,23,42,0.18)]">
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)] lg:items-end">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
+            <TrendingUp size={15} />
+            Paycheck history
+          </div>
+          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(totalIncomePence)}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            {latestPeriods.length > 0
+              ? `Latest paycheck ${latestPeriods[0].payday} was ${formatPence(latestPeriods[0].incomePence)}.`
+              : 'Create a paycheck plan to start building a history.'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner shadow-white/10">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
+            <BadgePoundSterling size={15} />
+            Allocated rate
+          </div>
+          <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-white">{allocationRate}%</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">
+            {formatPence(totalAllocatedPence)} allocated · {formatPence(unallocatedPence)} not allocated
+          </p>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15 shadow-inner shadow-slate-950/20">
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#22d3ee)]" style={{ width: allocationWidth }} />
+          </div>
+        </div>
+      </div>
+      {latestPeriods.length > 0 && (
+        <div className="border-t border-white/10 bg-white/[0.06] p-4">
+          <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
+            <span>Pay rhythm</span>
+            <span>Newest first</span>
+          </div>
+          <div className="flex h-20 items-end gap-1.5" aria-hidden="true">
+            {latestPeriods.map((period) => (
+              <span
+                key={period.id}
+                className="min-w-3 flex-1 rounded-t-lg bg-cyan-300/75 shadow-sm"
+                style={{ height: `${Math.max(12, Math.round((period.incomePence / maxHistoryIncomePence) * 100))}%` }}
+                title={`${period.payday}: ${formatPence(period.incomePence)}`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 

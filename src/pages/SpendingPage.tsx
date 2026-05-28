@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, PenLine, Trash2 } from 'lucide-react'
+import { CalendarDays, ChevronDown, CreditCard, PenLine, ReceiptText, Sparkles, Trash2, WalletCards } from 'lucide-react'
 
 import { findPayPeriodForDate, formatPence, getAppTodayIso, parsePoundsToPence } from '../domain/money'
 import type {
@@ -12,6 +12,7 @@ import {
   Button,
   CalculationDetails,
   Field,
+  MoneyMetric,
   Panel,
   SectionGrid,
   SelectInput,
@@ -54,6 +55,15 @@ export function SpendingPage({
   const parsedAmountPence = parsePoundsToPence(amount)
   const canSubmitSpend = parsedAmountPence > 0 && Boolean(date)
   const groupedTransactions = groupTransactionsByPeriod(snapshot.transactions, snapshot, selectedPayPeriod ?? null)
+  const selectedPeriodSpendPence = selectedPayPeriod
+    ? groupedTransactions.find((group) => group.id === selectedPayPeriod.id)?.totalPence ?? 0
+    : groupedTransactions[0]?.totalPence ?? 0
+  const todaySpendPence = snapshot.transactions
+    .filter((transaction) => transaction.date === today)
+    .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
+  const linkedCardSpendPence = snapshot.transactions
+    .filter((transaction) => transaction.paymentMethod === 'credit_card' || transaction.creditCardId)
+    .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
 
   async function submitTransaction() {
     const amountPence = parsedAmountPence
@@ -130,6 +140,24 @@ export function SpendingPage({
 
   return (
     <div className="space-y-6">
+      <div className="grid gap-3 md:grid-cols-3">
+        <MoneyMetric
+          label="Today logged"
+          value={formatSpendTotal(todaySpendPence)}
+          tone={todaySpendPence > 0 ? 'bad' : 'neutral'}
+          breakdown={getSpendingMetricBreakdown('Today logged', snapshot.transactions.filter((transaction) => transaction.date === today), snapshot)}
+        />
+        <MoneyMetric
+          label={selectedPayPeriod ? 'Selected paycheck' : 'Latest paycheck'}
+          value={formatSpendTotal(selectedPeriodSpendPence)}
+          tone={selectedPeriodSpendPence > 0 ? 'warning' : 'neutral'}
+        />
+        <MoneyMetric
+          label="Card-linked spend"
+          value={formatSpendTotal(linkedCardSpendPence)}
+          tone={linkedCardSpendPence > 0 ? 'primary' : 'neutral'}
+        />
+      </div>
       <SectionGrid variant="wideRight">
         <Panel
           title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
@@ -138,110 +166,118 @@ export function SpendingPage({
           density="compact"
         >
           <div className="space-y-4">
-          <Field label="Amount">
-            <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="12.50" />
-          </Field>
-          <div className="flex flex-wrap gap-2" aria-label="Quick amounts">
-            {quickAmounts.map((quickAmount) => (
-              <button
-                key={quickAmount}
-                type="button"
-                onClick={() => setAmount(quickAmount)}
-                className="rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
-              >
-                {formatPence(parsePoundsToPence(quickAmount))}
-              </button>
-            ))}
-          </div>
-          <Field label="Link spend to">
-            <SelectInput value={paymentMethod} onChange={(event) => changePaymentMethod(event.target.value as QuickSpendLinkMethod)}>
-              <option value="unlinked">Unlinked</option>
-              <option value="pot">Pot</option>
-              <option value="credit_card" disabled={activeCards.length === 0}>
-                Credit card
-              </option>
-            </SelectInput>
-          </Field>
-          {paymentMethod === 'pot' && (
-            <Field
-              label="Pot"
-              hint={
-                selectedPot?.linkedCreditCardId
-                  ? 'This logs card spend and adds the cover to the linked card pot checklist.'
-                  : 'Spending from a normal pot deducts its balance now.'
-              }
-            >
-              <SelectInput aria-label="Pot" value={potId} onChange={(event) => setPotId(event.target.value)}>
-                <option value="">No pot linked</option>
-                {activePots.map((pot) => (
-                  <option key={pot.id} value={pot.id}>
-                    {pot.name} · {formatPence(pot.balancePence)}
-                    {pot.linkedCreditCardId ? ' · card cover' : ''}
-                  </option>
-                ))}
-              </SelectInput>
+            <SpendPreviewCard
+              amountPence={parsedAmountPence}
+              date={date}
+              note={note}
+              linkLabel={getSelectedSpendLinkLabel(paymentMethod, selectedPot?.name, selectedCard?.name)}
+              paymentMethod={paymentMethod}
+              isEditing={Boolean(editingTransactionId)}
+            />
+            <Field label="Amount">
+              <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="12.50" />
             </Field>
-          )}
-          {paymentMethod === 'credit_card' && (
-            <Field label="Credit card" hint="Optional. Choose no card to keep this spend unlinked.">
-              <SelectInput aria-label="Credit card" value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
-                <option value="">No credit card linked</option>
-                {activeCards.map((card) => (
-                  <option key={card.id} value={card.id}>
-                    {card.name} ({card.provider})
-                  </option>
-                ))}
-              </SelectInput>
-            </Field>
-          )}
-          <Field label="Date">
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-              <Button variant="secondary" onClick={() => setDate(today)}>
-                Today
-              </Button>
-            </div>
-          </Field>
-          <Field label="Note">
-            <TextInput value={note} onChange={(event) => setNote(event.target.value)} placeholder="Groceries" />
-          </Field>
-          {recentNotes.length > 0 && (
-            <div className="flex flex-wrap gap-2" aria-label="Recent spending suggestions">
-              {recentNotes.map((recentNote) => (
+            <div className="flex flex-wrap gap-2" aria-label="Quick amounts">
+              {quickAmounts.map((quickAmount) => (
                 <button
-                  key={recentNote}
+                  key={quickAmount}
                   type="button"
-                  onClick={() => setNote(recentNote)}
-                  className="rounded-lg border border-slate-200/70 bg-white/[0.85] px-3 py-2 text-sm font-medium text-slate-700 shadow-sm shadow-slate-200/50 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
+                  onClick={() => setAmount(quickAmount)}
+                  className="rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
                 >
-                  {recentNote}
+                  {formatPence(parsePoundsToPence(quickAmount))}
                 </button>
               ))}
             </div>
-          )}
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={submitTransaction} disabled={!canSubmitSpend}>
-              {editingTransactionId ? 'Save spending' : 'Log spending'}
-            </Button>
-            {editingTransactionId && (
-              <Button variant="secondary" onClick={resetForm}>
-                Cancel
-              </Button>
+            <Field label="Link spend to">
+              <SelectInput value={paymentMethod} onChange={(event) => changePaymentMethod(event.target.value as QuickSpendLinkMethod)}>
+                <option value="unlinked">Unlinked</option>
+                <option value="pot">Pot</option>
+                <option value="credit_card" disabled={activeCards.length === 0}>
+                  Credit card
+                </option>
+              </SelectInput>
+            </Field>
+            {paymentMethod === 'pot' && (
+              <Field
+                label="Pot"
+                hint={
+                  selectedPot?.linkedCreditCardId
+                    ? 'This logs card spend and adds the cover to the linked card pot checklist.'
+                    : 'Spending from a normal pot deducts its balance now.'
+                }
+              >
+                <SelectInput aria-label="Pot" value={potId} onChange={(event) => setPotId(event.target.value)}>
+                  <option value="">No pot linked</option>
+                  {activePots.map((pot) => (
+                    <option key={pot.id} value={pot.id}>
+                      {pot.name} · {formatPence(pot.balancePence)}
+                      {pot.linkedCreditCardId ? ' · card cover' : ''}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
             )}
-          </div>
-          <div className="sticky bottom-3 z-10 rounded-lg border border-slate-200/90 bg-white/95 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.13)] backdrop-blur xl:hidden">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-950">
-                  {parsedAmountPence > 0 ? formatPence(parsedAmountPence) : 'No amount'} · {getSelectedSpendLinkLabel(paymentMethod, selectedPot?.name, selectedCard?.name)}
-                </p>
-                <p className="text-xs text-slate-500">{date}</p>
+            {paymentMethod === 'credit_card' && (
+              <Field label="Credit card" hint="Optional. Choose no card to keep this spend unlinked.">
+                <SelectInput aria-label="Credit card" value={creditCardId} onChange={(event) => setCreditCardId(event.target.value)}>
+                  <option value="">No credit card linked</option>
+                  {activeCards.map((card) => (
+                    <option key={card.id} value={card.id}>
+                      {card.name} ({card.provider})
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+            )}
+            <Field label="Date">
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <TextInput type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+                <Button variant="secondary" onClick={() => setDate(today)}>
+                  Today
+                </Button>
               </div>
+            </Field>
+            <Field label="Note">
+              <TextInput value={note} onChange={(event) => setNote(event.target.value)} placeholder="Groceries" />
+            </Field>
+            {recentNotes.length > 0 && (
+              <div className="flex flex-wrap gap-2" aria-label="Recent spending suggestions">
+                {recentNotes.map((recentNote) => (
+                  <button
+                    key={recentNote}
+                    type="button"
+                    onClick={() => setNote(recentNote)}
+                    className="rounded-lg border border-slate-200/70 bg-white/[0.85] px-3 py-2 text-sm font-medium text-slate-700 shadow-sm shadow-slate-200/50 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
+                  >
+                    {recentNote}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-3">
               <Button onClick={submitTransaction} disabled={!canSubmitSpend}>
-                {editingTransactionId ? 'Save' : 'Add'}
+                {editingTransactionId ? 'Save spending' : 'Log spending'}
               </Button>
+              {editingTransactionId && (
+                <Button variant="secondary" onClick={resetForm}>
+                  Cancel
+                </Button>
+              )}
             </div>
-          </div>
+            <div className="sticky bottom-3 z-10 rounded-lg border border-slate-200/90 bg-white/95 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.13)] backdrop-blur xl:hidden">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-950">
+                    {parsedAmountPence > 0 ? formatPence(parsedAmountPence) : 'No amount'} · {getSelectedSpendLinkLabel(paymentMethod, selectedPot?.name, selectedCard?.name)}
+                  </p>
+                  <p className="text-xs text-slate-500">{date}</p>
+                </div>
+                <Button onClick={submitTransaction} disabled={!canSubmitSpend}>
+                  {editingTransactionId ? 'Save' : 'Add'}
+                </Button>
+              </div>
+            </div>
           </div>
         </Panel>
 
@@ -252,82 +288,139 @@ export function SpendingPage({
           density="compact"
         >
           <div className="space-y-3 xl:max-h-[720px] xl:overflow-y-auto xl:pr-1">
-          {groupedTransactions.length > 0 ? (
-            groupedTransactions.map((group, index) => (
-              <details
-                key={group.id}
-                open={group.isSelected || (!selectedPayPeriod && index === 0)}
-                className={
-                  group.isSelected
-                    ? 'group rounded-lg border border-slate-950 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.08)]'
-                    : 'group rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60'
-                }
-              >
-                <summary className="cursor-pointer list-none px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-950">{group.label}</p>
-                        {group.isSelected && (
-                          <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
-                            Viewing
-                          </span>
-                        )}
+            {groupedTransactions.length > 0 ? (
+              groupedTransactions.map((group, index) => (
+                <details
+                  key={group.id}
+                  open={group.isSelected || (!selectedPayPeriod && index === 0)}
+                  className={
+                    group.isSelected
+                      ? 'group rounded-lg border border-slate-950 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.08)]'
+                      : 'group rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60'
+                  }
+                >
+                  <summary className="cursor-pointer list-none px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-950">{group.label}</p>
+                          {group.isSelected && (
+                            <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
+                              Viewing
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">{group.transactions.length} entries</p>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">{group.transactions.length} entries</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
+                        <ChevronDown size={17} className="shrink-0 text-slate-400 transition group-open:rotate-180" />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
-                      <ChevronDown size={17} className="shrink-0 text-slate-400 transition group-open:rotate-180" />
-                    </div>
+                  </summary>
+                  <div className="border-t border-slate-100 p-3">
+                    <CalculationDetails breakdown={getSpendingGroupBreakdown(group, snapshot)} />
                   </div>
-                </summary>
-                <div className="border-t border-slate-100 p-3">
-                  <CalculationDetails breakdown={getSpendingGroupBreakdown(group, snapshot)} />
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {group.transactions.map((transaction) => {
-                    return (
-                      <div key={transaction.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
-                          <p className="text-xs text-slate-500">
-                            {transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}
-                          </p>
+                  <div className="divide-y divide-slate-100">
+                    {group.transactions.map((transaction) => {
+                      return (
+                        <div key={transaction.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
+                            <p className="text-xs text-slate-500">
+                              {transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <p className="text-sm font-semibold text-red-700">-{formatPence(transaction.amountPence)}</p>
+                            <Button
+                              variant="secondary"
+                              onClick={() => startEditingTransaction(transaction.id)}
+                              aria-label={`Edit ${transaction.note}`}
+                            >
+                              <PenLine size={16} />
+                            </Button>
+                            <Button
+                              variant="danger"
+                              onClick={() => {
+                                if (window.confirm(`Delete ${transaction.note}?`)) {
+                                  void actions.deleteTransaction(transaction.id)
+                                }
+                              }}
+                              aria-label={`Delete ${transaction.note}`}
+                            >
+                              <Trash2 size={16} />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <p className="text-sm font-semibold text-red-700">-{formatPence(transaction.amountPence)}</p>
-                          <Button
-                            variant="secondary"
-                            onClick={() => startEditingTransaction(transaction.id)}
-                            aria-label={`Edit ${transaction.note}`}
-                          >
-                            <PenLine size={16} />
-                          </Button>
-                          <Button
-                            variant="danger"
-                            onClick={() => {
-                              if (window.confirm(`Delete ${transaction.note}?`)) {
-                                void actions.deleteTransaction(transaction.id)
-                              }
-                            }}
-                            aria-label={`Delete ${transaction.note}`}
-                          >
-                            <Trash2 size={16} />
-                          </Button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </details>
-            ))
-          ) : (
-            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No spending entries yet.</p>
-          )}
+                      )
+                    })}
+                  </div>
+                </details>
+              ))
+            ) : (
+              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No spending entries yet.</p>
+            )}
           </div>
         </Panel>
       </SectionGrid>
+    </div>
+  )
+}
+
+function SpendPreviewCard({
+  amountPence,
+  date,
+  note,
+  linkLabel,
+  paymentMethod,
+  isEditing,
+}: {
+  amountPence: number
+  date: string
+  note: string
+  linkLabel: string
+  paymentMethod: QuickSpendLinkMethod
+  isEditing: boolean
+}) {
+  const icon =
+    paymentMethod === 'credit_card' ? <CreditCard size={17} /> : paymentMethod === 'pot' ? <WalletCards size={17} /> : <ReceiptText size={17} />
+  const amountLabel = amountPence > 0 ? formatPence(amountPence) : '£0.00'
+  const noteLabel = note.trim() || 'Manual spend'
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-blue-200/90 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
+      <div className="flex items-start justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
+            <Sparkles size={15} />
+            {isEditing ? 'Editing spend' : 'Ready to log'}
+          </div>
+          <p className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-white">
+            {amountPence > 0 ? '-' : ''}{amountLabel}
+          </p>
+          <p className="mt-1 truncate text-sm text-slate-300">{noteLabel}</p>
+        </div>
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-cyan-100 shadow-inner shadow-white/10">
+          {icon}
+        </div>
+      </div>
+      <div className="grid gap-2 border-t border-white/10 bg-white/[0.06] p-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-white/10 bg-white/[0.08] px-3 py-2">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <CalendarDays size={14} />
+            Date
+          </div>
+          <p className="mt-1 truncate text-sm font-semibold text-white">{date}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.08] px-3 py-2">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {icon}
+            Link
+          </div>
+          <p className="mt-1 truncate text-sm font-semibold text-white">{linkLabel}</p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -356,6 +449,34 @@ function getSpendingGroupBreakdown(group: TransactionGroup, snapshot: PlannerSna
             {
               label: 'Period spending total',
               value: formatPence(group.totalPence),
+              tone: 'result' as const,
+            },
+          ]
+        : [{ label: 'No spending entries', value: formatPence(0), tone: 'result' }],
+  }
+}
+
+function getSpendingMetricBreakdown(
+  label: string,
+  transactions: PlannerSnapshot['transactions'],
+  snapshot: PlannerSnapshot,
+): CalculationBreakdown {
+  const totalPence = transactions.reduce((sum, transaction) => sum + transaction.amountPence, 0)
+
+  return {
+    formula: `${label} = manual spending entries in this view.`,
+    lines:
+      transactions.length > 0
+        ? [
+            ...transactions.map((transaction) => ({
+              label: transaction.note,
+              value: formatPence(transaction.amountPence),
+              detail: `${transaction.date} · ${getTransactionLinkLabel(transaction, snapshot)}`,
+              tone: 'add' as const,
+            })),
+            {
+              label,
+              value: formatPence(totalPence),
               tone: 'result' as const,
             },
           ]
@@ -418,6 +539,10 @@ function groupTransactionsByPeriod(
 
       return b.sortDate.localeCompare(a.sortDate)
     })
+}
+
+function formatSpendTotal(amountPence: number): string {
+  return amountPence > 0 ? `-${formatPence(amountPence)}` : formatPence(0)
 }
 
 function getQuickSpendLinkFields(

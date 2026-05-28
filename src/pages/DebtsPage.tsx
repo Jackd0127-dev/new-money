@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { PenLine, Trash2 } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { AlertTriangle, ArrowDownRight, BadgePoundSterling, PenLine, ShieldCheck, Trash2 } from 'lucide-react'
 
 import {
   findPayPeriodForDate,
@@ -77,6 +77,9 @@ export function DebtsPage({
     .filter((payment) => activeDebtIds.has(payment.debtId))
     .reduce((total, payment) => total + payment.amountPence, 0)
   const balanceReductionPence = Math.max(0, summary.totalOriginalAmountPence - summary.totalCurrentBalancePence)
+  const payoffPercent = summary.totalOriginalAmountPence > 0
+    ? Math.round((summary.totalPaidPence / summary.totalOriginalAmountPence) * 100)
+    : 100
   const dueThisPayPeriod = payPeriodEndDate
     ? activeDebts.filter((debt) => debt.dueDate <= payPeriodEndDate)
     : []
@@ -160,7 +163,16 @@ export function DebtsPage({
   return (
     <div className="space-y-6">
       <Panel title="Debt summary" description="Balances, paid-off progress, debts due in the selected pay period, and overdue items." accent="rose">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <DebtCommandCard
+          totalCurrentBalancePence={summary.totalCurrentBalancePence}
+          totalPaidPence={summary.totalPaidPence}
+          totalOriginalAmountPence={summary.totalOriginalAmountPence}
+          debtDueThisPayPeriodPence={debtDueThisPayPeriodPence}
+          overdueDebtCount={summary.overdueDebtCount}
+          payoffPercent={payoffPercent}
+          currentPayPeriod={currentPayPeriod}
+        />
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MoneyMetric
             label="Active debt"
             value={formatPence(summary.totalCurrentBalancePence)}
@@ -465,8 +477,8 @@ export function DebtsPage({
         density="compact"
       >
         <div className="space-y-4 xl:max-h-[820px] xl:overflow-y-auto xl:pr-1">
-            {visibleDebts.length > 0 ? (
-              visibleDebts.map((debt) => {
+          {visibleDebts.length > 0 ? (
+            visibleDebts.map((debt) => {
               const paidPence = Math.max(0, debt.originalAmountPence - debt.currentBalancePence)
               const linkedPotPence = getLinkedDebtPotPence(snapshot.pots, debt.id)
               const coveredPence = Math.min(debt.originalAmountPence, paidPence + linkedPotPence)
@@ -480,7 +492,9 @@ export function DebtsPage({
                 linkedPotPence > 0 ? `${formatPence(coveredPence)} covered` : `${formatPence(paidPence)} paid`
 
               return (
-                <div key={debt.id} className="rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]">
+                <div key={debt.id} className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]">
+                  <div className={isOverdue ? 'h-1.5 bg-red-500' : 'h-1.5 bg-[linear-gradient(90deg,#fb7185,#f59e0b)]'} />
+                  <div className="p-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -566,12 +580,13 @@ export function DebtsPage({
                       <p className="mt-2 text-xs text-slate-500">{debt.interestRateApr}% APR</p>
                     )}
                   </div>
+                  </div>
                 </div>
               )
-              })
-            ) : (
-              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debts tracked yet.</p>
-            )}
+            })
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debts tracked yet.</p>
+          )}
         </div>
       </Panel>
 
@@ -623,6 +638,99 @@ export function DebtsPage({
           )}
         </div>
       </Panel>
+    </div>
+  )
+}
+
+function DebtCommandCard({
+  totalCurrentBalancePence,
+  totalPaidPence,
+  totalOriginalAmountPence,
+  debtDueThisPayPeriodPence,
+  overdueDebtCount,
+  payoffPercent,
+  currentPayPeriod,
+}: {
+  totalCurrentBalancePence: number
+  totalPaidPence: number
+  totalOriginalAmountPence: number
+  debtDueThisPayPeriodPence: number
+  overdueDebtCount: number
+  payoffPercent: number
+  currentPayPeriod: PayPeriod | null
+}) {
+  const payoffWidth = `${Math.min(100, Math.max(0, payoffPercent))}%`
+  const remainingPercent = Math.max(0, 100 - Math.min(100, Math.max(0, payoffPercent)))
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-rose-200/90 bg-[linear-gradient(135deg,#020617,#2b0f1c_54%,#3f1624)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.2)]">
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)] lg:items-start">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-rose-200">
+            <BadgePoundSterling size={15} />
+            Debt control
+          </div>
+          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(totalCurrentBalancePence)}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-rose-50/75">
+            {formatPence(totalPaidPence)} cleared from {formatPence(totalOriginalAmountPence)} tracked original debt.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+          <DebtCommandStat icon={<ShieldCheck size={16} />} label="Paid off" value={`${payoffPercent}%`} tone="good" />
+          <DebtCommandStat
+            icon={<ArrowDownRight size={16} />}
+            label="Due this pay"
+            value={formatPence(debtDueThisPayPeriodPence)}
+            tone={debtDueThisPayPeriodPence > 0 ? 'warning' : 'muted'}
+          />
+          <DebtCommandStat
+            icon={<AlertTriangle size={16} />}
+            label="Overdue"
+            value={String(overdueDebtCount)}
+            tone={overdueDebtCount > 0 ? 'bad' : 'muted'}
+          />
+        </div>
+      </div>
+      <div className="border-t border-white/10 bg-white/[0.06] p-4">
+        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-rose-100/80">
+          <span>{currentPayPeriod ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}` : 'No active pay period'}</span>
+          <span>{remainingPercent}% left</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-white/15 shadow-inner shadow-slate-950/30">
+          <div className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#22d3ee)] shadow-sm" style={{ width: payoffWidth }} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function DebtCommandStat({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  tone: 'good' | 'warning' | 'bad' | 'muted'
+}) {
+  const toneClassName =
+    tone === 'good'
+      ? 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100'
+      : tone === 'warning'
+        ? 'border-amber-300/20 bg-amber-300/10 text-amber-100'
+        : tone === 'bad'
+          ? 'border-red-300/25 bg-red-300/10 text-red-100'
+          : 'border-white/10 bg-white/[0.08] text-slate-200'
+
+  return (
+    <div className={`rounded-2xl border p-3 shadow-inner shadow-white/5 ${toneClassName}`}>
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+        {icon}
+        {label}
+      </div>
+      <p className="mt-2 text-xl font-semibold tracking-[-0.02em] text-white">{value}</p>
     </div>
   )
 }

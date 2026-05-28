@@ -1,14 +1,17 @@
 import { useState, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import {
+  BadgePoundSterling,
   CalendarDays,
   ChevronDown,
   CreditCard,
+  Layers3,
   PauseCircle,
   PenLine,
   PiggyBank,
   PlayCircle,
   PlusCircle,
+  Repeat,
   Trash2,
   X,
 } from 'lucide-react'
@@ -332,17 +335,32 @@ function RecurringSummaryBar({
   return (
     <section
       aria-label="Recurring overview"
-      className="rounded-lg border border-slate-200/90 bg-white/95 p-3 shadow-[0_14px_35px_rgba(15,23,42,0.06)]"
+      className="overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]"
     >
-      <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <CompactStat label="Active" value={`${stats.activeCount}/${stats.totalCount}`} />
-          <CompactStat label="Monthly" value={String(stats.monthlyCount)} />
-          <CompactStat label="On cards" value={String(stats.cardLinkedCount)} />
-          <CompactStat label="Active total" value={formatPence(stats.activeTotalPence)} />
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-end">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
+            <Repeat size={15} />
+            Recurring control
+          </div>
+          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(stats.activeTotalPence)}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            {stats.activeCount} active payment{stats.activeCount === 1 ? '' : 's'} across {stats.totalCount} saved recurring item{stats.totalCount === 1 ? '' : 's'}.
+          </p>
         </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <CompactStat icon={<Layers3 size={16} />} label="Active" value={`${stats.activeCount}/${stats.totalCount}`} />
+          <CompactStat icon={<CalendarDays size={16} />} label="Monthly" value={String(stats.monthlyCount)} />
+          <CompactStat icon={<CreditCard size={16} />} label="On cards" value={String(stats.cardLinkedCount)} />
+          <CompactStat icon={<BadgePoundSterling size={16} />} label="Active total" value={formatPence(stats.activeTotalPence)} />
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 border-t border-white/10 bg-white/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+          {stats.totalCount > 0 ? 'Payments stay tucked into compact cards below' : 'Add the first repeating payment'}
+        </p>
         <Button
-          className="min-h-9 justify-center px-3 lg:min-w-36"
+          className="min-h-9 justify-center px-3 sm:min-w-36"
           variant={isCreateOpen ? 'secondary' : 'primary'}
           onClick={onToggleCreate}
         >
@@ -354,11 +372,14 @@ function RecurringSummaryBar({
   )
 }
 
-function CompactStat({ label, value }: { label: string; value: string }) {
+function CompactStat({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200/90 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/60">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-slate-950">{value}</p>
+    <div className="rounded-2xl border border-white/10 bg-white/[0.08] p-3 text-slate-200 shadow-inner shadow-white/5">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
+        {icon}
+        {label}
+      </div>
+      <p className="mt-2 truncate text-lg font-semibold tracking-[-0.02em] text-white">{value}</p>
     </div>
   )
 }

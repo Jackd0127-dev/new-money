@@ -1,8 +1,28 @@
-import { useState } from 'react'
-import { Apple, Loader2, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Apple, CheckCircle2, Loader2, LockKeyhole, Mail, ShieldCheck, Sparkles } from 'lucide-react'
 
 import type { FirebaseAuthController } from '../hooks/useFirebaseAuth'
 import { Button, Field, TextInput } from './ui'
+
+function AuthTrustCard({
+  icon,
+  title,
+  body,
+}: {
+  icon: ReactNode
+  title: string
+  body: string
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.08] p-3 shadow-sm shadow-slate-950/20 backdrop-blur">
+      <div className="flex items-center gap-2 text-sm font-semibold text-white">
+        <span className="text-emerald-200">{icon}</span>
+        {title}
+      </div>
+      <p className="mt-2 text-sm leading-5 text-slate-300">{body}</p>
+    </div>
+  )
+}
 
 export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
   const [email, setEmail] = useState('')
@@ -34,14 +54,14 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
   }
 
   return (
-    <main className="flex min-h-dvh min-w-0 items-center justify-center overflow-x-hidden bg-[linear-gradient(180deg,#f8fbff_0%,#eef5f7_48%,#f7fafc_100%)] px-4 py-6 text-slate-950 sm:px-6">
+    <main className="flex min-h-dvh min-w-0 items-center justify-center overflow-x-hidden bg-[radial-gradient(circle_at_12%_10%,rgba(45,212,191,0.20),transparent_26%),linear-gradient(180deg,#f8fbff_0%,#eef5f7_48%,#f7fafc_100%)] px-4 py-6 text-slate-950 sm:px-6">
       <section
         aria-label="Sign in to Money Manager"
-        className="grid min-w-0 w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur lg:grid-cols-[0.9fr_1.1fr]"
+        className="grid min-w-0 w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200/80 bg-white/95 shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur lg:grid-cols-[0.95fr_1.05fr]"
       >
-        <div className="min-w-0 bg-[linear-gradient(180deg,#06122a_0%,#071a2d_56%,#06101f_100%)] px-5 py-7 text-white sm:px-8 sm:py-10">
+        <div className="min-w-0 bg-[radial-gradient(circle_at_20%_12%,rgba(16,185,129,0.24),transparent_30%),linear-gradient(180deg,#06122a_0%,#071a2d_56%,#06101f_100%)] px-5 py-7 text-white sm:px-8 sm:py-10">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-xl bg-white p-2 text-slate-950 shadow-lg shadow-emerald-950/20">
+            <div className="flex size-11 items-center justify-center rounded-lg bg-white p-2 text-slate-950 shadow-lg shadow-emerald-950/20">
               <img src="/favicon.svg" alt="" className="size-full" />
             </div>
             <div>
@@ -51,6 +71,10 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
           </div>
 
           <div className="mt-10 max-w-sm">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
+              <Sparkles size={14} />
+              Private planner access
+            </div>
             <h1 className="text-3xl font-semibold leading-tight tracking-normal sm:text-4xl">
               Sign in to open your planner.
             </h1>
@@ -59,14 +83,30 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
             </p>
           </div>
 
-          <div className="mt-10 grid gap-3 text-sm text-slate-200">
-            <div className="flex items-start gap-3">
-              <ShieldCheck className="mt-0.5 shrink-0 text-emerald-300" size={18} />
-              <p>Cloud sync runs only after Firebase confirms your account.</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <LockKeyhole className="mt-0.5 shrink-0 text-cyan-300" size={18} />
-              <p>Opening the app signed out always returns to this login screen.</p>
+          <div className="mt-10 grid gap-3 sm:grid-cols-2">
+            <AuthTrustCard
+              icon={<ShieldCheck size={18} />}
+              title="Verified access"
+              body="Cloud sync runs only after Firebase confirms your account."
+            />
+            <AuthTrustCard
+              icon={<LockKeyhole size={18} />}
+              title="Locked entry"
+              body="Opening the app signed out always returns to this login screen."
+            />
+          </div>
+
+          <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.08] p-4 shadow-sm shadow-slate-950/20 backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-slate-400">Account status</p>
+                <p className="mt-1 text-lg font-semibold text-white">
+                  {auth.isLoading ? 'Checking' : auth.isConfigured ? 'Ready' : 'Setup needed'}
+                </p>
+              </div>
+              <div className="flex size-11 items-center justify-center rounded-lg border border-white/10 bg-slate-950/35 text-emerald-200">
+                {auth.isLoading ? <Loader2 className="animate-spin" size={19} /> : <CheckCircle2 size={19} />}
+              </div>
             </div>
           </div>
         </div>
@@ -111,7 +151,7 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
                 </Button>
               </div>
 
-              <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/50">
+              <div className="rounded-lg border border-slate-200/90 bg-[linear-gradient(135deg,#f8fafc,#ffffff)] p-3 shadow-inner shadow-slate-200/50">
                 <div className="grid gap-3">
                   <Field label="Email">
                     <TextInput

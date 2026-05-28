@@ -1,6 +1,6 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, type ReactNode, useState } from 'react'
 import { clsx } from 'clsx'
-import { CheckCircle2, Loader2, Send, Settings2, X } from 'lucide-react'
+import { Bot, CheckCircle2, MessageCircle, Loader2, Send, Settings2, ShieldCheck, Sparkles, X } from 'lucide-react'
 
 import {
   getAssistantActionDetails,
@@ -10,7 +10,7 @@ import {
   type AssistantActionProposal,
   type AssistantActionStatus,
 } from '../domain/assistantActions'
-import { getAppTodayIso } from '../domain/money'
+import { formatPence, getAppTodayIso } from '../domain/money'
 import {
   createAssistantMessage,
   createConversationHistory,
@@ -54,6 +54,11 @@ export function AiPlanPage({
     createConversation,
   } = useAssistantConversations()
   const viewedPeriod = selectedPayPeriod ?? null
+  const today = getAppTodayIso(snapshot.settings)
+  const pendingActionCount = messages.reduce(
+    (total, message) => total + (message.proposedActions?.filter((action) => actionStatuses[action.id]?.state !== 'done' && actionStatuses[action.id]?.state !== 'cancelled').length ?? 0),
+    0,
+  )
 
   async function confirmAssistantAction(action: AssistantActionProposal) {
     const validationError = getAssistantActionValidationError(action, snapshot)
@@ -172,8 +177,81 @@ export function AiPlanPage({
   }
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <section className="grid h-[min(700px,calc(100vh-9rem))] min-h-[520px] overflow-hidden rounded-2xl border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[210px_1fr]">
+    <div className="mx-auto max-w-6xl space-y-6">
+      <section className="overflow-hidden rounded-lg border border-slate-900 bg-[radial-gradient(circle_at_14%_12%,rgba(34,211,238,0.22),transparent_27%),linear-gradient(135deg,#020617,#071426_52%,#1e1b4b)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+        <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.1fr_1fr] xl:items-end">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
+              <Sparkles size={14} />
+              AI planning room
+            </div>
+            <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">Ask {profile.name}</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+              A calmer planning workspace for questions, saved conversations, and confirmable actions. Nothing changes until you review and approve it.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <AiOverviewMetric
+              icon={<MessageCircle size={15} />}
+              label="Messages"
+              value={String(messages.length)}
+              caption="in this chat"
+              tone="neutral"
+            />
+            <AiOverviewMetric
+              icon={<Bot size={15} />}
+              label="Saved chats"
+              value={String(conversations.length)}
+              caption="saved locally"
+              tone="good"
+            />
+            <AiOverviewMetric
+              icon={<ShieldCheck size={15} />}
+              label="Actions"
+              value={String(pendingActionCount)}
+              caption={pendingActionCount === 1 ? 'needs approval' : 'need approval'}
+              tone={pendingActionCount > 0 ? 'warning' : 'good'}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
+          <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-slate-400">Planner context</p>
+                <p className="mt-1 text-lg font-semibold text-white">
+                  {viewedPeriod ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate}` : 'No selected pay period'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-right">
+                <p className="text-2xl font-semibold text-white">{viewedPeriod ? formatPence(viewedPeriod.incomePence) : '-'}</p>
+                <p className="text-[11px] font-semibold uppercase text-slate-400">pay</p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <AiSignal label="Today" value={today} />
+              <AiSignal label="Provider" value={snapshot.settings.aiProvider === 'openrouter' ? 'GPT' : 'Gemini'} />
+              <AiSignal label="Mode" value={user ? 'Signed in' : 'Sign in needed'} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase text-slate-400">Planning sources</p>
+              <p className="text-xs font-semibold text-cyan-100">{snapshot.pots.length + snapshot.creditCards.length + snapshot.debts.length} data groups</p>
+            </div>
+            <div className="space-y-3">
+              <AiSourceBar label="Pots" count={snapshot.pots.length} max={Math.max(snapshot.pots.length, snapshot.creditCards.length, snapshot.debts.length, 1)} />
+              <AiSourceBar label="Cards" count={snapshot.creditCards.length} max={Math.max(snapshot.pots.length, snapshot.creditCards.length, snapshot.debts.length, 1)} />
+              <AiSourceBar label="Debts" count={snapshot.debts.length} max={Math.max(snapshot.pots.length, snapshot.creditCards.length, snapshot.debts.length, 1)} />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid h-[min(700px,calc(100vh-9rem))] min-h-[520px] overflow-hidden rounded-lg border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[230px_1fr]">
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversation.id}
@@ -316,6 +394,62 @@ function ConversationSidebar({
         ))}
       </div>
     </aside>
+  )
+}
+
+function AiOverviewMetric({
+  icon,
+  label,
+  value,
+  caption,
+  tone,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  caption: string
+  tone: 'neutral' | 'good' | 'warning'
+}) {
+  return (
+    <div
+      className={clsx(
+        'rounded-lg border p-4 shadow-sm backdrop-blur',
+        tone === 'neutral' && 'border-white/10 bg-white/[0.08]',
+        tone === 'good' && 'border-emerald-300/20 bg-emerald-300/10',
+        tone === 'warning' && 'border-amber-300/20 bg-amber-300/10',
+      )}
+    >
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-300">
+        <span className="text-cyan-100">{icon}</span>
+        {label}
+      </div>
+      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
+    </div>
+  )
+}
+
+function AiSignal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold text-white">{value}</p>
+    </div>
+  )
+}
+
+function AiSourceBar({ label, count, max }: { label: string; count: number; max: number }) {
+  return (
+    <div className="grid grid-cols-[72px_1fr_32px] items-center gap-3">
+      <p className="text-xs font-semibold text-slate-300">{label}</p>
+      <span className="h-2 overflow-hidden rounded-full bg-white/10">
+        <span
+          className="block h-full rounded-full bg-cyan-300"
+          style={{ width: `${Math.max(12, Math.round((count / max) * 100))}%` }}
+        />
+      </span>
+      <p className="text-right text-xs font-semibold text-slate-200">{count}</p>
+    </div>
   )
 }
 

@@ -253,6 +253,15 @@ export function DashboardPage({
 
   return (
     <div className="space-y-6">
+      <DashboardCommandCentre
+        viewedPeriod={viewedPeriod}
+        summary={summary}
+        activeTodoCount={activeTodoItems.length}
+        completedTodoCount={completedTodoCount}
+        remainingTodoAmountPence={remainingTodoAmountPence}
+        ignoredTodoCount={ignoredTodoCount}
+      />
+
       <Panel
         title="Selected pay period"
         accent="blue"
@@ -503,6 +512,158 @@ export function DashboardPage({
           />
         </SectionGrid>
       )}
+    </div>
+  )
+}
+
+function DashboardCommandCentre({
+  viewedPeriod,
+  summary,
+  activeTodoCount,
+  completedTodoCount,
+  remainingTodoAmountPence,
+  ignoredTodoCount,
+}: {
+  viewedPeriod: PayPeriod | null
+  summary: PayPeriodCostSummary
+  activeTodoCount: number
+  completedTodoCount: number
+  remainingTodoAmountPence: number
+  ignoredTodoCount: number
+}) {
+  const committedPercent = summary.payReceivedPence > 0
+    ? Math.min(100, Math.max(0, Math.round((summary.totalCostsPence / summary.payReceivedPence) * 100)))
+    : 0
+  const leftoverPercent = summary.payReceivedPence > 0
+    ? Math.min(100, Math.max(0, Math.round((Math.max(0, summary.moneyLeftPence) / summary.payReceivedPence) * 100)))
+    : 0
+  const checklistPercent = activeTodoCount > 0 ? Math.round((completedTodoCount / activeTodoCount) * 100) : 0
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-slate-900 bg-[radial-gradient(circle_at_16%_14%,rgba(34,211,238,0.22),transparent_28%),linear-gradient(135deg,#020617,#071426_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+      <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.1fr_1fr] xl:items-end">
+        <div className="min-w-0">
+          <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
+            <CircleDollarSign size={14} />
+            Dashboard command centre
+          </div>
+          <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">
+            {viewedPeriod ? formatPence(summary.moneyLeftPence) : 'Plan your first pay'}
+          </h2>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+            {viewedPeriod
+              ? `Paycheck window ${viewedPeriod.startDate} to ${viewedPeriod.endDate}, with cover, set-asides, and remaining money in one view.`
+              : 'Create a paycheck plan to see money in, money committed, and what still needs action.'}
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <DashboardOverviewMetric
+            label="Money in"
+            value={formatPence(summary.payReceivedPence)}
+            caption={viewedPeriod ? `Paid ${formatShortDateWithOrdinal(viewedPeriod.payday)}` : 'waiting for pay'}
+            tone="neutral"
+          />
+          <DashboardOverviewMetric
+            label="Committed"
+            value={formatPence(summary.totalCostsPence)}
+            caption={`${summary.items.length} planned signal${summary.items.length === 1 ? '' : 's'}`}
+            tone="warning"
+          />
+          <DashboardOverviewMetric
+            label="Still open"
+            value={formatPence(remainingTodoAmountPence)}
+            caption={`${completedTodoCount}/${activeTodoCount} checklist done`}
+            tone={remainingTodoAmountPence > 0 ? 'warning' : 'good'}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
+        <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-slate-400">Checklist position</p>
+              <p className="mt-1 text-lg font-semibold text-white">{checklistPercent}% sorted</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-right">
+              <p className="text-2xl font-semibold text-white">{ignoredTodoCount}</p>
+              <p className="text-[11px] font-semibold uppercase text-slate-400">ignored</p>
+            </div>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-[linear-gradient(90deg,#10b981,#22d3ee)]"
+              style={{ width: `${checklistPercent}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase text-slate-400">Paycheck shape</p>
+            <p className="text-xs font-semibold text-cyan-100">{summary.moneyLeftPence < 0 ? 'needs attention' : 'balanced'}</p>
+          </div>
+          <div className="space-y-3">
+            <DashboardPulseBar label="Committed" value={formatPence(summary.totalCostsPence)} percent={committedPercent} tone="warning" />
+            <DashboardPulseBar label="Remaining" value={formatPence(Math.max(0, summary.moneyLeftPence))} percent={leftoverPercent} tone="good" />
+            <DashboardPulseBar label="Open tasks" value={formatPence(remainingTodoAmountPence)} percent={100 - checklistPercent} tone="neutral" />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function DashboardOverviewMetric({
+  label,
+  value,
+  caption,
+  tone,
+}: {
+  label: string
+  value: string
+  caption: string
+  tone: 'neutral' | 'good' | 'warning'
+}) {
+  return (
+    <div
+      className={
+        tone === 'neutral'
+          ? 'rounded-lg border border-white/10 bg-white/[0.08] p-4 shadow-sm backdrop-blur'
+          : tone === 'good'
+            ? 'rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4 shadow-sm backdrop-blur'
+            : 'rounded-lg border border-amber-300/20 bg-amber-300/10 p-4 shadow-sm backdrop-blur'
+      }
+    >
+      <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
+    </div>
+  )
+}
+
+function DashboardPulseBar({
+  label,
+  value,
+  percent,
+  tone,
+}: {
+  label: string
+  value: string
+  percent: number
+  tone: 'neutral' | 'good' | 'warning'
+}) {
+  const barClassName =
+    tone === 'good' ? 'bg-emerald-300' : tone === 'warning' ? 'bg-amber-300' : 'bg-cyan-300'
+
+  return (
+    <div className="grid grid-cols-[6rem_1fr_auto] items-center gap-3">
+      <p className="text-xs font-semibold text-slate-300">{label}</p>
+      <span className="h-2 overflow-hidden rounded-full bg-white/10">
+        <span className={`block h-full rounded-full ${barClassName}`} style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+      </span>
+      <p className="text-right text-xs font-semibold text-slate-200">{value}</p>
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CalendarDays, CheckCircle2, Clock3, WalletCards } from 'lucide-react'
+import { ArrowRight, CalendarDays, CheckCircle2, Clock3, WalletCards } from 'lucide-react'
 
 import {
   calculatePaycheckAmount,
@@ -59,6 +59,8 @@ export function PaydayWizardPage({
     hourlyRatePence,
   })
   const canSubmit = hasValidPayday && incomePence > 0
+  const payPeriodDays = period ? getDaysBetween(period.startDate, period.endDate) + 1 : 0
+  const actualOverrideDifferencePence = actualAmountPence === null ? 0 : actualAmountPence - calculatedPence
 
   function loadPayday(nextPayday: string) {
     const draft = getPaydayDraft(snapshot, nextPayday)
@@ -89,6 +91,79 @@ export function PaydayWizardPage({
 
   return (
     <div className="space-y-6">
+      <section className="overflow-hidden rounded-lg border border-slate-900 bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.24),transparent_28%),linear-gradient(135deg,#020617,#072019_50%,#0f172a)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+        <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.05fr_1fr] xl:items-end">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-emerald-100 shadow-sm shadow-slate-950/20 backdrop-blur">
+              <WalletCards size={14} />
+              Paycheck planner
+            </div>
+            <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">{formatPence(incomePence)}</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+              Shape the paycheck once, then let dashboard, pots, cards, debts, savings, and calendar views read from the same saved plan.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <PaydayOverviewMetric
+              label="Estimate"
+              value={formatPence(calculatedPence)}
+              caption={`${hours || 0} hours at ${formatPence(hourlyRatePence)}`}
+              tone="neutral"
+            />
+            <PaydayOverviewMetric
+              label="Override"
+              value={actualAmountPence === null ? 'Unused' : formatSignedPence(actualOverrideDifferencePence)}
+              caption={actualAmountPence === null ? 'using hours estimate' : 'difference from estimate'}
+              tone={actualAmountPence === null || actualOverrideDifferencePence >= 0 ? 'good' : 'warning'}
+            />
+            <PaydayOverviewMetric
+              label="Plan state"
+              value={existingPeriod ? 'Update' : 'New'}
+              caption={canSubmit ? 'ready to save' : 'needs pay details'}
+              tone={canSubmit ? 'good' : 'warning'}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
+          <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+            <p className="text-xs font-semibold uppercase text-slate-400">Pay period route</p>
+            <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <PaydayRouteNode label="Starts" value={period?.startDate ?? 'Choose date'} />
+              <span className="flex size-9 items-center justify-center rounded-lg border border-white/10 bg-slate-950/35 text-emerald-100">
+                <ArrowRight size={17} />
+              </span>
+              <PaydayRouteNode label="Ends" value={period?.endDate ?? 'Choose date'} align="right" />
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-emerald-300"
+                style={{ width: `${canSubmit ? 100 : hasValidPayday ? 58 : 22}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-slate-400">Pay rhythm</p>
+                <p className="mt-1 text-lg font-semibold text-white">{formatPayFrequencyLabel(payFrequency)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-right">
+                <p className="text-2xl font-semibold text-white">{payPeriodDays || '-'}</p>
+                <p className="text-[11px] font-semibold uppercase text-slate-400">days</p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <PaydaySignal label="Payday" value={hasValidPayday ? payday : 'Invalid'} />
+              <PaydaySignal label="Next payday" value={period?.nextPayday ?? 'Pending'} />
+              <PaydaySignal label="Mode" value={actualAmountPence === null ? 'Estimate' : 'Actual'} />
+            </div>
+          </div>
+        </div>
+      </section>
+
       <Panel title="Pay day" description="Enter pay details for this payday." accent="emerald">
         <SectionGrid variant="wideLeft" className="items-start">
           <div className="grid gap-4 md:grid-cols-2">
@@ -233,6 +308,59 @@ function PaydayFlowStep({
   )
 }
 
+function PaydayOverviewMetric({
+  label,
+  value,
+  caption,
+  tone,
+}: {
+  label: string
+  value: string
+  caption: string
+  tone: 'neutral' | 'good' | 'warning'
+}) {
+  return (
+    <div
+      className={[
+        'rounded-lg border p-4 shadow-sm backdrop-blur',
+        tone === 'neutral' ? 'border-white/10 bg-white/[0.08]' : '',
+        tone === 'good' ? 'border-emerald-300/20 bg-emerald-300/10' : '',
+        tone === 'warning' ? 'border-amber-300/20 bg-amber-300/10' : '',
+      ].join(' ')}
+    >
+      <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
+    </div>
+  )
+}
+
+function PaydayRouteNode({
+  label,
+  value,
+  align = 'left',
+}: {
+  label: string
+  value: string
+  align?: 'left' | 'right'
+}) {
+  return (
+    <div className={align === 'right' ? 'text-right' : undefined}>
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    </div>
+  )
+}
+
+function PaydaySignal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold text-white">{value}</p>
+    </div>
+  )
+}
+
 function getPayToPlanBreakdown({
   actualAmountPence,
   calculatedPence,
@@ -287,6 +415,13 @@ function getPayToPlanBreakdown({
   }
 }
 
+function getDaysBetween(startDate: string, endDate: string): number {
+  const start = new Date(`${startDate}T00:00:00.000Z`).getTime()
+  const end = new Date(`${endDate}T00:00:00.000Z`).getTime()
+
+  return Math.max(0, Math.round((end - start) / (24 * 60 * 60 * 1000)))
+}
+
 function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
   const period = snapshot.payPeriods.find((candidate) => candidate.payday === payday)
 
@@ -312,6 +447,26 @@ function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
         ? ''
         : (paycheck.actualAmountPence / 100).toFixed(2),
   }
+}
+
+function formatSignedPence(amountPence: number): string {
+  if (amountPence > 0) {
+    return `+${formatPence(amountPence)}`
+  }
+
+  if (amountPence < 0) {
+    return `-${formatPence(Math.abs(amountPence))}`
+  }
+
+  return formatPence(0)
+}
+
+function formatPayFrequencyLabel(frequency: PayFrequency): string {
+  if (frequency === 'biweekly') {
+    return 'Biweekly'
+  }
+
+  return frequency.charAt(0).toUpperCase() + frequency.slice(1)
 }
 
 function isValidIsoDateInput(value: string): boolean {

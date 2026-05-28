@@ -1,5 +1,5 @@
-import { type FormEvent, useState } from 'react'
-import { Loader2, Send, X } from 'lucide-react'
+import { type FormEvent, type ReactNode, useState } from 'react'
+import { Bot, CheckCircle2, Loader2, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import {
@@ -171,10 +171,13 @@ export function AppAssistant({
         type="button"
         aria-label="Open AI helper"
         onClick={() => setIsOpen(true)}
-        className="ai-assistant-trigger fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-slate-800 bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-2xl shadow-slate-900/25 transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+        className="ai-assistant-trigger group fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-white/15 bg-[radial-gradient(circle_at_20%_20%,rgba(45,212,191,0.28),transparent_34%),linear-gradient(135deg,#020617,#0f172a)] px-4 py-3 text-sm font-semibold text-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
       >
-        <span className="flex size-9 items-center justify-center rounded-full bg-white text-xs font-black text-slate-950">
+        <span className="flex size-9 items-center justify-center rounded-full bg-white text-xs font-black text-slate-950 shadow-lg shadow-cyan-950/20">
           {profile.avatar}
+        </span>
+        <span className="hidden size-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.08] text-cyan-100 transition group-hover:bg-white/[0.14] sm:flex">
+          <Sparkles size={15} />
         </span>
         <span className="hidden sm:inline">Ask {profile.name}</span>
       </button>
@@ -185,15 +188,23 @@ export function AppAssistant({
     <section
       role="dialog"
       aria-label="AI helper"
-      className="fixed bottom-5 right-5 z-40 flex max-h-[min(620px,calc(100vh-2.5rem))] w-[min(420px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
+      className="fixed bottom-5 right-5 z-40 flex max-h-[min(660px,calc(100vh-2.5rem))] w-[min(440px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
     >
-      <div className="ai-assistant-header border-b border-white/15 p-3.5 text-white">
+      <div className="ai-assistant-header border-b border-white/15 bg-[radial-gradient(circle_at_18%_18%,rgba(34,211,238,0.24),transparent_34%),linear-gradient(135deg,#020617,#071426_52%,#172554)] p-3.5 text-white">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/95 text-xs font-black text-slate-950">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-white/95 text-xs font-black text-slate-950 shadow-lg shadow-slate-950/20">
               {profile.avatar}
             </span>
-            <p className="truncate text-base font-semibold">{profile.name}</p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="truncate text-base font-semibold">{profile.name}</p>
+                <span className="rounded-md border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-100">
+                  Helper
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-300">Ask, review, approve.</p>
+            </div>
           </div>
           <button
             type="button"
@@ -204,14 +215,22 @@ export function AppAssistant({
             <X size={18} />
           </button>
         </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <AssistantHeaderStat icon={<ShieldCheck size={13} />} label={user ? 'Signed in' : 'Sign in needed'} />
+          <AssistantHeaderStat icon={<Bot size={13} />} label={`${messages.length} messages`} />
+        </div>
       </div>
 
       <div
         role="log"
         aria-label="AI conversation messages"
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50/80 p-3"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc,#eef5f7)] p-3"
       >
-        <div className="rounded-xl border border-slate-200/90 bg-white/95 p-3 text-sm leading-5 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+        <div className="rounded-lg border border-slate-200/90 bg-white/95 p-3 text-sm leading-5 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+          <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-cyan-200/80 bg-cyan-50/80 px-2 py-1 text-[11px] font-semibold text-cyan-900">
+            <Sparkles size={12} />
+            Planning context
+          </div>
           <p>I can access all of your payments and give you a detailed plan depending on your needs.</p>
         </div>
 
@@ -227,7 +246,7 @@ export function AppAssistant({
         ))}
 
         {isSending && (
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white/95 p-3 text-sm text-slate-500 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200/90 bg-white/95 p-3 text-sm text-slate-500 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
             <Loader2 className="animate-spin" size={16} />
             Reading the whole planner...
           </div>
@@ -238,7 +257,7 @@ export function AppAssistant({
         <label htmlFor="app-assistant-input" className="sr-only">
           Ask AI
         </label>
-        <div className="flex items-end gap-2 rounded-xl border border-slate-200/90 bg-slate-50/80 p-2 shadow-inner shadow-slate-200/50 focus-within:border-cyan-400 focus-within:ring-4 focus-within:ring-cyan-100">
+        <div className="flex items-end gap-2 rounded-lg border border-slate-200/90 bg-slate-50/80 p-2 shadow-inner shadow-slate-200/50 focus-within:border-cyan-400 focus-within:ring-4 focus-within:ring-cyan-100">
           <textarea
             id="app-assistant-input"
             aria-label="Ask AI"
@@ -252,7 +271,7 @@ export function AppAssistant({
             type="submit"
             aria-label="Send message"
             disabled={!draft.trim() || isSending}
-            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#020617,#0f172a)] text-white shadow-sm shadow-slate-300/60 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Send size={17} />
           </button>
@@ -281,9 +300,9 @@ function ChatBubble({
     <article className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
         className={clsx(
-          'max-w-[92%] rounded-2xl px-3.5 py-3 text-sm leading-6 shadow-sm',
+          'max-w-[92%] rounded-lg px-3.5 py-3 text-sm leading-6 shadow-sm',
           isUser
-            ? 'bg-slate-950 text-white shadow-[0_14px_34px_rgba(15,23,42,0.16)]'
+            ? 'bg-[linear-gradient(135deg,#020617,#0f172a)] text-white shadow-[0_14px_34px_rgba(15,23,42,0.16)]'
             : 'border border-slate-200/90 bg-white/95 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]',
         )}
       >
@@ -307,6 +326,15 @@ function ChatBubble({
   )
 }
 
+function AssistantHeaderStat({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.08] px-3 py-2 text-xs font-semibold text-slate-200 backdrop-blur">
+      <span className="text-cyan-100">{icon}</span>
+      <span className="truncate">{label}</span>
+    </div>
+  )
+}
+
 function AssistantActionCard({
   action,
   snapshot,
@@ -326,11 +354,14 @@ function AssistantActionCard({
   const details = getAssistantActionDetails(action, snapshot)
 
   return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-3 text-slate-800 shadow-sm">
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-3 text-slate-800 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Suggested action</p>
-          <p className="mt-1 text-sm font-semibold text-slate-950">{action.label}</p>
+          <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-white/70 px-2 py-1 text-xs font-semibold uppercase text-emerald-700">
+            <CheckCircle2 size={13} />
+            Suggested action
+          </div>
+          <p className="mt-2 text-sm font-semibold text-slate-950">{action.label}</p>
         </div>
         {status.state === 'done' && (
           <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">Done</span>

@@ -431,7 +431,7 @@ export function DebtsPage({
               Record payment
             </Button>
             {selectedPaymentDebt && (
-              <details className="rounded-md bg-slate-50 px-3 py-2">
+              <details className="rounded-lg border border-rose-200/80 bg-[linear-gradient(135deg,#fff7ed,#fff1f2)] px-3 py-2 shadow-sm shadow-rose-100/60">
                 <summary className="cursor-pointer list-none text-sm text-slate-500">
                   Balance after payment:{' '}
                   <span className="font-semibold text-slate-950">
@@ -480,12 +480,12 @@ export function DebtsPage({
                 linkedPotPence > 0 ? `${formatPence(coveredPence)} covered` : `${formatPence(paidPence)} paid`
 
               return (
-                <div key={debt.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div key={debt.id} className="rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-semibold text-slate-950">{debt.name}</h3>
-                        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-600">
+                        <span className="rounded-md border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-semibold capitalize text-slate-600 shadow-sm shadow-slate-200/50">
                           {debt.status}
                         </span>
                         {isOverdue && (
@@ -535,9 +535,9 @@ export function DebtsPage({
                           <span>{progressLabel}</span>
                           <span>{progressPercent}%</span>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100/90 shadow-inner shadow-slate-200/70">
                           <div
-                            className="h-full rounded-full bg-emerald-500"
+                            className="h-full rounded-full bg-emerald-500 shadow-sm"
                             style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
                           />
                         </div>
@@ -570,7 +570,7 @@ export function DebtsPage({
               )
               })
             ) : (
-              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debts tracked yet.</p>
+              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debts tracked yet.</p>
             )}
         </div>
       </Panel>
@@ -589,7 +589,7 @@ export function DebtsPage({
               return (
                 <div
                   key={payment.id}
-                  className="flex flex-col gap-3 rounded-lg bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-lg border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div>
                     <p className="text-sm font-semibold text-slate-950">
@@ -619,7 +619,7 @@ export function DebtsPage({
               )
             })
           ) : (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No debt payments yet.</p>
+            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debt payments yet.</p>
           )}
         </div>
       </Panel>
@@ -637,7 +637,7 @@ function DebtStat({
   tone?: 'neutral' | 'bad'
 }) {
   return (
-    <div className={tone === 'bad' ? 'rounded-lg bg-red-50 p-3' : 'rounded-lg bg-slate-50 p-3'}>
+    <div className={tone === 'bad' ? 'rounded-lg border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 shadow-sm' : 'rounded-lg border border-slate-200/80 bg-white/80 p-3 shadow-sm shadow-slate-200/50'}>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className={tone === 'bad' ? 'mt-1 text-sm font-semibold text-red-700' : 'mt-1 text-sm font-semibold text-slate-950'}>
         {value}

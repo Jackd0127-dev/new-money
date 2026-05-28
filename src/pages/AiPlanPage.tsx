@@ -173,7 +173,7 @@ export function AiPlanPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <section className="grid h-[min(700px,calc(100vh-9rem))] min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:grid-cols-[210px_1fr]">
+      <section className="grid h-[min(700px,calc(100vh-9rem))] min-h-[520px] overflow-hidden rounded-2xl border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[210px_1fr]">
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversation.id}
@@ -201,7 +201,7 @@ export function AiPlanPage({
           </div>
 
           {isCustomizing && (
-            <div className="grid gap-3 border-b border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_140px]">
+            <div className="grid gap-3 border-b border-slate-200/90 bg-slate-50/80 p-3 md:grid-cols-[1fr_140px]">
               <Field label="AI name">
                 <TextInput
                   value={profile.name}
@@ -222,7 +222,7 @@ export function AiPlanPage({
           <div
             role="log"
             aria-label="AI conversation messages"
-            className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3 md:p-4"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50/80 p-3 md:p-4"
           >
             <AssistantIntroBubble name={profile.name} avatar={profile.avatar} />
 
@@ -241,11 +241,11 @@ export function AiPlanPage({
             {isAsking && <TypingBubble name={profile.name} avatar={profile.avatar} />}
           </div>
 
-          <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-3">
+          <form onSubmit={sendMessage} className="border-t border-slate-200/90 bg-white/95 p-3">
             <label htmlFor="ai-plan-chat-input" className="sr-only">
               Message AI
             </label>
-            <div className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner shadow-slate-200/60 focus-within:border-slate-400 focus-within:ring-4 focus-within:ring-slate-100">
+            <div className="flex items-end gap-2 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-2 shadow-inner shadow-slate-200/60 focus-within:border-cyan-400 focus-within:ring-4 focus-within:ring-cyan-100">
               <textarea
                 id="ai-plan-chat-input"
                 aria-label="Message AI"
@@ -283,13 +283,13 @@ function ConversationSidebar({
   onCreateConversation: () => void
 }) {
   return (
-    <aside className="flex max-h-36 min-h-0 flex-col border-b border-slate-200 bg-white md:max-h-none md:border-b-0 md:border-r">
+    <aside className="flex max-h-36 min-h-0 flex-col border-b border-slate-200/90 bg-slate-950 text-white md:max-h-none md:border-b-0 md:border-r md:border-slate-900">
       <div className="flex items-center justify-between gap-2 border-b border-slate-200 p-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Chats</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Chats</p>
         <button
           type="button"
           onClick={onCreateConversation}
-          className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+          className="rounded-lg border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/15"
         >
           New
         </button>
@@ -304,12 +304,12 @@ function ConversationSidebar({
             className={clsx(
               'min-w-44 rounded-xl border px-3 py-2 text-left text-sm transition md:min-w-0',
               conversation.id === activeConversationId
-                ? 'border-slate-950 bg-slate-950 text-white'
-                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white',
+                ? 'border-cyan-300/50 bg-white/[0.12] text-white shadow-sm shadow-cyan-950/20'
+                : 'border-white/10 bg-white/[0.06] text-slate-300 hover:border-white/20 hover:bg-white/[0.09] hover:text-white',
             )}
           >
             <span className="block truncate font-semibold">{conversation.title}</span>
-            <span className={clsx('mt-1 block truncate text-xs', conversation.id === activeConversationId ? 'text-white/65' : 'text-slate-500')}>
+            <span className={clsx('mt-1 block truncate text-xs', conversation.id === activeConversationId ? 'text-white/65' : 'text-slate-400')}>
               {conversation.messages.length === 0 ? 'Empty chat' : `${conversation.messages.length} messages`}
             </span>
           </button>
@@ -325,7 +325,7 @@ function AssistantIntroBubble({ name, avatar }: { name: string; avatar: string }
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">
         {avatar}
       </span>
-      <div className="max-w-[82%] rounded-3xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-700 shadow-sm">
+      <div className="max-w-[82%] rounded-3xl rounded-bl-md border border-slate-200/90 bg-white/95 px-4 py-3 text-sm leading-6 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
         <p className="font-semibold text-slate-950">{name}</p>
         <p className="mt-1">
           I can access all of your payments and give you a detailed plan depending on your needs.
@@ -341,7 +341,7 @@ function TypingBubble({ name, avatar }: { name: string; avatar: string }) {
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">
         {avatar}
       </span>
-      <div className="rounded-3xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="rounded-3xl rounded-bl-md border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
         <div className="flex items-center gap-1">
           <span className="ai-typing-dot" />
           <span className="ai-typing-dot [animation-delay:120ms]" />
@@ -380,8 +380,8 @@ function MessageBubble({
         className={clsx(
           'max-w-[82%] rounded-3xl px-4 py-3 text-sm leading-6 shadow-sm',
           isUser
-            ? 'rounded-br-md bg-slate-950 text-white'
-            : 'rounded-bl-md border border-slate-200 bg-white text-slate-700',
+            ? 'rounded-br-md bg-slate-950 text-white shadow-[0_14px_34px_rgba(15,23,42,0.16)]'
+            : 'rounded-bl-md border border-slate-200/90 bg-white/95 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]',
         )}
       >
         <p className={clsx('whitespace-pre-wrap', isUser ? 'text-white' : 'text-slate-800')}>{message.answer}</p>
@@ -465,7 +465,7 @@ function AssistantActionCard({
             type="button"
             onClick={onCancel}
             disabled={isRunning}
-            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-3 text-xs font-semibold text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             Cancel
           </button>

@@ -118,19 +118,19 @@ function SavingsPotCard({ pot }: { pot: Pot }) {
   const progressWidth = `${Math.min(100, Math.max(0, progressPercent))}%`
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-emerald-200/80 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-base font-semibold text-slate-950">{pot.name}</p>
           <p className="mt-1 text-sm text-slate-500">{pot.type === 'investment' ? 'Investment' : 'Savings'}</p>
         </div>
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white/[0.85] text-emerald-700 shadow-sm shadow-emerald-100/60">
           <TrendingUp size={18} />
         </span>
       </div>
-      <p className="mt-5 text-2xl font-semibold text-slate-950">{formatPence(pot.balancePence)}</p>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100">
-        <div className="h-full rounded-full bg-emerald-500" style={{ width: targetPence > 0 ? progressWidth : '0%' }} />
+      <p className="mt-5 text-2xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(pot.balancePence)}</p>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-emerald-100/90 shadow-inner shadow-emerald-200/60">
+        <div className="h-full rounded-full bg-emerald-500 shadow-sm" style={{ width: targetPence > 0 ? progressWidth : '0%' }} />
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 text-sm">
         <span className="font-semibold text-emerald-700">{targetPence > 0 ? `${progressPercent}%` : 'No target'}</span>

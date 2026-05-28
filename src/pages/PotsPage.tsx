@@ -295,12 +295,12 @@ export function PotsPage({
             )}
           </div>
           {topUpHistory.length > 0 ? (
-            <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+            <div className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
               {topUpHistory.map(({ allocation, pot }) => {
                 const potName = pot?.name ?? 'Deleted pot'
 
                 return (
-                  <div key={allocation.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5">
+                  <div key={allocation.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-slate-50/80">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-950">{potName}</p>
                       <p className="mt-0.5 truncate text-xs text-slate-500">
@@ -322,7 +322,7 @@ export function PotsPage({
               })}
             </div>
           ) : (
-            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            <p className="mt-3 rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
               No manual top-ups for this paycheck yet.
             </p>
           )}
@@ -353,8 +353,8 @@ export function PotsPage({
                   className={clsx(
                     'inline-flex min-h-10 items-center justify-center rounded-lg border px-4 text-sm font-semibold transition',
                     activeCategory === category
-                      ? 'border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-600/25'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                      ? 'border-blue-600 bg-blue-600 bg-[linear-gradient(135deg,#2563eb,#0891b2)] text-white shadow-sm shadow-blue-600/25'
+                      : 'border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white',
                   )}
                 >
                   {category}
@@ -364,14 +364,14 @@ export function PotsPage({
                 type="button"
                 aria-label="Add pot category"
                 onClick={() => setIsAddingCategory((current) => !current)}
-                className="inline-flex size-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                className="inline-flex size-10 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
               >
                 <Plus size={16} />
               </button>
             </div>
 
             {isAddingCategory && (
-              <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row">
+              <div className="flex flex-col gap-2 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60 sm:flex-row">
                 <TextInput
                   value={newCategory}
                   onChange={(event) => setNewCategory(event.target.value)}
@@ -410,7 +410,7 @@ export function PotsPage({
               })}
 
               {visiblePots.length === 0 && (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3 2xl:col-span-4">
+                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3 2xl:col-span-4">
                   No pots in this section yet.
                 </p>
               )}
@@ -419,12 +419,12 @@ export function PotsPage({
       </Panel>
 
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Create pot"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
           >
             <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
@@ -462,12 +462,12 @@ export function PotsPage({
       )}
 
       {editingPotId && editForm && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Edit pot"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
           >
             <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
@@ -531,7 +531,7 @@ function PotCard({
     <div
       data-testid="pot-card"
       className={clsx(
-        'flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md',
+        'flex flex-col rounded-xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]',
         isOpen ? 'min-h-[330px]' : 'h-[330px]',
       )}
     >
@@ -544,7 +544,7 @@ function PotCard({
           className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-start gap-3 rounded-lg text-left outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
         >
           <span
-            className="flex size-14 shrink-0 items-center justify-center rounded-full"
+            className="flex size-14 shrink-0 items-center justify-center rounded-xl shadow-sm"
             style={{
               backgroundColor: withAlpha(pot.color, 0.14),
               color: pot.color,
@@ -561,7 +561,7 @@ function PotCard({
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className="inline-flex size-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            className="inline-flex size-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100/90 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
             onClick={onEdit}
             aria-label={`Edit ${pot.name}`}
             title={`Edit ${pot.name}`}
@@ -580,12 +580,12 @@ function PotCard({
         </div>
       </div>
 
-      <p className="mt-5 text-3xl font-semibold tracking-normal text-slate-950">{formatPence(pot.balancePence)}</p>
+      <p className="mt-5 text-3xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(pot.balancePence)}</p>
 
       <div className="mt-4">
-        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-2 overflow-hidden rounded-full bg-slate-100/90 shadow-inner shadow-slate-200/70">
           <div
-            className="h-full rounded-full transition-all"
+            className="h-full rounded-full transition-all shadow-sm"
             style={{
               width: progress.targetPence > 0 ? progressWidth : '0%',
               backgroundColor: pot.color,
@@ -622,14 +622,14 @@ function PotCard({
           {sourceLabels.map((label) => (
             <span
               key={label}
-              className="max-w-[9rem] truncate rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"
+              className="max-w-[9rem] truncate rounded-full border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-medium text-slate-600"
               title={label}
             >
               {label}
             </span>
           ))}
           {hiddenSourceLabelCount > 0 && (
-            <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+            <span className="shrink-0 rounded-full border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-medium text-slate-600">
               +{hiddenSourceLabelCount}
             </span>
           )}
@@ -644,7 +644,7 @@ function PotCard({
               {activityItems.map((item) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-50 px-3 py-2"
+                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-slate-200/80 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/50"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-950">{item.title}</p>
@@ -657,12 +657,12 @@ function PotCard({
               ))}
             </div>
           ) : (
-            <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
               No activity recorded for this pot yet.
             </p>
           )}
           {linkedRecurringPayments.length > 0 && (
-            <div className="mt-4 rounded-lg border border-slate-200 bg-white">
+            <div className="mt-4 overflow-hidden rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
               <div className="border-b border-slate-100 px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked recurring payments</p>
               </div>

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { ArrowRight, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, PiggyBank, ReceiptText } from 'lucide-react'
 
 import {
   createNextPayPeriod,
@@ -22,7 +22,7 @@ import {
   type PayPeriodCostSummary,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, MoneyMetric, Panel, SelectInput, type CalculationBreakdown } from '../components/ui'
+import { Button, MoneyMetric, Panel, SectionGrid, SelectInput, type CalculationBreakdown } from '../components/ui'
 import type { PayFrequency, PayPeriod, PotAllocation } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
@@ -244,9 +244,9 @@ export function DashboardPage({
               : 'Create your first paycheck plan to see your pay, payments due, and money left.'
         }
         action={
-          <div className="flex flex-col gap-2 sm:min-w-80 sm:flex-row sm:items-end">
+          <div className="flex w-full flex-col gap-2 lg:min-w-80 lg:flex-row lg:items-end">
             {snapshot.payPeriods.length > 0 && (
-              <label className="block min-w-0 flex-1">
+              <label className="block w-full min-w-0 flex-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewing</span>
                 <SelectInput
                   aria-label="Viewing pay period"
@@ -263,42 +263,47 @@ export function DashboardPage({
                 </SelectInput>
               </label>
             )}
-            <Button onClick={() => onViewChange('payday')}>{viewedPeriod ? 'Update pay' : 'Plan pay'}</Button>
+            <Button className="w-full lg:w-auto" onClick={() => onViewChange('payday')}>
+              {viewedPeriod ? 'Update pay' : 'Plan pay'}
+            </Button>
           </div>
         }
       >
         {viewedPeriod ? (
-          <div className="grid items-start gap-4 lg:grid-cols-3">
-            <MoneyMetric
-              label="Total pay"
-              value={formatPence(summary.payReceivedPence)}
-              tone="primary"
-              breakdown={getTotalPayBreakdown(summary, viewedPeriod.startDate, viewedPeriod.endDate)}
-              open={openMetric === 'total-pay'}
-              onOpenChange={(isOpen) =>
-                setOpenMetric((current) => isOpen ? 'total-pay' : current === 'total-pay' ? null : current)
-              }
-            />
-            <MoneyMetric
-              label="Total costs"
-              value={formatPence(summary.totalCostsPence)}
-              tone="warning"
-              breakdown={getTotalCostsBreakdown(summary)}
-              open={openMetric === 'total-costs'}
-              onOpenChange={(isOpen) =>
-                setOpenMetric((current) => isOpen ? 'total-costs' : current === 'total-costs' ? null : current)
-              }
-            />
-            <MoneyMetric
-              label="Money left"
-              value={formatPence(summary.moneyLeftPence)}
-              tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
-              breakdown={getMoneyLeftBreakdown(summary)}
-              open={openMetric === 'money-left'}
-              onOpenChange={(isOpen) =>
-                setOpenMetric((current) => isOpen ? 'money-left' : current === 'money-left' ? null : current)
-              }
-            />
+          <div className="space-y-4">
+            <div className="grid items-start gap-4 lg:grid-cols-3">
+              <MoneyMetric
+                label="Total pay"
+                value={formatPence(summary.payReceivedPence)}
+                tone="primary"
+                breakdown={getTotalPayBreakdown(summary, viewedPeriod.startDate, viewedPeriod.endDate)}
+                open={openMetric === 'total-pay'}
+                onOpenChange={(isOpen) =>
+                  setOpenMetric((current) => isOpen ? 'total-pay' : current === 'total-pay' ? null : current)
+                }
+              />
+              <MoneyMetric
+                label="Total costs"
+                value={formatPence(summary.totalCostsPence)}
+                tone="warning"
+                breakdown={getTotalCostsBreakdown(summary)}
+                open={openMetric === 'total-costs'}
+                onOpenChange={(isOpen) =>
+                  setOpenMetric((current) => isOpen ? 'total-costs' : current === 'total-costs' ? null : current)
+                }
+              />
+              <MoneyMetric
+                label="Money left"
+                value={formatPence(summary.moneyLeftPence)}
+                tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
+                breakdown={getMoneyLeftBreakdown(summary)}
+                open={openMetric === 'money-left'}
+                onOpenChange={(isOpen) =>
+                  setOpenMetric((current) => isOpen ? 'money-left' : current === 'money-left' ? null : current)
+                }
+              />
+            </div>
+            <PaycheckFlowDiagram summary={summary} />
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
@@ -314,160 +319,285 @@ export function DashboardPage({
         )}
       </Panel>
       {viewedPeriod && (
-        <Panel
-          title="Paycheck to-do list"
-          accent="emerald"
-          description={`Tick off where this paycheck needs to go. ${completedTodoCount} of ${activeTodoItems.length} done.${ignoredTodoCount > 0 ? ` ${ignoredTodoCount} ignored.` : ''}`}
-        >
-          {todoItems.length > 0 ? (
-            <ul className="space-y-2">
-              {todoItems.map((item) => {
-                const isDone = completedTodoIds.has(item.id)
-                const isIgnored = ignoredPaymentIds.has(item.ignoreId)
-                const isPending = pendingTodoIds.has(item.id)
-                const isExpanded = expandedTodoIds.has(item.id)
-                const breakdownId = `dashboard-todo-breakdown-${item.id}`
-                const breakdownLabel = item.breakdownLabel ?? item.ignoreLabel
+        <SectionGrid variant="wideLeft" className="gap-6">
+          <Panel
+            title="Paycheck to-do list"
+            accent="emerald"
+            description={`Tick off where this paycheck needs to go. ${completedTodoCount} of ${activeTodoItems.length} done.${ignoredTodoCount > 0 ? ` ${ignoredTodoCount} ignored.` : ''}`}
+          >
+            {todoItems.length > 0 ? (
+              <ul className="space-y-2">
+                {todoItems.map((item) => {
+                  const isDone = completedTodoIds.has(item.id)
+                  const isIgnored = ignoredPaymentIds.has(item.ignoreId)
+                  const isPending = pendingTodoIds.has(item.id)
+                  const isExpanded = expandedTodoIds.has(item.id)
+                  const breakdownId = `dashboard-todo-breakdown-${item.id}`
+                  const breakdownLabel = item.breakdownLabel ?? item.ignoreLabel
 
-                return (
-                  <li
-                    key={item.id}
-                    className={
-                      isIgnored
-                        ? 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 opacity-75'
-                        : isDone
-                          ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3'
-                          : 'rounded-lg border border-slate-200 bg-white px-3 py-3'
+                  return (
+                    <li
+                      key={item.id}
+                      className={
+                        isIgnored
+                          ? 'rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-3 opacity-75'
+                          : isDone
+                            ? 'rounded-lg border border-emerald-200/90 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] px-3 py-3 shadow-sm shadow-emerald-100/70'
+                            : 'rounded-lg border border-slate-200/90 bg-white/95 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200'
                       }
-                  >
-                    <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-start">
-                      <input
-                        id={`dashboard-todo-${item.id}`}
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                        aria-label={item.label}
-                        checked={isDone && !isIgnored}
-                        disabled={isIgnored || isPending}
-                        onChange={(event) => void toggleTodo(item, event.target.checked)}
-                      />
-                      <label htmlFor={`dashboard-todo-${item.id}`} className={isIgnored ? 'min-w-0 cursor-default' : 'min-w-0 cursor-pointer'}>
-                        <span
-                          className={
-                            isIgnored
-                              ? 'block text-sm font-semibold text-slate-500 line-through decoration-2'
-                              : isDone
-                                ? 'block text-sm font-semibold text-emerald-900 line-through decoration-2'
-                                : 'block text-sm font-semibold text-slate-950'
-                          }
-                        >
-                          {item.label}
-                        </span>
-                        <span
-                          className={
-                            isIgnored
-                              ? 'mt-1 block text-xs font-semibold text-slate-500'
-                              : isDone
-                                ? 'mt-1 block text-xs text-emerald-700'
-                                : 'mt-1 block text-xs text-slate-500'
-                          }
-                        >
-                          {isIgnored ? 'Ignored for this paycheck' : item.detail}
-                        </span>
-                      </label>
-                      <span
-                        className={
-                          isIgnored
-                            ? 'text-sm font-semibold text-slate-500 line-through decoration-2 sm:text-right'
-                            : isDone
-                              ? 'text-sm font-semibold text-emerald-800 sm:text-right'
-                              : 'text-sm font-semibold text-slate-950 sm:text-right'
-                        }
-                      >
-                        {formatPence(item.amountPence)}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`${isExpanded ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
-                        aria-expanded={isExpanded}
-                        aria-controls={breakdownId}
-                        onClick={() => toggleTodoBreakdown(item.id)}
-                        className={
-                          isIgnored
-                            ? 'inline-flex min-h-8 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-400 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
-                            : 'inline-flex min-h-8 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
-                        }
-                      >
-                        <ChevronDown
-                          size={16}
-                          aria-hidden="true"
-                          className={isExpanded ? 'rotate-180 transition' : 'transition'}
+                    >
+                      <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-start">
+                        <input
+                          id={`dashboard-todo-${item.id}`}
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 rounded border-slate-300 accent-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label={item.label}
+                          checked={isDone && !isIgnored}
+                          disabled={isIgnored || isPending}
+                          onChange={(event) => void toggleTodo(item, event.target.checked)}
                         />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Ignore Payment for ${item.ignoreLabel}`}
-                        aria-pressed={isIgnored}
-                        onClick={() => toggleIgnoredPayment(item, !isIgnored)}
-                        className={
-                          isIgnored
-                            ? 'inline-flex min-h-8 items-center justify-center rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
-                            : 'inline-flex min-h-8 items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
-                        }
-                      >
-                        Ignore Payment
-                      </button>
-                    </div>
-                    {isExpanded && (
-                      <div
-                        id={breakdownId}
-                        role="region"
-                        aria-label={`Breakdown for ${breakdownLabel}`}
-                        className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3"
-                      >
-                        <ul className="space-y-2">
-                          {item.breakdownLines.map((line) => (
-                            <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm">
-                              <div className="min-w-0">
-                                <p className="truncate font-semibold text-slate-900">{line.label}</p>
-                                <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
-                              </div>
-                              <p className={line.amountPence < 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-950'}>
-                                {formatPence(line.amountPence)}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
-                          <span className="font-semibold text-slate-700">Total</span>
-                          <span className="font-semibold text-slate-950">{formatPence(item.amountPence)}</span>
-                        </div>
+                        <label htmlFor={`dashboard-todo-${item.id}`} className={isIgnored ? 'min-w-0 cursor-default' : 'min-w-0 cursor-pointer'}>
+                          <span
+                            className={
+                              isIgnored
+                                ? 'block text-sm font-semibold text-slate-500 line-through decoration-2'
+                                : isDone
+                                  ? 'block text-sm font-semibold text-emerald-950 line-through decoration-2'
+                                  : 'block text-sm font-semibold text-slate-950'
+                            }
+                          >
+                            {item.label}
+                          </span>
+                          <span
+                            className={
+                              isIgnored
+                                ? 'mt-1 block text-xs font-semibold text-slate-500'
+                                : isDone
+                                  ? 'mt-1 block text-xs text-emerald-700'
+                                  : 'mt-1 block text-xs text-slate-500'
+                            }
+                          >
+                            {isIgnored ? 'Ignored for this paycheck' : item.detail}
+                          </span>
+                        </label>
+                        <span
+                          className={
+                            isIgnored
+                              ? 'text-sm font-semibold text-slate-500 line-through decoration-2 sm:text-right'
+                              : isDone
+                                ? 'text-sm font-semibold text-emerald-800 sm:text-right'
+                                : 'text-sm font-semibold text-slate-950 sm:text-right'
+                          }
+                        >
+                          {formatPence(item.amountPence)}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`${isExpanded ? 'Hide' : 'Show'} breakdown for ${breakdownLabel}`}
+                          aria-expanded={isExpanded}
+                          aria-controls={breakdownId}
+                          onClick={() => toggleTodoBreakdown(item.id)}
+                          className={
+                            isIgnored
+                              ? 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-400 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                              : 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                          }
+                        >
+                          <ChevronDown
+                            size={16}
+                            aria-hidden="true"
+                            className={isExpanded ? 'rotate-180 transition' : 'transition'}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Ignore Payment for ${item.ignoreLabel}`}
+                          aria-pressed={isIgnored}
+                          onClick={() => toggleIgnoredPayment(item, !isIgnored)}
+                          className={
+                            isIgnored
+                              ? 'inline-flex min-h-8 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
+                              : 'inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 text-xs font-semibold text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                          }
+                        >
+                          Ignore Payment
+                        </button>
                       </div>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
-              <p className="text-sm font-semibold text-slate-950">No set-asides for this paycheck</p>
-              <p className="mt-1 text-sm leading-5 text-slate-500">
-                Add pot allocations, credit pots, or debt reserves and they will appear here.
-              </p>
-            </div>
-          )}
-        </Panel>
+                      {isExpanded && (
+                        <div
+                          id={breakdownId}
+                          role="region"
+                          aria-label={`Breakdown for ${breakdownLabel}`}
+                          className="mt-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60"
+                        >
+                          <ul className="space-y-2">
+                            {item.breakdownLines.map((line) => (
+                              <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-sm shadow-sm shadow-slate-200/50">
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-slate-900">{line.label}</p>
+                                  <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
+                                </div>
+                                <p className={line.amountPence < 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-950'}>
+                                  {formatPence(line.amountPence)}
+                                </p>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
+                            <span className="font-semibold text-slate-700">Total</span>
+                            <span className="font-semibold text-slate-950">{formatPence(item.amountPence)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <p className="text-sm font-semibold text-slate-950">No set-asides for this paycheck</p>
+                <p className="mt-1 text-sm leading-5 text-slate-500">
+                  Add pot allocations, credit pots, or debt reserves and they will appear here.
+                </p>
+              </div>
+            )}
+          </Panel>
+          <NextPaycheckOutgoingsPanel
+            period={outgoingPreviewPeriod}
+            summary={outgoingPreviewSummary}
+            offset={outgoingPreviewOffset}
+            isOpen={isNextOutgoingsOpen}
+            onToggleOpen={() => setIsNextOutgoingsOpen((current) => !current)}
+            onPrevious={() => setOutgoingPreviewOffset((current) => current - 1)}
+            onNext={() => setOutgoingPreviewOffset((current) => current + 1)}
+          />
+        </SectionGrid>
       )}
-      {viewedPeriod && (
-        <NextPaycheckOutgoingsPanel
-          period={outgoingPreviewPeriod}
-          summary={outgoingPreviewSummary}
-          offset={outgoingPreviewOffset}
-          isOpen={isNextOutgoingsOpen}
-          onToggleOpen={() => setIsNextOutgoingsOpen((current) => !current)}
-          onPrevious={() => setOutgoingPreviewOffset((current) => current - 1)}
-          onNext={() => setOutgoingPreviewOffset((current) => current + 1)}
+    </div>
+  )
+}
+
+function PaycheckFlowDiagram({ summary }: { summary: PayPeriodCostSummary }) {
+  const payPence = Math.max(0, summary.payReceivedPence)
+  const costPence = Math.max(0, summary.totalCostsPence)
+  const leftPence = Math.max(0, summary.moneyLeftPence)
+  const overspentPence = Math.max(0, -summary.moneyLeftPence)
+  const basePence = Math.max(payPence, costPence + leftPence, 1)
+  const payWidth = Math.max(8, Math.round((payPence / basePence) * 100))
+  const costWidth = Math.min(100, Math.max(8, Math.round((costPence / basePence) * 100)))
+  const leftWidth = Math.min(100, Math.max(leftPence > 0 ? 8 : 0, Math.round((leftPence / basePence) * 100)))
+  const overspentWidth = Math.min(100, Math.max(overspentPence > 0 ? 8 : 0, Math.round((overspentPence / basePence) * 100)))
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.07)]">
+      <div className="grid gap-4 p-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch">
+        <PaycheckFlowNode
+          icon={<CircleDollarSign size={17} />}
+          label="Pay in"
+          value={formatPence(summary.payReceivedPence)}
+          detail="Income saved to this paycheck"
+          tone="pay"
         />
-      )}
+        <FlowArrow />
+        <PaycheckFlowNode
+          icon={<ReceiptText size={17} />}
+          label="Committed"
+          value={formatPence(summary.totalCostsPence)}
+          detail="Checklist, reserves, payments"
+          tone="cost"
+        />
+        <FlowArrow />
+        <PaycheckFlowNode
+          icon={<PiggyBank size={17} />}
+          label={summary.moneyLeftPence < 0 ? 'Shortfall' : 'Left'}
+          value={formatPence(summary.moneyLeftPence)}
+          detail={summary.moneyLeftPence < 0 ? 'Needs attention' : 'Available after plan'}
+          tone={summary.moneyLeftPence < 0 ? 'bad' : 'left'}
+        />
+      </div>
+      <div className="border-t border-slate-100 bg-slate-50/70 p-4">
+        <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span>Paycheck shape</span>
+          <span>{summary.items.length} planned item{summary.items.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="mt-3 grid gap-2">
+          <FlowBar label="Pay" value={formatPence(summary.payReceivedPence)} width={payWidth} className="bg-slate-950" />
+          <FlowBar label="Costs" value={formatPence(summary.totalCostsPence)} width={costWidth} className="bg-amber-400" />
+          {summary.moneyLeftPence >= 0 ? (
+            <FlowBar label="Left" value={formatPence(summary.moneyLeftPence)} width={leftWidth} className="bg-emerald-500" />
+          ) : (
+            <FlowBar label="Over" value={formatPence(overspentPence)} width={overspentWidth} className="bg-red-500" />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PaycheckFlowNode({
+  icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  detail: string
+  tone: 'pay' | 'cost' | 'left' | 'bad'
+}) {
+  const toneClassName =
+    tone === 'pay'
+      ? 'border-slate-900 bg-slate-950 text-white'
+      : tone === 'cost'
+        ? 'border-amber-200 bg-[linear-gradient(135deg,#fff7ed,#fffbeb)] text-amber-700'
+        : tone === 'bad'
+          ? 'border-red-200 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] text-red-700'
+          : 'border-emerald-200 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] text-emerald-700'
+  const valueClassName = tone === 'pay' ? 'text-white' : 'text-slate-950'
+  const detailClassName = tone === 'pay' ? 'text-slate-300' : 'text-slate-500'
+
+  return (
+    <div className={`rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)] ${toneClassName}`}>
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+        {icon}
+        {label}
+      </div>
+      <p className={`mt-3 text-2xl font-semibold tracking-[-0.02em] ${valueClassName}`}>{value}</p>
+      <p className={`mt-1 text-xs leading-5 ${detailClassName}`}>{detail}</p>
+    </div>
+  )
+}
+
+function FlowArrow() {
+  return (
+    <div className="hidden items-center justify-center text-slate-300 lg:flex">
+      <span className="flex size-9 items-center justify-center rounded-full border border-slate-200/90 bg-white/90 shadow-sm shadow-slate-200/60">
+        <ArrowRight size={16} />
+      </span>
+    </div>
+  )
+}
+
+function FlowBar({
+  label,
+  value,
+  width,
+  className,
+}: {
+  label: string
+  value: string
+  width: number
+  className: string
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[5rem_1fr_auto] sm:items-center">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="h-2 overflow-hidden rounded-full bg-white shadow-inner shadow-slate-200/70">
+        <div className={`h-full rounded-full shadow-sm transition-all ${className}`} style={{ width: `${width}%` }} />
+      </div>
+      <p className="text-xs font-semibold text-slate-700">{value}</p>
     </div>
   )
 }
@@ -501,23 +631,23 @@ function NextPaycheckOutgoingsPanel({
       accent="amber"
       description={periodDescription}
       action={
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex w-full shrink-0 items-center justify-between gap-2">
           <button
             type="button"
             aria-label="Previous paycheck preview"
             onClick={onPrevious}
-            className="inline-flex min-h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            className="inline-flex min-h-9 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             <ChevronLeft size={16} aria-hidden="true" />
           </button>
-          <span className="hidden min-w-32 rounded-md bg-slate-50 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500 sm:inline-block">
+          <span className="hidden min-w-32 rounded-lg border border-slate-200/90 bg-white/90 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-sm shadow-slate-200/60 sm:inline-block">
             {formatPaycheckOffsetLabel(offset)}
           </span>
           <button
             type="button"
             aria-label="Next paycheck preview"
             onClick={onNext}
-            className="inline-flex min-h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            className="inline-flex min-h-9 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             <ChevronRight size={16} aria-hidden="true" />
           </button>
@@ -526,20 +656,29 @@ function NextPaycheckOutgoingsPanel({
     >
       {period ? (
         <div className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_auto] md:items-stretch">
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="grid gap-3">
+            <div className="rounded-lg border border-amber-200/90 bg-[linear-gradient(135deg,#fff7ed,#fffbeb)] p-4 shadow-sm shadow-amber-100/70">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Total outgoing</p>
-              <p className="mt-2 text-3xl font-semibold text-slate-950">{formatPence(summary.totalCostsPence)}</p>
+              <p className="mt-2 text-3xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(summary.totalCostsPence)}</p>
               <p className="mt-1 text-sm text-amber-800">{outgoingItems.length} payments in this paycheck window</p>
+              <div className="mt-4 flex h-6 items-end gap-1.5" aria-hidden="true">
+                {[36, 48, 28, 64, 52, 76, 34, 42, 58, 70, 45, 32].map((height, index) => (
+                  <span
+                    key={`${height}-${index}`}
+                    className="w-1 flex-1 rounded-full bg-amber-400/75"
+                    style={{ height: `${height}%` }}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-1">
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <div className="rounded-lg border border-emerald-200/90 bg-emerald-50/80 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Money left estimate</p>
                 <p className={summary.moneyLeftPence < 0 ? 'mt-1 text-lg font-semibold text-red-700' : 'mt-1 text-lg font-semibold text-emerald-700'}>
                   {formatPence(summary.moneyLeftPence)}
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="rounded-lg border border-cyan-200/90 bg-cyan-50/70 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paycheck</p>
                 <p className="mt-1 text-sm font-semibold text-slate-950">{formatPaycheckOffsetLabel(offset)}</p>
               </div>
@@ -549,7 +688,7 @@ function NextPaycheckOutgoingsPanel({
               aria-label={toggleLabel}
               aria-expanded={isOpen}
               onClick={onToggleOpen}
-              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950 md:self-stretch"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-900 bg-slate-950 px-4 text-sm font-semibold text-white shadow-[0_10px_26px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
             >
               <CalendarDays size={16} aria-hidden="true" />
               {isOpen ? 'Hide payments' : 'Show payments'}
@@ -558,7 +697,7 @@ function NextPaycheckOutgoingsPanel({
           </div>
 
           {isOpen && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-3">
               {outgoingItems.length > 0 ? (
                 <ul className="divide-y divide-slate-200">
                   {outgoingItems.map((item) => (
@@ -569,7 +708,7 @@ function NextPaycheckOutgoingsPanel({
                           {item.date} · {formatCostSource(item.source)}
                         </p>
                         {item.coverBreakdown && item.coverBreakdown.length > 0 && (
-                          <ul className="mt-2 space-y-1 rounded-md border border-slate-200 bg-white px-2.5 py-2">
+                          <ul className="mt-2 space-y-1 rounded-lg border border-slate-200/90 bg-white/90 px-2.5 py-2 shadow-sm shadow-slate-200/60">
                             {item.coverBreakdown.map((line) => (
                               <li key={line.id} className="flex items-start justify-between gap-3 text-xs">
                                 <span className="min-w-0">
@@ -595,7 +734,7 @@ function NextPaycheckOutgoingsPanel({
                   ))}
                 </ul>
               ) : (
-                <p className="rounded-md bg-white px-3 py-3 text-sm text-slate-500">
+                <p className="rounded-lg border border-dashed border-slate-200/90 bg-white/90 px-3 py-3 text-sm text-slate-500">
                   No outgoing payments are dated inside this paycheck window yet.
                 </p>
               )}
@@ -603,7 +742,7 @@ function NextPaycheckOutgoingsPanel({
           )}
         </div>
       ) : (
-        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+        <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
           No paycheck is selected, so there is no future period to preview yet.
         </p>
       )}

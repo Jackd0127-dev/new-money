@@ -34,14 +34,14 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-slate-100 px-4 py-6 text-slate-950 sm:px-6">
+    <main className="flex min-h-dvh min-w-0 items-center justify-center overflow-x-hidden bg-[linear-gradient(180deg,#f8fbff_0%,#eef5f7_48%,#f7fafc_100%)] px-4 py-6 text-slate-950 sm:px-6">
       <section
         aria-label="Sign in to Money Manager"
-        className="grid w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70 lg:grid-cols-[0.9fr_1.1fr]"
+        className="grid min-w-0 w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur lg:grid-cols-[0.9fr_1.1fr]"
       >
-        <div className="bg-slate-950 px-5 py-7 text-white sm:px-8 sm:py-10">
+        <div className="min-w-0 bg-[linear-gradient(180deg,#06122a_0%,#071a2d_56%,#06101f_100%)] px-5 py-7 text-white sm:px-8 sm:py-10">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-xl bg-white p-2 text-slate-950">
+            <div className="flex size-11 items-center justify-center rounded-xl bg-white p-2 text-slate-950 shadow-lg shadow-emerald-950/20">
               <img src="/favicon.svg" alt="" className="size-full" />
             </div>
             <div>
@@ -71,7 +71,7 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
           </div>
         </div>
 
-        <div className="px-5 py-7 sm:px-8 sm:py-10">
+        <div className="min-w-0 px-5 py-7 sm:px-8 sm:py-10">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold text-slate-950">Account login</h2>
@@ -92,6 +92,7 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
             <div className="mt-6 space-y-5">
               <div className="grid gap-2 sm:grid-cols-2">
                 <Button
+                  className="w-full px-3"
                   variant="secondary"
                   disabled={busyAction !== null || auth.isLoading}
                   onClick={() => void runAuthAction('google', auth.signInWithGoogle)}
@@ -100,6 +101,7 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
                   Continue with Google
                 </Button>
                 <Button
+                  className="w-full px-3"
                   variant="secondary"
                   disabled={busyAction !== null || auth.isLoading || !auth.isAppleEnabled}
                   onClick={() => void runAuthAction('apple', auth.signInWithApple)}
@@ -109,7 +111,7 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
                 </Button>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/50">
                 <div className="grid gap-3">
                   <Field label="Email">
                     <TextInput
@@ -138,11 +140,12 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
                     />
                   </Field>
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                    <Button onClick={() => void submitEmailAuth()} disabled={!canSubmitEmail || auth.isLoading}>
+                    <Button className="w-full" onClick={() => void submitEmailAuth()} disabled={!canSubmitEmail || auth.isLoading}>
                       {busyAction === 'email' ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
                       {mode === 'sign-in' ? 'Sign in' : 'Create account'}
                     </Button>
                     <Button
+                      className="w-full"
                       type="button"
                       variant="secondary"
                       disabled={busyAction !== null || auth.isLoading}

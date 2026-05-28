@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { CalendarDays, CheckCircle2, Clock3, WalletCards } from 'lucide-react'
 
 import {
   calculatePaycheckAmount,
@@ -165,11 +165,36 @@ export function PaydayWizardPage({
               })}
             />
 
+            <div className="overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] p-4 shadow-[0_18px_45px_rgba(15,23,42,0.07)]">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Paycheck flow</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">
+                    {period ? `${period.startDate} to ${period.endDate}` : 'Waiting for a valid payday'}
+                  </p>
+                </div>
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/80 text-emerald-700 shadow-sm shadow-emerald-100/60">
+                  <WalletCards size={18} />
+                </span>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <PaydayFlowStep icon={<CalendarDays size={15} />} label="Payday" value={hasValidPayday ? payday : 'Invalid'} />
+                <PaydayFlowStep icon={<Clock3 size={15} />} label="Frequency" value={payFrequency} />
+                <PaydayFlowStep icon={<CheckCircle2 size={15} />} label="Status" value={existingPeriod ? 'Updating' : 'New plan'} />
+              </div>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/80 shadow-inner shadow-emerald-100">
+                <div
+                  className="h-full rounded-full bg-emerald-500 shadow-sm transition-all"
+                  style={{ width: `${canSubmit ? 100 : hasValidPayday ? 58 : 24}%` }}
+                />
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center gap-3">
               <Button disabled={!canSubmit || saved} onClick={submitPlan}>
                 {existingPeriod ? 'Update paycheck plan' : 'Confirm paycheck plan'}
               </Button>
-              <span className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium capitalize text-slate-700">
+              <span className="rounded-lg border border-slate-200/90 bg-white/90 px-3 py-2 text-sm font-medium capitalize text-slate-700 shadow-sm shadow-slate-200/60">
                 {payFrequency} plan
               </span>
               {saved && (
@@ -184,6 +209,26 @@ export function PaydayWizardPage({
       </Panel>
 
       <PayPeriodHistoryPanel snapshot={snapshot} actions={actions} />
+    </div>
+  )
+}
+
+function PaydayFlowStep({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-xl border border-white/70 bg-white/[0.78] px-3 py-2 shadow-sm shadow-emerald-100/50">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <span className="text-emerald-700">{icon}</span>
+        {label}
+      </div>
+      <p className="mt-1 truncate text-sm font-semibold capitalize text-slate-950">{value}</p>
     </div>
   )
 }

@@ -1,4 +1,5 @@
-import { Trash2 } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { CalendarDays, CircleDollarSign, Trash2, WalletCards } from 'lucide-react'
 
 import { formatPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -21,6 +22,17 @@ export function PayPeriodHistoryPanel({
   snapshot: PlannerSnapshot
   actions: PlannerActions
 }) {
+  const totalIncomePence = snapshot.payPeriods.reduce((total, period) => total + period.incomePence, 0)
+  const totalAllocatedPence = snapshot.payPeriods.reduce((total, period) => {
+    const allocated = snapshot.potAllocations
+      .filter((allocation) => allocation.payPeriodId === period.id)
+      .reduce((allocationTotal, allocation) => allocationTotal + allocation.amountPence, 0)
+
+    return total + allocated
+  }, 0)
+  const latestPeriods = snapshot.payPeriods.slice(0, 10)
+  const maxHistoryIncomePence = Math.max(1, ...latestPeriods.map((period) => period.incomePence))
+
   async function deletePeriod(periodId: string, payday: string) {
     if (window.confirm(`Delete paycheck plan for ${payday}?`)) {
       await actions.deletePayPeriod(periodId)
@@ -29,9 +41,37 @@ export function PayPeriodHistoryPanel({
 
   return (
     <Panel title="Pay period history" description="Previous paycheck plans and their allocations." accent="blue">
-      <div className="overflow-hidden rounded-lg border border-slate-200">
+      <div className="mb-4 grid gap-3 md:grid-cols-3">
+        <HistoryStat icon={<CalendarDays size={17} />} label="Paychecks" value={String(snapshot.payPeriods.length)} tone="blue" />
+        <HistoryStat icon={<CircleDollarSign size={17} />} label="Total income" value={formatPence(totalIncomePence)} tone="emerald" />
+        <HistoryStat icon={<WalletCards size={17} />} label="Total allocated" value={formatPence(totalAllocatedPence)} tone="violet" />
+      </div>
+
+      {latestPeriods.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#eff6ff,#ecfeff)] p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Pay rhythm</p>
+              <p className="mt-1 text-sm text-blue-900">Recent paycheck sizes, newest first.</p>
+            </div>
+            <p className="text-sm font-semibold text-slate-950">{formatPence(latestPeriods[0].incomePence)}</p>
+          </div>
+          <div className="mt-4 flex h-24 items-end gap-1.5" aria-hidden="true">
+            {latestPeriods.map((period) => (
+              <span
+                key={period.id}
+                className="min-w-3 flex-1 rounded-t-lg bg-blue-500/75 shadow-sm"
+                style={{ height: `${Math.max(12, Math.round((period.incomePence / maxHistoryIncomePence) * 100))}%` }}
+                title={`${period.payday}: ${formatPence(period.incomePence)}`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <thead className="bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3 font-semibold">Payday</th>
               <th className="px-4 py-3 font-semibold">Period</th>
@@ -41,7 +81,7 @@ export function PayPeriodHistoryPanel({
               <th className="px-4 py-3 font-semibold">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 bg-white">
+          <tbody className="divide-y divide-slate-200/80 bg-white/95">
             {snapshot.payPeriods.length > 0 ? (
               snapshot.payPeriods.map((period) => {
                 const allocated = snapshot.potAllocations
@@ -49,7 +89,7 @@ export function PayPeriodHistoryPanel({
                   .reduce((total, allocation) => total + allocation.amountPence, 0)
 
                 return (
-                  <tr key={period.id}>
+                  <tr key={period.id} className="transition hover:bg-slate-50/80">
                     <td className="px-4 py-3 font-medium text-slate-950">{period.payday}</td>
                     <td className="px-4 py-3 text-slate-600">
                       {period.startDate} to {period.endDate}
@@ -68,7 +108,11 @@ export function PayPeriodHistoryPanel({
                         />
                       </details>
                     </td>
-                    <td className="px-4 py-3 capitalize text-slate-600">{period.status}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-md border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-semibold capitalize text-slate-600 shadow-sm shadow-slate-200/50">
+                        {period.status}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <Button
                         variant="danger"
@@ -92,6 +136,35 @@ export function PayPeriodHistoryPanel({
         </table>
       </div>
     </Panel>
+  )
+}
+
+function HistoryStat({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  tone: 'blue' | 'emerald' | 'violet'
+}) {
+  const toneClassName =
+    tone === 'emerald'
+      ? 'border-emerald-200 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] text-emerald-700'
+      : tone === 'violet'
+        ? 'border-violet-200 bg-[linear-gradient(135deg,#ffffff,#f5f3ff)] text-violet-700'
+        : 'border-blue-200 bg-[linear-gradient(135deg,#ffffff,#eff6ff)] text-blue-700'
+
+  return (
+    <div className={`rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)] ${toneClassName}`}>
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+        {icon}
+        {label}
+      </div>
+      <p className="mt-2 text-xl font-semibold tracking-[-0.02em] text-slate-950">{value}</p>
+    </div>
   )
 }
 

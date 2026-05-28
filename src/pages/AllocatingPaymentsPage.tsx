@@ -327,7 +327,7 @@ export function AllocatingPaymentsPage({
             />
           </Field>
           <Field label="Card design">
-            <div className="flex min-h-9 items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 shadow-sm">
+            <div className="flex min-h-9 items-center justify-between gap-3 rounded-xl border border-slate-200/90 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/60">
               <div className="flex min-w-0 items-center gap-3">
                 <div className={`figma-credit-card credit-card-design-summary__art figma-credit-card--${selectedDesign.id}`} aria-hidden="true">
                   <CreditCardArtwork design={selectedDesign} />
@@ -397,12 +397,12 @@ export function AllocatingPaymentsPage({
           onEditRepayment={startEditingRepayment}
         />
         {editingCardId && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div
               role="dialog"
               aria-modal="true"
               aria-label="Edit credit card"
-              className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+              className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
             >
               <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
                 <div>
@@ -552,7 +552,7 @@ export function AllocatingPaymentsPage({
                   />
                 ))
               ) : (
-                <p className="w-full rounded-lg bg-slate-50 p-3 text-sm text-slate-500 sm:col-span-2 xl:col-span-1">
+                <p className="w-full rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500 sm:col-span-2 xl:col-span-1">
                   No credit cards yet.
                 </p>
               )}
@@ -568,7 +568,7 @@ export function AllocatingPaymentsPage({
                   return (
                     <div
                       key={repayment.id}
-                      className="grid gap-2 rounded-lg bg-slate-50 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                      className="grid gap-2 rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 shadow-sm shadow-slate-200/60 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-950">{repayment.note || 'Card repayment'}</p>
@@ -598,7 +598,7 @@ export function AllocatingPaymentsPage({
                   )
                 })
               ) : (
-                <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No repayments recorded yet.</p>
+                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">No repayments recorded yet.</p>
               )}
             </div>
           </Panel>
@@ -618,8 +618,8 @@ export function AllocatingPaymentsPage({
                   open={group.isSelected || (!viewedPeriod && index === 0)}
                   className={
                     group.isSelected
-                      ? 'rounded-lg border border-slate-950 bg-white shadow-sm'
-                      : 'rounded-lg border border-slate-200 bg-white'
+                      ? 'rounded-lg border border-slate-950 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.08)]'
+                      : 'rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60'
                   }
                 >
                   <summary className="cursor-pointer list-none px-3 py-2">
@@ -657,7 +657,7 @@ export function AllocatingPaymentsPage({
                 </details>
               ))
             ) : (
-              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
                 No payments or card spending are available to allocate yet.
               </p>
             )}
@@ -730,12 +730,12 @@ function CreditCardDesignModal({
   onClose: () => void
 }) {
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4">
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Card design"
-        className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+        className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
       >
         <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
           <div>
@@ -1024,7 +1024,7 @@ function PaymentAllocationRow({
   const missingCardLabel = getMissingCardLabel(row.creditCardId, activeCards)
 
   return (
-    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_auto]">
+    <div className="grid gap-3 rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-violet-200 md:grid-cols-[1fr_180px_auto]">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-semibold text-slate-950">{row.label}</p>
@@ -1182,7 +1182,7 @@ function CreditCardOverview({
                 />
               ))
             ) : (
-              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No card activity in this pay period.</p>
+              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No card activity in this pay period.</p>
             )}
           </div>
         </Panel>
@@ -1213,18 +1213,18 @@ function CreditCardStat({
 
 function creditCardStatClass(tone: 'neutral' | 'good' | 'warning' | 'bad'): string {
   if (tone === 'good') {
-    return 'rounded-lg border border-emerald-200 bg-emerald-50 p-4'
+    return 'rounded-lg border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
   }
 
   if (tone === 'warning') {
-    return 'rounded-lg border border-amber-200 bg-amber-50 p-4'
+    return 'rounded-lg border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
   }
 
   if (tone === 'bad') {
-    return 'rounded-lg border border-red-200 bg-red-50 p-4'
+    return 'rounded-lg border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
   }
 
-  return 'rounded-lg border border-slate-200 bg-white p-4'
+  return 'rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
 }
 
 function CreditCardActivityRow({
@@ -1246,7 +1246,7 @@ function CreditCardActivityRow({
   const amountClassName = item.amountPence < 0 ? 'text-emerald-700' : 'text-red-700'
 
   return (
-    <div className={`grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-[1fr_auto] ${overviewBorderClass(item.source)}`}>
+    <div className={`grid gap-3 rounded-lg border bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 sm:grid-cols-[1fr_auto] ${overviewBorderClass(item.source)}`}>
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-semibold text-slate-950">{item.label}</p>

@@ -127,8 +127,9 @@ export function RecurringCalendar({
               return (
                 <div
                   key={`${occurrence.payment.id}-${occurrence.dueDate}`}
-                  className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="group relative overflow-hidden rounded-lg border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-[0_16px_38px_rgba(15,23,42,0.08)] sm:flex sm:items-center sm:justify-between sm:gap-3"
                 >
+                  <span className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-cyan-400/80" aria-hidden="true" />
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-slate-950">{occurrence.payment.name}</p>
@@ -148,12 +149,12 @@ export function RecurringCalendar({
                       {occurrence.payment.potId ? pot?.name ?? 'Archived pot' : 'No pot linked'}
                     </p>
                   </div>
-                  <p className="text-sm font-semibold text-slate-950">{formatPence(occurrence.amountPence)}</p>
+                  <p className="mt-3 text-sm font-semibold text-slate-950 sm:mt-0">{formatPence(occurrence.amountPence)}</p>
                 </div>
               )
             })
           ) : (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">
               No active recurring payments are due in this window.
             </p>
           )}

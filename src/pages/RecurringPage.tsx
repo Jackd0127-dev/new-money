@@ -260,7 +260,7 @@ export function RecurringPage({
                   />
                 ))
               ) : (
-                <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No recurring payments yet.</p>
+                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">No recurring payments yet.</p>
               )}
             </div>
           </Panel>
@@ -270,12 +270,12 @@ export function RecurringPage({
       </SectionGrid>
 
       {editingPaymentId && editForm && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Edit recurring payment"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
           >
             <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
@@ -332,7 +332,7 @@ function RecurringSummaryBar({
   return (
     <section
       aria-label="Recurring overview"
-      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+      className="rounded-lg border border-slate-200/90 bg-white/95 p-3 shadow-[0_14px_35px_rgba(15,23,42,0.06)]"
     >
       <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -356,7 +356,7 @@ function RecurringSummaryBar({
 
 function CompactStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+    <div className="rounded-lg border border-slate-200/90 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/60">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-0.5 text-sm font-semibold text-slate-950">{value}</p>
     </div>
@@ -477,13 +477,13 @@ function RecurringPaymentCard({
   const potLabel = payment.potId ? pot?.name ?? 'Archived pot' : 'No pot'
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <article className="rounded-lg border border-slate-200/90 bg-white/95 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-slate-300">
       <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <span className={payment.active ? 'size-2 rounded-full bg-emerald-500' : 'size-2 rounded-full bg-slate-300'} />
             <h3 className="min-w-0 truncate text-sm font-semibold text-slate-950">{payment.name}</h3>
-            <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold capitalize text-slate-600">
+            <span className="shrink-0 rounded-md border border-slate-200/80 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold capitalize text-slate-600 shadow-sm shadow-slate-200/50">
               {payment.priority}
             </span>
           </div>
@@ -557,7 +557,7 @@ function CompactMetaPill({ icon, label, muted = false }: { icon: ReactNode; labe
 
 function CompactDetail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-slate-50 px-2.5 py-2">
+    <div className="rounded-lg border border-slate-200/80 bg-white/80 px-2.5 py-2 shadow-sm shadow-slate-200/50">
       <p className="font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-0.5 font-semibold text-slate-950">{value}</p>
     </div>
@@ -586,7 +586,7 @@ function IconButton({
       className={clsx(
         'inline-flex size-7 items-center justify-center rounded-md transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
         tone === 'neutral' &&
-          'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-slate-400',
+          'border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 hover:-translate-y-0.5 hover:bg-white hover:text-slate-950 focus-visible:outline-slate-400',
         tone === 'danger' && 'bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600',
       )}
     >
@@ -772,7 +772,7 @@ function NextPaydayOwedPanel({
 
           <CompactBreakdownDetails title="Cost calculation" breakdown={getNextPaydayOwedBreakdown(summary, period)} />
 
-          <details className="rounded-lg border border-slate-200 bg-slate-50">
+          <details className="rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.05)]">
             <summary className="cursor-pointer list-none px-3 py-2.5">
               <div className="flex items-center justify-between gap-3">
                 <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-950">
@@ -782,12 +782,12 @@ function NextPaydayOwedPanel({
                 <span className="text-xs font-semibold text-slate-500">{summary.items.length}</span>
               </div>
             </summary>
-            <div className="max-h-72 space-y-2 overflow-y-auto border-t border-slate-200 p-2.5">
+            <div className="max-h-72 space-y-2 overflow-y-auto border-t border-slate-100 p-2.5">
               {summary.items.length > 0 ? (
                 summary.items.map((item) => (
                   <div
                     key={item.id}
-                    className="grid gap-2 rounded-md bg-white px-2.5 py-2 text-sm sm:grid-cols-[1fr_auto]"
+                    className="grid gap-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-sm shadow-sm shadow-slate-200/50 transition hover:bg-white sm:grid-cols-[1fr_auto]"
                   >
                     <div>
                       <p className="font-medium text-slate-800">{item.label}</p>
@@ -802,7 +802,7 @@ function NextPaydayOwedPanel({
                   </div>
                 ))
               ) : (
-                <p className="rounded-md bg-white px-3 py-2 text-sm text-slate-500">
+                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
                   Nothing is dated inside the next payday period yet.
                 </p>
               )}
@@ -810,7 +810,7 @@ function NextPaydayOwedPanel({
           </details>
         </div>
       ) : (
-        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">
+        <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
           No payday plan is available to build a next-period preview.
         </p>
       )}
@@ -830,11 +830,11 @@ function CompactPreviewMetric({
   return (
     <div
       className={clsx(
-        'flex items-center justify-between gap-3 rounded-md border px-3 py-2',
-        tone === 'neutral' && 'border-slate-200 bg-white',
-        tone === 'good' && 'border-emerald-200 bg-emerald-50',
-        tone === 'warning' && 'border-amber-200 bg-amber-50',
-        tone === 'bad' && 'border-red-200 bg-red-50',
+        'flex items-center justify-between gap-3 rounded-lg border px-3 py-2 shadow-sm',
+        tone === 'neutral' && 'border-slate-200/90 bg-white/95',
+        tone === 'good' && 'border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)]',
+        tone === 'warning' && 'border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)]',
+        tone === 'bad' && 'border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)]',
       )}
     >
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
@@ -851,7 +851,7 @@ function CompactBreakdownDetails({
   breakdown: CalculationBreakdown
 }) {
   return (
-    <details className="rounded-lg border border-slate-200 bg-white">
+    <details className="rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
       <summary className="cursor-pointer list-none px-3 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-semibold text-slate-950">{title}</p>
@@ -862,7 +862,7 @@ function CompactBreakdownDetails({
         {breakdown.formula && <p className="text-xs leading-5 text-slate-500">{breakdown.formula}</p>}
         <div className="space-y-1">
           {breakdown.lines.map((line) => (
-            <div key={`${line.label}-${line.value}`} className="flex items-start justify-between gap-3 rounded-md bg-slate-50 px-2.5 py-2">
+            <div key={`${line.label}-${line.value}`} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-2 shadow-sm shadow-slate-200/50">
               <div className="min-w-0">
                 <p className="truncate text-xs font-semibold text-slate-700">{line.label}</p>
                 {line.detail && <p className="mt-0.5 text-xs leading-4 text-slate-500">{line.detail}</p>}

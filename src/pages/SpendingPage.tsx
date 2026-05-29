@@ -1,5 +1,14 @@
-import { useState } from 'react'
-import { CalendarDays, ChevronDown, CreditCard, PenLine, ReceiptText, Sparkles, Trash2, WalletCards } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import {
+  CalendarDays,
+  ChevronDown,
+  CreditCard,
+  PenLine,
+  ReceiptText,
+  Sparkles,
+  Trash2,
+  WalletCards,
+} from 'lucide-react'
 
 import { findPayPeriodForDate, formatPence, getAppTodayIso, parsePoundsToPence } from '../domain/money'
 import type {
@@ -55,15 +64,25 @@ export function SpendingPage({
   const parsedAmountPence = parsePoundsToPence(amount)
   const canSubmitSpend = parsedAmountPence > 0 && Boolean(date)
   const groupedTransactions = groupTransactionsByPeriod(snapshot.transactions, snapshot, selectedPayPeriod ?? null)
-  const selectedPeriodSpendPence = selectedPayPeriod
-    ? groupedTransactions.find((group) => group.id === selectedPayPeriod.id)?.totalPence ?? 0
-    : groupedTransactions[0]?.totalPence ?? 0
+  const selectedTransactionGroup = selectedPayPeriod
+    ? groupedTransactions.find((group) => group.id === selectedPayPeriod.id) ?? null
+    : groupedTransactions[0] ?? null
+  const selectedPeriodSpendPence = selectedTransactionGroup?.totalPence ?? 0
   const todaySpendPence = snapshot.transactions
     .filter((transaction) => transaction.date === today)
     .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
   const linkedCardSpendPence = snapshot.transactions
     .filter((transaction) => transaction.paymentMethod === 'credit_card' || transaction.creditCardId)
     .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
+  const potLinkedSpendPence = snapshot.transactions
+    .filter((transaction) => transaction.potId && transaction.paymentMethod !== 'credit_card' && !transaction.creditCardId)
+    .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
+  const unlinkedSpendPence = snapshot.transactions
+    .filter((transaction) => !transaction.potId && !transaction.creditCardId && transaction.paymentMethod !== 'credit_card')
+    .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
+  const recentTransactions = [...snapshot.transactions]
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .slice(0, 3)
 
   async function submitTransaction() {
     const amountPence = parsedAmountPence
@@ -140,6 +159,19 @@ export function SpendingPage({
 
   return (
     <div className="space-y-6">
+      <SpendingCommandCenter
+        today={today}
+        selectedPayPeriod={selectedPayPeriod ?? null}
+        selectedPeriodSpendPence={selectedPeriodSpendPence}
+        selectedPeriodEntryCount={selectedTransactionGroup?.transactions.length ?? 0}
+        todaySpendPence={todaySpendPence}
+        linkedCardSpendPence={linkedCardSpendPence}
+        potLinkedSpendPence={potLinkedSpendPence}
+        unlinkedSpendPence={unlinkedSpendPence}
+        recentTransactions={recentTransactions}
+        snapshot={snapshot}
+      />
+
       <div className="grid gap-3 md:grid-cols-3">
         <MoneyMetric
           label="Today logged"
@@ -364,6 +396,184 @@ export function SpendingPage({
           </div>
         </Panel>
       </SectionGrid>
+    </div>
+  )
+}
+
+function SpendingCommandCenter({
+  today,
+  selectedPayPeriod,
+  selectedPeriodSpendPence,
+  selectedPeriodEntryCount,
+  todaySpendPence,
+  linkedCardSpendPence,
+  potLinkedSpendPence,
+  unlinkedSpendPence,
+  recentTransactions,
+  snapshot,
+}: {
+  today: string
+  selectedPayPeriod: PayPeriod | null
+  selectedPeriodSpendPence: number
+  selectedPeriodEntryCount: number
+  todaySpendPence: number
+  linkedCardSpendPence: number
+  potLinkedSpendPence: number
+  unlinkedSpendPence: number
+  recentTransactions: PlannerSnapshot['transactions']
+  snapshot: PlannerSnapshot
+}) {
+  const routedSpendPence = linkedCardSpendPence + potLinkedSpendPence
+  const allSpendPence = routedSpendPence + unlinkedSpendPence
+  const routedPercent = allSpendPence > 0 ? Math.round((routedSpendPence / allSpendPence) * 100) : 0
+  const cardWidth = allSpendPence > 0 ? `${Math.min(100, Math.round((linkedCardSpendPence / allSpendPence) * 100))}%` : '0%'
+  const potWidth = allSpendPence > 0 ? `${Math.min(100, Math.round((potLinkedSpendPence / allSpendPence) * 100))}%` : '0%'
+  const unlinkedWidth = allSpendPence > 0 ? `${Math.min(100, Math.round((unlinkedSpendPence / allSpendPence) * 100))}%` : '0%'
+  const periodLabel = selectedPayPeriod
+    ? `${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`
+    : 'No paycheck selected'
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617_0%,#111827_48%,#3a1830_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.24)]">
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.44fr)]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-2xl border border-rose-300/25 bg-rose-300/10 text-rose-100 shadow-inner shadow-white/10">
+              <ReceiptText size={20} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-xl font-semibold text-white">Spending command desk</h2>
+              <p className="mt-1 text-sm leading-5 text-slate-300">{periodLabel}</p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <SpendCommandMetric
+              icon={<CalendarDays size={17} />}
+              label="Today"
+              value={formatSpendTotal(todaySpendPence)}
+              detail={today}
+            />
+            <SpendCommandMetric
+              icon={<WalletCards size={17} />}
+              label="Paycheck spend"
+              value={formatSpendTotal(selectedPeriodSpendPence)}
+              detail={`${selectedPeriodEntryCount} entr${selectedPeriodEntryCount === 1 ? 'y' : 'ies'} in view`}
+              tone="amber"
+            />
+            <SpendCommandMetric
+              icon={<CreditCard size={17} />}
+              label="Card route"
+              value={formatSpendTotal(linkedCardSpendPence)}
+              detail="Feeds card cover and future direct debits"
+              tone="cyan"
+            />
+            <SpendCommandMetric
+              icon={<Sparkles size={17} />}
+              label="Routed"
+              value={`${routedPercent}%`}
+              detail={`${formatSpendTotal(routedSpendPence)} linked to cards or pots`}
+              tone="emerald"
+            />
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
+              <span>Spend routing</span>
+              <span>{formatSpendTotal(allSpendPence)} total logged</span>
+            </div>
+            <div className="mt-4 overflow-hidden rounded-full bg-slate-950/50 p-1 shadow-inner shadow-slate-950">
+              <div className="flex h-3 overflow-hidden rounded-full bg-white/10">
+                <div className="bg-cyan-300" style={{ width: cardWidth }} />
+                <div className="bg-emerald-300" style={{ width: potWidth }} />
+                <div className="bg-rose-300" style={{ width: unlinkedWidth }} />
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-300 sm:grid-cols-3">
+              <SpendRouteLabel colorClass="bg-cyan-300" label="Cards" value={formatSpendTotal(linkedCardSpendPence)} />
+              <SpendRouteLabel colorClass="bg-emerald-300" label="Pots" value={formatSpendTotal(potLinkedSpendPence)} />
+              <SpendRouteLabel colorClass="bg-rose-300" label="Unlinked" value={formatSpendTotal(unlinkedSpendPence)} />
+            </div>
+          </div>
+        </div>
+
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-inner shadow-white/10">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-rose-100/80">Recent trail</p>
+              <p className="mt-2 text-3xl font-semibold text-white">{recentTransactions.length}</p>
+            </div>
+            <span className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-rose-50">
+              Latest entries
+            </span>
+          </div>
+          <div className="mt-5 space-y-3">
+            {recentTransactions.length > 0 ? (
+              recentTransactions.map((transaction) => (
+                <div key={transaction.id} className="rounded-xl border border-white/10 bg-slate-950/25 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{transaction.note}</p>
+                      <p className="mt-0.5 text-xs text-slate-400">{transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}</p>
+                    </div>
+                    <p className="text-sm font-semibold text-rose-100">{formatSpendTotal(transaction.amountPence)}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/15 bg-slate-950/25 p-4 text-sm text-slate-300">
+                Log spend to build a recent trail.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function SpendCommandMetric({
+  icon,
+  label,
+  value,
+  detail,
+  tone = 'rose',
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  detail: string
+  tone?: 'rose' | 'amber' | 'cyan' | 'emerald'
+}) {
+  const toneClassName =
+    tone === 'amber'
+      ? 'border-amber-300/20 bg-amber-300/10 text-amber-100'
+      : tone === 'cyan'
+        ? 'border-cyan-300/20 bg-cyan-300/10 text-cyan-100'
+        : tone === 'emerald'
+          ? 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100'
+          : 'border-rose-300/20 bg-rose-300/10 text-rose-100'
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3 shadow-inner shadow-white/10 sm:p-4">
+      <div className={`mb-3 flex size-8 items-center justify-center rounded-xl sm:size-9 ${toneClassName}`}>
+        {icon}
+      </div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-white sm:text-2xl">{value}</p>
+      <p className="mt-2 text-[11px] leading-5 text-slate-400 sm:text-xs">{detail}</p>
+    </div>
+  )
+}
+
+function SpendRouteLabel({ colorClass, label, value }: { colorClass: string; label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-950/25 px-3 py-2">
+      <span className="flex items-center gap-2">
+        <span className={`size-2 rounded-full ${colorClass}`} />
+        {label}
+      </span>
+      <span className="text-white">{value}</span>
     </div>
   )
 }

@@ -38,16 +38,17 @@ export function Panel({
     <section
       aria-label={title}
       className={clsx(
-        'app-panel relative overflow-hidden rounded-lg border bg-white/[0.92] shadow-[0_18px_55px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur',
+        'app-panel relative overflow-hidden rounded-2xl border bg-white/[0.94] shadow-[0_18px_55px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur',
         density === 'compact' ? 'p-4' : 'p-5',
         panelAccentClassName(accent),
         className,
       )}
     >
+      <span className={clsx('pointer-events-none absolute inset-x-0 top-0 h-1', panelAccentBarClassName(accent))} aria-hidden="true" />
       {(title || description || action) && (
         <div
           className={clsx(
-            'app-panel__header flex flex-col gap-4 border-b border-slate-100/80',
+            'app-panel__header flex flex-col gap-4 border-b border-slate-100/80 sm:flex-row sm:items-start sm:justify-between',
             density === 'compact' ? 'mb-3 pb-3' : 'mb-4 pb-4',
           )}
         >
@@ -55,7 +56,7 @@ export function Panel({
             {title && <h2 className="text-base font-semibold tracking-[-0.01em] text-slate-950">{title}</h2>}
             {description && <p className="mt-1 text-sm leading-5 text-slate-500">{description}</p>}
           </div>
-          {action && <div className="app-panel__action w-full shrink-0">{action}</div>}
+          {action && <div className="app-panel__action w-full shrink-0 sm:w-auto">{action}</div>}
         </div>
       )}
       {children}
@@ -119,6 +120,38 @@ function panelAccentClassName(accent: PanelAccent): string {
   }
 
   return 'border-slate-200/90 shadow-slate-950/5'
+}
+
+function panelAccentBarClassName(accent: PanelAccent): string {
+  if (accent === 'blue') {
+    return 'bg-[linear-gradient(90deg,#2563eb,#22d3ee)]'
+  }
+
+  if (accent === 'emerald') {
+    return 'bg-[linear-gradient(90deg,#10b981,#22d3ee)]'
+  }
+
+  if (accent === 'amber') {
+    return 'bg-[linear-gradient(90deg,#f59e0b,#facc15)]'
+  }
+
+  if (accent === 'rose') {
+    return 'bg-[linear-gradient(90deg,#fb7185,#f59e0b)]'
+  }
+
+  if (accent === 'violet') {
+    return 'bg-[linear-gradient(90deg,#7c3aed,#22d3ee)]'
+  }
+
+  if (accent === 'cyan') {
+    return 'bg-[linear-gradient(90deg,#06b6d4,#34d399)]'
+  }
+
+  if (accent === 'fuchsia') {
+    return 'bg-[linear-gradient(90deg,#c026d3,#fb7185)]'
+  }
+
+  return 'bg-[linear-gradient(90deg,#64748b,#22d3ee)]'
 }
 
 export function Button({
@@ -217,7 +250,7 @@ export function MoneyMetric({
 }) {
   const isPrimary = tone === 'primary'
   const className = clsx(
-    'relative h-fit self-start overflow-hidden rounded-lg border p-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]',
+    'relative h-fit self-start overflow-hidden rounded-2xl border p-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]',
     metricCardClassName(tone),
   )
   const labelClassName = isPrimary ? 'text-slate-300' : metricLabelClassName(tone)
@@ -342,7 +375,7 @@ export function CalculationDetails({
   return (
     <div
       className={clsx(
-        'mt-4 rounded-lg border p-3',
+        'mt-4 rounded-xl border p-3',
         inverted ? 'border-white/10 bg-white/10' : 'border-slate-200/80 bg-white/80',
       )}
     >

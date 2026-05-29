@@ -1,5 +1,19 @@
-import { useMemo, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, PenLine, PlusCircle, Trash2, X } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  CreditCard,
+  PiggyBank,
+  ReceiptText,
+  ShieldCheck,
+  Trash2,
+  WalletCards,
+  PenLine,
+  PlusCircle,
+  X,
+} from 'lucide-react'
 
 import {
   creditCardDesigns,
@@ -15,6 +29,7 @@ import {
   getCreditCardAllocationSummary,
   parsePoundsToPence,
   type CreditCardAllocationCardSummary,
+  type CreditCardAllocationSummary,
   type CreditCardAllocationItem,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -423,6 +438,13 @@ export function AllocatingPaymentsPage({
 
   return (
     <div className="space-y-4">
+      <CreditAllocationCommandCenter
+        summary={summary}
+        viewedPeriod={viewedPeriod}
+        cardCount={activeCards.length}
+        paymentGroupCount={paymentGroups.length}
+      />
+
       <Panel
         title="Credit card summary"
         description="Selected pay, actual card balances, forecasts, and linked credit pots."
@@ -675,6 +697,184 @@ type CreditCardVisualDetails = {
   name: string
   provider: string
   directDebit: string
+}
+
+function CreditAllocationCommandCenter({
+  summary,
+  viewedPeriod,
+  cardCount,
+  paymentGroupCount,
+}: {
+  summary: CreditCardAllocationSummary
+  viewedPeriod: PayPeriod | null
+  cardCount: number
+  paymentGroupCount: number
+}) {
+  const actualOwedPence = summary.cards.reduce((total, cardSummary) => total + cardSummary.actualOwedPence, 0)
+  const actualAvailablePence = summary.cards.reduce((total, cardSummary) => total + cardSummary.actualAvailableCreditPence, 0)
+  const forecastOwedPence = summary.cards.reduce((total, cardSummary) => total + cardSummary.forecastOwedPence, 0)
+  const forecastAvailablePence = summary.cards.reduce((total, cardSummary) => total + cardSummary.forecastAvailableCreditPence, 0)
+  const plannedChargesPence = summary.cards.reduce((total, cardSummary) => total + cardSummary.plannedChargesPence, 0)
+  const reservedPence = summary.totalCreditPotsPence
+  const coverPercent = forecastOwedPence > 0 ? Math.round((reservedPence / forecastOwedPence) * 100) : 0
+  const coverWidth = `${Math.min(100, Math.max(0, coverPercent))}%`
+  const periodLabel = viewedPeriod
+    ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate}`
+    : 'Choose a paycheck to see period cover'
+  const focusCards = [...summary.cards]
+    .sort((left, right) => right.plannedTopUpNeededPence - left.plannedTopUpNeededPence)
+    .slice(0, 3)
+
+  return (
+    <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617_0%,#0f172a_48%,#123244_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.24)]">
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.48fr)]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-2xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-100 shadow-inner shadow-white/10">
+              <WalletCards size={20} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-xl font-semibold text-white">Card allocation cockpit</h2>
+              <p className="mt-1 text-sm leading-5 text-slate-300">{periodLabel}</p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <CommandMetricCard
+              icon={<CreditCard size={17} />}
+              label="Actual owed"
+              value={formatPence(actualOwedPence)}
+              detail={`${formatPence(actualAvailablePence)} actual credit still open`}
+            />
+            <CommandMetricCard
+              icon={<ReceiptText size={17} />}
+              label="Forecast owed"
+              value={formatPence(forecastOwedPence)}
+              detail={`${formatPence(plannedChargesPence)} planned charges in view`}
+              tone="amber"
+            />
+            <CommandMetricCard
+              icon={<PiggyBank size={17} />}
+              label="Reserved cover"
+              value={formatPence(reservedPence)}
+              detail={`${coverPercent}% of forecast balance covered`}
+              tone="emerald"
+            />
+            <CommandMetricCard
+              icon={<ShieldCheck size={17} />}
+              label="Forecast credit"
+              value={formatPence(forecastAvailablePence)}
+              detail={`${formatPence(summary.totalPlannedTopUpNeededPence)} still needs cover`}
+              tone={summary.totalPlannedTopUpNeededPence > 0 ? 'rose' : 'cyan'}
+            />
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
+              <span>Forecast cover route</span>
+              <span>{cardCount} card{cardCount === 1 ? '' : 's'} · {paymentGroupCount} payment group{paymentGroupCount === 1 ? '' : 's'}</span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr] md:items-center">
+              <RouteNode label="Actual card balance" value={formatPence(actualOwedPence)} />
+              <ArrowRight className="hidden text-cyan-200 md:block" size={18} />
+              <RouteNode label="Planned card charges" value={formatPence(plannedChargesPence)} />
+              <ArrowRight className="hidden text-cyan-200 md:block" size={18} />
+              <RouteNode label="Pot cover needed" value={formatPence(summary.totalPlannedTopUpNeededPence)} />
+            </div>
+          </div>
+        </div>
+
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-inner shadow-white/10">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-100/80">Reserved against forecast</p>
+              <p className="mt-2 text-3xl font-semibold text-white">{coverPercent}%</p>
+            </div>
+            <span className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-50">
+              {formatPence(reservedPence)}
+            </span>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-950/50 shadow-inner shadow-slate-950">
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#22d3ee,#34d399,#facc15)]" style={{ width: coverWidth }} />
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {focusCards.length > 0 ? (
+              focusCards.map((cardSummary) => {
+                const cardForecastPence = Math.max(0, cardSummary.forecastOwedPence)
+                const cardCoveredPercent = cardForecastPence > 0
+                  ? Math.round((cardSummary.creditPotPence / cardForecastPence) * 100)
+                  : 0
+                const cardWidth = `${Math.min(100, Math.max(0, cardCoveredPercent))}%`
+
+                return (
+                  <div key={cardSummary.card.id} className="rounded-xl border border-white/10 bg-slate-950/25 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">{cardSummary.card.name}</p>
+                        <p className="mt-0.5 text-xs text-slate-400">{formatPence(cardSummary.plannedTopUpNeededPence)} cover needed</p>
+                      </div>
+                      <p className="text-sm font-semibold text-cyan-100">{formatPence(cardSummary.creditPotPence)}</p>
+                    </div>
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full rounded-full bg-cyan-300" style={{ width: cardWidth }} />
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/15 bg-slate-950/25 p-4 text-sm text-slate-300">
+                Add cards to see allocation cover here.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CommandMetricCard({
+  icon,
+  label,
+  value,
+  detail,
+  tone = 'cyan',
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  detail: string
+  tone?: 'cyan' | 'emerald' | 'amber' | 'rose'
+}) {
+  const toneClassName =
+    tone === 'emerald'
+      ? 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100'
+      : tone === 'amber'
+        ? 'border-amber-300/20 bg-amber-300/10 text-amber-100'
+        : tone === 'rose'
+          ? 'border-rose-300/20 bg-rose-300/10 text-rose-100'
+          : 'border-cyan-300/20 bg-cyan-300/10 text-cyan-100'
+
+  return (
+    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-3 shadow-inner shadow-white/10 sm:p-4">
+      <div className={`mb-3 flex size-8 items-center justify-center rounded-xl sm:size-9 ${toneClassName}`}>
+        {icon}
+      </div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-white sm:text-2xl">{value}</p>
+      <p className="mt-2 text-[11px] leading-5 text-slate-400 sm:text-xs">{detail}</p>
+    </div>
+  )
+}
+
+function RouteNode({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-xl border border-white/10 bg-slate-950/30 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    </div>
+  )
 }
 
 function CompactSummaryMetric({

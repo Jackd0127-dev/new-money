@@ -168,13 +168,9 @@ export function DashboardPage({
             ? fundingPotSelections[item.id] ?? item.completion.fundingPotId ?? ''
             : ''
 
-          await actions.upsertPaycheckPotAllocation({
-            id: item.completion.id,
-            payPeriodId: item.completion.payPeriodId,
-            potId: item.completion.potId,
-            ...(selectedFundingPotId ? { fundingPotId: selectedFundingPotId } : {}),
-            amountPence: item.completion.amountPence,
-          })
+          await actions.upsertPaycheckPotAllocation(
+            getPaycheckPotAllocationPayload(item.completion, selectedFundingPotId),
+          )
         } else {
           await actions.deletePaycheckPotAllocation(item.completion.id)
         }
@@ -204,6 +200,35 @@ export function DashboardPage({
       writeCompletedTodos(next)
       return next
     })
+  }
+
+  async function updateTodoFundingPot(
+    item: PaycheckTodoItem,
+    fundingPotId: string,
+    shouldSaveSelection: boolean,
+  ) {
+    setFundingPotSelections((current) => ({
+      ...current,
+      [item.id]: fundingPotId,
+    }))
+
+    if (!shouldSaveSelection || !item.completion || !actions) {
+      return
+    }
+
+    setPendingTodoIds((current) => new Set(current).add(item.id))
+
+    try {
+      await actions.upsertPaycheckPotAllocation(
+        getPaycheckPotAllocationPayload(item.completion, fundingPotId),
+      )
+    } finally {
+      setPendingTodoIds((current) => {
+        const next = new Set(current)
+        next.delete(item.id)
+        return next
+      })
+    }
   }
 
   function toggleIgnoredPayment(item: PaycheckTodoItem, ignored: boolean) {
@@ -383,6 +408,11 @@ export function DashboardPage({
                     const isExpanded = expandedTodoIds.has(item.id)
                     const breakdownId = `dashboard-todo-breakdown-${item.id}`
                     const breakdownLabel = item.breakdownLabel ?? item.ignoreLabel
+                    const completionId = item.completion?.id
+                    const hasSavedCompletion = completionId
+                      ? snapshot.potAllocations.some((allocation) => allocation.id === completionId)
+                      : false
+                    const shouldSaveFundingSelection = isDone || hasSavedCompletion
 
                     return (
                       <li
@@ -483,12 +513,9 @@ export function DashboardPage({
                             <SelectInput
                               aria-label={`Pay ${item.ignoreLabel} planned card cover from`}
                               value={fundingPotSelections[item.id] ?? item.completion?.fundingPotId ?? ''}
-                              disabled={isDone || isPending}
+                              disabled={isPending}
                               onChange={(event) =>
-                                setFundingPotSelections((current) => ({
-                                  ...current,
-                                  [item.id]: event.target.value,
-                                }))
+                                void updateTodoFundingPot(item, event.target.value, shouldSaveFundingSelection)
                               }
                             >
                               <option value="">This paycheck</option>
@@ -553,6 +580,19 @@ export function DashboardPage({
       )}
     </div>
   )
+}
+
+function getPaycheckPotAllocationPayload(
+  completion: PaycheckTodoCompletion,
+  fundingPotId: string,
+) {
+  return {
+    id: completion.id,
+    payPeriodId: completion.payPeriodId,
+    potId: completion.potId,
+    ...(fundingPotId ? { fundingPotId } : {}),
+    amountPence: completion.amountPence,
+  }
 }
 
 function DashboardCommandCentre({

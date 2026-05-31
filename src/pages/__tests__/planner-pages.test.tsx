@@ -3985,6 +3985,61 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('can change the funding pot after a planned card cover checklist item is completed', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture({ completed: true })
+    window.localStorage.setItem(
+      'new-money.dashboard-todos.v1',
+      JSON.stringify({ 'period-current': ['linked-credit-card-pot-card-barclays-todo'] }),
+    )
+    const snapshotWithSavings = {
+      ...snapshot,
+      pots: [
+        ...snapshot.pots,
+        {
+          id: 'pot-emergency',
+          name: 'Emergency savings',
+          type: 'saving' as const,
+          balancePence: 20200,
+          targetPence: null,
+          color: '#10b981',
+          linkedCreditCardId: null,
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    }
+
+    render(
+      <DashboardPage
+        snapshot={snapshotWithSavings}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    const fundingSelect = screen.getByLabelText('Pay Barclays planned card cover from')
+
+    expect(fundingSelect).toBeEnabled()
+
+    await user.selectOptions(fundingSelect, 'pot-emergency')
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+      payPeriodId: 'period-current',
+      potId: 'pot-barclays',
+      fundingPotId: 'pot-emergency',
+      amountPence: 17857,
+    })
+
+    restoreLocalStorage()
+  })
+
   it('expands a checklist row to show the payments that make up the amount', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()

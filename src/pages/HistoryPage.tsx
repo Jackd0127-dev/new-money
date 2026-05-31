@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { BadgePoundSterling, CalendarDays, CircleDollarSign, Trash2, TrendingUp, WalletCards } from 'lucide-react'
+import { CalendarDays, CircleDollarSign, Trash2, WalletCards } from 'lucide-react'
 
 import { formatPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
@@ -30,10 +30,6 @@ export function PayPeriodHistoryPanel({
 
     return total + allocated
   }, 0)
-  const allocationRate = totalIncomePence > 0 ? Math.round((totalAllocatedPence / totalIncomePence) * 100) : 0
-  const unallocatedPence = Math.max(0, totalIncomePence - totalAllocatedPence)
-  const latestPeriods = snapshot.payPeriods.slice(0, 10)
-  const maxHistoryIncomePence = Math.max(1, ...latestPeriods.map((period) => period.incomePence))
 
   async function deletePeriod(periodId: string, payday: string) {
     if (window.confirm(`Delete paycheck plan for ${payday}?`)) {
@@ -43,16 +39,7 @@ export function PayPeriodHistoryPanel({
 
   return (
     <Panel title="Pay period history" description="Previous paycheck plans and their allocations." accent="blue" className="min-w-0">
-      <HistoryOverview
-        latestPeriods={latestPeriods}
-        maxHistoryIncomePence={maxHistoryIncomePence}
-        totalIncomePence={totalIncomePence}
-        totalAllocatedPence={totalAllocatedPence}
-        unallocatedPence={unallocatedPence}
-        allocationRate={allocationRate}
-      />
-
-      <div className="mb-4 mt-4 grid gap-3 md:grid-cols-3">
+      <div className="mb-4 grid gap-3 md:grid-cols-3">
         <HistoryStat icon={<CalendarDays size={17} />} label="Paychecks" value={String(snapshot.payPeriods.length)} tone="blue" />
         <HistoryStat icon={<CircleDollarSign size={17} />} label="Total income" value={formatPence(totalIncomePence)} tone="emerald" />
         <HistoryStat icon={<WalletCards size={17} />} label="Total allocated" value={formatPence(totalAllocatedPence)} tone="violet" />
@@ -132,110 +119,6 @@ export function PayPeriodHistoryPanel({
         </table>
       </div>
     </Panel>
-  )
-}
-
-function HistoryOverview({
-  latestPeriods,
-  maxHistoryIncomePence,
-  totalIncomePence,
-  totalAllocatedPence,
-  unallocatedPence,
-  allocationRate,
-}: {
-  latestPeriods: PlannerSnapshot['payPeriods']
-  maxHistoryIncomePence: number
-  totalIncomePence: number
-  totalAllocatedPence: number
-  unallocatedPence: number
-  allocationRate: number
-}) {
-  const overAllocatedPence = Math.max(0, totalAllocatedPence - totalIncomePence)
-  const hasUnallocated = unallocatedPence > 0
-
-  return (
-    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_22px_65px_rgba(15,23,42,0.18)] sm:max-w-full">
-      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)] lg:items-end">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
-            <TrendingUp size={15} />
-            Paycheck history
-          </div>
-          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(totalIncomePence)}</p>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-            {latestPeriods.length > 0
-              ? `Latest paycheck ${latestPeriods[0].payday} was ${formatPence(latestPeriods[0].incomePence)}.`
-              : 'Create a paycheck plan to start building a history.'}
-          </p>
-        </div>
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner shadow-white/10">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
-            <BadgePoundSterling size={15} />
-            Allocated rate
-          </div>
-          <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-white">{allocationRate}%</p>
-          <p className="mt-1 text-xs leading-5 text-slate-300">
-            {formatPence(totalAllocatedPence)} allocated · {formatPence(unallocatedPence)} not allocated
-          </p>
-          <ProgressRail percent={allocationRate} className="mt-3" trackClassName="bg-white/15 shadow-slate-950/20" />
-        </div>
-      </div>
-      <div className="border-t border-white/10 bg-white/[0.05] p-4">
-        <div className="grid gap-2 sm:grid-cols-3">
-          <HistoryFlowStat label="Income" value={formatPence(totalIncomePence)} />
-          <HistoryFlowStat label="Allocated" value={formatPence(totalAllocatedPence)} />
-          <HistoryFlowStat
-            label={hasUnallocated ? 'Not allocated' : overAllocatedPence > 0 ? 'Over allocated' : 'Balanced'}
-            value={hasUnallocated ? formatPence(unallocatedPence) : overAllocatedPence > 0 ? formatPence(overAllocatedPence) : formatPence(0)}
-            tone={hasUnallocated ? 'warning' : overAllocatedPence > 0 ? 'good' : 'neutral'}
-          />
-        </div>
-      </div>
-      {latestPeriods.length > 0 && (
-        <div className="border-t border-white/10 bg-white/[0.06] p-4">
-          <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
-            <span>Pay rhythm</span>
-            <span>Newest first</span>
-          </div>
-          <div className="flex h-20 items-end gap-1.5" aria-hidden="true">
-            {latestPeriods.map((period) => (
-              <span
-                key={period.id}
-                className="min-w-3 flex-1 rounded-t-lg bg-cyan-300/75 shadow-sm"
-                style={{ height: `${Math.max(12, Math.round((period.incomePence / maxHistoryIncomePence) * 100))}%` }}
-                title={`${period.payday}: ${formatPence(period.incomePence)}`}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function HistoryFlowStat({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string
-  value: string
-  tone?: 'neutral' | 'good' | 'warning'
-}) {
-  return (
-    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={
-        tone === 'good'
-          ? 'mt-1 truncate text-sm font-semibold text-emerald-200'
-          : tone === 'warning'
-            ? 'mt-1 truncate text-sm font-semibold text-amber-200'
-            : 'mt-1 truncate text-sm font-semibold text-white'
-      }
-      >
-        {value}
-      </p>
-    </div>
   )
 }
 

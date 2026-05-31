@@ -1,18 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import {
-  ArrowRight,
-  BadgePoundSterling,
   CalendarDays,
   ChevronDown,
   CreditCard,
-  Layers3,
   PauseCircle,
   PenLine,
   PiggyBank,
   PlayCircle,
-  PlusCircle,
-  Repeat,
   Trash2,
   X,
 } from 'lucide-react'
@@ -59,10 +54,14 @@ export function RecurringPage({
   snapshot,
   actions,
   selectedPayPeriod,
+  isCreateOpen = false,
+  onCreateOpenChange,
 }: {
   snapshot: PlannerSnapshot
   actions: PlannerActions
   selectedPayPeriod?: PayPeriod | null
+  isCreateOpen?: boolean
+  onCreateOpenChange?: (isOpen: boolean) => void
 }) {
   const today = getAppTodayIso(snapshot.settings)
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
@@ -70,7 +69,6 @@ export function RecurringPage({
   const [createForm, setCreateForm] = useState<RecurringFormState>(() =>
     createEmptyRecurringForm(activePots[0]?.id ?? ''),
   )
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [expandedPaymentIds, setExpandedPaymentIds] = useState<Set<string>>(() => new Set())
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<RecurringFormState | null>(null)
@@ -150,7 +148,7 @@ export function RecurringPage({
 
     await actions.addRecurringPayment(addInput)
     resetCreateForm()
-    setIsCreateOpen(false)
+    onCreateOpenChange?.(false)
   }
 
   function startEditingPayment(paymentId: string) {
@@ -196,17 +194,10 @@ export function RecurringPage({
     })
   }
 
-  const recurringStats = getRecurringStats(snapshot.recurringPayments)
   const paymentGroups = getRecurringPaymentGroups(snapshot.recurringPayments)
 
   return (
     <div className="min-w-0 space-y-4">
-      <RecurringSummaryBar
-        stats={recurringStats}
-        isCreateOpen={isCreateOpen}
-        onToggleCreate={() => setIsCreateOpen((isOpen) => !isOpen)}
-      />
-
       <SectionGrid variant="wideLeft" className="gap-4">
         <div className="space-y-4">
           {isCreateOpen && (
@@ -229,7 +220,7 @@ export function RecurringPage({
                   <Button
                     className="min-h-9 px-3"
                     variant="secondary"
-                    onClick={() => setIsCreateOpen(false)}
+                    onClick={() => onCreateOpenChange?.(false)}
                   >
                     Close
                   </Button>
@@ -321,177 +312,6 @@ function createEmptyRecurringForm(defaultPotId: string): RecurringFormState {
     priority: 'essential',
     potId: defaultPotId,
     creditCardId: '',
-  }
-}
-
-function RecurringSummaryBar({
-  stats,
-  isCreateOpen,
-  onToggleCreate,
-}: {
-  stats: RecurringStats
-  isCreateOpen: boolean
-  onToggleCreate: () => void
-}) {
-  return (
-    <section
-      aria-label="Recurring overview"
-      className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full"
-    >
-      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-end">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
-            <Repeat size={15} />
-            Recurring control
-          </div>
-          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(stats.activeTotalPence)}</p>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-            {stats.activeCount} active payment{stats.activeCount === 1 ? '' : 's'} across {stats.totalCount} saved recurring item{stats.totalCount === 1 ? '' : 's'}.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <CompactStat icon={<Layers3 size={16} />} label="Active" value={`${stats.activeCount}/${stats.totalCount}`} />
-          <CompactStat icon={<CalendarDays size={16} />} label="Monthly" value={String(stats.monthlyCount)} />
-          <CompactStat icon={<CreditCard size={16} />} label="On cards" value={String(stats.cardLinkedCount)} />
-          <CompactStat icon={<BadgePoundSterling size={16} />} label="Active total" value={formatPence(stats.activeTotalPence)} />
-        </div>
-      </div>
-      <div className="flex flex-col gap-3 border-t border-white/10 bg-white/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-          {stats.totalCount > 0 ? 'Payments stay tucked into compact cards below' : 'Add the first repeating payment'}
-        </p>
-        <Button
-          className="min-h-9 justify-center px-3 sm:min-w-36"
-          variant={isCreateOpen ? 'secondary' : 'primary'}
-          onClick={onToggleCreate}
-        >
-          <PlusCircle size={16} />
-          New payment
-        </Button>
-      </div>
-      {stats.totalCount > 0 && (
-        <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
-              <span>Schedule mix</span>
-              <span>{stats.activeCount} active</span>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-4">
-              <RecurringMixNode label="Weekly" count={stats.weeklyCount} total={stats.totalCount} tone="cyan" />
-              <RecurringMixNode label="Biweekly" count={stats.biweeklyCount} total={stats.totalCount} tone="emerald" />
-              <RecurringMixNode label="Monthly" count={stats.monthlyCount} total={stats.totalCount} tone="amber" />
-              <RecurringMixNode label="Yearly" count={stats.yearlyCount} total={stats.totalCount} tone="rose" />
-            </div>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
-              <span>Payment route</span>
-              <span>{formatPence(stats.activeTotalPence)}</span>
-            </div>
-            <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr] md:items-center">
-              <RecurringRouteNode label="Direct" value={formatPence(stats.directTotalPence)} />
-              <ArrowRight className="hidden text-cyan-200 md:block" size={18} />
-              <RecurringRouteNode label="Via pots" value={formatPence(stats.potLinkedTotalPence)} />
-              <ArrowRight className="hidden text-cyan-200 md:block" size={18} />
-              <RecurringRouteNode label="On cards" value={formatPence(stats.cardLinkedTotalPence)} />
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function RecurringMixNode({
-  label,
-  count,
-  total,
-  tone,
-}: {
-  label: string
-  count: number
-  total: number
-  tone: 'cyan' | 'emerald' | 'amber' | 'rose'
-}) {
-  const percent = total > 0 ? Math.round((count / total) * 100) : 0
-  const toneClassName =
-    tone === 'emerald'
-      ? 'bg-emerald-300'
-      : tone === 'amber'
-        ? 'bg-amber-300'
-        : tone === 'rose'
-          ? 'bg-rose-300'
-          : 'bg-cyan-300'
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.07] p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-        <p className="text-sm font-semibold text-white">{count}</p>
-      </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className={`h-full rounded-full ${toneClassName}`} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
-      </div>
-    </div>
-  )
-}
-
-function RecurringRouteNode({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
-    </div>
-  )
-}
-
-function CompactStat({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.08] p-3 text-slate-200 shadow-inner shadow-white/5">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
-        {icon}
-        {label}
-      </div>
-      <p className="mt-2 truncate text-lg font-semibold tracking-[-0.02em] text-white">{value}</p>
-    </div>
-  )
-}
-
-interface RecurringStats {
-  totalCount: number
-  activeCount: number
-  weeklyCount: number
-  biweeklyCount: number
-  monthlyCount: number
-  yearlyCount: number
-  cardLinkedCount: number
-  potLinkedTotalPence: number
-  cardLinkedTotalPence: number
-  directTotalPence: number
-  activeTotalPence: number
-}
-
-function getRecurringStats(payments: RecurringPayment[]): RecurringStats {
-  const activePayments = payments.filter((payment) => payment.active)
-
-  return {
-    totalCount: payments.length,
-    activeCount: activePayments.length,
-    weeklyCount: payments.filter((payment) => payment.frequency === 'weekly').length,
-    biweeklyCount: payments.filter((payment) => payment.frequency === 'biweekly').length,
-    monthlyCount: payments.filter((payment) => payment.frequency === 'monthly').length,
-    yearlyCount: payments.filter((payment) => payment.frequency === 'yearly').length,
-    cardLinkedCount: payments.filter((payment) => Boolean(payment.creditCardId)).length,
-    potLinkedTotalPence: activePayments
-      .filter((payment) => Boolean(payment.potId) && !payment.creditCardId)
-      .reduce((total, payment) => total + payment.amountPence, 0),
-    cardLinkedTotalPence: activePayments
-      .filter((payment) => Boolean(payment.creditCardId))
-      .reduce((total, payment) => total + payment.amountPence, 0),
-    directTotalPence: activePayments
-      .filter((payment) => !payment.potId && !payment.creditCardId)
-      .reduce((total, payment) => total + payment.amountPence, 0),
-    activeTotalPence: activePayments.reduce((total, payment) => total + payment.amountPence, 0),
   }
 }
 

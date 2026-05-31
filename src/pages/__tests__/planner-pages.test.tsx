@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -75,6 +76,16 @@ describe('app shell navigation', () => {
       'AI',
       'Settings',
     ])
+  })
+
+  it('keeps desktop navigation scrollable so all tabs can be reached', () => {
+    render(
+      <AppShell activeView="dashboard" onViewChange={vi.fn()}>
+        <div>Page content</div>
+      </AppShell>,
+    )
+
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveClass('overflow-y-auto')
   })
 })
 
@@ -1418,6 +1429,10 @@ describe('spending page', () => {
 
     render(<SpendingPage snapshot={createSnapshot()} actions={actions} />)
 
+    expect(screen.queryByText('Ready to log')).not.toBeInTheDocument()
+    expect(screen.getByText('Recent payments')).toBeInTheDocument()
+    expect(screen.queryByText('Recent trail')).not.toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: '£10.00' }))
     await user.click(screen.getByRole('button', { name: 'Log spending' }))
 
@@ -1782,6 +1797,7 @@ describe('allocating payments page', () => {
 
     render(<AllocatingPaymentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
 
+    expect(screen.queryByText('Card allocation cockpit')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New card' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Record repayment' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Add credit card' })).not.toBeInTheDocument()
@@ -2256,6 +2272,8 @@ describe('pots page', () => {
 
     render(<PotsPage snapshot={createSnapshot()} actions={actions} />)
 
+    expect(screen.queryByText('Pot command centre')).not.toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: 'Edit Food' }))
 
     expect(screen.queryByRole('dialog', { name: 'Create pot' })).not.toBeInTheDocument()
@@ -2687,6 +2705,10 @@ describe('pots page', () => {
 
     render(<SavingsInvestmentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={null} />)
 
+    expect(screen.queryByText('Savings runway')).not.toBeInTheDocument()
+    expect(screen.getByText('Saved so far')).toBeInTheDocument()
+    expect(screen.getByText('This paycheck')).toBeInTheDocument()
+    expect(screen.getByText('Targets')).toBeInTheDocument()
     expect(screen.getByText('114%')).toBeInTheDocument()
     expect(screen.queryByText('100%')).not.toBeInTheDocument()
   })
@@ -3068,7 +3090,7 @@ describe('pots page', () => {
 })
 
 describe('recurring page', () => {
-  it('keeps add and payment details tucked behind compact controls', async () => {
+  it('opens the create form from the app header action and keeps payment details tucked away', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
       recurringPayments: [
@@ -3087,11 +3109,12 @@ describe('recurring page', () => {
       ],
     })
 
-    render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
+    render(<RecurringWithHeaderAction snapshot={snapshot} actions={createActions()} />)
 
     expect(screen.queryByLabelText('Name')).not.toBeInTheDocument()
     expect(screen.getByText('Phone')).toBeInTheDocument()
     expect(screen.queryByText('Paid from Bills')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recurring control')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'New payment' }))
 
@@ -3245,9 +3268,7 @@ describe('recurring page', () => {
       ],
     })
 
-    render(<RecurringPage snapshot={snapshot} actions={actions} />)
-
-    await user.click(screen.getByRole('button', { name: 'New payment' }))
+    render(<RecurringPage snapshot={snapshot} actions={actions} isCreateOpen onCreateOpenChange={vi.fn()} />)
     await user.type(screen.getByLabelText('Name'), 'Spotify')
     await user.type(screen.getByLabelText('Amount'), '11.99')
     await user.clear(screen.getByLabelText('Due day'))
@@ -3504,6 +3525,9 @@ describe('dashboard page', () => {
     expect(within(currentPeriod).getAllByText('£548.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('Safe today')).not.toBeInTheDocument()
     expect(screen.queryByText('Available after bills')).not.toBeInTheDocument()
+    expect(screen.queryByText('Dashboard command centre')).not.toBeInTheDocument()
+    expect(screen.queryByText('Checklist position')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paycheck shape')).not.toBeInTheDocument()
   })
 
   it('previews next paycheck outgoings in a collapsible panel with paycheck navigation', async () => {
@@ -4821,6 +4845,11 @@ describe('history page', () => {
       />,
     )
 
+    expect(screen.queryByText('Paycheck history')).not.toBeInTheDocument()
+    expect(screen.getByText('Paychecks')).toBeInTheDocument()
+    expect(screen.getByText('Total income')).toBeInTheDocument()
+    expect(screen.getByText('Total allocated')).toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: 'Delete paycheck plan for 2026-05-16' }))
 
     expect(confirmSpy).toHaveBeenCalledWith('Delete paycheck plan for 2026-05-16?')
@@ -5092,6 +5121,35 @@ function getMetricDetails(container: HTMLElement, label: string): HTMLElement {
   expect(details).not.toBeNull()
 
   return details as HTMLElement
+}
+
+function RecurringWithHeaderAction({
+  snapshot,
+  actions,
+}: {
+  snapshot: PlannerSnapshot
+  actions: TestActions
+}) {
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+
+  return (
+    <AppShell
+      activeView="recurring"
+      onViewChange={vi.fn()}
+      headerAction={
+        <button type="button" onClick={() => setIsCreateOpen(true)}>
+          New payment
+        </button>
+      }
+    >
+      <RecurringPage
+        snapshot={snapshot}
+        actions={actions}
+        isCreateOpen={isCreateOpen}
+        onCreateOpenChange={setIsCreateOpen}
+      />
+    </AppShell>
+  )
 }
 
 function createActions(): TestActions {

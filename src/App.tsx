@@ -27,6 +27,7 @@ function App() {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string | null>(null)
   const [isCreatePotModalOpen, setIsCreatePotModalOpen] = useState(false)
+  const [isCreateRecurringOpen, setIsCreateRecurringOpen] = useState(false)
   const { snapshot, isLoading, error, actions } = usePlannerData()
   const auth = useFirebaseAuth()
   const cloudSync = useCloudSync({
@@ -101,7 +102,15 @@ function App() {
       <AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />
     ),
     debts: <DebtsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
-    recurring: <RecurringPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />,
+    recurring: (
+      <RecurringPage
+        snapshot={snapshot}
+        actions={actions}
+        selectedPayPeriod={selectedPayPeriod}
+        isCreateOpen={isCreateRecurringOpen}
+        onCreateOpenChange={setIsCreateRecurringOpen}
+      />
+    ),
     calendar: <CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />,
     history: <HistoryPage snapshot={snapshot} actions={actions} />,
     settings: <SettingsPage snapshot={snapshot} actions={actions} auth={auth} cloudSync={cloudSync} />,
@@ -116,6 +125,9 @@ function App() {
           if (view !== 'pots') {
             setIsCreatePotModalOpen(false)
           }
+          if (view !== 'recurring') {
+            setIsCreateRecurringOpen(false)
+          }
         }}
         selectedPayPeriod={selectedPayPeriod}
         headerAction={
@@ -123,6 +135,11 @@ function App() {
             <Button onClick={() => setIsCreatePotModalOpen(true)}>
               <Plus size={18} />
               Create pot
+            </Button>
+          ) : activeView === 'recurring' ? (
+            <Button onClick={() => setIsCreateRecurringOpen(true)}>
+              <Plus size={18} />
+              New payment
             </Button>
           ) : undefined
         }

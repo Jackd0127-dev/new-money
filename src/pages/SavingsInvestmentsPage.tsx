@@ -3,7 +3,7 @@ import { ArrowRight, BadgePoundSterling, PiggyBank, Target, TrendingUp } from 'l
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, MoneyMetric, Panel, ProgressRail, SectionGrid, SelectInput, TextInput } from '../components/ui'
+import { Button, Field, MoneyMetric, Panel, ProgressRail, SelectInput, TextInput } from '../components/ui'
 import type { PayPeriod, Pot } from '../types/models'
 
 export function SavingsInvestmentsPage({
@@ -57,19 +57,11 @@ export function SavingsInvestmentsPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <SectionGrid variant="wideLeft" className="gap-4">
-        <SavingsOverviewCard
-          totalSavedPence={totalSavedPence}
-          targetPence={targetPence}
-          selectedPeriodAllocationPence={selectedPeriodAllocationPence}
-          potCount={eligiblePots.length}
-        />
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-          <MoneyMetric label="Saved so far" value={formatPence(totalSavedPence)} tone="good" />
-          <MoneyMetric label="This paycheck" value={formatPence(selectedPeriodAllocationPence)} tone="primary" />
-          <MoneyMetric label="Targets" value={targetPence > 0 ? formatPence(targetPence) : 'Not set'} />
-        </div>
-      </SectionGrid>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <MoneyMetric label="Saved so far" value={formatPence(totalSavedPence)} tone="good" />
+        <MoneyMetric label="This paycheck" value={formatPence(selectedPeriodAllocationPence)} tone="primary" />
+        <MoneyMetric label="Targets" value={targetPence > 0 ? formatPence(targetPence) : 'Not set'} />
+      </div>
 
       <Panel
         title="Savings & Investments"
@@ -124,84 +116,6 @@ export function SavingsInvestmentsPage({
           </Panel>
         )}
       </div>
-    </div>
-  )
-}
-
-function SavingsOverviewCard({
-  totalSavedPence,
-  targetPence,
-  selectedPeriodAllocationPence,
-  potCount,
-}: {
-  totalSavedPence: number
-  targetPence: number
-  selectedPeriodAllocationPence: number
-  potCount: number
-}) {
-  const progressPercent = targetPence > 0 ? Math.round((totalSavedPence / targetPence) * 100) : 0
-  const remainingPence = Math.max(0, targetPence - totalSavedPence)
-  const surplusPence = Math.max(0, totalSavedPence - targetPence)
-
-  return (
-    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#06122a_0%,#072b2f_54%,#064e3b_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
-      <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-200">
-            <TrendingUp size={15} />
-            Savings runway
-          </div>
-          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(totalSavedPence)}</p>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-emerald-50/80">
-            {targetPence > 0
-              ? `${formatPence(remainingPence)} left across ${potCount} savings and investment pot${potCount === 1 ? '' : 's'}.`
-              : `${potCount} savings and investment pot${potCount === 1 ? '' : 's'} ready for paycheck allocations.`}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner shadow-white/10 md:min-w-44">
-          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-100">This paycheck</p>
-          <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-white">{formatPence(selectedPeriodAllocationPence)}</p>
-          <p className="mt-1 text-xs leading-5 text-emerald-50/70">Already planned for long-term pots.</p>
-        </div>
-      </div>
-      <div className="border-t border-white/10 bg-white/[0.06] p-4">
-        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-emerald-100/80">
-          <span>{targetPence > 0 ? `${progressPercent}% funded` : 'No combined target'}</span>
-          <span>{targetPence > 0 ? formatPence(targetPence) : 'Set targets in Pots'}</span>
-        </div>
-        <ProgressRail
-          percent={targetPence > 0 ? progressPercent : 0}
-          trackClassName="bg-white/15 shadow-slate-950/20"
-        />
-        {targetPence > 0 && (
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <SavingsFlowStat label="Target" value={formatPence(targetPence)} />
-            <SavingsFlowStat label="Saved" value={formatPence(totalSavedPence)} />
-            <SavingsFlowStat
-              label={surplusPence > 0 ? 'Ahead' : 'Left'}
-              value={surplusPence > 0 ? formatPence(surplusPence) : formatPence(remainingPence)}
-              tone={surplusPence > 0 ? 'good' : 'neutral'}
-            />
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function SavingsFlowStat({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string
-  value: string
-  tone?: 'neutral' | 'good'
-}) {
-  return (
-    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-emerald-100/70">{label}</p>
-      <p className={tone === 'good' ? 'mt-1 truncate text-sm font-semibold text-emerald-200' : 'mt-1 truncate text-sm font-semibold text-white'}>{value}</p>
     </div>
   )
 }

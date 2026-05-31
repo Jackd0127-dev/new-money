@@ -1,7 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { clsx } from 'clsx'
 import {
-  BadgePoundSterling,
   Banknote,
   Car,
   CreditCard,
@@ -10,7 +9,6 @@ import {
   Gift,
   Heart,
   Home,
-  Layers3,
   PenLine,
   Phone,
   PiggyBank,
@@ -19,7 +17,6 @@ import {
   Shield,
   Target,
   Trash2,
-  TrendingUp,
   Utensils,
   Wallet,
   X,
@@ -147,11 +144,6 @@ export function PotsPage({
   const canTopUpPot = Boolean(selectedPayPeriod && topUpPotId && topUpAmountPence > 0)
   const canSaveCreatePot = canSubmitPotForm(createForm, snapshot)
   const canSaveEditPot = editForm ? canSubmitPotForm(editForm, snapshot) : false
-  const potProgresses = activePots.map((pot) => getPotProgress(pot, snapshot, today))
-  const totalPotBalancePence = activePots.reduce((total, pot) => total + Math.max(0, pot.balancePence), 0)
-  const totalPotTargetPence = potProgresses.reduce((total, progress) => total + Math.max(0, progress.targetPence), 0)
-  const totalPotShortfallPence = potProgresses.reduce((total, progress) => total + Math.max(0, progress.shortfallPence), 0)
-  const potFundedPercent = totalPotTargetPence > 0 ? Math.round((totalPotBalancePence / totalPotTargetPence) * 100) : 0
   const topUpHistory = useMemo(() => {
     if (!selectedPayPeriod) {
       return []
@@ -172,7 +164,6 @@ export function PotsPage({
       }))
       .sort((left, right) => right.allocation.createdAt.localeCompare(left.allocation.createdAt))
   }, [selectedPayPeriod, snapshot.potAllocations, snapshot.pots])
-  const selectedTopUpPence = topUpHistory.reduce((total, item) => total + item.allocation.amountPence, 0)
 
   async function submitPot() {
     if (!canSaveCreatePot) {
@@ -258,17 +249,6 @@ export function PotsPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <PotOverviewCard
-        totalBalancePence={totalPotBalancePence}
-        totalTargetPence={totalPotTargetPence}
-        totalShortfallPence={totalPotShortfallPence}
-        fundedPercent={potFundedPercent}
-        activePotCount={activePots.length}
-        categoryCount={Math.max(0, categoryOptions.length - 1)}
-        selectedTopUpPence={selectedTopUpPence}
-        selectedPayPeriod={selectedPayPeriod ?? null}
-      />
-
       <Panel
         title="Top up pots"
         description={selectedPayPeriod ? `Comes out of ${selectedPayPeriod.payday} pay.` : 'Create a paycheck first.'}
@@ -516,117 +496,6 @@ export function PotsPage({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function PotOverviewCard({
-  totalBalancePence,
-  totalTargetPence,
-  totalShortfallPence,
-  fundedPercent,
-  activePotCount,
-  categoryCount,
-  selectedTopUpPence,
-  selectedPayPeriod,
-}: {
-  totalBalancePence: number
-  totalTargetPence: number
-  totalShortfallPence: number
-  fundedPercent: number
-  activePotCount: number
-  categoryCount: number
-  selectedTopUpPence: number
-  selectedPayPeriod: PayPeriod | null
-}) {
-  const surplusPence = Math.max(0, totalBalancePence - totalTargetPence)
-  const hasOpenShortfall = totalShortfallPence > 0
-  const finalFlowLabel = hasOpenShortfall ? 'Still needed' : surplusPence > 0 ? 'Extra cover' : 'Still needed'
-  const finalFlowValue = hasOpenShortfall ? formatPence(totalShortfallPence) : surplusPence > 0 ? formatPence(surplusPence) : formatPence(0)
-  const finalFlowTone = hasOpenShortfall ? 'warning' : surplusPence > 0 ? 'good' : 'neutral'
-
-  return (
-    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
-      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-start">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
-            <PiggyBank size={15} />
-            Pot command centre
-          </div>
-          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatPence(totalBalancePence)}</p>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-            {totalTargetPence > 0
-              ? `${formatPence(totalShortfallPence)} still needed across active pot targets.`
-              : 'Create targets or link pots to cards and debts to track progress here.'}
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <PotOverviewStat icon={<Layers3 size={16} />} label="Active pots" value={String(activePotCount)} />
-          <PotOverviewStat icon={<Target size={16} />} label="Funded" value={totalTargetPence > 0 ? `${fundedPercent}% overall` : 'No target'} />
-          <PotOverviewStat icon={<BadgePoundSterling size={16} />} label="This paycheck" value={formatPence(selectedTopUpPence)} />
-          <PotOverviewStat icon={<TrendingUp size={16} />} label="Sections" value={String(categoryCount)} />
-        </div>
-      </div>
-      <div className="border-t border-white/10 bg-white/[0.06] p-4">
-        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
-          <span>{selectedPayPeriod ? `Viewing ${selectedPayPeriod.payday}` : 'No paycheck selected'}</span>
-          <span>{totalTargetPence > 0 ? formatPence(totalTargetPence) : 'Targets unset'}</span>
-        </div>
-        <ProgressRail
-          percent={totalTargetPence > 0 ? fundedPercent : 0}
-          trackClassName="bg-white/15 shadow-slate-950/30"
-        />
-        {totalTargetPence > 0 && (
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <PotOverviewFlowStat label="Target" value={formatPence(totalTargetPence)} />
-            <PotOverviewFlowStat label="In pots" value={formatPence(totalBalancePence)} />
-            <PotOverviewFlowStat label={finalFlowLabel} value={finalFlowValue} tone={finalFlowTone} />
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function PotOverviewStat({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-}) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-3 text-slate-200 shadow-inner shadow-white/5">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
-        {icon}
-        {label}
-      </div>
-      <p className="mt-2 truncate text-lg font-semibold tracking-[-0.02em] text-white">{value}</p>
-    </div>
-  )
-}
-
-function PotOverviewFlowStat({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string
-  value: string
-  tone?: 'neutral' | 'good' | 'warning'
-}) {
-  return (
-    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={clsx(
-        'mt-1 truncate text-sm font-semibold',
-        tone === 'good' ? 'text-emerald-200' : tone === 'warning' ? 'text-amber-200' : 'text-white',
-      )}
-      >
-        {value}
-      </p>
     </div>
   )
 }

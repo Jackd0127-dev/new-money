@@ -54,9 +54,9 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_16%_8%,rgba(45,212,191,0.16),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#eef5f7_46%,#f7fafc_100%)] text-slate-900">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 overflow-hidden border-r border-white/10 bg-[radial-gradient(circle_at_18%_12%,rgba(20,184,166,0.20),transparent_30%),linear-gradient(180deg,#06122a_0%,#071a2d_48%,#06101f_100%)] px-4 py-5 text-white shadow-[18px_0_55px_rgba(15,23,42,0.16)] lg:block">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col overflow-hidden border-r border-white/10 bg-[radial-gradient(circle_at_18%_12%,rgba(20,184,166,0.20),transparent_30%),linear-gradient(180deg,#06122a_0%,#071a2d_48%,#06101f_100%)] px-4 py-5 text-white shadow-[18px_0_55px_rgba(15,23,42,0.16)] lg:flex">
         <div className="pointer-events-none absolute inset-x-5 top-20 h-28 rounded-full bg-cyan-300/10 blur-3xl" />
-        <div className="flex items-center gap-3 px-2">
+        <div className="relative flex shrink-0 items-center gap-3 px-2">
           <div className="flex size-10 items-center justify-center rounded-lg bg-white p-2 text-slate-950 shadow-lg shadow-emerald-950/20">
             <img src="/favicon.svg" alt="" className="size-full" />
           </div>
@@ -66,7 +66,7 @@ export function AppShell({
           </div>
         </div>
 
-        <div className="relative mt-6 rounded-lg border border-white/10 bg-white/[0.08] p-3 shadow-2xl shadow-slate-950/20 backdrop-blur">
+        <div className="relative mt-6 shrink-0 rounded-lg border border-white/10 bg-white/[0.08] p-3 shadow-2xl shadow-slate-950/20 backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase text-slate-400">Active workspace</p>
@@ -82,7 +82,7 @@ export function AppShell({
           </div>
         </div>
 
-        <nav className="relative mt-5 space-y-1.5">
+        <nav aria-label="Primary navigation" className="relative mt-5 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
           {navItems.map((item) => {
             const Icon = item.icon
 
@@ -113,7 +113,7 @@ export function AppShell({
             )
           })}
         </nav>
-        <div className="absolute inset-x-4 bottom-5 rounded-lg border border-white/10 bg-white/[0.08] p-3 text-sm shadow-2xl shadow-slate-950/20 backdrop-blur">
+        <div className="relative mt-4 shrink-0 rounded-lg border border-white/10 bg-white/[0.08] p-3 text-sm shadow-2xl shadow-slate-950/20 backdrop-blur">
           <div className="flex items-start gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-slate-950/35 text-cyan-200">
               <CircleDollarSign size={17} />
@@ -161,7 +161,7 @@ export function AppShell({
               {headerAction}
             </div>
           </div>
-          <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+          <nav aria-label="Mobile navigation" className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
             {navItems.map((item) => {
               const Icon = item.icon
 

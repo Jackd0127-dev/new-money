@@ -198,14 +198,6 @@ export function SpendingPage({
           density="compact"
         >
           <div className="space-y-4">
-            <SpendPreviewCard
-              amountPence={parsedAmountPence}
-              date={date}
-              note={note}
-              linkLabel={getSelectedSpendLinkLabel(paymentMethod, selectedPot?.name, selectedCard?.name)}
-              paymentMethod={paymentMethod}
-              isEditing={Boolean(editingTransactionId)}
-            />
             <Field label="Amount">
               <TextInput inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="12.50" />
             </Field>
@@ -500,7 +492,7 @@ function SpendingCommandCenter({
         <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-inner shadow-white/10">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-rose-100/80">Recent trail</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-rose-100/80">Recent payments</p>
               <p className="mt-2 text-3xl font-semibold text-white">{recentTransactions.length}</p>
             </div>
             <span className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-rose-50">
@@ -522,7 +514,7 @@ function SpendingCommandCenter({
               ))
             ) : (
               <div className="rounded-xl border border-dashed border-white/15 bg-slate-950/25 p-4 text-sm text-slate-300">
-                Log spend to build a recent trail.
+                Log spend to build recent payments.
               </div>
             )}
           </div>
@@ -574,63 +566,6 @@ function SpendRouteLabel({ colorClass, label, value }: { colorClass: string; lab
         {label}
       </span>
       <span className="text-white">{value}</span>
-    </div>
-  )
-}
-
-function SpendPreviewCard({
-  amountPence,
-  date,
-  note,
-  linkLabel,
-  paymentMethod,
-  isEditing,
-}: {
-  amountPence: number
-  date: string
-  note: string
-  linkLabel: string
-  paymentMethod: QuickSpendLinkMethod
-  isEditing: boolean
-}) {
-  const icon =
-    paymentMethod === 'credit_card' ? <CreditCard size={17} /> : paymentMethod === 'pot' ? <WalletCards size={17} /> : <ReceiptText size={17} />
-  const amountLabel = amountPence > 0 ? formatPence(amountPence) : '£0.00'
-  const noteLabel = note.trim() || 'Manual spend'
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-blue-200/90 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
-      <div className="flex items-start justify-between gap-3 p-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
-            <Sparkles size={15} />
-            {isEditing ? 'Editing spend' : 'Ready to log'}
-          </div>
-          <p className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-white">
-            {amountPence > 0 ? '-' : ''}{amountLabel}
-          </p>
-          <p className="mt-1 truncate text-sm text-slate-300">{noteLabel}</p>
-        </div>
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-cyan-100 shadow-inner shadow-white/10">
-          {icon}
-        </div>
-      </div>
-      <div className="grid gap-2 border-t border-white/10 bg-white/[0.06] p-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 shadow-inner shadow-white/5">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            <CalendarDays size={14} />
-            Date
-          </div>
-          <p className="mt-1 truncate text-sm font-semibold text-white">{date}</p>
-        </div>
-        <div className="rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 shadow-inner shadow-white/5">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {icon}
-            Link
-          </div>
-          <p className="mt-1 truncate text-sm font-semibold text-white">{linkLabel}</p>
-        </div>
-      </div>
     </div>
   )
 }

@@ -1,16 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import {
-  ArrowRight,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleDollarSign,
   Clock3,
   EyeOff,
-  PiggyBank,
-  ReceiptText,
 } from 'lucide-react'
 
 import {
@@ -289,15 +285,6 @@ export function DashboardPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <DashboardCommandCentre
-        viewedPeriod={viewedPeriod}
-        summary={summary}
-        activeTodoCount={activeTodoItems.length}
-        completedTodoCount={completedTodoCount}
-        remainingTodoAmountPence={remainingTodoAmountPence}
-        ignoredTodoCount={ignoredTodoCount}
-      />
-
       <Panel
         title="Selected pay period"
         accent="blue"
@@ -368,7 +355,6 @@ export function DashboardPage({
                 }
               />
             </div>
-            <PaycheckFlowDiagram summary={summary} />
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
@@ -595,150 +581,6 @@ function getPaycheckPotAllocationPayload(
   }
 }
 
-function DashboardCommandCentre({
-  viewedPeriod,
-  summary,
-  activeTodoCount,
-  completedTodoCount,
-  remainingTodoAmountPence,
-  ignoredTodoCount,
-}: {
-  viewedPeriod: PayPeriod | null
-  summary: PayPeriodCostSummary
-  activeTodoCount: number
-  completedTodoCount: number
-  remainingTodoAmountPence: number
-  ignoredTodoCount: number
-}) {
-  const committedPercent = summary.payReceivedPence > 0
-    ? Math.min(100, Math.max(0, Math.round((summary.totalCostsPence / summary.payReceivedPence) * 100)))
-    : 0
-  const leftoverPercent = summary.payReceivedPence > 0
-    ? Math.min(100, Math.max(0, Math.round((Math.max(0, summary.moneyLeftPence) / summary.payReceivedPence) * 100)))
-    : 0
-  const checklistPercent = activeTodoCount > 0 ? Math.round((completedTodoCount / activeTodoCount) * 100) : 0
-
-  return (
-    <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_16%_14%,rgba(34,211,238,0.22),transparent_28%),linear-gradient(135deg,#020617,#071426_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
-      <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.1fr_1fr] xl:items-end">
-        <div className="command-centre-mobile-column min-w-0 sm:max-w-none">
-          <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
-            <CircleDollarSign size={14} />
-            Dashboard command centre
-          </div>
-          <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">
-            {viewedPeriod ? formatPence(summary.moneyLeftPence) : 'Plan your first pay'}
-          </h2>
-          <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
-            {viewedPeriod
-              ? `Paycheck window ${viewedPeriod.startDate} to ${viewedPeriod.endDate}. Cover, set-asides, and remaining money in one view.`
-              : 'Create a paycheck plan to see money in, money committed, and what still needs action.'}
-          </p>
-        </div>
-
-        <div className="command-centre-mobile-column grid min-w-0 gap-3 sm:max-w-none sm:grid-cols-3">
-          <DashboardOverviewMetric
-            label="Money in"
-            value={formatPence(summary.payReceivedPence)}
-            caption={viewedPeriod ? `Paid ${formatShortDateWithOrdinal(viewedPeriod.payday)}` : 'waiting for pay'}
-            tone="neutral"
-          />
-          <DashboardOverviewMetric
-            label="Committed"
-            value={formatPence(summary.totalCostsPence)}
-            caption={`${summary.items.length} planned signal${summary.items.length === 1 ? '' : 's'}`}
-            tone="warning"
-          />
-          <DashboardOverviewMetric
-            label="Still open"
-            value={formatPence(remainingTodoAmountPence)}
-            caption={`${completedTodoCount}/${activeTodoCount} checklist done`}
-            tone={remainingTodoAmountPence > 0 ? 'warning' : 'good'}
-          />
-        </div>
-      </div>
-
-      <div className="grid min-w-0 gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase text-slate-400">Checklist position</p>
-              <p className="mt-1 text-lg font-semibold text-white">{checklistPercent}% sorted</p>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-right">
-              <p className="text-2xl font-semibold text-white">{ignoredTodoCount}</p>
-              <p className="text-[11px] font-semibold uppercase text-slate-400">ignored</p>
-            </div>
-          </div>
-          <ProgressRail percent={checklistPercent} className="mt-4" trackClassName="bg-white/10 shadow-slate-950/20" />
-        </div>
-
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold uppercase text-slate-400">Paycheck shape</p>
-            <p className="text-xs font-semibold text-cyan-100">{summary.moneyLeftPence < 0 ? 'needs attention' : 'balanced'}</p>
-          </div>
-          <div className="space-y-3">
-            <DashboardPulseBar label="Committed" value={formatPence(summary.totalCostsPence)} percent={committedPercent} tone="warning" />
-            <DashboardPulseBar label="Remaining" value={formatPence(Math.max(0, summary.moneyLeftPence))} percent={leftoverPercent} tone="good" />
-            <DashboardPulseBar label="Open tasks" value={formatPence(remainingTodoAmountPence)} percent={100 - checklistPercent} tone="neutral" />
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function DashboardOverviewMetric({
-  label,
-  value,
-  caption,
-  tone,
-}: {
-  label: string
-  value: string
-  caption: string
-  tone: 'neutral' | 'good' | 'warning'
-}) {
-  return (
-    <div
-      className={
-        tone === 'neutral'
-          ? 'min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur'
-          : tone === 'good'
-            ? 'min-w-0 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4 shadow-inner shadow-white/5 backdrop-blur'
-            : 'min-w-0 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 shadow-inner shadow-white/5 backdrop-blur'
-      }
-    >
-      <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-      <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
-    </div>
-  )
-}
-
-function DashboardPulseBar({
-  label,
-  value,
-  percent,
-  tone,
-}: {
-  label: string
-  value: string
-  percent: number
-  tone: 'neutral' | 'good' | 'warning'
-}) {
-  const color = tone === 'good' ? '#34d399' : tone === 'warning' ? '#fcd34d' : '#67e8f9'
-
-  return (
-    <div className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-3">
-      <p className="text-xs font-semibold text-slate-300">{label}</p>
-      <ProgressRail percent={percent} color={color} trackClassName="h-2 bg-white/10 shadow-slate-950/20" />
-      <p className="text-right text-xs font-semibold text-slate-200">{value}</p>
-    </div>
-  )
-}
-
 function ChecklistProgressCard({
   activeCount,
   completedCount,
@@ -840,131 +682,6 @@ function ChecklistProgressStat({
   )
 }
 
-function PaycheckFlowDiagram({ summary }: { summary: PayPeriodCostSummary }) {
-  const payPence = Math.max(0, summary.payReceivedPence)
-  const costPence = Math.max(0, summary.totalCostsPence)
-  const leftPence = Math.max(0, summary.moneyLeftPence)
-  const overspentPence = Math.max(0, -summary.moneyLeftPence)
-  const basePence = Math.max(payPence, costPence + leftPence, 1)
-  const payWidth = Math.max(8, Math.round((payPence / basePence) * 100))
-  const costWidth = Math.min(100, Math.max(8, Math.round((costPence / basePence) * 100)))
-  const leftWidth = Math.min(100, Math.max(leftPence > 0 ? 8 : 0, Math.round((leftPence / basePence) * 100)))
-  const overspentWidth = Math.min(100, Math.max(overspentPence > 0 ? 8 : 0, Math.round((overspentPence / basePence) * 100)))
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.07)]">
-      <div className="grid gap-4 p-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch">
-        <PaycheckFlowNode
-          icon={<CircleDollarSign size={17} />}
-          label="Pay in"
-          value={formatPence(summary.payReceivedPence)}
-          detail="Income saved to this paycheck"
-          tone="pay"
-        />
-        <FlowArrow />
-        <PaycheckFlowNode
-          icon={<ReceiptText size={17} />}
-          label="Committed"
-          value={formatPence(summary.totalCostsPence)}
-          detail="Checklist, reserves, payments"
-          tone="cost"
-        />
-        <FlowArrow />
-        <PaycheckFlowNode
-          icon={<PiggyBank size={17} />}
-          label={summary.moneyLeftPence < 0 ? 'Shortfall' : 'Left'}
-          value={formatPence(summary.moneyLeftPence)}
-          detail={summary.moneyLeftPence < 0 ? 'Needs attention' : 'Available after plan'}
-          tone={summary.moneyLeftPence < 0 ? 'bad' : 'left'}
-        />
-      </div>
-      <div className="border-t border-slate-100 bg-slate-50/70 p-4">
-        <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          <span>Paycheck shape</span>
-          <span>{summary.items.length} planned item{summary.items.length === 1 ? '' : 's'}</span>
-        </div>
-        <div className="mt-3 grid gap-2">
-          <FlowBar label="Pay" value={formatPence(summary.payReceivedPence)} width={payWidth} className="bg-slate-950" />
-          <FlowBar label="Costs" value={formatPence(summary.totalCostsPence)} width={costWidth} className="bg-amber-400" />
-          {summary.moneyLeftPence >= 0 ? (
-            <FlowBar label="Left" value={formatPence(summary.moneyLeftPence)} width={leftWidth} className="bg-emerald-500" />
-          ) : (
-            <FlowBar label="Over" value={formatPence(overspentPence)} width={overspentWidth} className="bg-red-500" />
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function PaycheckFlowNode({
-  icon,
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-  detail: string
-  tone: 'pay' | 'cost' | 'left' | 'bad'
-}) {
-  const toneClassName =
-    tone === 'pay'
-      ? 'border-slate-900 bg-slate-950 text-white'
-      : tone === 'cost'
-        ? 'border-amber-200 bg-[linear-gradient(135deg,#fff7ed,#fffbeb)] text-amber-700'
-        : tone === 'bad'
-          ? 'border-red-200 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] text-red-700'
-          : 'border-emerald-200 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] text-emerald-700'
-  const valueClassName = tone === 'pay' ? 'text-white' : 'text-slate-950'
-  const detailClassName = tone === 'pay' ? 'text-slate-300' : 'text-slate-500'
-
-  return (
-    <div className={`rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)] ${toneClassName}`}>
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
-        {icon}
-        {label}
-      </div>
-      <p className={`mt-3 text-2xl font-semibold tracking-[-0.02em] ${valueClassName}`}>{value}</p>
-      <p className={`mt-1 text-xs leading-5 ${detailClassName}`}>{detail}</p>
-    </div>
-  )
-}
-
-function FlowArrow() {
-  return (
-    <div className="hidden items-center justify-center text-slate-300 lg:flex">
-      <span className="flex size-9 items-center justify-center rounded-full border border-slate-200/90 bg-white/90 shadow-sm shadow-slate-200/60">
-        <ArrowRight size={16} />
-      </span>
-    </div>
-  )
-}
-
-function FlowBar({
-  label,
-  value,
-  width,
-  className,
-}: {
-  label: string
-  value: string
-  width: number
-  className: string
-}) {
-  return (
-    <div className="grid gap-2 sm:grid-cols-[5rem_1fr_auto] sm:items-center">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <div className="h-2 overflow-hidden rounded-full bg-white shadow-inner shadow-slate-200/70">
-        <div className={`h-full rounded-full shadow-sm transition-all ${className}`} style={{ width: `${width}%` }} />
-      </div>
-      <p className="text-xs font-semibold text-slate-700">{value}</p>
-    </div>
-  )
-}
-
 function NextPaycheckOutgoingsPanel({
   period,
   summary,
@@ -1024,15 +741,6 @@ function NextPaycheckOutgoingsPanel({
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Total outgoing</p>
               <p className="mt-2 text-3xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(summary.totalCostsPence)}</p>
               <p className="mt-1 text-sm text-amber-800">{outgoingItems.length} payments in this paycheck window</p>
-              <div className="mt-4 flex h-6 items-end gap-1.5" aria-hidden="true">
-                {[36, 48, 28, 64, 52, 76, 34, 42, 58, 70, 45, 32].map((height, index) => (
-                  <span
-                    key={`${height}-${index}`}
-                    className="w-1 flex-1 rounded-full bg-amber-400/75"
-                    style={{ height: `${height}%` }}
-                  />
-                ))}
-              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
               <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/80 p-3 shadow-sm shadow-emerald-100/60">

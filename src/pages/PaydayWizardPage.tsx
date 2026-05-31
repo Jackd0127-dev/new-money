@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowRight, CalendarDays, CheckCircle2, Clock3, WalletCards } from 'lucide-react'
+import { CalendarDays, CheckCircle2, Clock3, WalletCards } from 'lucide-react'
 
 import {
   calculatePaycheckAmount,
@@ -60,7 +60,6 @@ export function PaydayWizardPage({
     hourlyRatePence,
   })
   const canSubmit = hasValidPayday && incomePence > 0
-  const payPeriodDays = period ? getDaysBetween(period.startDate, period.endDate) + 1 : 0
   const actualOverrideDifferencePence = actualAmountPence === null ? 0 : actualAmountPence - calculatedPence
 
   function loadPayday(nextPayday: string) {
@@ -92,81 +91,29 @@ export function PaydayWizardPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.24),transparent_28%),linear-gradient(135deg,#020617,#072019_50%,#0f172a)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
-        <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.05fr_1fr] xl:items-end">
-          <div className="command-centre-mobile-column min-w-0 sm:max-w-none">
-            <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-emerald-100 shadow-sm shadow-slate-950/20 backdrop-blur">
-              <WalletCards size={14} />
-              Paycheck planner
-            </div>
-            <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">{formatPence(incomePence)}</h2>
-            <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
-              Shape the paycheck once. Dashboard, pots, cards, debts, savings, and calendar views read the same plan.
-            </p>
-          </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <PaydayOverviewMetric
+          label="Estimate"
+          value={formatPence(calculatedPence)}
+          caption={`${hours || 0} hours at ${formatPence(hourlyRatePence)}`}
+          tone="neutral"
+        />
+        <PaydayOverviewMetric
+          label="Override"
+          value={actualAmountPence === null ? 'Unused' : formatSignedPence(actualOverrideDifferencePence)}
+          caption={actualAmountPence === null ? 'using hours estimate' : 'difference from estimate'}
+          tone={actualAmountPence === null || actualOverrideDifferencePence >= 0 ? 'good' : 'warning'}
+        />
+        <PaydayOverviewMetric
+          label="Plan state"
+          value={existingPeriod ? 'Update' : 'New'}
+          caption={canSubmit ? 'ready to save' : 'needs pay details'}
+          tone={canSubmit ? 'good' : 'warning'}
+        />
+      </div>
 
-          <div className="command-centre-mobile-column grid min-w-0 gap-3 sm:max-w-none sm:grid-cols-3">
-            <PaydayOverviewMetric
-              label="Estimate"
-              value={formatPence(calculatedPence)}
-              caption={`${hours || 0} hours at ${formatPence(hourlyRatePence)}`}
-              tone="neutral"
-            />
-            <PaydayOverviewMetric
-              label="Override"
-              value={actualAmountPence === null ? 'Unused' : formatSignedPence(actualOverrideDifferencePence)}
-              caption={actualAmountPence === null ? 'using hours estimate' : 'difference from estimate'}
-              tone={actualAmountPence === null || actualOverrideDifferencePence >= 0 ? 'good' : 'warning'}
-            />
-            <PaydayOverviewMetric
-              label="Plan state"
-              value={existingPeriod ? 'Update' : 'New'}
-              caption={canSubmit ? 'ready to save' : 'needs pay details'}
-              tone={canSubmit ? 'good' : 'warning'}
-            />
-          </div>
-        </div>
-
-        <div className="grid min-w-0 gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
-          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
-            <p className="text-xs font-semibold uppercase text-slate-400">Pay period route</p>
-            <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-              <PaydayRouteNode label="Starts" value={period?.startDate ?? 'Choose date'} />
-              <span className="flex size-9 items-center justify-center rounded-lg border border-white/10 bg-slate-950/35 text-emerald-100">
-                <ArrowRight size={17} />
-              </span>
-              <PaydayRouteNode label="Ends" value={period?.endDate ?? 'Choose date'} align="right" />
-            </div>
-            <ProgressRail
-              percent={canSubmit ? 100 : hasValidPayday ? 58 : 22}
-              color="#6ee7b7"
-              className="mt-4"
-              trackClassName="bg-white/10 shadow-slate-950/20"
-            />
-          </div>
-
-          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase text-slate-400">Pay rhythm</p>
-                <p className="mt-1 text-lg font-semibold text-white">{formatPayFrequencyLabel(payFrequency)}</p>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-right">
-                <p className="text-2xl font-semibold text-white">{payPeriodDays || '-'}</p>
-                <p className="text-[11px] font-semibold uppercase text-slate-400">days</p>
-              </div>
-            </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              <PaydaySignal label="Payday" value={hasValidPayday ? payday : 'Invalid'} />
-              <PaydaySignal label="Next payday" value={period?.nextPayday ?? 'Pending'} />
-              <PaydaySignal label="Mode" value={actualAmountPence === null ? 'Estimate' : 'Actual'} />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <Panel title="Pay day" description="Enter pay details for this payday." accent="emerald">
-        <SectionGrid variant="wideLeft" className="items-start">
+      <SectionGrid variant="wideLeft" className="gap-4">
+        <Panel title="Pay details" description="Enter pay details for this payday." accent="emerald" density="compact">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Payday">
               <TextInput
@@ -226,8 +173,10 @@ export function PaydayWizardPage({
               <TextInput value={period ? `${period.startDate} to ${period.endDate}` : 'Choose a valid payday'} disabled />
             </Field>
           </div>
+        </Panel>
 
-          <div className="space-y-5">
+        <Panel title="Pay summary" description={period ? `${period.startDate} to ${period.endDate}` : 'Choose a valid payday.'} accent="blue" density="compact">
+          <div className="space-y-4">
             <MoneyMetric
               label="Pay to plan"
               value={formatPence(incomePence)}
@@ -281,8 +230,8 @@ export function PaydayWizardPage({
               )}
             </div>
           </div>
-        </SectionGrid>
-      </Panel>
+        </Panel>
+      </SectionGrid>
 
       <PayPeriodHistoryPanel snapshot={snapshot} actions={actions} />
     </div>
@@ -323,41 +272,15 @@ function PaydayOverviewMetric({
   return (
     <div
       className={[
-        'min-w-0 rounded-2xl border p-4 shadow-inner shadow-white/5 backdrop-blur',
-        tone === 'neutral' ? 'border-white/10 bg-white/[0.08]' : '',
-        tone === 'good' ? 'border-emerald-300/20 bg-emerald-300/10' : '',
-        tone === 'warning' ? 'border-amber-300/20 bg-amber-300/10' : '',
+        'min-w-0 rounded-2xl border bg-white/95 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.055)]',
+        tone === 'neutral' ? 'border-slate-200/90' : '',
+        tone === 'good' ? 'border-emerald-200/90' : '',
+        tone === 'warning' ? 'border-amber-200/90' : '',
       ].join(' ')}
     >
-      <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-      <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
-    </div>
-  )
-}
-
-function PaydayRouteNode({
-  label,
-  value,
-  align = 'left',
-}: {
-  label: string
-  value: string
-  align?: 'left' | 'right'
-}) {
-  return (
-    <div className={align === 'right' ? 'text-right' : undefined}>
-      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
-    </div>
-  )
-}
-
-function PaydaySignal({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-slate-950/25 px-3 py-2 shadow-inner shadow-slate-950/20">
-      <p className="text-[11px] font-semibold uppercase text-slate-400">{label}</p>
-      <p className="mt-1 truncate text-sm font-semibold text-white">{value}</p>
+      <p className={tone === 'warning' ? 'text-xs font-semibold uppercase text-amber-700' : tone === 'good' ? 'text-xs font-semibold uppercase text-emerald-700' : 'text-xs font-semibold uppercase text-slate-500'}>{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+      <p className="mt-1 text-xs font-medium text-slate-500">{caption}</p>
     </div>
   )
 }
@@ -416,13 +339,6 @@ function getPayToPlanBreakdown({
   }
 }
 
-function getDaysBetween(startDate: string, endDate: string): number {
-  const start = new Date(`${startDate}T00:00:00.000Z`).getTime()
-  const end = new Date(`${endDate}T00:00:00.000Z`).getTime()
-
-  return Math.max(0, Math.round((end - start) / (24 * 60 * 60 * 1000)))
-}
-
 function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
   const period = snapshot.payPeriods.find((candidate) => candidate.payday === payday)
 
@@ -460,14 +376,6 @@ function formatSignedPence(amountPence: number): string {
   }
 
   return formatPence(0)
-}
-
-function formatPayFrequencyLabel(frequency: PayFrequency): string {
-  if (frequency === 'biweekly') {
-    return 'Biweekly'
-  }
-
-  return frequency.charAt(0).toUpperCase() + frequency.slice(1)
 }
 
 function isValidIsoDateInput(value: string): boolean {

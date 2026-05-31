@@ -250,7 +250,7 @@ export function MoneyMetric({
 }) {
   const isPrimary = tone === 'primary'
   const className = clsx(
-        'relative h-fit self-start overflow-hidden rounded-[1.25rem] border p-4 shadow-[0_18px_48px_rgba(15,23,42,0.065)]',
+    'relative h-fit self-start overflow-hidden rounded-[1.25rem] border p-4 shadow-[0_18px_48px_rgba(15,23,42,0.065)]',
     metricCardClassName(tone),
   )
   const labelClassName = isPrimary ? 'text-slate-300' : metricLabelClassName(tone)
@@ -261,7 +261,6 @@ export function MoneyMetric({
       <div className={className}>
         <p className={clsx('text-xs font-semibold uppercase tracking-wide', labelClassName)}>{label}</p>
         <p className={clsx('mt-2 text-2xl font-semibold tracking-[-0.02em]', valueClassName)}>{value}</p>
-        <MetricSparkline tone={tone} />
       </div>
     )
   }
@@ -286,7 +285,6 @@ export function MoneyMetric({
         <p className={clsx('mt-3 text-xs font-semibold', isPrimary ? 'text-slate-300' : 'text-slate-500')}>
           Show calculation
         </p>
-        <MetricSparkline tone={tone} />
       </summary>
       <CalculationDetails breakdown={breakdown} inverted={isPrimary} />
     </details>
@@ -380,42 +378,6 @@ function metricLabelClassName(tone: 'neutral' | 'primary' | 'good' | 'warning' |
   }
 
   return 'text-slate-500'
-}
-
-function metricSparklineClassName(tone: 'neutral' | 'primary' | 'good' | 'warning' | 'bad'): string {
-  if (tone === 'primary') {
-    return 'bg-emerald-300/80'
-  }
-
-  if (tone === 'good') {
-    return 'bg-emerald-500/70'
-  }
-
-  if (tone === 'warning') {
-    return 'bg-amber-400/80'
-  }
-
-  if (tone === 'bad') {
-    return 'bg-red-400/80'
-  }
-
-  return 'bg-cyan-500/60'
-}
-
-function MetricSparkline({ tone }: { tone: 'neutral' | 'primary' | 'good' | 'warning' | 'bad' }) {
-  const bars = [31, 42, 28, 55, 47, 36, 64, 72, 58, 44, 39, 68, 76, 61, 49, 34, 26, 46, 59, 71]
-
-  return (
-    <div className="mt-4 flex h-7 items-end gap-1.5" aria-hidden="true">
-      {bars.map((height, index) => (
-        <span
-          key={`${height}-${index}`}
-          className={clsx('w-1 flex-1 rounded-full opacity-80', index > 13 && 'opacity-25', metricSparklineClassName(tone))}
-          style={{ height: `${height}%` }}
-        />
-      ))}
-    </div>
-  )
 }
 
 export function CalculationDetails({

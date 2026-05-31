@@ -257,7 +257,7 @@ export function PotsPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <PotOverviewCard
         totalBalancePence={totalPotBalancePence}
         totalTargetPence={totalPotTargetPence}
@@ -316,7 +316,7 @@ export function PotsPage({
             )}
           </div>
           {topUpHistory.length > 0 ? (
-            <div className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
+            <div className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
               {topUpHistory.map(({ allocation, pot }) => {
                 const potName = pot?.name ?? 'Deleted pot'
 
@@ -343,7 +343,7 @@ export function PotsPage({
               })}
             </div>
           ) : (
-            <p className="mt-3 rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
+            <p className="mt-3 rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
               No manual top-ups for this paycheck yet.
             </p>
           )}
@@ -372,7 +372,7 @@ export function PotsPage({
                   type="button"
                   onClick={() => setActiveCategory(category)}
                   className={clsx(
-                    'inline-flex min-h-10 items-center justify-center rounded-lg border px-4 text-sm font-semibold transition',
+                    'inline-flex min-h-10 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition',
                     activeCategory === category
                       ? 'border-blue-600 bg-blue-600 bg-[linear-gradient(135deg,#2563eb,#0891b2)] text-white shadow-sm shadow-blue-600/25'
                       : 'border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white',
@@ -385,14 +385,14 @@ export function PotsPage({
                 type="button"
                 aria-label="Add pot category"
                 onClick={() => setIsAddingCategory((current) => !current)}
-                className="inline-flex size-10 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+                className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
               >
                 <Plus size={16} />
               </button>
             </div>
 
             {isAddingCategory && (
-              <div className="flex flex-col gap-2 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60 sm:flex-row">
+              <div className="flex flex-col gap-2 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60 sm:flex-row">
                 <TextInput
                   value={newCategory}
                   onChange={(event) => setNewCategory(event.target.value)}
@@ -431,7 +431,7 @@ export function PotsPage({
               })}
 
               {visiblePots.length === 0 && (
-                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3 2xl:col-span-4">
+                <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3 2xl:col-span-4">
                   No pots in this section yet.
                 </p>
               )}
@@ -546,7 +546,7 @@ function PotOverviewCard({
   const finalFlowTone = hasOpenShortfall ? 'warning' : surplusPence > 0 ? 'good' : 'neutral'
 
   return (
-    <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
@@ -662,7 +662,7 @@ function PotCard({
     <div
       data-testid="pot-card"
       className={clsx(
-        'flex flex-col rounded-xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]',
+        'flex flex-col rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_18px_48px_rgba(15,23,42,0.065)] transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_24px_58px_rgba(15,23,42,0.1)]',
         isOpen ? 'min-h-[330px]' : 'h-[330px]',
       )}
     >
@@ -672,7 +672,7 @@ function PotCard({
           onClick={onToggle}
           aria-expanded={isOpen}
           aria-label={`${isOpen ? 'Hide' : 'View'} ${pot.name} activity`}
-          className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-start gap-3 rounded-lg text-left outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+          className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-start gap-3 rounded-xl text-left outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
         >
           <span
             className="flex size-14 shrink-0 items-center justify-center rounded-xl shadow-sm"
@@ -729,7 +729,7 @@ function PotCard({
         <div className="min-h-12">
           {dueLabel && (
             <div
-              className="truncate rounded-lg px-3 py-2 text-sm font-medium"
+              className="truncate rounded-xl px-3 py-2 text-sm font-medium"
               style={{
                 backgroundColor: withAlpha(pot.color, 0.1),
                 color: pot.color,
@@ -767,7 +767,7 @@ function PotCard({
               {activityItems.map((item) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-slate-200/80 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/50"
+                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/50"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-950">{item.title}</p>
@@ -780,12 +780,12 @@ function PotCard({
               ))}
             </div>
           ) : (
-            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
+            <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
               No activity recorded for this pot yet.
             </p>
           )}
           {linkedRecurringPayments.length > 0 && (
-            <div className="mt-4 overflow-hidden rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
               <div className="border-b border-slate-100 px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked recurring payments</p>
               </div>
@@ -956,7 +956,7 @@ function PotFormFields({
                 aria-label={`Use ${option.label} symbol`}
                 onClick={() => onChange({ ...form, icon: option.key })}
                 className={clsx(
-                  'flex size-10 items-center justify-center rounded-lg border transition',
+                  'flex size-10 items-center justify-center rounded-xl border transition',
                   option.key === form.icon
                     ? 'border-slate-950 bg-slate-950 text-white'
                     : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',

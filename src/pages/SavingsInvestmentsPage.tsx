@@ -56,7 +56,7 @@ export function SavingsInvestmentsPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <SectionGrid variant="wideLeft" className="gap-4">
         <SavingsOverviewCard
           totalSavedPence={totalSavedPence}
@@ -144,7 +144,7 @@ function SavingsOverviewCard({
   const surplusPence = Math.max(0, totalSavedPence - targetPence)
 
   return (
-    <section className="max-w-full overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#06122a_0%,#072b2f_54%,#064e3b_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#06122a_0%,#072b2f_54%,#064e3b_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
       <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-200">
@@ -237,7 +237,7 @@ function AllocationPreviewCard({
           <BadgePoundSterling size={18} />
         </span>
       </div>
-      <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-xl border border-emerald-100 bg-white/80 p-3">
+      <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-2xl border border-emerald-100 bg-white/80 p-3 shadow-inner shadow-emerald-100/50">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Add now</p>
           <p className="mt-1 text-sm font-semibold text-slate-950">{amountLabel}</p>
@@ -266,7 +266,7 @@ function SavingsPotCard({ pot }: { pot: Pot }) {
   const accentColor = pot.color || '#10b981'
 
   return (
-    <div className="group overflow-hidden rounded-2xl border border-emerald-200/80 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(15,23,42,0.1)]">
+    <div className="group overflow-hidden rounded-2xl border border-emerald-200/80 bg-white/95 shadow-[0_18px_48px_rgba(15,23,42,0.065)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_58px_rgba(15,23,42,0.1)]">
       <div className="h-1.5" style={{ backgroundColor: accentColor }} />
       <div className="p-4">
       <div className="flex items-start justify-between gap-3">

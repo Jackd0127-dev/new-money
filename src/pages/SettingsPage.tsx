@@ -77,7 +77,7 @@ export function SettingsPage({
   const accountStatus = auth?.user ? 'Signed in' : auth?.isConfigured ? 'Signed out' : 'Local mode'
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <SettingsOverviewCard
         appDate={previewTodayIso}
         appDateMode={appDateMode}
@@ -130,7 +130,7 @@ export function SettingsPage({
                 </SelectInput>
               </Field>
             </div>
-            <div className="rounded-lg border border-violet-200 bg-violet-50 bg-[linear-gradient(135deg,#ffffff,#f5f3ff)] p-3 shadow-sm">
+            <div className="rounded-2xl border border-violet-200 bg-violet-50 bg-[linear-gradient(135deg,#ffffff,#f5f3ff)] p-3 shadow-sm">
               <div className="flex items-start gap-3">
                 <CalendarDays className="mt-0.5 shrink-0 text-violet-700" size={18} />
                 <div className="min-w-0 flex-1 space-y-3">
@@ -236,7 +236,7 @@ export function SettingsPage({
               {updatingPlanner ? 'Updating' : 'Update'}
             </Button>
             {plannerUpdated && (
-              <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm shadow-emerald-100/60">
+              <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm shadow-emerald-100/60">
                 <CheckCircle2 size={18} />
                 Planner updated
               </span>
@@ -262,7 +262,7 @@ function SettingsOverviewCard({
   accountStatus: string
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-end">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
@@ -439,13 +439,13 @@ function AccountPanel({
         </div>
 
         {auth?.isLoading && (
-          <div className="rounded-lg border border-slate-200/90 bg-white/90 p-3 text-sm text-slate-600 shadow-sm shadow-slate-200/60">
+          <div className="rounded-2xl border border-slate-200/90 bg-white/90 p-3 text-sm text-slate-600 shadow-sm shadow-slate-200/60">
             Checking account status.
           </div>
         )}
 
         {!canUseAuth && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-3 text-sm leading-5 text-amber-900 shadow-sm">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-3 text-sm leading-5 text-amber-900 shadow-sm">
             Sign-in is not configured for this build.
           </div>
         )}
@@ -501,19 +501,19 @@ function AccountPanel({
         )}
 
         {auth?.error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 text-sm leading-5 text-red-700 shadow-sm">
+          <div className="rounded-2xl border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 text-sm leading-5 text-red-700 shadow-sm">
             {auth.error}
           </div>
         )}
 
         {accountError && (
-          <div className="rounded-lg border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 text-sm leading-5 text-red-700 shadow-sm">
+          <div className="rounded-2xl border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 text-sm leading-5 text-red-700 shadow-sm">
             {accountError}
           </div>
         )}
 
         {accountMessage && (
-          <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-3 text-sm leading-5 text-emerald-800 shadow-sm">
+          <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-3 text-sm leading-5 text-emerald-800 shadow-sm">
             <CheckCircle2 className="mt-0.5 shrink-0" size={16} />
             <p>{accountMessage}</p>
           </div>
@@ -547,7 +547,7 @@ function AccountPanel({
           </Button>
         </div>
 
-        <div className="flex items-start gap-2 rounded-lg border border-slate-200/80 bg-white/[0.85] p-3 text-xs leading-5 text-slate-500 shadow-sm shadow-slate-200/50">
+        <div className="flex items-start gap-2 rounded-2xl border border-slate-200/80 bg-white/[0.85] p-3 text-xs leading-5 text-slate-500 shadow-sm shadow-slate-200/50">
           <ShieldAlert className="mt-0.5 shrink-0" size={15} />
           <p>Password changes are sent by email. Deleting your account removes the sign-in account; local app data on this device remains available.</p>
         </div>
@@ -558,7 +558,7 @@ function AccountPanel({
 
 function AccountFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200/80 bg-white/[0.85] p-3 shadow-sm shadow-slate-200/50">
+    <div className="rounded-2xl border border-slate-200/80 bg-white/[0.85] p-3 shadow-sm shadow-slate-200/50">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 break-words text-sm font-semibold text-slate-950">{value}</p>
     </div>

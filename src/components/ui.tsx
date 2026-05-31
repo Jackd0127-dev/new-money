@@ -38,7 +38,7 @@ export function Panel({
     <section
       aria-label={title}
       className={clsx(
-        'app-panel relative max-w-full min-w-0 overflow-hidden rounded-2xl border bg-white/[0.94] shadow-[0_18px_55px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur',
+        'app-panel relative max-w-full min-w-0 overflow-hidden rounded-[1.35rem] border bg-white/[0.94] shadow-[0_22px_65px_rgba(15,23,42,0.075),0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur',
         density === 'compact' ? 'p-4' : 'p-5',
         panelAccentClassName(accent),
         className,
@@ -164,7 +164,7 @@ export function Button({
   return (
     <button
       className={clsx(
-        'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
         variant === 'primary' &&
           'bg-slate-950 text-white shadow-[0_10px_24px_rgba(15,23,42,0.18)] hover:-translate-y-0.5 hover:bg-slate-800 focus-visible:outline-slate-950',
         variant === 'secondary' &&
@@ -201,7 +201,7 @@ export function TextInput({ className, ...props }: InputHTMLAttributes<HTMLInput
   return (
     <input
       className={clsx(
-        'h-10 w-full rounded-lg border border-slate-200/90 bg-white/95 px-3 text-sm text-slate-950 shadow-sm shadow-slate-200/70 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100',
+        'h-10 w-full rounded-xl border border-slate-200/90 bg-white/95 px-3 text-sm text-slate-950 shadow-sm shadow-slate-200/70 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100',
         className,
       )}
       {...props}
@@ -213,7 +213,7 @@ export function SelectInput({ className, ...props }: SelectHTMLAttributes<HTMLSe
   return (
     <select
       className={clsx(
-        'h-10 w-full rounded-lg border border-slate-200/90 bg-white/95 px-3 text-sm text-slate-950 shadow-sm shadow-slate-200/70 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100',
+        'h-10 w-full rounded-xl border border-slate-200/90 bg-white/95 px-3 text-sm text-slate-950 shadow-sm shadow-slate-200/70 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100',
         className,
       )}
       {...props}
@@ -225,7 +225,7 @@ export function TextArea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   return (
     <textarea
       className={clsx(
-        'min-h-24 w-full rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 text-sm text-slate-950 shadow-sm shadow-slate-200/70 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100',
+        'min-h-24 w-full rounded-xl border border-slate-200/90 bg-white/95 px-3 py-2 text-sm text-slate-950 shadow-sm shadow-slate-200/70 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100',
         className,
       )}
       {...props}
@@ -250,7 +250,7 @@ export function MoneyMetric({
 }) {
   const isPrimary = tone === 'primary'
   const className = clsx(
-    'relative h-fit self-start overflow-hidden rounded-2xl border p-4 shadow-[0_16px_42px_rgba(15,23,42,0.06)]',
+        'relative h-fit self-start overflow-hidden rounded-[1.25rem] border p-4 shadow-[0_18px_48px_rgba(15,23,42,0.065)]',
     metricCardClassName(tone),
   )
   const labelClassName = isPrimary ? 'text-slate-300' : metricLabelClassName(tone)
@@ -314,7 +314,7 @@ export function ProgressRail({
 
   return (
     <div className={className}>
-      <div className={clsx('relative h-2.5 overflow-hidden rounded-full bg-slate-100/90 shadow-inner shadow-slate-200/70', trackClassName)}>
+      <div className={clsx('relative h-2.5 overflow-hidden rounded-full bg-slate-100/90 shadow-inner shadow-slate-200/70 ring-1 ring-white/70', trackClassName)}>
         <span
           className={clsx('block h-full rounded-full transition-all shadow-sm', fillClassName)}
           style={{
@@ -428,8 +428,8 @@ export function CalculationDetails({
   return (
     <div
       className={clsx(
-        'mt-4 rounded-xl border p-3',
-        inverted ? 'border-white/10 bg-white/10' : 'border-slate-200/80 bg-white/80',
+        'mt-4 rounded-2xl border p-3 shadow-inner',
+        inverted ? 'border-white/10 bg-white/10 shadow-white/5' : 'border-slate-200/80 bg-white/80 shadow-slate-100/80',
       )}
     >
       {breakdown.formula && (

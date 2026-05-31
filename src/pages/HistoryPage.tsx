@@ -42,7 +42,7 @@ export function PayPeriodHistoryPanel({
   }
 
   return (
-    <Panel title="Pay period history" description="Previous paycheck plans and their allocations." accent="blue">
+    <Panel title="Pay period history" description="Previous paycheck plans and their allocations." accent="blue" className="min-w-0">
       <HistoryOverview
         latestPeriods={latestPeriods}
         maxHistoryIncomePence={maxHistoryIncomePence}
@@ -58,7 +58,7 @@ export function PayPeriodHistoryPanel({
         <HistoryStat icon={<WalletCards size={17} />} label="Total allocated" value={formatPence(totalAllocatedPence)} tone="violet" />
       </div>
 
-      <div className="w-full max-w-full min-w-0 overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+      <div className="w-full max-w-full min-w-0 overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_18px_48px_rgba(15,23,42,0.065)]">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
           <thead className="bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -105,7 +105,7 @@ export function PayPeriodHistoryPanel({
                       </details>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="rounded-md border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-semibold capitalize text-slate-600 shadow-sm shadow-slate-200/50">
+                      <span className="rounded-xl border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-semibold capitalize text-slate-600 shadow-sm shadow-slate-200/50">
                         {period.status}
                       </span>
                     </td>
@@ -154,7 +154,7 @@ function HistoryOverview({
   const hasUnallocated = unallocatedPence > 0
 
   return (
-    <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_22px_65px_rgba(15,23,42,0.18)]">
+    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_22px_65px_rgba(15,23,42,0.18)] sm:max-w-full">
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)] lg:items-end">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">

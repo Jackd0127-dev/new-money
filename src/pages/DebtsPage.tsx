@@ -162,7 +162,7 @@ export function DebtsPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <Panel title="Debt summary" description="Balances, paid-off progress, debts due in the selected pay period, and overdue items." accent="rose">
         <DebtCommandCard
           totalCurrentBalancePence={summary.totalCurrentBalancePence}
@@ -444,7 +444,7 @@ export function DebtsPage({
               Record payment
             </Button>
             {selectedPaymentDebt && (
-              <details className="rounded-lg border border-rose-200/80 bg-[linear-gradient(135deg,#fff7ed,#fff1f2)] px-3 py-2 shadow-sm shadow-rose-100/60">
+              <details className="rounded-2xl border border-rose-200/80 bg-[linear-gradient(135deg,#fff7ed,#fff1f2)] px-3 py-2 shadow-sm shadow-rose-100/60">
                 <summary className="cursor-pointer list-none text-sm text-slate-500">
                   Balance after payment:{' '}
                   <span className="font-semibold text-slate-950">
@@ -581,7 +581,7 @@ export function DebtsPage({
               )
             })
           ) : (
-            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debts tracked yet.</p>
+            <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debts tracked yet.</p>
           )}
         </div>
       </Panel>
@@ -600,7 +600,7 @@ export function DebtsPage({
               return (
                 <div
                   key={payment.id}
-                  className="flex flex-col gap-3 rounded-lg border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_14px_38px_rgba(15,23,42,0.055)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)] sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div>
                     <p className="text-sm font-semibold text-slate-950">
@@ -630,7 +630,7 @@ export function DebtsPage({
               )
             })
           ) : (
-            <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debt payments yet.</p>
+            <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No debt payments yet.</p>
           )}
         </div>
       </Panel>
@@ -658,7 +658,7 @@ function DebtCommandCard({
   const remainingPercent = Math.max(0, 100 - Math.min(100, Math.max(0, payoffPercent)))
 
   return (
-    <section className="max-w-full overflow-hidden rounded-2xl border border-rose-200/90 bg-[linear-gradient(135deg,#020617,#2b0f1c_54%,#3f1624)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.2)]">
+    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-rose-200/90 bg-[linear-gradient(135deg,#020617,#2b0f1c_54%,#3f1624)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.2)] sm:max-w-full">
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)] lg:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-rose-200">
@@ -738,7 +738,7 @@ function DebtStat({
   tone?: 'neutral' | 'bad'
 }) {
   return (
-    <div className={tone === 'bad' ? 'rounded-lg border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 shadow-sm' : 'rounded-lg border border-slate-200/80 bg-white/80 p-3 shadow-sm shadow-slate-200/50'}>
+    <div className={tone === 'bad' ? 'rounded-xl border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 shadow-sm' : 'rounded-xl border border-slate-200/80 bg-white/80 p-3 shadow-sm shadow-slate-200/50'}>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className={tone === 'bad' ? 'mt-1 text-sm font-semibold text-red-700' : 'mt-1 text-sm font-semibold text-slate-950'}>
         {value}

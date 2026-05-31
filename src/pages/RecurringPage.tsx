@@ -200,7 +200,7 @@ export function RecurringPage({
   const paymentGroups = getRecurringPaymentGroups(snapshot.recurringPayments)
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <RecurringSummaryBar
         stats={recurringStats}
         isCreateOpen={isCreateOpen}
@@ -264,7 +264,7 @@ export function RecurringPage({
                   />
                 ))
               ) : (
-                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">No recurring payments yet.</p>
+                <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">No recurring payments yet.</p>
               )}
             </div>
           </Panel>
@@ -336,7 +336,7 @@ function RecurringSummaryBar({
   return (
     <section
       aria-label="Recurring overview"
-      className="overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]"
+      className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full"
     >
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-end">
         <div className="min-w-0">
@@ -589,7 +589,7 @@ function RecurringPaymentCard({
   const potLabel = payment.potId ? pot?.name ?? 'Archived pot' : 'No pot'
 
   return (
-    <article className="rounded-lg border border-slate-200/90 bg-white/95 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-slate-300">
+    <article className="rounded-2xl border border-slate-200/90 bg-white/95 p-3 shadow-[0_14px_38px_rgba(15,23,42,0.055)] transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]">
       <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -669,7 +669,7 @@ function CompactMetaPill({ icon, label, muted = false }: { icon: ReactNode; labe
 
 function CompactDetail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200/80 bg-white/80 px-2.5 py-2 shadow-sm shadow-slate-200/50">
+    <div className="rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2 shadow-sm shadow-slate-200/50">
       <p className="font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-0.5 font-semibold text-slate-950">{value}</p>
     </div>
@@ -899,7 +899,7 @@ function NextPaydayOwedPanel({
                 summary.items.map((item) => (
                   <div
                     key={item.id}
-                    className="grid gap-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-sm shadow-sm shadow-slate-200/50 transition hover:bg-white sm:grid-cols-[1fr_auto]"
+                    className="grid gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-sm shadow-sm shadow-slate-200/50 transition hover:bg-white sm:grid-cols-[1fr_auto]"
                   >
                     <div>
                       <p className="font-medium text-slate-800">{item.label}</p>
@@ -914,7 +914,7 @@ function NextPaydayOwedPanel({
                   </div>
                 ))
               ) : (
-                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
+                <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
                   Nothing is dated inside the next payday period yet.
                 </p>
               )}
@@ -922,7 +922,7 @@ function NextPaydayOwedPanel({
           </details>
         </div>
       ) : (
-        <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
+        <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
           No payday plan is available to build a next-period preview.
         </p>
       )}
@@ -942,7 +942,7 @@ function CompactPreviewMetric({
   return (
     <div
       className={clsx(
-        'flex items-center justify-between gap-3 rounded-lg border px-3 py-2 shadow-sm',
+        'flex items-center justify-between gap-3 rounded-xl border px-3 py-2 shadow-sm',
         tone === 'neutral' && 'border-slate-200/90 bg-white/95',
         tone === 'good' && 'border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)]',
         tone === 'warning' && 'border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)]',
@@ -963,7 +963,7 @@ function CompactBreakdownDetails({
   breakdown: CalculationBreakdown
 }) {
   return (
-    <details className="rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
+    <details className="rounded-2xl border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60">
       <summary className="cursor-pointer list-none px-3 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-semibold text-slate-950">{title}</p>
@@ -974,7 +974,7 @@ function CompactBreakdownDetails({
         {breakdown.formula && <p className="text-xs leading-5 text-slate-500">{breakdown.formula}</p>}
         <div className="space-y-1">
           {breakdown.lines.map((line) => (
-            <div key={`${line.label}-${line.value}`} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-2 shadow-sm shadow-slate-200/50">
+            <div key={`${line.label}-${line.value}`} className="flex items-start justify-between gap-3 rounded-xl border border-slate-200/80 bg-white/90 px-2.5 py-2 shadow-sm shadow-slate-200/50">
               <div className="min-w-0">
                 <p className="truncate text-xs font-semibold text-slate-700">{line.label}</p>
                 {line.detail && <p className="mt-0.5 text-xs leading-4 text-slate-500">{line.detail}</p>}

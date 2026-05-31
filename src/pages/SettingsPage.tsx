@@ -1,7 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import {
   Apple,
-  Bot,
   CalendarDays,
   CheckCircle2,
   KeyRound,
@@ -9,9 +8,7 @@ import {
   Mail,
   RefreshCw,
   ShieldAlert,
-  SlidersHorizontal,
   Trash2,
-  UserRound,
 } from 'lucide-react'
 
 import { getAppTodayIso, parsePoundsToPence } from '../domain/money'
@@ -73,19 +70,8 @@ export function SettingsPage({
     setSaved(false)
   }
 
-  const previewTodayIso = appDateMode === 'manual' ? manualTodayIso : getAppTodayIso(snapshot.settings)
-  const accountStatus = auth?.user ? 'Signed in' : auth?.isConfigured ? 'Signed out' : 'Local mode'
-
   return (
     <div className="min-w-0 space-y-6">
-      <SettingsOverviewCard
-        appDate={previewTodayIso}
-        appDateMode={appDateMode}
-        payFrequency={payFrequency}
-        aiProvider={aiProvider}
-        accountStatus={accountStatus}
-      />
-
       <SectionGrid variant="balanced">
         <Panel title="Pay defaults" description="These defaults speed up each payday plan." accent="blue" density="compact">
           <div className="space-y-4">
@@ -246,77 +232,6 @@ export function SettingsPage({
       </Panel>
     </div>
   )
-}
-
-function SettingsOverviewCard({
-  appDate,
-  appDateMode,
-  payFrequency,
-  aiProvider,
-  accountStatus,
-}: {
-  appDate: string
-  appDateMode: AppDateMode
-  payFrequency: PayFrequency
-  aiProvider: AiProvider
-  accountStatus: string
-}) {
-  return (
-    <section className="w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
-      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] lg:items-end">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
-            <SlidersHorizontal size={15} />
-            Planner settings
-          </div>
-          <p className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-white">{formatSettingsDate(appDate)}</p>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-            Current app date, pay defaults, account access, and AI preferences in one place.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <SettingsOverviewStat icon={<CalendarDays size={16} />} label="Date mode" value={appDateMode} />
-          <SettingsOverviewStat icon={<RefreshCw size={16} />} label="Pay rhythm" value={payFrequency} />
-          <SettingsOverviewStat icon={<Bot size={16} />} label="AI provider" value={aiProvider === 'openrouter' ? 'GPT' : 'Gemini'} />
-          <SettingsOverviewStat icon={<UserRound size={16} />} label="Account" value={accountStatus} />
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function SettingsOverviewStat({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.08] p-3 text-slate-200 shadow-inner shadow-white/5">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
-        {icon}
-        {label}
-      </div>
-      <p className="mt-2 truncate text-lg font-semibold capitalize tracking-[-0.02em] text-white">{value}</p>
-    </div>
-  )
-}
-
-function formatSettingsDate(value: string): string {
-  const date = new Date(`${value}T00:00:00.000Z`)
-
-  if (Number.isNaN(date.getTime())) {
-    return 'Choose a date'
-  }
-
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
 }
 
 function AccountPanel({

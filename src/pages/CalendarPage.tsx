@@ -40,7 +40,7 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod, Transaction } from '../types/models'
-import { Button, Panel, ProgressRail, SectionGrid } from '../components/ui'
+import { Button, Panel, SectionGrid } from '../components/ui'
 
 type CalendarEventType =
   | 'payday'
@@ -181,9 +181,6 @@ export function CalendarPage({
   )
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events])
   const selectedDayPayPeriod = selectedDate ? findPayPeriodForDate(snapshot.payPeriods, selectedDate) : null
-  const monthOverview = useMemo(() => getCalendarOverview(events, monthStart, monthEnd), [events, monthEnd, monthStart])
-  const monthNetPence = monthOverview.moneyInPence - monthOverview.moneyOutPence
-
   useEffect(() => {
     if (!selectedDate || typeof window.scrollTo !== 'function') {
       return
@@ -226,112 +223,6 @@ export function CalendarPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_18%_12%,rgba(45,212,191,0.22),transparent_26%),linear-gradient(135deg,#020617,#071526_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
-        <div className="grid min-w-0 gap-6 p-5 text-white xl:grid-cols-[1.2fr_1fr] xl:items-end">
-          <div className="command-centre-mobile-column min-w-0 sm:max-w-none">
-            <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
-              <CalendarDays size={14} />
-              Calendar command centre
-            </div>
-            <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">{formatMonth(visibleMonth)}</h2>
-            <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
-              See what lands this month. Paychecks, card statements, pot cover, debts, and spend stay in one flow.
-            </p>
-          </div>
-
-          <div className="command-centre-mobile-column grid min-w-0 gap-3 sm:max-w-none sm:grid-cols-3">
-            <CalendarOverviewMetric
-              label="Money out"
-              value={formatPence(monthOverview.moneyOutPence)}
-              caption={`${monthOverview.outgoingCount} outgoing item${monthOverview.outgoingCount === 1 ? '' : 's'}`}
-              tone="warning"
-            />
-            <CalendarOverviewMetric
-              label="Money in"
-              value={formatPence(monthOverview.moneyInPence)}
-              caption={`${monthOverview.incomingCount} incoming item${monthOverview.incomingCount === 1 ? '' : 's'}`}
-              tone="good"
-            />
-            <CalendarOverviewMetric
-              label="Checklist"
-              value={`${monthOverview.completedCount}/${monthOverview.completableCount}`}
-              caption={monthOverview.completableCount > 0 ? 'completed items' : 'no checklist items'}
-              tone="neutral"
-            />
-          </div>
-        </div>
-
-        <div className="grid min-w-0 gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
-          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase text-slate-400">Busiest day</p>
-                <p className="mt-1 text-lg font-semibold text-white">
-                  {monthOverview.busiestDate ? formatShortDate(monthOverview.busiestDate) : 'No activity'}
-                </p>
-              </div>
-              <div className="min-w-20 rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2 text-right">
-                <p className="text-2xl font-semibold text-white">{monthOverview.busiestCount}</p>
-                <p className="text-[11px] font-semibold uppercase text-slate-400">signals</p>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-7 gap-1.5">
-              {monthOverview.weekPressure.map((level, index) => (
-                <span
-                  key={`${level}-${index}`}
-                  className={clsx(
-                    'h-8 rounded-md border border-white/10',
-                    level === 0 && 'bg-white/[0.08]',
-                    level === 1 && 'bg-cyan-300/35',
-                    level === 2 && 'bg-amber-300/55',
-                    level >= 3 && 'bg-rose-300/70',
-                  )}
-                  aria-hidden="true"
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="text-xs font-semibold uppercase text-slate-400">Month composition</p>
-              <p className="text-xs font-semibold text-cyan-100">{monthOverview.eventCount} scheduled signals</p>
-            </div>
-            <div className="space-y-2.5">
-              {monthOverview.typeBreakdown.length > 0 ? (
-                monthOverview.typeBreakdown.map((item) => {
-                  const style = eventStyles[item.type]
-                  const Icon = style.icon
-
-                  return (
-                    <div key={item.type} className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                      <span className={`flex size-7 items-center justify-center rounded-md border ${style.className}`}>
-                        <Icon size={14} />
-                      </span>
-                      <ProgressRail percent={item.percent} trackClassName="h-2 bg-white/10 shadow-slate-950/20" />
-                      <span className="min-w-12 text-right text-xs font-semibold text-slate-200">
-                        {item.count}
-                      </span>
-                    </div>
-                  )
-                })
-              ) : (
-                <p className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2 text-sm text-slate-300">
-                  Nothing scheduled in this month yet.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="min-w-0 border-t border-white/10 bg-white/[0.05] p-4">
-          <div className="grid gap-2 sm:grid-cols-3">
-            <CalendarFlowStat label="Month in" value={formatPence(monthOverview.moneyInPence)} tone="good" />
-            <CalendarFlowStat label="Month out" value={formatPence(monthOverview.moneyOutPence)} tone="warning" />
-            <CalendarFlowStat label="Net" value={formatSignedPence(monthNetPence)} tone={monthNetPence >= 0 ? 'good' : 'bad'} />
-          </div>
-        </div>
-      </section>
-
       <Panel
         title={formatMonth(visibleMonth)}
         description={
@@ -701,122 +592,6 @@ function CompactMoneyLine({
       <p className="text-sm font-semibold text-slate-950">{value}</p>
     </div>
   )
-}
-
-function CalendarOverviewMetric({
-  label,
-  value,
-  caption,
-  tone,
-}: {
-  label: string
-  value: string
-  caption: string
-  tone: 'neutral' | 'good' | 'warning'
-}) {
-  return (
-    <div
-      className={clsx(
-        'min-w-0 rounded-2xl border p-4 shadow-inner shadow-white/5 backdrop-blur',
-        tone === 'neutral' && 'border-white/10 bg-white/[0.08]',
-        tone === 'good' && 'border-emerald-300/20 bg-emerald-300/10',
-        tone === 'warning' && 'border-amber-300/20 bg-amber-300/10',
-      )}
-    >
-      <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-      <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
-    </div>
-  )
-}
-
-function CalendarFlowStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone: 'good' | 'warning' | 'bad'
-}) {
-  return (
-    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p
-        className={clsx(
-          'mt-1 truncate text-sm font-semibold',
-          tone === 'good' && 'text-emerald-200',
-          tone === 'warning' && 'text-amber-200',
-          tone === 'bad' && 'text-rose-200',
-        )}
-      >
-        {value}
-      </p>
-    </div>
-  )
-}
-
-function getCalendarOverview(events: CalendarEvent[], monthStart: string, monthEnd: string) {
-  const monthEvents = events.filter((event) => event.date >= monthStart && event.date <= monthEnd)
-  const moneyOutPence = monthEvents
-    .filter((event) => event.direction === 'out')
-    .reduce((total, event) => total + event.amountPence, 0)
-  const moneyInPence = monthEvents
-    .filter((event) => event.direction === 'in')
-    .reduce((total, event) => total + event.amountPence, 0)
-  const incomingCount = monthEvents.filter((event) => event.direction === 'in').length
-  const outgoingCount = monthEvents.filter((event) => event.direction === 'out').length
-  const completableEvents = monthEvents.filter((event) => event.completionStatus)
-  const completedCount = completableEvents.filter((event) => event.completionStatus === 'completed').length
-  const dayCounts = new Map<string, number>()
-  const typeCounts = new Map<CalendarEventType, number>()
-
-  for (const event of monthEvents) {
-    dayCounts.set(event.date, (dayCounts.get(event.date) ?? 0) + 1)
-    typeCounts.set(event.type, (typeCounts.get(event.type) ?? 0) + 1)
-  }
-
-  let busiestDate: string | null = null
-  let busiestCount = 0
-
-  for (const [date, count] of dayCounts.entries()) {
-    if (count > busiestCount) {
-      busiestDate = date
-      busiestCount = count
-    }
-  }
-
-  const maxTypeCount = Math.max(...typeCounts.values(), 0)
-  const typeBreakdown = Array.from(typeCounts.entries())
-    .sort((a, b) => b[1] - a[1] || eventStyles[a[0]].label.localeCompare(eventStyles[b[0]].label))
-    .slice(0, 5)
-    .map(([type, count]) => ({
-      type,
-      count,
-      percent: maxTypeCount > 0 ? Math.max(12, Math.round((count / maxTypeCount) * 100)) : 0,
-    }))
-
-  const weekPressure = getMonthCells(startOfMonth(parseIsoDate(monthStart))).map((cell) => {
-    if (cell.date < monthStart || cell.date > monthEnd) {
-      return 0
-    }
-
-    return Math.min(dayCounts.get(cell.date) ?? 0, 3)
-  })
-
-  return {
-    moneyOutPence,
-    moneyInPence,
-    incomingCount,
-    outgoingCount,
-    completableCount: completableEvents.length,
-    completedCount,
-    eventCount: monthEvents.length,
-    busiestDate,
-    busiestCount,
-    typeBreakdown,
-    weekPressure,
-  }
 }
 
 function getCalendarEvents(snapshot: PlannerSnapshot, startDate: string, endDate: string): CalendarEvent[] {

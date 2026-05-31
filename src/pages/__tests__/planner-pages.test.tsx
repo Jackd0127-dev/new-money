@@ -342,6 +342,10 @@ describe('calendar page', () => {
 
     render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
 
+    expect(screen.queryByText('Calendar command centre')).not.toBeInTheDocument()
+    expect(screen.queryByText('Busiest day')).not.toBeInTheDocument()
+    expect(screen.queryByText('Month composition')).not.toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: 'Open 29 May 2026' }))
     expect(screen.getByRole('heading', { name: /Friday.*29 May 2026/ })).toBeInTheDocument()
     expect(screen.queryByText('Fuel')).not.toBeInTheDocument()
@@ -999,6 +1003,7 @@ describe('settings page', () => {
 
     render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
 
+    expect(screen.queryByText('Planner settings')).not.toBeInTheDocument()
     expect(screen.queryByText('Settings saved')).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Account' })).toBeInTheDocument()
     expect(screen.getByText('Local planner')).toBeInTheDocument()
@@ -1212,6 +1217,9 @@ describe('AI page', () => {
       />,
     )
 
+    expect(screen.queryByText('AI planning room')).not.toBeInTheDocument()
+    expect(screen.queryByText('Planner context')).not.toBeInTheDocument()
+    expect(screen.queryByText('Planning sources')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Message AI' })).toHaveClass('min-h-12')
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
     expect(screen.getByText('Saved money chats with confirmable actions.')).toBeInTheDocument()

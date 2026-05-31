@@ -38,7 +38,7 @@ export function Panel({
     <section
       aria-label={title}
       className={clsx(
-        'app-panel relative overflow-hidden rounded-2xl border bg-white/[0.94] shadow-[0_18px_55px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur',
+        'app-panel relative max-w-full min-w-0 overflow-hidden rounded-2xl border bg-white/[0.94] shadow-[0_18px_55px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur',
         density === 'compact' ? 'p-4' : 'p-5',
         panelAccentClassName(accent),
         className,
@@ -290,6 +290,59 @@ export function MoneyMetric({
       </summary>
       <CalculationDetails breakdown={breakdown} inverted={isPrimary} />
     </details>
+  )
+}
+
+export function ProgressRail({
+  percent,
+  color,
+  className,
+  trackClassName,
+  fillClassName,
+}: {
+  percent: number
+  color?: string
+  className?: string
+  trackClassName?: string
+  fillClassName?: string
+}) {
+  const safePercent = Math.max(0, percent)
+  const baseWidth = `${Math.min(100, safePercent)}%`
+  const overTargetPercent = Math.max(0, safePercent - 100)
+  const overTargetWidth = `${Math.min(100, overTargetPercent)}%`
+  const fillBackground = color ?? 'linear-gradient(90deg,#34d399,#22d3ee)'
+
+  return (
+    <div className={className}>
+      <div className={clsx('relative h-2.5 overflow-hidden rounded-full bg-slate-100/90 shadow-inner shadow-slate-200/70', trackClassName)}>
+        <span
+          className={clsx('block h-full rounded-full transition-all shadow-sm', fillClassName)}
+          style={{
+            width: baseWidth,
+            background: fillBackground,
+          }}
+        />
+        {overTargetPercent > 0 && (
+          <span
+            className="absolute inset-y-0 right-0 w-8 bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.68))]"
+            aria-hidden="true"
+          />
+        )}
+      </div>
+      {overTargetPercent > 0 && (
+        <div className="mt-1.5 grid grid-cols-[1fr_auto] items-center gap-2">
+          <div className="h-1.5 overflow-hidden rounded-full bg-emerald-100/80 shadow-inner shadow-emerald-200/50">
+            <span
+              className="block h-full rounded-full bg-[linear-gradient(90deg,#22d3ee,#34d399)]"
+              style={{ width: overTargetWidth }}
+            />
+          </div>
+          <span className="text-[0.68rem] font-semibold uppercase tracking-wide text-emerald-700">
+            +{overTargetPercent}%
+          </span>
+        </div>
+      )}
+    </div>
   )
 }
 

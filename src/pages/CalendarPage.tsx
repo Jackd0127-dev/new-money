@@ -40,7 +40,7 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod, Transaction } from '../types/models'
-import { Button, Panel, SectionGrid } from '../components/ui'
+import { Button, Panel, ProgressRail, SectionGrid } from '../components/ui'
 
 type CalendarEventType =
   | 'payday'
@@ -182,6 +182,7 @@ export function CalendarPage({
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events])
   const selectedDayPayPeriod = selectedDate ? findPayPeriodForDate(snapshot.payPeriods, selectedDate) : null
   const monthOverview = useMemo(() => getCalendarOverview(events, monthStart, monthEnd), [events, monthEnd, monthStart])
+  const monthNetPence = monthOverview.moneyInPence - monthOverview.moneyOutPence
 
   useEffect(() => {
     if (!selectedDate || typeof window.scrollTo !== 'function') {
@@ -224,21 +225,21 @@ export function CalendarPage({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="max-w-full overflow-hidden rounded-lg border border-slate-900 bg-[radial-gradient(circle_at_18%_12%,rgba(45,212,191,0.22),transparent_26%),linear-gradient(135deg,#020617,#071526_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <div className="min-w-0 space-y-6">
+      <section className="w-full max-w-[calc(100vw-2rem)] min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_18%_12%,rgba(45,212,191,0.22),transparent_26%),linear-gradient(135deg,#020617,#071526_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
         <div className="grid min-w-0 gap-6 p-5 text-white xl:grid-cols-[1.2fr_1fr] xl:items-end">
-          <div className="min-w-0">
+          <div className="min-w-0 max-w-[calc(100vw-4.5rem)] sm:max-w-none">
             <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
               <CalendarDays size={14} />
               Calendar command centre
             </div>
             <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">{formatMonth(visibleMonth)}</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+            <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
               A cleaner view of what is landing this month, with paycheck money, card statements, linked-pot cover, debt dates, and manual spend kept in one flow.
             </p>
           </div>
 
-          <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+          <div className="grid min-w-0 max-w-[calc(100vw-4.5rem)] gap-3 sm:max-w-none sm:grid-cols-3">
             <CalendarOverviewMetric
               label="Money out"
               value={formatPence(monthOverview.moneyOutPence)}
@@ -260,8 +261,8 @@ export function CalendarPage({
           </div>
         </div>
 
-        <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
-          <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+        <div className="grid min-w-0 gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
+          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase text-slate-400">Busiest day</p>
@@ -291,7 +292,7 @@ export function CalendarPage({
             </div>
           </div>
 
-          <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
             <div className="mb-3 flex items-center justify-between gap-3">
               <p className="text-xs font-semibold uppercase text-slate-400">Month composition</p>
               <p className="text-xs font-semibold text-cyan-100">{monthOverview.eventCount} scheduled signals</p>
@@ -307,9 +308,7 @@ export function CalendarPage({
                       <span className={`flex size-7 items-center justify-center rounded-md border ${style.className}`}>
                         <Icon size={14} />
                       </span>
-                      <span className="h-2 overflow-hidden rounded-full bg-white/10">
-                        <span className="block h-full rounded-full bg-cyan-300" style={{ width: `${item.percent}%` }} />
-                      </span>
+                      <ProgressRail percent={item.percent} trackClassName="h-2 bg-white/10 shadow-slate-950/20" />
                       <span className="min-w-12 text-right text-xs font-semibold text-slate-200">
                         {item.count}
                       </span>
@@ -322,6 +321,13 @@ export function CalendarPage({
                 </p>
               )}
             </div>
+          </div>
+        </div>
+        <div className="min-w-0 border-t border-white/10 bg-white/[0.05] p-4">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <CalendarFlowStat label="Month in" value={formatPence(monthOverview.moneyInPence)} tone="good" />
+            <CalendarFlowStat label="Month out" value={formatPence(monthOverview.moneyOutPence)} tone="warning" />
+            <CalendarFlowStat label="Net" value={formatSignedPence(monthNetPence)} tone={monthNetPence >= 0 ? 'good' : 'bad'} />
           </div>
         </div>
       </section>
@@ -362,7 +368,7 @@ export function CalendarPage({
           })}
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-slate-200/90 bg-white/[0.92] shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="max-w-full overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/[0.92] shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
           <div className="grid min-w-[680px] grid-cols-7">
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
               <div key={day} className="border-b border-slate-200/80 bg-slate-50/90 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -490,7 +496,7 @@ function CalendarDayDetails({
 
   return (
     <div className="space-y-6" aria-label={`Calendar day ${date}`}>
-      <section className="overflow-hidden rounded-lg border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
+      <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
         <div className="grid gap-6 p-5 text-white lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Day overview</p>
@@ -583,7 +589,7 @@ function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
   const breakdownLabel = `${event.title} ${formatEventAmount(event)}`
 
   return (
-    <article className="rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_14px_36px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-violet-200">
+    <article className="rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_14px_36px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-violet-200">
       <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto] sm:items-center">
         <div className={`flex size-11 items-center justify-center rounded-lg border ${style.className}`}>
           <Icon size={19} />
@@ -667,7 +673,7 @@ function DayMetric({
   return (
     <div
       className={clsx(
-        'rounded-lg border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)]',
+        'rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)]',
         tone === 'neutral' && 'border-slate-200/90 bg-white/95',
         tone === 'good' && 'border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)]',
         tone === 'warning' && 'border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)]',
@@ -711,7 +717,7 @@ function CalendarOverviewMetric({
   return (
     <div
       className={clsx(
-        'rounded-lg border p-4 shadow-sm backdrop-blur',
+        'min-w-0 rounded-2xl border p-4 shadow-inner shadow-white/5 backdrop-blur',
         tone === 'neutral' && 'border-white/10 bg-white/[0.08]',
         tone === 'good' && 'border-emerald-300/20 bg-emerald-300/10',
         tone === 'warning' && 'border-amber-300/20 bg-amber-300/10',
@@ -720,6 +726,32 @@ function CalendarOverviewMetric({
       <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
       <p className="mt-1 text-xs font-medium text-slate-400">{caption}</p>
+    </div>
+  )
+}
+
+function CalendarFlowStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: 'good' | 'warning' | 'bad'
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
+      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p
+        className={clsx(
+          'mt-1 truncate text-sm font-semibold',
+          tone === 'good' && 'text-emerald-200',
+          tone === 'warning' && 'text-amber-200',
+          tone === 'bad' && 'text-rose-200',
+        )}
+      >
+        {value}
+      </p>
     </div>
   )
 }

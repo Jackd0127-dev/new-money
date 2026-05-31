@@ -3,7 +3,7 @@ import { BadgePoundSterling, CalendarDays, CircleDollarSign, Trash2, TrendingUp,
 
 import { formatPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, CalculationDetails, Panel, type CalculationBreakdown } from '../components/ui'
+import { Button, CalculationDetails, Panel, ProgressRail, type CalculationBreakdown } from '../components/ui'
 
 export function HistoryPage({
   snapshot,
@@ -58,7 +58,7 @@ export function PayPeriodHistoryPanel({
         <HistoryStat icon={<WalletCards size={17} />} label="Total allocated" value={formatPence(totalAllocatedPence)} tone="violet" />
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
+      <div className="w-full max-w-full min-w-0 overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.06)]">
         <table className="w-full min-w-[720px] border-collapse text-left text-sm">
           <thead className="bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -77,7 +77,6 @@ export function PayPeriodHistoryPanel({
                   .filter((allocation) => allocation.payPeriodId === period.id)
                   .reduce((total, allocation) => total + allocation.amountPence, 0)
                 const rowAllocationPercent = period.incomePence > 0 ? Math.round((allocated / period.incomePence) * 100) : 0
-                const rowAllocationWidth = `${Math.min(100, Math.max(0, rowAllocationPercent))}%`
 
                 return (
                   <tr key={period.id} className="transition hover:bg-slate-50/80">
@@ -92,9 +91,11 @@ export function PayPeriodHistoryPanel({
                           {formatPence(allocated)}
                           <span className="ml-2 text-xs font-semibold text-slate-500">{rowAllocationPercent}%</span>
                         </summary>
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 shadow-inner shadow-slate-200/80">
-                          <div className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb,#06b6d4)]" style={{ width: rowAllocationWidth }} />
-                        </div>
+                        <ProgressRail
+                          percent={rowAllocationPercent}
+                          className="mt-2"
+                          trackClassName="h-1.5 bg-slate-100 shadow-slate-200/80"
+                        />
                         <CalculationDetails
                           breakdown={getHistoryAllocationBreakdown(
                             snapshot.potAllocations.filter((allocation) => allocation.payPeriodId === period.id),
@@ -149,10 +150,11 @@ function HistoryOverview({
   unallocatedPence: number
   allocationRate: number
 }) {
-  const allocationWidth = `${Math.min(100, Math.max(0, allocationRate))}%`
+  const overAllocatedPence = Math.max(0, totalAllocatedPence - totalIncomePence)
+  const hasUnallocated = unallocatedPence > 0
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_22px_65px_rgba(15,23,42,0.18)]">
+    <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] text-white shadow-[0_22px_65px_rgba(15,23,42,0.18)]">
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)] lg:items-end">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-200">
@@ -166,7 +168,7 @@ function HistoryOverview({
               : 'Create a paycheck plan to start building a history.'}
           </p>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner shadow-white/10">
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner shadow-white/10">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
             <BadgePoundSterling size={15} />
             Allocated rate
@@ -175,9 +177,18 @@ function HistoryOverview({
           <p className="mt-1 text-xs leading-5 text-slate-300">
             {formatPence(totalAllocatedPence)} allocated · {formatPence(unallocatedPence)} not allocated
           </p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15 shadow-inner shadow-slate-950/20">
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#22d3ee)]" style={{ width: allocationWidth }} />
-          </div>
+          <ProgressRail percent={allocationRate} className="mt-3" trackClassName="bg-white/15 shadow-slate-950/20" />
+        </div>
+      </div>
+      <div className="border-t border-white/10 bg-white/[0.05] p-4">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <HistoryFlowStat label="Income" value={formatPence(totalIncomePence)} />
+          <HistoryFlowStat label="Allocated" value={formatPence(totalAllocatedPence)} />
+          <HistoryFlowStat
+            label={hasUnallocated ? 'Not allocated' : overAllocatedPence > 0 ? 'Over allocated' : 'Balanced'}
+            value={hasUnallocated ? formatPence(unallocatedPence) : overAllocatedPence > 0 ? formatPence(overAllocatedPence) : formatPence(0)}
+            tone={hasUnallocated ? 'warning' : overAllocatedPence > 0 ? 'good' : 'neutral'}
+          />
         </div>
       </div>
       {latestPeriods.length > 0 && (
@@ -202,6 +213,32 @@ function HistoryOverview({
   )
 }
 
+function HistoryFlowStat({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'good' | 'warning'
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
+      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={
+        tone === 'good'
+          ? 'mt-1 truncate text-sm font-semibold text-emerald-200'
+          : tone === 'warning'
+            ? 'mt-1 truncate text-sm font-semibold text-amber-200'
+            : 'mt-1 truncate text-sm font-semibold text-white'
+      }
+      >
+        {value}
+      </p>
+    </div>
+  )
+}
+
 function HistoryStat({
   icon,
   label,
@@ -221,7 +258,7 @@ function HistoryStat({
         : 'border-blue-200 bg-[linear-gradient(135deg,#ffffff,#eff6ff)] text-blue-700'
 
   return (
-    <div className={`rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)] ${toneClassName}`}>
+    <div className={`min-w-0 rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)] ${toneClassName}`}>
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
         {icon}
         {label}

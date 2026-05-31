@@ -4820,6 +4820,10 @@ describe('debts page', () => {
     render(
       <DebtsPage
         snapshot={createSnapshot({
+          settings: createSettings({
+            appDateMode: 'manual',
+            manualTodayIso: '2026-05-29',
+          }),
           payPeriods: [
             {
               id: 'period-current',
@@ -5093,20 +5097,7 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
   const transactions = overrides.transactions as Transaction[] | undefined
 
   return {
-    settings: {
-      id: 'default',
-      currency: 'GBP',
-      payFrequency: 'biweekly',
-      defaultPayPeriodDays: 14,
-      hourlyRatePence: 1250,
-      defaultHoursWorked: 72,
-      appDateMode: 'automatic',
-      manualTodayIso: null,
-      aiInstructions: '',
-      aiProvider: 'gemini',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    },
+    settings: createSettings(),
     pots: [
       {
         id: 'pot-bills',
@@ -5144,6 +5135,26 @@ function createSnapshot(overrides: Partial<PlannerSnapshot> = {}): PlannerSnapsh
     customPayments: [],
     creditCardRepayments: [],
     dailyBriefs: [],
+    ...overrides,
+  }
+}
+
+function createSettings(overrides: Partial<PlannerSnapshot['settings']> = {}): PlannerSnapshot['settings'] {
+  const timestamp = '2026-05-16T00:00:00.000Z'
+
+  return {
+    id: 'default',
+    currency: 'GBP',
+    payFrequency: 'biweekly',
+    defaultPayPeriodDays: 14,
+    hourlyRatePence: 1250,
+    defaultHoursWorked: 72,
+    appDateMode: 'automatic',
+    manualTodayIso: null,
+    aiInstructions: '',
+    aiProvider: 'gemini',
+    createdAt: timestamp,
+    updatedAt: timestamp,
     ...overrides,
   }
 }

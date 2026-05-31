@@ -3,7 +3,7 @@ import { ArrowRight, BadgePoundSterling, PiggyBank, Target, TrendingUp } from 'l
 
 import { formatPence, parsePoundsToPence } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, Field, MoneyMetric, Panel, SectionGrid, SelectInput, TextInput } from '../components/ui'
+import { Button, Field, MoneyMetric, Panel, ProgressRail, SectionGrid, SelectInput, TextInput } from '../components/ui'
 import type { PayPeriod, Pot } from '../types/models'
 
 export function SavingsInvestmentsPage({
@@ -141,10 +141,10 @@ function SavingsOverviewCard({
 }) {
   const progressPercent = targetPence > 0 ? Math.round((totalSavedPence / targetPence) * 100) : 0
   const remainingPence = Math.max(0, targetPence - totalSavedPence)
-  const progressWidth = `${Math.min(100, Math.max(0, progressPercent))}%`
+  const surplusPence = Math.max(0, totalSavedPence - targetPence)
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#06122a_0%,#072b2f_54%,#064e3b_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <section className="max-w-full overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#06122a_0%,#072b2f_54%,#064e3b_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
       <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-200">
@@ -169,11 +169,40 @@ function SavingsOverviewCard({
           <span>{targetPence > 0 ? `${progressPercent}% funded` : 'No combined target'}</span>
           <span>{targetPence > 0 ? formatPence(targetPence) : 'Set targets in Pots'}</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-white/15 shadow-inner shadow-slate-950/20">
-          <div className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#22d3ee)] shadow-sm" style={{ width: targetPence > 0 ? progressWidth : '0%' }} />
-        </div>
+        <ProgressRail
+          percent={targetPence > 0 ? progressPercent : 0}
+          trackClassName="bg-white/15 shadow-slate-950/20"
+        />
+        {targetPence > 0 && (
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <SavingsFlowStat label="Target" value={formatPence(targetPence)} />
+            <SavingsFlowStat label="Saved" value={formatPence(totalSavedPence)} />
+            <SavingsFlowStat
+              label={surplusPence > 0 ? 'Ahead' : 'Left'}
+              value={surplusPence > 0 ? formatPence(surplusPence) : formatPence(remainingPence)}
+              tone={surplusPence > 0 ? 'good' : 'neutral'}
+            />
+          </div>
+        )}
       </div>
     </section>
+  )
+}
+
+function SavingsFlowStat({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'good'
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 shadow-inner shadow-white/5">
+      <p className="text-[0.68rem] font-semibold uppercase tracking-wide text-emerald-100/70">{label}</p>
+      <p className={tone === 'good' ? 'mt-1 truncate text-sm font-semibold text-emerald-200' : 'mt-1 truncate text-sm font-semibold text-white'}>{value}</p>
+    </div>
   )
 }
 
@@ -233,7 +262,6 @@ function SavingsPotCard({ pot }: { pot: Pot }) {
   const progressPercent = targetPence > 0
     ? Math.round((Math.max(0, pot.balancePence) / targetPence) * 100)
     : 0
-  const progressWidth = `${Math.min(100, Math.max(0, progressPercent))}%`
   const targetDeltaPence = targetPence - pot.balancePence
   const accentColor = pot.color || '#10b981'
 
@@ -251,12 +279,12 @@ function SavingsPotCard({ pot }: { pot: Pot }) {
         </span>
       </div>
       <p className="mt-5 text-2xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(pot.balancePence)}</p>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-emerald-100/90 shadow-inner shadow-emerald-200/60">
-        <div
-          className="h-full rounded-full shadow-sm"
-          style={{ width: targetPence > 0 ? progressWidth : '0%', backgroundColor: accentColor }}
-        />
-      </div>
+      <ProgressRail
+        percent={targetPence > 0 ? progressPercent : 0}
+        color={accentColor}
+        className="mt-4"
+        trackClassName="bg-emerald-100/90 shadow-emerald-200/60"
+      />
       <div className="mt-3 flex items-center justify-between gap-3 text-sm">
         <span className="font-semibold text-emerald-700">{targetPence > 0 ? `${progressPercent}%` : 'No target'}</span>
         <span className="text-slate-500">{targetPence > 0 ? `Target ${formatPence(targetPence)}` : 'Set a target in Pots'}</span>

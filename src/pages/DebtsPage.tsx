@@ -17,6 +17,7 @@ import {
   Field,
   MoneyMetric,
   Panel,
+  ProgressRail,
   SectionGrid,
   SelectInput,
   TextInput,
@@ -549,12 +550,7 @@ export function DebtsPage({
                           <span>{progressLabel}</span>
                           <span>{progressPercent}%</span>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-100/90 shadow-inner shadow-slate-200/70">
-                          <div
-                            className="h-full rounded-full bg-emerald-500 shadow-sm"
-                            style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
-                          />
-                        </div>
+                        <ProgressRail percent={progressPercent} color="#10b981" fillClassName="bg-emerald-500" />
                       </summary>
                       <CalculationDetails
                         breakdown={{
@@ -659,11 +655,10 @@ function DebtCommandCard({
   payoffPercent: number
   currentPayPeriod: PayPeriod | null
 }) {
-  const payoffWidth = `${Math.min(100, Math.max(0, payoffPercent))}%`
   const remainingPercent = Math.max(0, 100 - Math.min(100, Math.max(0, payoffPercent)))
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-rose-200/90 bg-[linear-gradient(135deg,#020617,#2b0f1c_54%,#3f1624)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.2)]">
+    <section className="max-w-full overflow-hidden rounded-2xl border border-rose-200/90 bg-[linear-gradient(135deg,#020617,#2b0f1c_54%,#3f1624)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.2)]">
       <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.45fr)] lg:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-rose-200">
@@ -696,9 +691,7 @@ function DebtCommandCard({
           <span>{currentPayPeriod ? `${currentPayPeriod.startDate} to ${currentPayPeriod.endDate}` : 'No active pay period'}</span>
           <span>{remainingPercent}% left</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-white/15 shadow-inner shadow-slate-950/30">
-          <div className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#22d3ee)] shadow-sm" style={{ width: payoffWidth }} />
-        </div>
+        <ProgressRail percent={payoffPercent} trackClassName="bg-white/15 shadow-slate-950/30" />
       </div>
     </section>
   )

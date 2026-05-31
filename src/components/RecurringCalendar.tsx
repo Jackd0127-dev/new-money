@@ -9,7 +9,7 @@ import {
 } from '../domain/money'
 import type { PlannerSnapshot } from '../hooks/usePlannerData'
 import type { PayPeriod } from '../types/models'
-import { MoneyMetric, Panel, SelectInput } from './ui'
+import { MoneyMetric, Panel, ProgressRail, SelectInput } from './ui'
 
 const recurringRangeOptions = [14, 30, 60, 90, 365] as const
 type RecurringRangeDays = (typeof recurringRangeOptions)[number]
@@ -51,6 +51,10 @@ export function RecurringCalendar({
     (total, occurrence) => total + occurrence.amountPence,
     0,
   )
+  const upcomingTotalPence = upcomingOccurrences.reduce((total, occurrence) => total + occurrence.amountPence, 0)
+  const paydayPressurePercent = upcomingTotalPence > 0
+    ? Math.round((dueBeforeNextPaydayPence / upcomingTotalPence) * 100)
+    : 0
 
   return (
     <Panel
@@ -107,8 +111,23 @@ export function RecurringCalendar({
             }}
           />
 
+          <div className="rounded-2xl border border-cyan-200/80 bg-[linear-gradient(135deg,#ffffff,#ecfeff)] p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">Payday pressure</p>
+                <p className="mt-1 text-sm leading-5 text-slate-600">
+                  {formatPence(dueBeforeNextPaydayPence)} before payday out of {formatPence(upcomingTotalPence)} in this range.
+                </p>
+              </div>
+              <span className="shrink-0 rounded-xl border border-cyan-200 bg-white/90 px-3 py-2 text-sm font-semibold text-cyan-900 shadow-sm shadow-cyan-100/70">
+                {paydayPressurePercent}%
+              </span>
+            </div>
+            <ProgressRail percent={paydayPressurePercent} className="mt-3" trackClassName="bg-cyan-100/80 shadow-cyan-200/50" />
+          </div>
+
           {dueBeforeNextPaydayPence > 0 && (
-            <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+            <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-4 text-sm leading-6 text-amber-900 shadow-sm shadow-amber-100/70">
               <AlertTriangle className="mt-0.5 shrink-0" size={18} />
               <p>Reserve these payments before treating pot balances as spendable.</p>
             </div>
@@ -127,7 +146,7 @@ export function RecurringCalendar({
               return (
                 <div
                   key={`${occurrence.payment.id}-${occurrence.dueDate}`}
-                  className="group relative overflow-hidden rounded-lg border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-[0_16px_38px_rgba(15,23,42,0.08)] sm:flex sm:items-center sm:justify-between sm:gap-3"
+                  className="group relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-[0_16px_38px_rgba(15,23,42,0.08)] sm:flex sm:items-center sm:justify-between sm:gap-3"
                 >
                   <span className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-cyan-400/80" aria-hidden="true" />
                   <div>

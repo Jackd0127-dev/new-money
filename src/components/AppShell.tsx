@@ -126,7 +126,7 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="lg:pl-64">
+      <div className="min-w-0 overflow-hidden lg:pl-64">
         <header className="sticky top-0 z-10 border-b border-white/70 bg-white/80 px-4 py-3 shadow-sm shadow-slate-200/60 backdrop-blur-xl md:px-8">
           <div className="flex flex-col items-start gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0">
@@ -184,7 +184,7 @@ export function AppShell({
             })}
           </nav>
         </header>
-        <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">{children}</main>
+        <main className="mx-auto min-w-0 max-w-7xl px-4 py-6 md:px-8">{children}</main>
       </div>
     </div>
   )

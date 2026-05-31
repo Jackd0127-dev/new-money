@@ -38,6 +38,7 @@ import {
   CalculationDetails,
   Field,
   Panel,
+  ProgressRail,
   SectionGrid,
   SelectInput,
   TextInput,
@@ -437,7 +438,7 @@ export function AllocatingPaymentsPage({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <CreditAllocationCommandCenter
         summary={summary}
         viewedPeriod={viewedPeriod}
@@ -574,7 +575,7 @@ export function AllocatingPaymentsPage({
                   />
                 ))
               ) : (
-                <p className="w-full rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500 sm:col-span-2 xl:col-span-1">
+                <p className="w-full rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500 sm:col-span-2 xl:col-span-1">
                   No credit cards yet.
                 </p>
               )}
@@ -590,7 +591,7 @@ export function AllocatingPaymentsPage({
                   return (
                     <div
                       key={repayment.id}
-                      className="grid gap-2 rounded-lg border border-slate-200/90 bg-white/95 px-3 py-2 shadow-sm shadow-slate-200/60 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                      className="grid gap-2 rounded-2xl border border-slate-200/90 bg-white/95 px-3 py-2 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-950">{repayment.note || 'Card repayment'}</p>
@@ -620,7 +621,7 @@ export function AllocatingPaymentsPage({
                   )
                 })
               ) : (
-                <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">No repayments recorded yet.</p>
+                <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">No repayments recorded yet.</p>
               )}
             </div>
           </Panel>
@@ -640,8 +641,8 @@ export function AllocatingPaymentsPage({
                   open={group.isSelected || (!viewedPeriod && index === 0)}
                   className={
                     group.isSelected
-                      ? 'rounded-lg border border-slate-950 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.08)]'
-                      : 'rounded-lg border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-200/60'
+                      ? 'rounded-2xl border border-slate-950 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.08)]'
+                      : 'rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
                   }
                 >
                   <summary className="cursor-pointer list-none px-3 py-2">
@@ -679,7 +680,7 @@ export function AllocatingPaymentsPage({
                 </details>
               ))
             ) : (
-              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
+              <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
                 No payments or card spending are available to allocate yet.
               </p>
             )}
@@ -717,7 +718,6 @@ function CreditAllocationCommandCenter({
   const plannedChargesPence = summary.cards.reduce((total, cardSummary) => total + cardSummary.plannedChargesPence, 0)
   const reservedPence = summary.totalCreditPotsPence
   const coverPercent = forecastOwedPence > 0 ? Math.round((reservedPence / forecastOwedPence) * 100) : 0
-  const coverWidth = `${Math.min(100, Math.max(0, coverPercent))}%`
   const periodLabel = viewedPeriod
     ? `${viewedPeriod.startDate} to ${viewedPeriod.endDate}`
     : 'Choose a paycheck to see period cover'
@@ -794,9 +794,11 @@ function CreditAllocationCommandCenter({
               {formatPence(reservedPence)}
             </span>
           </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-950/50 shadow-inner shadow-slate-950">
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#22d3ee,#34d399,#facc15)]" style={{ width: coverWidth }} />
-          </div>
+          <ProgressRail
+            percent={coverPercent}
+            className="mt-4"
+            trackClassName="bg-slate-950/50 shadow-slate-950"
+          />
 
           <div className="mt-5 space-y-3">
             {focusCards.length > 0 ? (
@@ -805,8 +807,6 @@ function CreditAllocationCommandCenter({
                 const cardCoveredPercent = cardForecastPence > 0
                   ? Math.round((cardSummary.creditPotPence / cardForecastPence) * 100)
                   : 0
-                const cardWidth = `${Math.min(100, Math.max(0, cardCoveredPercent))}%`
-
                 return (
                   <div key={cardSummary.card.id} className="rounded-xl border border-white/10 bg-slate-950/25 p-3">
                     <div className="flex items-center justify-between gap-3">
@@ -816,9 +816,12 @@ function CreditAllocationCommandCenter({
                       </div>
                       <p className="text-sm font-semibold text-cyan-100">{formatPence(cardSummary.creditPotPence)}</p>
                     </div>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                      <div className="h-full rounded-full bg-cyan-300" style={{ width: cardWidth }} />
-                    </div>
+                    <ProgressRail
+                      percent={cardCoveredPercent}
+                      color="#67e8f9"
+                      className="mt-3"
+                      trackClassName="h-1.5 bg-white/10 shadow-slate-950/20"
+                    />
                   </div>
                 )
               })
@@ -901,7 +904,7 @@ function CompactSummaryMetric({
 
   return (
     <details
-      className={`group rounded-lg border p-3 ${toneClassName}`}
+      className={`group rounded-2xl border p-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] ${toneClassName}`}
       open={open}
       onToggle={(event) => onOpenChange(event.currentTarget.open)}
     >
@@ -1224,7 +1227,7 @@ function PaymentAllocationRow({
   const missingCardLabel = getMissingCardLabel(row.creditCardId, activeCards)
 
   return (
-    <div className="grid gap-3 rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-violet-200 md:grid-cols-[1fr_180px_auto]">
+    <div className="grid gap-3 rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-violet-200 md:grid-cols-[1fr_180px_auto]">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-semibold text-slate-950">{row.label}</p>
@@ -1382,7 +1385,7 @@ function CreditCardOverview({
                 />
               ))
             ) : (
-              <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No card activity in this pay period.</p>
+              <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No card activity in this pay period.</p>
             )}
           </div>
         </Panel>
@@ -1413,18 +1416,18 @@ function CreditCardStat({
 
 function creditCardStatClass(tone: 'neutral' | 'good' | 'warning' | 'bad'): string {
   if (tone === 'good') {
-    return 'rounded-lg border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+    return 'rounded-2xl border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
   }
 
   if (tone === 'warning') {
-    return 'rounded-lg border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+    return 'rounded-2xl border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
   }
 
   if (tone === 'bad') {
-    return 'rounded-lg border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+    return 'rounded-2xl border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
   }
 
-  return 'rounded-lg border border-slate-200/90 bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
+  return 'rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
 }
 
 function CreditCardActivityRow({
@@ -1446,7 +1449,7 @@ function CreditCardActivityRow({
   const amountClassName = item.amountPence < 0 ? 'text-emerald-700' : 'text-red-700'
 
   return (
-    <div className={`grid gap-3 rounded-lg border bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 sm:grid-cols-[1fr_auto] ${overviewBorderClass(item.source)}`}>
+    <div className={`grid gap-3 rounded-2xl border bg-white/95 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 sm:grid-cols-[1fr_auto] ${overviewBorderClass(item.source)}`}>
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-semibold text-slate-950">{item.label}</p>

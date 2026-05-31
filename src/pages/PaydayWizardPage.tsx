@@ -15,6 +15,7 @@ import {
   Field,
   MoneyMetric,
   Panel,
+  ProgressRail,
   SectionGrid,
   SelectInput,
   TextInput,
@@ -90,21 +91,21 @@ export function PaydayWizardPage({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-lg border border-slate-900 bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.24),transparent_28%),linear-gradient(135deg,#020617,#072019_50%,#0f172a)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <div className="min-w-0 space-y-6">
+      <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.24),transparent_28%),linear-gradient(135deg,#020617,#072019_50%,#0f172a)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
         <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.05fr_1fr] xl:items-end">
-          <div>
+          <div className="command-centre-mobile-column min-w-0 sm:max-w-none">
             <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-emerald-100 shadow-sm shadow-slate-950/20 backdrop-blur">
               <WalletCards size={14} />
               Paycheck planner
             </div>
             <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">{formatPence(incomePence)}</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-              Shape the paycheck once, then let dashboard, pots, cards, debts, savings, and calendar views read from the same saved plan.
+            <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
+              Shape the paycheck once. Dashboard, pots, cards, debts, savings, and calendar views read the same plan.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="command-centre-mobile-column grid min-w-0 gap-3 sm:max-w-none sm:grid-cols-3">
             <PaydayOverviewMetric
               label="Estimate"
               value={formatPence(calculatedPence)}
@@ -126,8 +127,8 @@ export function PaydayWizardPage({
           </div>
         </div>
 
-        <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
-          <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+        <div className="grid min-w-0 gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
+          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
             <p className="text-xs font-semibold uppercase text-slate-400">Pay period route</p>
             <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
               <PaydayRouteNode label="Starts" value={period?.startDate ?? 'Choose date'} />
@@ -136,15 +137,15 @@ export function PaydayWizardPage({
               </span>
               <PaydayRouteNode label="Ends" value={period?.endDate ?? 'Choose date'} align="right" />
             </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full bg-emerald-300"
-                style={{ width: `${canSubmit ? 100 : hasValidPayday ? 58 : 22}%` }}
-              />
-            </div>
+            <ProgressRail
+              percent={canSubmit ? 100 : hasValidPayday ? 58 : 22}
+              color="#6ee7b7"
+              className="mt-4"
+              trackClassName="bg-white/10 shadow-slate-950/20"
+            />
           </div>
 
-          <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+          <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase text-slate-400">Pay rhythm</p>
@@ -257,19 +258,19 @@ export function PaydayWizardPage({
                 <PaydayFlowStep icon={<Clock3 size={15} />} label="Frequency" value={payFrequency} />
                 <PaydayFlowStep icon={<CheckCircle2 size={15} />} label="Status" value={existingPeriod ? 'Updating' : 'New plan'} />
               </div>
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/80 shadow-inner shadow-emerald-100">
-                <div
-                  className="h-full rounded-full bg-emerald-500 shadow-sm transition-all"
-                  style={{ width: `${canSubmit ? 100 : hasValidPayday ? 58 : 24}%` }}
-                />
-              </div>
+              <ProgressRail
+                percent={canSubmit ? 100 : hasValidPayday ? 58 : 24}
+                color="#10b981"
+                className="mt-4"
+                trackClassName="bg-white/80 shadow-emerald-100"
+              />
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <Button disabled={!canSubmit || saved} onClick={submitPlan}>
                 {existingPeriod ? 'Update paycheck plan' : 'Confirm paycheck plan'}
               </Button>
-              <span className="rounded-lg border border-slate-200/90 bg-white/90 px-3 py-2 text-sm font-medium capitalize text-slate-700 shadow-sm shadow-slate-200/60">
+                <span className="rounded-2xl border border-slate-200/90 bg-white/90 px-3 py-2 text-sm font-medium capitalize text-slate-700 shadow-sm shadow-slate-200/60">
                 {payFrequency} plan
               </span>
               {saved && (
@@ -322,7 +323,7 @@ function PaydayOverviewMetric({
   return (
     <div
       className={[
-        'rounded-lg border p-4 shadow-sm backdrop-blur',
+        'min-w-0 rounded-2xl border p-4 shadow-inner shadow-white/5 backdrop-blur',
         tone === 'neutral' ? 'border-white/10 bg-white/[0.08]' : '',
         tone === 'good' ? 'border-emerald-300/20 bg-emerald-300/10' : '',
         tone === 'warning' ? 'border-amber-300/20 bg-amber-300/10' : '',
@@ -354,7 +355,7 @@ function PaydayRouteNode({
 
 function PaydaySignal({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-slate-950/25 px-3 py-2">
+    <div className="rounded-xl border border-white/10 bg-slate-950/25 px-3 py-2 shadow-inner shadow-slate-950/20">
       <p className="text-[11px] font-semibold uppercase text-slate-400">{label}</p>
       <p className="mt-1 truncate text-sm font-semibold text-white">{value}</p>
     </div>

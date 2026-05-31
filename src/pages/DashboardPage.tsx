@@ -34,7 +34,7 @@ import {
   type PayPeriodCostSummary,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, MoneyMetric, Panel, SectionGrid, SelectInput, type CalculationBreakdown } from '../components/ui'
+import { Button, MoneyMetric, Panel, ProgressRail, SectionGrid, SelectInput, type CalculationBreakdown } from '../components/ui'
 import type { PayFrequency, PayPeriod, PotAllocation } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
@@ -252,7 +252,7 @@ export function DashboardPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <DashboardCommandCentre
         viewedPeriod={viewedPeriod}
         summary={summary}
@@ -378,10 +378,10 @@ export function DashboardPage({
                         key={item.id}
                         className={
                           isIgnored
-                            ? 'rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-3 opacity-75'
+                            ? 'rounded-2xl border border-slate-200/90 bg-slate-50/80 px-3 py-3 opacity-75'
                             : isDone
-                              ? 'rounded-lg border border-emerald-200/90 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] px-3 py-3 shadow-sm shadow-emerald-100/70'
-                              : 'rounded-lg border border-slate-200/90 bg-white/95 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200'
+                              ? 'rounded-2xl border border-emerald-200/90 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] px-3 py-3 shadow-sm shadow-emerald-100/70'
+                              : 'rounded-2xl border border-slate-200/90 bg-white/95 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200'
                         }
                       >
                         <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-start">
@@ -466,11 +466,11 @@ export function DashboardPage({
                             id={breakdownId}
                             role="region"
                             aria-label={`Breakdown for ${breakdownLabel}`}
-                            className="mt-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60"
+                            className="mt-3 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60"
                           >
                             <ul className="space-y-2">
                               {item.breakdownLines.map((line) => (
-                                <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-slate-200/70 bg-white/90 px-3 py-2 text-sm shadow-sm shadow-slate-200/50">
+                                <li key={line.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-xl border border-slate-200/70 bg-white/90 px-3 py-2 text-sm shadow-sm shadow-slate-200/50">
                                   <div className="min-w-0">
                                     <p className="truncate font-semibold text-slate-900">{line.label}</p>
                                     <p className="mt-0.5 text-xs leading-5 text-slate-500">{line.detail}</p>
@@ -493,7 +493,7 @@ export function DashboardPage({
                 </ul>
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
                 <p className="text-sm font-semibold text-slate-950">No set-asides for this paycheck</p>
                 <p className="mt-1 text-sm leading-5 text-slate-500">
                   Add pot allocations, credit pots, or debt reserves and they will appear here.
@@ -540,9 +540,9 @@ function DashboardCommandCentre({
   const checklistPercent = activeTodoCount > 0 ? Math.round((completedTodoCount / activeTodoCount) * 100) : 0
 
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-900 bg-[radial-gradient(circle_at_16%_14%,rgba(34,211,238,0.22),transparent_28%),linear-gradient(135deg,#020617,#071426_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
+    <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_16%_14%,rgba(34,211,238,0.22),transparent_28%),linear-gradient(135deg,#020617,#071426_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
       <div className="grid gap-6 p-5 text-white xl:grid-cols-[1.1fr_1fr] xl:items-end">
-        <div className="min-w-0">
+        <div className="command-centre-mobile-column min-w-0 sm:max-w-none">
           <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
             <CircleDollarSign size={14} />
             Dashboard command centre
@@ -550,14 +550,14 @@ function DashboardCommandCentre({
           <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">
             {viewedPeriod ? formatPence(summary.moneyLeftPence) : 'Plan your first pay'}
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+          <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
             {viewedPeriod
-              ? `Paycheck window ${viewedPeriod.startDate} to ${viewedPeriod.endDate}, with cover, set-asides, and remaining money in one view.`
+              ? `Paycheck window ${viewedPeriod.startDate} to ${viewedPeriod.endDate}. Cover, set-asides, and remaining money in one view.`
               : 'Create a paycheck plan to see money in, money committed, and what still needs action.'}
           </p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="command-centre-mobile-column grid min-w-0 gap-3 sm:max-w-none sm:grid-cols-3">
           <DashboardOverviewMetric
             label="Money in"
             value={formatPence(summary.payReceivedPence)}
@@ -579,8 +579,8 @@ function DashboardCommandCentre({
         </div>
       </div>
 
-      <div className="grid gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+      <div className="grid min-w-0 gap-4 border-t border-white/10 bg-white/[0.04] p-5 lg:grid-cols-[1fr_1.15fr]">
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase text-slate-400">Checklist position</p>
@@ -591,15 +591,10 @@ function DashboardCommandCentre({
               <p className="text-[11px] font-semibold uppercase text-slate-400">ignored</p>
             </div>
           </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-[linear-gradient(90deg,#10b981,#22d3ee)]"
-              style={{ width: `${checklistPercent}%` }}
-            />
-          </div>
+          <ProgressRail percent={checklistPercent} className="mt-4" trackClassName="bg-white/10 shadow-slate-950/20" />
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-white/[0.08] p-4 backdrop-blur">
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur">
           <div className="mb-4 flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase text-slate-400">Paycheck shape</p>
             <p className="text-xs font-semibold text-cyan-100">{summary.moneyLeftPence < 0 ? 'needs attention' : 'balanced'}</p>
@@ -630,10 +625,10 @@ function DashboardOverviewMetric({
     <div
       className={
         tone === 'neutral'
-          ? 'rounded-lg border border-white/10 bg-white/[0.08] p-4 shadow-sm backdrop-blur'
+          ? 'min-w-0 rounded-2xl border border-white/10 bg-white/[0.08] p-4 shadow-inner shadow-white/5 backdrop-blur'
           : tone === 'good'
-            ? 'rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4 shadow-sm backdrop-blur'
-            : 'rounded-lg border border-amber-300/20 bg-amber-300/10 p-4 shadow-sm backdrop-blur'
+            ? 'min-w-0 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4 shadow-inner shadow-white/5 backdrop-blur'
+            : 'min-w-0 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 shadow-inner shadow-white/5 backdrop-blur'
       }
     >
       <p className="text-xs font-semibold uppercase text-slate-300">{label}</p>
@@ -654,15 +649,12 @@ function DashboardPulseBar({
   percent: number
   tone: 'neutral' | 'good' | 'warning'
 }) {
-  const barClassName =
-    tone === 'good' ? 'bg-emerald-300' : tone === 'warning' ? 'bg-amber-300' : 'bg-cyan-300'
+  const color = tone === 'good' ? '#34d399' : tone === 'warning' ? '#fcd34d' : '#67e8f9'
 
   return (
-    <div className="grid grid-cols-[6rem_1fr_auto] items-center gap-3">
+    <div className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-3">
       <p className="text-xs font-semibold text-slate-300">{label}</p>
-      <span className="h-2 overflow-hidden rounded-full bg-white/10">
-        <span className={`block h-full rounded-full ${barClassName}`} style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
-      </span>
+      <ProgressRail percent={percent} color={color} trackClassName="h-2 bg-white/10 shadow-slate-950/20" />
       <p className="text-right text-xs font-semibold text-slate-200">{value}</p>
     </div>
   )
@@ -685,7 +677,7 @@ function ChecklistProgressCard({
 }) {
   const countPercent = activeCount > 0 ? Math.round((completedCount / activeCount) * 100) : 0
   const amountPercent = totalAmountPence > 0
-    ? Math.min(100, Math.round((completedAmountPence / totalAmountPence) * 100))
+    ? Math.round((completedAmountPence / totalAmountPence) * 100)
     : countPercent
   const openCount = Math.max(0, activeCount - completedCount)
 
@@ -741,12 +733,7 @@ function ChecklistProgressCard({
           <span>Amount covered</span>
           <span>{formatPence(completedAmountPence)} of {formatPence(totalAmountPence)}</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-white shadow-inner shadow-slate-200/80">
-          <div
-            className="h-full rounded-full bg-[linear-gradient(90deg,#10b981,#06b6d4)] shadow-sm transition-all"
-            style={{ width: `${amountPercent}%` }}
-          />
-        </div>
+        <ProgressRail percent={amountPercent} trackClassName="bg-white shadow-slate-200/80" />
       </div>
     </div>
   )
@@ -954,7 +941,7 @@ function NextPaycheckOutgoingsPanel({
       {period ? (
         <div className="space-y-3">
           <div className="grid gap-3">
-            <div className="rounded-lg border border-amber-200/90 bg-[linear-gradient(135deg,#fff7ed,#fffbeb)] p-4 shadow-sm shadow-amber-100/70">
+            <div className="rounded-2xl border border-amber-200/90 bg-[linear-gradient(135deg,#fff7ed,#fffbeb)] p-4 shadow-[0_14px_35px_rgba(245,158,11,0.11)]">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Total outgoing</p>
               <p className="mt-2 text-3xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(summary.totalCostsPence)}</p>
               <p className="mt-1 text-sm text-amber-800">{outgoingItems.length} payments in this paycheck window</p>
@@ -969,13 +956,13 @@ function NextPaycheckOutgoingsPanel({
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              <div className="rounded-lg border border-emerald-200/90 bg-emerald-50/80 p-3">
+              <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/80 p-3 shadow-sm shadow-emerald-100/60">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Money left estimate</p>
                 <p className={summary.moneyLeftPence < 0 ? 'mt-1 text-lg font-semibold text-red-700' : 'mt-1 text-lg font-semibold text-emerald-700'}>
                   {formatPence(summary.moneyLeftPence)}
                 </p>
               </div>
-              <div className="rounded-lg border border-cyan-200/90 bg-cyan-50/70 p-3">
+              <div className="rounded-2xl border border-cyan-200/90 bg-cyan-50/70 p-3 shadow-sm shadow-cyan-100/60">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paycheck</p>
                 <p className="mt-1 text-sm font-semibold text-slate-950">{formatPaycheckOffsetLabel(offset)}</p>
               </div>
@@ -985,7 +972,7 @@ function NextPaycheckOutgoingsPanel({
               aria-label={toggleLabel}
               aria-expanded={isOpen}
               onClick={onToggleOpen}
-              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-900 bg-slate-950 px-4 text-sm font-semibold text-white shadow-[0_10px_26px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-slate-900 bg-slate-950 px-4 text-sm font-semibold text-white shadow-[0_10px_26px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
             >
               <CalendarDays size={16} aria-hidden="true" />
               {isOpen ? 'Hide payments' : 'Show payments'}
@@ -994,7 +981,7 @@ function NextPaycheckOutgoingsPanel({
           </div>
 
           {isOpen && (
-            <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-3">
+            <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-3 shadow-inner shadow-slate-200/50">
               {outgoingItems.length > 0 ? (
                 <ul className="divide-y divide-slate-200">
                   {outgoingItems.map((item) => (

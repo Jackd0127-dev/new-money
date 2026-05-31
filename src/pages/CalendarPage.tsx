@@ -226,20 +226,20 @@ export function CalendarPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <section className="w-full max-w-[calc(100vw-2rem)] min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_18%_12%,rgba(45,212,191,0.22),transparent_26%),linear-gradient(135deg,#020617,#071526_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-full">
+      <section className="w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[radial-gradient(circle_at_18%_12%,rgba(45,212,191,0.22),transparent_26%),linear-gradient(135deg,#020617,#071526_52%,#172554)] shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
         <div className="grid min-w-0 gap-6 p-5 text-white xl:grid-cols-[1.2fr_1fr] xl:items-end">
-          <div className="min-w-0 max-w-[calc(100vw-4.5rem)] sm:max-w-none">
+          <div className="command-centre-mobile-column min-w-0 sm:max-w-none">
             <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 shadow-sm shadow-slate-950/20 backdrop-blur">
               <CalendarDays size={14} />
               Calendar command centre
             </div>
             <h2 className="mt-5 text-3xl font-semibold sm:text-4xl">{formatMonth(visibleMonth)}</h2>
             <p className="mt-3 max-w-full break-words text-sm leading-6 text-slate-300 sm:max-w-2xl">
-              A cleaner view of what is landing this month, with paycheck money, card statements, linked-pot cover, debt dates, and manual spend kept in one flow.
+              See what lands this month. Paychecks, card statements, pot cover, debts, and spend stay in one flow.
             </p>
           </div>
 
-          <div className="grid min-w-0 max-w-[calc(100vw-4.5rem)] gap-3 sm:max-w-none sm:grid-cols-3">
+          <div className="command-centre-mobile-column grid min-w-0 gap-3 sm:max-w-none sm:grid-cols-3">
             <CalendarOverviewMetric
               label="Money out"
               value={formatPence(monthOverview.moneyOutPence)}

@@ -42,6 +42,17 @@ button {
   container-type: inline-size;
 }
 
+.command-centre-mobile-column {
+  width: min(100%, 19rem);
+  max-width: 100%;
+}
+
+@media (min-width: 640px) {
+  .command-centre-mobile-column {
+    width: auto;
+  }
+}
+
 @container (min-width: 720px) {
   .app-panel__header {
     flex-direction: row;

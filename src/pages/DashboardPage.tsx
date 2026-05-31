@@ -48,6 +48,7 @@ interface PaycheckTodoItem {
   label: string
   detail: string
   amountPence: number
+  canSelectFundingPot?: boolean
   breakdownLabel?: string
   breakdownLines: PaycheckTodoBreakdownLine[]
   completion?: PaycheckTodoCompletion
@@ -65,6 +66,7 @@ interface PaycheckTodoCompletion {
   id: string
   payPeriodId: string
   potId: string
+  fundingPotId?: string | null
   amountPence: number
 }
 
@@ -90,6 +92,7 @@ export function DashboardPage({
   )
   const [pendingTodoIds, setPendingTodoIds] = useState<Set<string>>(() => new Set())
   const [expandedTodoIds, setExpandedTodoIds] = useState<Set<string>>(() => new Set())
+  const [fundingPotSelections, setFundingPotSelections] = useState<Record<string, string>>({})
   const [isNextOutgoingsOpen, setIsNextOutgoingsOpen] = useState(false)
   const [outgoingPreviewOffset, setOutgoingPreviewOffset] = useState(1)
   const today = getAppTodayIso(snapshot.settings)
@@ -113,6 +116,9 @@ export function DashboardPage({
   const todoItems = viewedPeriod ? getPaycheckTodoItems(snapshot, viewedPeriod, baseSummary, today) : []
   const completedTodoIds = new Set(viewedPeriod ? completedTodosByPeriod[viewedPeriod.id] ?? [] : [])
   const activeTodoItems = todoItems.filter((item) => !ignoredPaymentIds.has(item.ignoreId))
+  const eligibleFundingPots = snapshot.pots
+    .filter((pot) => !pot.archived && (pot.type === 'saving' || pot.type === 'investment'))
+    .sort((a, b) => a.name.localeCompare(b.name))
   const completedTodoCount = activeTodoItems.filter((item) => completedTodoIds.has(item.id)).length
   const ignoredTodoCount = todoItems.length - activeTodoItems.length
   const activeTodoAmountPence = activeTodoItems.reduce(
@@ -158,10 +164,15 @@ export function DashboardPage({
 
       try {
         if (done) {
+          const selectedFundingPotId = item.canSelectFundingPot
+            ? fundingPotSelections[item.id] ?? item.completion.fundingPotId ?? ''
+            : ''
+
           await actions.upsertPaycheckPotAllocation({
             id: item.completion.id,
             payPeriodId: item.completion.payPeriodId,
             potId: item.completion.potId,
+            ...(selectedFundingPotId ? { fundingPotId: selectedFundingPotId } : {}),
             amountPence: item.completion.amountPence,
           })
         } else {
@@ -461,6 +472,34 @@ export function DashboardPage({
                             Ignore Payment
                           </button>
                         </div>
+                        {item.canSelectFundingPot && eligibleFundingPots.length > 0 && !isIgnored && (
+                          <div className="mt-3 grid gap-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pay from</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-500">
+                                {getFundingPotDetail(item.completion?.fundingPotId, snapshot)}
+                              </p>
+                            </div>
+                            <SelectInput
+                              aria-label={`Pay ${item.ignoreLabel} planned card cover from`}
+                              value={fundingPotSelections[item.id] ?? item.completion?.fundingPotId ?? ''}
+                              disabled={isDone || isPending}
+                              onChange={(event) =>
+                                setFundingPotSelections((current) => ({
+                                  ...current,
+                                  [item.id]: event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">This paycheck</option>
+                              {eligibleFundingPots.map((pot) => (
+                                <option key={pot.id} value={pot.id}>
+                                  {pot.name} · {formatPence(pot.balancePence)}
+                                </option>
+                              ))}
+                            </SelectInput>
+                          </div>
+                        )}
                         {isExpanded && (
                           <div
                             id={breakdownId}
@@ -1532,10 +1571,14 @@ function potAllocationCostToTodoItem(
   const linkedCreditCardId = sourceCostItemId
     ? getCreditCardIdFromLinkedCreditCardPotCostItemId(sourceCostItemId)
     : null
+  const allocation = item.id.startsWith('pot-allocation-')
+    ? snapshot.potAllocations.find((candidate) => candidate.id === item.id.slice('pot-allocation-'.length))
+    : null
   const completion = sourceCostItemId && item.potId
     ? createPaycheckPotCompletion({
         payPeriod,
         potId: item.potId,
+        fundingPotId: allocation?.fundingPotId ?? item.fundingPotId ?? null,
         amountPence: item.amountPence,
         costItemId: sourceCostItemId,
       })
@@ -1547,9 +1590,6 @@ function potAllocationCostToTodoItem(
     const breakdownLabel = isAdditionalCover
       ? `${cardName} additional planned card cover`
       : `${cardName} planned card cover`
-    const allocation = item.id.startsWith('pot-allocation-')
-      ? snapshot.potAllocations.find((candidate) => candidate.id === item.id.slice('pot-allocation-'.length))
-      : null
     const previousAllocation = isAdditionalCover
       ? allocation
         ? getPreviousCompletedLinkedCreditCardPotAllocation(
@@ -1598,8 +1638,11 @@ function potAllocationCostToTodoItem(
       ignoreId: item.id,
       ignoreLabel: cardName,
       label: `Set aside ${formatPence(item.amountPence)} into "${getPotName(snapshot, item.potId)}" pot for "${cardName}" planned card cover`,
-      detail: 'Moved into this pot from the dashboard checklist',
+      detail: allocation?.fundingPotId
+        ? `Moved from ${getPotName(snapshot, allocation.fundingPotId)} into this pot`
+        : 'Moved into this pot from the dashboard checklist',
       amountPence: item.amountPence,
+      canSelectFundingPot: true,
       breakdownLabel,
       breakdownLines,
       completion,
@@ -1695,6 +1738,7 @@ function linkedCreditCardPotCostToTodoItem(
       ? 'New card costs after the previous checklist cover was completed'
       : 'Current shortfall plus planned card charges before next payday',
     amountPence: item.amountPence,
+    canSelectFundingPot: true,
     breakdownLabel,
     breakdownLines: getLinkedCreditCardPotBreakdownLines(item, snapshot, payPeriod, today),
     completion: item.potId
@@ -1810,11 +1854,13 @@ function filterSnapshotForHistoricalAllocation(
 function createPaycheckPotCompletion({
   payPeriod,
   potId,
+  fundingPotId = null,
   amountPence,
   costItemId,
 }: {
   payPeriod: PayPeriod
   potId: string
+  fundingPotId?: string | null
   amountPence: number
   costItemId: string
 }): PaycheckTodoCompletion {
@@ -1823,6 +1869,7 @@ function createPaycheckPotCompletion({
     id: getDashboardTodoAllocationId(payPeriod.id, costItemId),
     payPeriodId: payPeriod.id,
     potId,
+    fundingPotId,
     amountPence,
   }
 }
@@ -1841,6 +1888,14 @@ function getCardName(snapshot: PlannerSnapshot, creditCardId?: string | null): s
   }
 
   return snapshot.creditCards.find((candidate) => candidate.id === creditCardId)?.name ?? 'Archived card'
+}
+
+function getFundingPotDetail(fundingPotId: string | null | undefined, snapshot: PlannerSnapshot): string {
+  if (!fundingPotId) {
+    return 'Current source: this paycheck.'
+  }
+
+  return `Current source: ${getPotName(snapshot, fundingPotId)}.`
 }
 
 function readCompletedTodos(): Record<string, string[]> {

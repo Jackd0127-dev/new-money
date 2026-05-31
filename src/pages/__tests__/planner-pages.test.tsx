@@ -3933,6 +3933,58 @@ describe('dashboard page', () => {
     restoreLocalStorage()
   })
 
+  it('can fund a planned card cover checklist item from a savings pot', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const restoreLocalStorage = mockLocalStorage()
+    const { selectedPayPeriod, snapshot } = createBarclaysLinkedCardCoverFixture()
+    const snapshotWithSavings = {
+      ...snapshot,
+      pots: [
+        ...snapshot.pots,
+        {
+          id: 'pot-emergency',
+          name: 'Emergency savings',
+          type: 'saving' as const,
+          balancePence: 20200,
+          targetPence: null,
+          color: '#10b981',
+          linkedCreditCardId: null,
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+    }
+
+    render(
+      <DashboardPage
+        snapshot={snapshotWithSavings}
+        selectedPayPeriod={selectedPayPeriod}
+        actions={actions}
+        onViewChange={vi.fn()}
+      />,
+    )
+
+    await user.selectOptions(screen.getByLabelText('Pay Barclays planned card cover from'), 'pot-emergency')
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: /Set aside £178\.57 into "Barclays" pot for "Barclays" planned card cover/,
+      }),
+    )
+
+    expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
+      id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+      payPeriodId: 'period-current',
+      potId: 'pot-barclays',
+      fundingPotId: 'pot-emergency',
+      amountPence: 17857,
+    })
+
+    restoreLocalStorage()
+  })
+
   it('expands a checklist row to show the payments that make up the amount', async () => {
     const user = userEvent.setup()
     const restoreLocalStorage = mockLocalStorage()

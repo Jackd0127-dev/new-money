@@ -99,6 +99,7 @@ export interface PotAllocation extends Timestamped {
   id: string
   payPeriodId: string
   potId: string
+  fundingPotId?: string | null
   amountPence: number
   source?: PotAllocationSource
   recurringPaymentId?: string | null

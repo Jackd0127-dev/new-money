@@ -134,7 +134,10 @@ function normalizePlannerSnapshot(snapshot: Partial<PlannerSnapshot>): PlannerSn
     recurringPayments: snapshot.recurringPayments ?? [],
     payPeriods: snapshot.payPeriods ?? [],
     paychecks: snapshot.paychecks ?? [],
-    potAllocations: snapshot.potAllocations ?? [],
+    potAllocations: (snapshot.potAllocations ?? []).map((allocation) => ({
+      ...allocation,
+      fundingPotId: allocation.fundingPotId ?? null,
+    })),
     transactions: snapshot.transactions ?? [],
     debts: snapshot.debts ?? [],
     debtPayments: snapshot.debtPayments ?? [],

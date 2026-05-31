@@ -2147,6 +2147,97 @@ describe('pay period cost summary', () => {
     })
   })
 
+  it('keeps a savings-funded linked-card pot allocation out of paycheck costs while leaving it visible', () => {
+    const payPeriod: PayPeriod = {
+      id: 'period-current',
+      startDate: '2026-05-22',
+      endDate: '2026-06-04',
+      payday: '2026-05-22',
+      nextPayday: '2026-06-05',
+      incomePence: 20200,
+      status: 'active',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    }
+    const summary = getPayPeriodCostSummary({
+      payPeriod,
+      creditCards: [
+        {
+          id: 'card-barclays',
+          name: 'Barclays',
+          provider: 'Barclays',
+          limitPence: 80000,
+          openingBalancePence: 1000,
+          dueDay: 11,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [],
+      customPayments: [],
+      transactions: [],
+      debts: [],
+      creditCardRepayments: [],
+      pots: [
+        {
+          id: 'pot-barclays',
+          name: 'Barclays',
+          type: 'reserved',
+          balancePence: 1000,
+          targetPence: null,
+          color: '#2563eb',
+          linkedCreditCardId: 'card-barclays',
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+        {
+          id: 'pot-savings',
+          name: 'Emergency savings',
+          type: 'saving',
+          balancePence: 19200,
+          targetPence: null,
+          color: '#10b981',
+          linkedCreditCardId: null,
+          linkedDebtId: null,
+          archived: false,
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+          payPeriodId: 'period-current',
+          potId: 'pot-barclays',
+          fundingPotId: 'pot-savings',
+          amountPence: 500,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-22T12:00:00.000Z',
+          updatedAt: '2026-05-22T12:00:00.000Z',
+        },
+      ],
+    })
+
+    expect(summary.potAllocationsPence).toBe(0)
+    expect(summary.totalCostsPence).toBe(0)
+    expect(summary.moneyLeftPence).toBe(20200)
+    expect(summary.items).toContainEqual(
+      expect.objectContaining({
+        id: 'pot-allocation-dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
+        amountPence: 500,
+        source: 'pot_allocation',
+        potId: 'pot-barclays',
+        fundingPotId: 'pot-savings',
+      }),
+    )
+  })
+
   it('uses linked pot balances to reduce recurring set-asides due this pay period', () => {
     const payPeriod: PayPeriod = {
       id: 'period-current',

@@ -71,6 +71,7 @@ export interface PaycheckPotAllocationInput {
   id: string
   payPeriodId: string
   potId: string
+  fundingPotId?: string | null
   amountPence: number
 }
 
@@ -283,7 +284,7 @@ export async function getPlannerSnapshot(): Promise<PlannerSnapshot> {
     recurringPayments: recurringPayments.sort((a, b) => a.name.localeCompare(b.name)),
     payPeriods,
     paychecks,
-    potAllocations,
+    potAllocations: potAllocations.map(normalizePotAllocation),
     transactions,
     debts,
     debtPayments,
@@ -388,13 +389,14 @@ export async function deletePot(potId: string): Promise<void> {
     'rw',
     [db.pots, db.recurringPayments, db.potAllocations, db.transactions],
     async () => {
-      const [recurringCount, allocationCount, transactionCount] = await Promise.all([
+      const [recurringCount, allocationCount, fundingAllocationCount, transactionCount] = await Promise.all([
         db.recurringPayments.where('potId').equals(potId).count(),
         db.potAllocations.where('potId').equals(potId).count(),
+        db.potAllocations.filter((allocation) => allocation.fundingPotId === potId).count(),
         db.transactions.where('potId').equals(potId).count(),
       ])
 
-      if (recurringCount + allocationCount + transactionCount > 0) {
+      if (recurringCount + allocationCount + fundingAllocationCount + transactionCount > 0) {
         await db.pots.update(potId, {
           archived: true,
           updatedAt: timestamp,
@@ -1256,6 +1258,7 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
           id: crypto.randomUUID(),
           payPeriodId,
           potId: allocation.potId,
+          fundingPotId: null,
           amountPence: allocation.amountPence,
           source: allocation.source,
           recurringPaymentId: allocation.recurringPaymentId,
@@ -1263,14 +1266,7 @@ export async function createPaycheckPlan(input: PaycheckPlanInput): Promise<void
           updatedAt: timestamp,
         })
 
-        const pot = await db.pots.get(allocation.potId)
-
-        if (pot) {
-          await db.pots.update(pot.id, {
-            balancePence: pot.balancePence + allocation.amountPence,
-            updatedAt: timestamp,
-          })
-        }
+        await applyPotAllocationToBalances(allocation, timestamp)
       }
     },
   )
@@ -1285,9 +1281,10 @@ export async function upsertPaycheckPotAllocation(input: PaycheckPotAllocationIn
   }
 
   await db.transaction('rw', [db.payPeriods, db.potAllocations, db.pots], async () => {
-    const [payPeriod, pot, existingAllocation] = await Promise.all([
+    const [payPeriod, pot, fundingPot, existingAllocation] = await Promise.all([
       db.payPeriods.get(input.payPeriodId),
       db.pots.get(input.potId),
+      input.fundingPotId ? db.pots.get(input.fundingPotId) : Promise.resolve(undefined),
       db.potAllocations.get(input.id),
     ])
 
@@ -1295,38 +1292,41 @@ export async function upsertPaycheckPotAllocation(input: PaycheckPotAllocationIn
       return
     }
 
-    if (!existingAllocation) {
-      await db.potAllocations.add({
+    const fundingPotId = isFundingPotEligible(fundingPot, pot.id) ? fundingPot.id : null
+    const nextAllocation: PotAllocation = {
+      ...(existingAllocation ?? {
         id: input.id,
-        payPeriodId: input.payPeriodId,
-        potId: input.potId,
-        amountPence,
-        source: 'manual',
-        recurringPaymentId: null,
         createdAt: timestamp,
-        updatedAt: timestamp,
-      })
-      await addAllocationToPot(input.potId, amountPence, timestamp)
-      return
-    }
-
-    if (existingAllocation.potId !== input.potId) {
-      await removeAllocationFromPot(existingAllocation, timestamp)
-      await addAllocationToPot(input.potId, amountPence, timestamp)
-    } else {
-      await addAllocationToPot(input.potId, amountPence - existingAllocation.amountPence, timestamp)
-    }
-
-    await db.potAllocations.put({
-      ...existingAllocation,
+      }),
+      id: input.id,
       payPeriodId: input.payPeriodId,
       potId: input.potId,
+      fundingPotId,
       amountPence,
       source: 'manual',
       recurringPaymentId: null,
       updatedAt: timestamp,
-    })
+    }
+
+    if (!existingAllocation) {
+      await db.potAllocations.add(nextAllocation)
+      await applyPotAllocationToBalances(nextAllocation, timestamp)
+      return
+    }
+
+    await removeAllocationFromPot(existingAllocation, timestamp)
+    await db.potAllocations.put(nextAllocation)
+    await applyPotAllocationToBalances(nextAllocation, timestamp)
   })
+}
+
+function isFundingPotEligible(pot: Pot | undefined | null, destinationPotId: string): pot is Pot {
+  return Boolean(
+    pot &&
+    !pot.archived &&
+    pot.id !== destinationPotId &&
+    (pot.type === 'saving' || pot.type === 'investment'),
+  )
 }
 
 export async function deletePaycheckPotAllocation(allocationId: string): Promise<void> {
@@ -1445,7 +1445,7 @@ export async function replacePlannerSnapshot(snapshot: PlannerSnapshot): Promise
       await putAll(db.recurringPayments, snapshot.recurringPayments)
       await putAll(db.payPeriods, snapshot.payPeriods)
       await putAll(db.paychecks, snapshot.paychecks)
-      await putAll(db.potAllocations, snapshot.potAllocations)
+      await putAll(db.potAllocations, snapshot.potAllocations.map(normalizePotAllocation))
       await putAll(db.transactions, snapshot.transactions)
       await putAll(db.debts, snapshot.debts)
       await putAll(db.debtPayments, snapshot.debtPayments)
@@ -1717,6 +1717,7 @@ async function recalculatePayPeriodAllocations(period: PayPeriod, timestamp: str
           period,
           allocation: {
             potId: costItem.potId,
+            fundingPotId: allocation.fundingPotId ?? null,
             amountPence: costItem.amountPence,
             recurringPaymentId: null,
           },
@@ -1738,7 +1739,7 @@ async function recalculatePayPeriodAllocations(period: PayPeriod, timestamp: str
     }
 
     await db.potAllocations.put(allocation)
-    await addAllocationToPot(allocation.potId, allocation.amountPence, timestamp)
+    await applyPotAllocationToBalances(allocation, timestamp)
   }
 }
 
@@ -1754,6 +1755,7 @@ function createRecalculatedAllocation({
   period: PayPeriod
   allocation: {
     potId: string
+    fundingPotId?: string | null
     amountPence: number
     recurringPaymentId?: string | null
   }
@@ -1765,6 +1767,7 @@ function createRecalculatedAllocation({
     id,
     payPeriodId: period.id,
     potId: allocation.potId,
+    fundingPotId: allocation.fundingPotId ?? null,
     amountPence: Math.max(0, Math.round(allocation.amountPence)),
     source,
     recurringPaymentId: allocation.recurringPaymentId ?? null,
@@ -1773,7 +1776,10 @@ function createRecalculatedAllocation({
   }
 }
 
-function applyAllocationsToPots(pots: Pot[], allocations: Array<Pick<PotAllocation, 'potId' | 'amountPence'>>): Pot[] {
+function applyAllocationsToPots(
+  pots: Pot[],
+  allocations: Array<Pick<PotAllocation, 'potId' | 'amountPence' | 'fundingPotId'>>,
+): Pot[] {
   const allocationTotalsByPot = new Map<string, number>()
 
   for (const allocation of allocations) {
@@ -1781,6 +1787,13 @@ function applyAllocationsToPots(pots: Pot[], allocations: Array<Pick<PotAllocati
       allocation.potId,
       (allocationTotalsByPot.get(allocation.potId) ?? 0) + allocation.amountPence,
     )
+
+    if (allocation.fundingPotId) {
+      allocationTotalsByPot.set(
+        allocation.fundingPotId,
+        (allocationTotalsByPot.get(allocation.fundingPotId) ?? 0) - allocation.amountPence,
+      )
+    }
   }
 
   return pots.map((pot) => ({
@@ -2154,6 +2167,13 @@ function removeAllocationsFromPotBalances(pots: Pot[], allocations: PotAllocatio
       allocation.potId,
       (allocationTotalsByPot.get(allocation.potId) ?? 0) + allocation.amountPence,
     )
+
+    if (allocation.fundingPotId) {
+      allocationTotalsByPot.set(
+        allocation.fundingPotId,
+        (allocationTotalsByPot.get(allocation.fundingPotId) ?? 0) - allocation.amountPence,
+      )
+    }
   }
 
   return pots.map((pot) => ({
@@ -2237,6 +2257,13 @@ function normalizePot(pot: Pot): Pot {
   }
 }
 
+function normalizePotAllocation(allocation: PotAllocation): PotAllocation {
+  return {
+    ...allocation,
+    fundingPotId: allocation.fundingPotId ?? null,
+  }
+}
+
 function normalizePotCategory(category?: string | null): string | null {
   const clean = category?.trim().replace(/\s+/g, ' ').slice(0, 32) ?? ''
 
@@ -2296,6 +2323,7 @@ async function reserveNewRecurringPaymentForActivePeriod(
       id: crypto.randomUUID(),
       payPeriodId: latestPeriod.id,
       potId: reserveAllocation.potId,
+      fundingPotId: null,
       amountPence: reserveAllocation.amountPence,
       source: 'recurring',
       recurringPaymentId: reserveAllocation.recurringPaymentId,
@@ -2366,6 +2394,7 @@ async function reconcileRecurringPaymentForActivePeriod(
       id: crypto.randomUUID(),
       payPeriodId: latestPeriod.id,
       potId: reserveAllocation.potId,
+      fundingPotId: null,
       amountPence: reserveAllocation.amountPence,
       source: 'recurring',
       recurringPaymentId: reserveAllocation.recurringPaymentId,
@@ -2389,6 +2418,7 @@ async function reconcileRecurringPaymentForActivePeriod(
 
   await db.potAllocations.update(existingAllocation.id, {
     potId: reserveAllocation.potId,
+    fundingPotId: null,
     amountPence: reserveAllocation.amountPence,
     source: 'recurring',
     recurringPaymentId: reserveAllocation.recurringPaymentId,
@@ -2430,10 +2460,25 @@ async function deletePayPeriodAllocations(payPeriodId: string, timestamp: string
 }
 
 async function removeAllocationFromPot(
-  allocation: Pick<PotAllocation, 'potId' | 'amountPence'>,
+  allocation: Pick<PotAllocation, 'potId' | 'amountPence' | 'fundingPotId'>,
   timestamp: string,
 ): Promise<void> {
   await addAllocationToPot(allocation.potId, -allocation.amountPence, timestamp)
+
+  if (allocation.fundingPotId) {
+    await addAllocationToPot(allocation.fundingPotId, allocation.amountPence, timestamp)
+  }
+}
+
+async function applyPotAllocationToBalances(
+  allocation: Pick<PotAllocation, 'potId' | 'amountPence' | 'fundingPotId'>,
+  timestamp: string,
+): Promise<void> {
+  await addAllocationToPot(allocation.potId, allocation.amountPence, timestamp)
+
+  if (allocation.fundingPotId) {
+    await addAllocationToPot(allocation.fundingPotId, -allocation.amountPence, timestamp)
+  }
 }
 
 async function addAllocationToPot(

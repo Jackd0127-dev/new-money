@@ -159,6 +159,93 @@ describe('paycheck plan storage', () => {
     expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
   })
 
+  it('transfers funded paycheck checklist allocations between pots and reverses them on update and delete', async () => {
+    await db.pots.bulkAdd([
+      {
+        id: 'pot-emergency',
+        name: 'Emergency savings',
+        type: 'saving',
+        balancePence: 20200,
+        targetPence: null,
+        color: '#10b981',
+        linkedCreditCardId: null,
+        linkedDebtId: null,
+        archived: false,
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+      {
+        id: 'pot-holiday',
+        name: 'Holiday fund',
+        type: 'investment',
+        balancePence: 10000,
+        targetPence: null,
+        color: '#0ea5e9',
+        linkedCreditCardId: null,
+        linkedDebtId: null,
+        archived: false,
+        createdAt: '2026-05-16T00:00:00.000Z',
+        updatedAt: '2026-05-16T00:00:00.000Z',
+      },
+    ])
+    await createPaycheckPlan({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+
+    const savedSnapshot = await getPlannerSnapshot()
+    const payPeriodId = savedSnapshot.payPeriods[0].id
+    const allocationId = `dashboard-todo-${payPeriodId}-linked-credit-card-pot-card-barclays`
+
+    await upsertPaycheckPotAllocation({
+      id: allocationId,
+      payPeriodId,
+      potId: 'pot-food',
+      fundingPotId: 'pot-emergency',
+      amountPence: 500,
+    })
+
+    let snapshot = await getPlannerSnapshot()
+    expect(snapshot.potAllocations.find((allocation) => allocation.id === allocationId)).toMatchObject({
+      potId: 'pot-food',
+      fundingPotId: 'pot-emergency',
+      amountPence: 500,
+    })
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(500)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-emergency')?.balancePence).toBe(19700)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-holiday')?.balancePence).toBe(10000)
+
+    await upsertPaycheckPotAllocation({
+      id: allocationId,
+      payPeriodId,
+      potId: 'pot-food',
+      fundingPotId: 'pot-holiday',
+      amountPence: 700,
+    })
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.potAllocations.find((allocation) => allocation.id === allocationId)).toMatchObject({
+      potId: 'pot-food',
+      fundingPotId: 'pot-holiday',
+      amountPence: 700,
+    })
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(700)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-emergency')?.balancePence).toBe(20200)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-holiday')?.balancePence).toBe(9300)
+
+    await deletePaycheckPotAllocation(allocationId)
+
+    snapshot = await getPlannerSnapshot()
+    expect(snapshot.potAllocations.some((allocation) => allocation.id === allocationId)).toBe(false)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-food')?.balancePence).toBe(0)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-emergency')?.balancePence).toBe(20200)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-holiday')?.balancePence).toBe(10000)
+  })
+
   it('updates stale dashboard card-pot allocations to the latest card forecast maths', async () => {
     vi.setSystemTime(new Date('2026-05-25T12:00:00.000Z'))
     await db.pots.clear()
@@ -177,6 +264,19 @@ describe('paycheck plan storage', () => {
       targetPence: null,
       color: '#2563eb',
       linkedCreditCardId: 'card-barclays',
+      linkedDebtId: null,
+      archived: false,
+      createdAt: '2026-05-22T00:00:00.000Z',
+      updatedAt: '2026-05-22T00:00:00.000Z',
+    })
+    await db.pots.add({
+      id: 'pot-emergency',
+      name: 'Emergency savings',
+      type: 'saving',
+      balancePence: 2150,
+      targetPence: null,
+      color: '#10b981',
+      linkedCreditCardId: null,
       linkedDebtId: null,
       archived: false,
       createdAt: '2026-05-22T00:00:00.000Z',
@@ -251,6 +351,7 @@ describe('paycheck plan storage', () => {
       id: 'dashboard-todo-period-current-linked-credit-card-pot-card-barclays',
       payPeriodId: 'period-current',
       potId: 'pot-barclays',
+      fundingPotId: 'pot-emergency',
       amountPence: 17850,
       source: 'manual',
       recurringPaymentId: null,
@@ -266,7 +367,9 @@ describe('paycheck plan storage', () => {
     )
 
     expect(allocation?.amountPence).toBe(17857)
+    expect(allocation?.fundingPotId).toBe('pot-emergency')
     expect(snapshot.pots.find((pot) => pot.id === 'pot-barclays')?.balancePence).toBe(77505)
+    expect(snapshot.pots.find((pot) => pot.id === 'pot-emergency')?.balancePence).toBe(2143)
     expect(snapshot.creditCards.find((card) => card.id === 'card-barclays')?.openingBalancePence).toBe(68005)
   })
 

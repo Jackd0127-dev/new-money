@@ -113,6 +113,7 @@ export interface PeriodCostItem {
   source: PeriodCostItemSource
   creditCardId?: string | null
   potId?: string | null
+  fundingPotId?: string | null
   createdAt?: string | null
   coverBreakdown?: LinkedCreditCardPotCoverBreakdownItem[]
 }
@@ -610,6 +611,7 @@ export function getPayPeriodCostSummary({
         source: 'pot_allocation' as const,
         creditCardId: null,
         potId: allocation.potId,
+        fundingPotId: allocation.fundingPotId ?? null,
         createdAt: allocation.createdAt,
       }
     })
@@ -827,7 +829,9 @@ function createPayPeriodCostSummaryFromItems(
   const manualSpendingPence = sumPositive(
     items.filter((item) => item.source === 'manual_spend' && !item.creditCardId),
   )
-  const potAllocationsPence = sumPositive(items.filter((item) => item.source === 'pot_allocation'))
+  const potAllocationsPence = sumPositive(
+    items.filter((item) => item.source === 'pot_allocation' && !item.fundingPotId),
+  )
   const debtReservesPence = sumPositive(items.filter((item) => item.source === 'debt_reserve'))
   const debtMinimumsPence = sumPositive(items.filter((item) => item.source === 'debt_minimum'))
   const creditCardPotsPence = sumPositive(

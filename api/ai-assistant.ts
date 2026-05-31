@@ -755,6 +755,8 @@ function compactPotAllocation(allocation: PlannerSnapshot['potAllocations'][numb
     payday: getLookupName(lookups.payPeriods, allocation.payPeriodId),
     potId: allocation.potId,
     potName: getLookupName(lookups.pots, allocation.potId),
+    fundingPotId: allocation.fundingPotId ?? null,
+    fundingPotName: getLookupName(lookups.pots, allocation.fundingPotId),
     amountPence: allocation.amountPence,
     source: allocation.source,
     recurringPaymentId: allocation.recurringPaymentId ?? null,

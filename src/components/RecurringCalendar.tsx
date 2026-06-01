@@ -111,7 +111,7 @@ export function RecurringCalendar({
             }}
           />
 
-          <div className="rounded-2xl border border-cyan-200/80 bg-[linear-gradient(135deg,#ffffff,#ecfeff)] p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)]">
+          <div className="rounded-2xl border border-cyan-200/80 bg-cyan-50 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">Payday pressure</p>
@@ -127,7 +127,7 @@ export function RecurringCalendar({
           </div>
 
           {dueBeforeNextPaydayPence > 0 && (
-            <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-4 text-sm leading-6 text-amber-900 shadow-sm shadow-amber-100/70">
+            <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900 shadow-sm shadow-amber-100/70">
               <AlertTriangle className="mt-0.5 shrink-0" size={18} />
               <p>Reserve these payments before treating pot balances as spendable.</p>
             </div>

@@ -115,7 +115,7 @@ export function AppAssistant({
         createAssistantMessage({
           role: 'assistant',
           ...createUnavailableResponse(
-            'Sign in from Settings to ask AI.',
+            `Sign in from Settings to ask ${profile.name}.`,
             'Authentication is required before any planner data is sent to an AI provider.',
             'Sign in from Settings, then ask again so I can use your synced planner data.',
           ),
@@ -169,17 +169,17 @@ export function AppAssistant({
     return (
       <button
         type="button"
-        aria-label="Open AI helper"
+        aria-label={`Open ${profile.name} helper`}
         onClick={() => setIsOpen(true)}
-        className="ai-assistant-trigger group fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-white/15 bg-[radial-gradient(circle_at_20%_20%,rgba(45,212,191,0.28),transparent_34%),linear-gradient(135deg,#020617,#0f172a)] px-4 py-3 text-sm font-semibold text-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+        className="ai-assistant-trigger group fixed bottom-[5.75rem] right-3 z-40 inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/95 px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text-primary)] shadow-[0_12px_30px_rgba(15,23,42,0.12)] backdrop-blur transition hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-emerald)] sm:right-5 sm:px-3 lg:bottom-5"
       >
-        <span className="flex size-9 items-center justify-center rounded-full bg-white text-xs font-black text-slate-950 shadow-lg shadow-cyan-950/20">
+        <span className="flex size-7 items-center justify-center rounded-full bg-[var(--color-emerald)] text-[11px] font-black text-white shadow-sm shadow-emerald-950/10">
           {profile.avatar}
         </span>
-        <span className="hidden size-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.08] text-cyan-100 transition group-hover:bg-white/[0.14] sm:flex">
+        <span className="hidden size-6 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-emerald)] transition group-hover:bg-[var(--color-accent)] sm:flex">
           <Sparkles size={15} />
         </span>
-        <span className="hidden sm:inline">Ask {profile.name}</span>
+        <span>{profile.name}</span>
       </button>
     )
   }
@@ -187,10 +187,10 @@ export function AppAssistant({
   return (
     <section
       role="dialog"
-      aria-label="AI helper"
-      className="fixed bottom-5 right-5 z-40 flex max-h-[min(660px,calc(100vh-2.5rem))] w-[min(440px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
+      aria-label={`${profile.name} helper`}
+      className="fixed inset-x-3 bottom-24 z-40 flex max-h-[min(660px,calc(100vh-7rem))] flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur sm:inset-x-auto sm:right-5 sm:w-[min(440px,calc(100vw-2.5rem))] lg:bottom-5"
     >
-      <div className="ai-assistant-header border-b border-white/15 bg-[radial-gradient(circle_at_18%_18%,rgba(34,211,238,0.24),transparent_34%),linear-gradient(135deg,#020617,#071426_52%,#172554)] p-3.5 text-white">
+      <div className="ai-assistant-header border-b border-white/10 p-3.5 text-white">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-white/95 text-xs font-black text-slate-950 shadow-lg shadow-slate-950/20">
@@ -208,7 +208,7 @@ export function AppAssistant({
           </div>
           <button
             type="button"
-            aria-label="Close AI helper"
+            aria-label={`Close ${profile.name} helper`}
             onClick={() => setIsOpen(false)}
             className="rounded-md p-2 text-slate-300 transition hover:bg-white/10 hover:text-white"
           >
@@ -223,8 +223,8 @@ export function AppAssistant({
 
       <div
         role="log"
-        aria-label="AI conversation messages"
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc,#eef5f7)] p-3"
+        aria-label={`${profile.name} conversation messages`}
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[var(--color-surface-soft)] p-3"
       >
         <div className="rounded-lg border border-slate-200/90 bg-white/95 p-3 text-sm leading-5 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
           <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-cyan-200/80 bg-cyan-50/80 px-2 py-1 text-[11px] font-semibold text-cyan-900">
@@ -255,12 +255,12 @@ export function AppAssistant({
 
       <form onSubmit={sendMessage} className="border-t border-slate-200/90 bg-white/95 p-2.5">
         <label htmlFor="app-assistant-input" className="sr-only">
-          Ask AI
+          Ask {profile.name}
         </label>
         <div className="flex items-end gap-2 rounded-lg border border-slate-200/90 bg-slate-50/80 p-2 shadow-inner shadow-slate-200/50 focus-within:border-cyan-400 focus-within:ring-4 focus-within:ring-cyan-100">
           <textarea
             id="app-assistant-input"
-            aria-label="Ask AI"
+            aria-label={`Ask ${profile.name}`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             rows={2}
@@ -271,7 +271,7 @@ export function AppAssistant({
             type="submit"
             aria-label="Send message"
             disabled={!draft.trim() || isSending}
-            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#020617,#0f172a)] text-white shadow-sm shadow-slate-300/60 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-deep-navy)] text-white shadow-sm shadow-slate-300/60 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Send size={17} />
           </button>
@@ -302,7 +302,7 @@ function ChatBubble({
         className={clsx(
           'max-w-[92%] rounded-lg px-3.5 py-3 text-sm leading-6 shadow-sm',
           isUser
-            ? 'bg-[linear-gradient(135deg,#020617,#0f172a)] text-white shadow-[0_14px_34px_rgba(15,23,42,0.16)]'
+            ? 'bg-[var(--color-deep-navy)] text-white shadow-[0_14px_34px_rgba(15,23,42,0.16)]'
             : 'border border-slate-200/90 bg-white/95 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]',
         )}
       >
@@ -354,7 +354,7 @@ function AssistantActionCard({
   const details = getAssistantActionDetails(action, snapshot)
 
   return (
-    <div className="rounded-lg border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-3 text-slate-800 shadow-sm">
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-slate-800 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-white/70 px-2 py-1 text-xs font-semibold uppercase text-emerald-700">
@@ -448,13 +448,13 @@ async function getAssistantErrorMessage(response: Response): Promise<string> {
       reason?: unknown
     }
     const parts = [
-      typeof body.error === 'string' ? body.error : `AI helper request failed with ${response.status}`,
+      typeof body.error === 'string' ? body.error : `Assistant helper request failed with ${response.status}`,
       typeof body.provider === 'string' ? `Provider: ${body.provider}` : '',
       typeof body.reason === 'string' ? body.reason : '',
     ].filter(Boolean)
 
     return parts.join(' · ')
   } catch {
-    return `AI helper request failed with ${response.status}`
+    return `Assistant helper request failed with ${response.status}`
   }
 }

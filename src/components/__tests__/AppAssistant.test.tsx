@@ -18,6 +18,32 @@ describe('AppAssistant', () => {
     restoreLocalStorage = null
   })
 
+  it('keeps the floating trigger clear of mobile bottom tabs', () => {
+    render(
+      <AppAssistant
+        snapshot={createSnapshot()}
+        activeView="dashboard"
+        selectedPayPeriod={createPayPeriod()}
+        actions={createActions()}
+        user={null}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Open Jimbo helper' })
+
+    expect(trigger).toHaveClass('bottom-[5.75rem]')
+    expect(trigger).toHaveClass('lg:bottom-5')
+    expect(trigger).not.toHaveClass('sm:bottom-5')
+    expect(trigger).toHaveClass('min-h-10')
+    expect(trigger).toHaveClass('rounded-full')
+    expect(trigger).toHaveClass('bg-white/95')
+    expect(trigger).toHaveClass('text-[var(--color-text-primary)]')
+    expect(trigger).not.toHaveClass('text-white')
+    expect(trigger.className).not.toContain('radial-gradient')
+    expect(trigger.className).not.toContain('linear-gradient')
+    expect(trigger).toHaveTextContent('Jimbo')
+  })
+
   it('opens as a pinned helper and sends the current tab, selected period, and full snapshot', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn(async () => ({
@@ -43,18 +69,18 @@ describe('AppAssistant', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
+    await user.click(screen.getByRole('button', { name: 'Open Jimbo helper' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'Jimbo helper' })
     expect(dialog).toBeInTheDocument()
-    expect(within(dialog).getAllByText('AI').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText('Jimbo').length).toBeGreaterThan(0)
     expect(screen.getByText('I can access all of your payments and give you a detailed plan depending on your needs.')).toBeInTheDocument()
     expect(screen.queryByText('New Money AI')).not.toBeInTheDocument()
     expect(screen.queryByText('Full app context, focused on your current screen.')).not.toBeInTheDocument()
     expect(screen.queryByText('Spending')).not.toBeInTheDocument()
     expect(screen.queryByText('2026-05-16 to 2026-05-29')).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Ask AI'), 'What am I looking at?')
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'What am I looking at?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -100,13 +126,13 @@ describe('AppAssistant', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask AI'), 'Can you see my app?')
+    await user.click(screen.getByRole('button', { name: 'Open Jimbo helper' }))
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'Can you see my app?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'Jimbo helper' })
 
-    expect(within(dialog).getByText(/Sign in from Settings to ask AI/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Sign in from Settings to ask Jimbo/)).toBeInTheDocument()
     expect(within(dialog).getByText(/What I’d do next: Sign in from Settings/)).toBeInTheDocument()
     expect(within(dialog).queryByText(/I can still see the local dashboard context/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/pay is/)).not.toBeInTheDocument()
@@ -137,11 +163,11 @@ describe('AppAssistant', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask AI'), 'Give me every paycheck I received.')
+    await user.click(screen.getByRole('button', { name: 'Open Jimbo helper' }))
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'Give me every paycheck I received.')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'Jimbo helper' })
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(within(dialog).getByText(/Assistant returned invalid JSON/)).toBeInTheDocument()
@@ -190,13 +216,13 @@ describe('AppAssistant', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask AI'), 'How much is in my Food pot?')
+    await user.click(screen.getByRole('button', { name: 'Open Jimbo helper' }))
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'How much is in my Food pot?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(screen.getByText(/Your Food pot has £120.00 left/)).toBeInTheDocument())
 
-    await user.type(screen.getByLabelText('Ask AI'), 'What about if I spend another tenner?')
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'What about if I spend another tenner?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
@@ -258,11 +284,11 @@ describe('AppAssistant', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask AI'), 'I spent £18.50 on lunch today from Food')
+    await user.click(screen.getByRole('button', { name: 'Open Jimbo helper' }))
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'I spent £18.50 on lunch today from Food')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'Jimbo helper' })
 
     await waitFor(() => expect(within(dialog).getByText('Suggested action')).toBeInTheDocument())
     expect(within(dialog).getByText('Log £18.50 lunch spend')).toBeInTheDocument()
@@ -328,11 +354,11 @@ describe('AppAssistant', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Open AI helper' }))
-    await user.type(screen.getByLabelText('Ask AI'), 'Make me a car insurance pot with £87.11')
+    await user.click(screen.getByRole('button', { name: 'Open Jimbo helper' }))
+    await user.type(screen.getByLabelText('Ask Jimbo'), 'Make me a car insurance pot with £87.11')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const dialog = screen.getByRole('dialog', { name: 'AI helper' })
+    const dialog = screen.getByRole('dialog', { name: 'Jimbo helper' })
 
     await waitFor(() => expect(within(dialog).getByText('Create Car Insurance pot')).toBeInTheDocument())
     expect(actions.addPot).not.toHaveBeenCalled()

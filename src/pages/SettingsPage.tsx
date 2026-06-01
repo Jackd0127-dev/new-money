@@ -72,8 +72,8 @@ export function SettingsPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <SectionGrid variant="balanced">
-        <Panel title="Pay defaults" description="These defaults speed up each payday plan." accent="blue" density="compact">
+      <SectionGrid variant="wideLeft">
+        <Panel title="Pay defaults" description="Default pay details and Jimbo preferences." accent="slate" density="compact">
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Currency">
@@ -116,14 +116,14 @@ export function SettingsPage({
                 </SelectInput>
               </Field>
             </div>
-            <div className="rounded-2xl border border-violet-200 bg-violet-50 bg-[linear-gradient(135deg,#ffffff,#f5f3ff)] p-3 shadow-sm">
+            <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3">
               <div className="flex items-start gap-3">
-                <CalendarDays className="mt-0.5 shrink-0 text-violet-700" size={18} />
+                <CalendarDays className="mt-0.5 shrink-0 text-slate-500" size={18} />
                 <div className="min-w-0 flex-1 space-y-3">
                   <div>
-                    <p className="text-sm font-semibold text-violet-950">App date</p>
-                    <p className="mt-1 text-xs leading-5 text-violet-800">
-                      Automatic uses your device date. Manual lets you simulate due dates, pay periods, and planner updates.
+                    <p className="text-sm font-semibold text-slate-950">App date</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Use automatic dates day to day. Switch to manual when checking a future pay period.
                     </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -156,7 +156,7 @@ export function SettingsPage({
             </div>
             <Field
               label="AI provider"
-              hint="Choose the AI provider used by the server."
+              hint="Used for Jimbo replies."
             >
               <SelectInput
                 aria-label="AI provider"
@@ -172,7 +172,7 @@ export function SettingsPage({
             </Field>
             <Field
               label="Custom AI instructions"
-              hint="Used for tone and preferences only. The app still owns all money calculations."
+              hint="Tone and preference notes for Jimbo."
             >
               <TextArea
                 aria-label="Custom AI instructions"
@@ -201,17 +201,17 @@ export function SettingsPage({
         <AccountPanel auth={auth} cloudSync={cloudSync} />
       </SectionGrid>
 
-      <Panel title="Update" description="Refresh saved planner data." accent="emerald" density="compact">
+      <Panel title="Update" description="Apply the latest planner updates." accent="slate" density="compact">
         <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div className="rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
+          <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-4">
             <div className="flex items-start gap-3">
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/80 text-emerald-700 shadow-sm shadow-emerald-100/60">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600">
                 <RefreshCw size={18} aria-hidden="true" />
               </span>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-950">Bring this account up to date</p>
-                <p className="mt-1 text-sm leading-5 text-emerald-800">
-                  Normalises existing pots, cards, recurring payments, and saved checklist data to the newest app shape.
+                <p className="mt-1 text-sm leading-5 text-slate-500">
+                  Checks saved planner data and applies any available updates.
                 </p>
               </div>
             </div>
@@ -222,7 +222,7 @@ export function SettingsPage({
               {updatingPlanner ? 'Updating' : 'Update'}
             </Button>
             {plannerUpdated && (
-              <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 shadow-sm shadow-emerald-100/60">
+              <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
                 <CheckCircle2 size={18} />
                 Planner updated
               </span>
@@ -346,7 +346,7 @@ function AccountPanel({
   const canChangePassword = Boolean(isSignedIn && passwordResetEmail && hasPasswordProvider(auth?.user ?? null))
 
   return (
-    <Panel title="Account" description="Manage sign-in and account actions." accent="cyan" density="compact">
+    <Panel title="Account" description="Sign-in, password, and account access." accent="slate" density="compact">
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <AccountFact label="Account" value={accountIdentifier} />
@@ -354,13 +354,13 @@ function AccountPanel({
         </div>
 
         {auth?.isLoading && (
-          <div className="rounded-2xl border border-slate-200/90 bg-white/90 p-3 text-sm text-slate-600 shadow-sm shadow-slate-200/60">
+          <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-3 text-sm text-slate-600">
             Checking account status.
           </div>
         )}
 
         {!canUseAuth && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)] p-3 text-sm leading-5 text-amber-900 shadow-sm">
+          <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-3 text-sm leading-5 text-slate-600">
             Sign-in is not configured for this build.
           </div>
         )}
@@ -416,19 +416,19 @@ function AccountPanel({
         )}
 
         {auth?.error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 text-sm leading-5 text-red-700 shadow-sm">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-5 text-red-700">
             {auth.error}
           </div>
         )}
 
         {accountError && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)] p-3 text-sm leading-5 text-red-700 shadow-sm">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-5 text-red-700">
             {accountError}
           </div>
         )}
 
         {accountMessage && (
-          <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-3 text-sm leading-5 text-emerald-800 shadow-sm">
+          <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-5 text-emerald-800">
             <CheckCircle2 className="mt-0.5 shrink-0" size={16} />
             <p>{accountMessage}</p>
           </div>
@@ -445,7 +445,8 @@ function AccountPanel({
             {busyAccountAction === 'password' ? 'Sending reset' : 'Change password'}
           </Button>
           <Button
-            variant="danger"
+            variant="secondary"
+            className="border-red-200 text-red-700 shadow-none hover:border-red-300 hover:bg-red-50 focus-visible:outline-[var(--color-danger)]"
             disabled={!isSignedIn || busyAccountAction !== null}
             onClick={() => void deleteAccount()}
           >
@@ -462,9 +463,9 @@ function AccountPanel({
           </Button>
         </div>
 
-        <div className="flex items-start gap-2 rounded-2xl border border-slate-200/80 bg-white/[0.85] p-3 text-xs leading-5 text-slate-500 shadow-sm shadow-slate-200/50">
+        <div className="flex items-start gap-2 rounded-lg border border-slate-200/80 bg-slate-50/80 p-3 text-xs leading-5 text-slate-500">
           <ShieldAlert className="mt-0.5 shrink-0" size={15} />
-          <p>Password changes are sent by email. Deleting your account removes the sign-in account; local app data on this device remains available.</p>
+          <p>Password reset uses email. Delete removes the sign-in account; your local planner data stays on this device.</p>
         </div>
       </div>
     </Panel>
@@ -473,7 +474,7 @@ function AccountPanel({
 
 function AccountFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white/[0.85] p-3 shadow-sm shadow-slate-200/50">
+    <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 break-words text-sm font-semibold text-slate-950">{value}</p>
     </div>

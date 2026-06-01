@@ -742,6 +742,9 @@ describe('paycheck plan storage', () => {
   })
 
   it('repairs duplicate recurring allocations and reverses duplicated pot balance', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-05-24T12:00:00.000Z'))
+
     const timestamp = '2026-05-22T00:00:00.000Z'
 
     await db.payPeriods.add({
@@ -930,6 +933,9 @@ describe('paycheck plan storage', () => {
   })
 
   it('logs spending against a linked credit card pot as card spend without deducting the pot', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-05-25T12:00:00.000Z'))
+
     await db.creditCards.add({
       id: 'card-barclays',
       name: 'Barclays',

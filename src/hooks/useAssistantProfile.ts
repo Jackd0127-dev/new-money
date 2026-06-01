@@ -8,8 +8,8 @@ export interface AssistantProfile {
 const assistantProfileStorageKey = 'new-money.assistant-profile.v1'
 const assistantProfileEventName = 'new-money.assistant-profile.updated'
 const defaultAssistantProfile: AssistantProfile = {
-  name: 'AI',
-  avatar: 'AI',
+  name: 'Jimbo',
+  avatar: 'J',
 }
 
 export function useAssistantProfile() {

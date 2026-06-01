@@ -19,7 +19,6 @@ import {
   Trash2,
   Utensils,
   Wallet,
-  X,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
@@ -36,8 +35,8 @@ import {
   Button,
   CalculationDetails,
   Field,
+  FormDrawer,
   Panel,
-  ProgressRail,
   SelectInput,
   TextInput,
   type CalculationBreakdown,
@@ -98,6 +97,14 @@ interface PotActivityItem {
   amountPence: number
 }
 
+interface PotsSummary {
+  totalPence: number
+  spendingPence: number
+  savingsPence: number
+  reservedCardPence: number
+  activePotCount: number
+}
+
 const emptyPotForm = (): PotFormState => ({
   name: '',
   type: 'spending',
@@ -129,6 +136,7 @@ export function PotsPage({
   const [openPotId, setOpenPotId] = useState<string | null>(null)
   const [editingPotId, setEditingPotId] = useState<string | null>(null)
   const [localCreateModalOpen, setLocalCreateModalOpen] = useState(false)
+  const [isTopUpDrawerOpen, setIsTopUpDrawerOpen] = useState(false)
   const [activeCategory, setActiveCategory] = useState<string>(customCategoryAll)
   const [isAddingCategory, setIsAddingCategory] = useState(false)
   const [newCategory, setNewCategory] = useState('')
@@ -136,10 +144,12 @@ export function PotsPage({
   const [topUpPotId, setTopUpPotId] = useState('')
   const [topUpAmount, setTopUpAmount] = useState('')
   const activePots = snapshot.pots.filter((pot) => !pot.archived)
+  const potsSummary = useMemo(() => getPotsSummary(activePots), [activePots])
   const categoryOptions = useMemo(() => getPotCategoryOptions(activePots, customCategories), [activePots, customCategories])
   const visiblePots = activePots.filter((pot) => isPotInCategory(pot, activeCategory))
   const isCreateOpen = isCreateModalOpen ?? localCreateModalOpen
   const setCreateOpen = onCreateModalOpenChange ?? setLocalCreateModalOpen
+  const detailPot = activePots.find((pot) => pot.id === openPotId) ?? null
   const topUpAmountPence = parsePoundsToPence(topUpAmount)
   const canTopUpPot = Boolean(selectedPayPeriod && topUpPotId && topUpAmountPence > 0)
   const canSaveCreatePot = canSubmitPotForm(createForm, snapshot)
@@ -209,9 +219,20 @@ export function PotsPage({
     setCreateForm(emptyPotForm())
   }
 
+  function closeCreateDrawer() {
+    resetCreateForm()
+    setCreateOpen(false)
+  }
+
   function closeEditModal() {
     setEditingPotId(null)
     setEditForm(null)
+  }
+
+  function closeTopUpDrawer() {
+    setTopUpPotId('')
+    setTopUpAmount('')
+    setIsTopUpDrawerOpen(false)
   }
 
   function submitCustomCategory() {
@@ -240,7 +261,7 @@ export function PotsPage({
       amountPence: topUpAmountPence,
     })
 
-    setTopUpAmount('')
+    closeTopUpDrawer()
   }
 
   async function deleteTopUp(allocationId: string) {
@@ -248,14 +269,197 @@ export function PotsPage({
   }
 
   return (
-    <div className="min-w-0 space-y-6">
+    <div className="min-w-0 space-y-4">
+      <PotsSummaryHeader summary={potsSummary} />
+
       <Panel
-        title="Top up pots"
-        description={selectedPayPeriod ? `Comes out of ${selectedPayPeriod.payday} pay.` : 'Create a paycheck first.'}
+        title="Top-up history"
+        description={selectedPayPeriod ? `Manual top-ups from the ${selectedPayPeriod.payday} paycheck.` : 'Choose a paycheck to see top-ups.'}
         accent="emerald"
         density="compact"
+        action={
+          <Button onClick={() => setIsTopUpDrawerOpen(true)} disabled={!selectedPayPeriod || activePots.length === 0}>
+            <Plus size={18} />
+            Top up pot
+          </Button>
+        }
       >
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Manual entries</h3>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {selectedPayPeriod ? `From the ${selectedPayPeriod.payday} paycheck.` : 'Choose a paycheck to see top-ups.'}
+            </p>
+          </div>
+          {topUpHistory.length > 0 && (
+            <span className="rounded-[var(--radius-control)] border border-[color:rgba(20,122,85,0.22)] bg-[rgba(20,122,85,0.08)] px-2.5 py-1 text-xs font-semibold text-[var(--color-success)]">
+              {formatPence(topUpHistory.reduce((total, item) => total + item.allocation.amountPence, 0))}
+            </span>
+          )}
+        </div>
+        {topUpHistory.length > 0 ? (
+          <div className="mt-3 divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            {topUpHistory.map(({ allocation, pot }) => {
+              const potName = pot?.name ?? 'Deleted pot'
+
+              return (
+                <div key={allocation.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-[var(--color-surface-soft)]">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{potName}</p>
+                    <p className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
+                      Added {formatTopUpDate(allocation.createdAt)}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">{formatPence(allocation.amountPence)}</p>
+                  <button
+                    type="button"
+                    onClick={() => void deleteTopUp(allocation.id)}
+                    aria-label={`Delete ${potName} top-up`}
+                    title={`Delete ${potName} top-up`}
+                    className="inline-flex size-7 items-center justify-center rounded-md border border-[color:rgba(177,58,50,0.22)] bg-[rgba(177,58,50,0.06)] text-[var(--color-danger)] transition hover:-translate-y-0.5 hover:bg-[rgba(177,58,50,0.1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-danger)]"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-2 text-sm text-[var(--color-text-muted)]">
+            No manual top-ups for this paycheck yet.
+          </p>
+        )}
+      </Panel>
+
+      <Panel
+        title="Pots"
+        description="Click a pot to see spending, recurring payments, and allocations tied to it."
+        accent="blue"
+        density="compact"
+        action={
+          onCreateModalOpenChange ? undefined : (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus size={18} />
+              Create pot
+            </Button>
+          )
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {categoryOptions.map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => setActiveCategory(category)}
+                className={clsx(
+                  'inline-flex min-h-9 items-center justify-center rounded-[var(--radius-control)] border px-3 text-sm font-semibold transition',
+                  activeCategory === category
+                    ? 'border-[var(--color-deep-navy)] bg-[var(--color-deep-navy)] text-white'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]',
+                )}
+              >
+                {category}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Add pot category"
+              onClick={() => setIsAddingCategory((current) => !current)}
+              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] transition hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+
+          {isAddingCategory && (
+            <div className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-3 sm:flex-row">
+              <TextInput
+                value={newCategory}
+                onChange={(event) => setNewCategory(event.target.value)}
+                placeholder="New section name"
+                aria-label="New pot category"
+              />
+              <Button onClick={submitCustomCategory}>Add section</Button>
+            </div>
+          )}
+
+          <section aria-label="Pot grid" className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {visiblePots.map((pot) => {
+              const activityItems = getPotActivityItems(pot.id, snapshot)
+              const progress = getPotProgress(pot, snapshot, today)
+
+              return (
+                <PotCard
+                  key={pot.id}
+                  pot={pot}
+                  progress={progress}
+                  activityItems={activityItems}
+                  today={today}
+                  onViewDetails={() => setOpenPotId(pot.id)}
+                  onEdit={() => startEditingPot(pot.id)}
+                  onDelete={() => {
+                    if (window.confirm(`Delete ${pot.name}?`)) {
+                      void actions.deletePot(pot.id)
+                    }
+                  }}
+                />
+              )
+            })}
+
+            {visiblePots.length === 0 && (
+              <div className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-soft)] p-6 text-center sm:col-span-2 xl:col-span-3 2xl:col-span-4">
+                <p className="text-base font-semibold text-[var(--color-text-primary)]">No pots yet.</p>
+                <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">Create a pot to separate spending, savings, or reserved money.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      </Panel>
+
+      <FormDrawer
+        open={isCreateOpen}
+        title="Create pot"
+        description="Add money you already set aside, then linked payments can spend from that pot when due."
+        closeLabel="Close create pot"
+        onClose={closeCreateDrawer}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeCreateDrawer}>
+              Cancel
+            </Button>
+            <Button onClick={submitPot} disabled={!canSaveCreatePot}>Add pot</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <PotFormFields
+            form={createForm}
+            snapshot={snapshot}
+            categoryOptions={categoryOptions}
+            onChange={setCreateForm}
+          />
+        </div>
+      </FormDrawer>
+
+      <FormDrawer
+        open={isTopUpDrawerOpen}
+        title="Top up pot"
+        description={selectedPayPeriod ? `Add a manual top-up from the ${selectedPayPeriod.payday} paycheck.` : 'Create a paycheck first.'}
+        closeLabel="Close top up pot"
+        onClose={closeTopUpDrawer}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeTopUpDrawer}>
+              Cancel
+            </Button>
+            <Button onClick={submitPotTopUp} disabled={!canTopUpPot}>
+              Top up pot
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
           <Field label="Pot to top up">
             <SelectInput value={topUpPotId} onChange={(event) => setTopUpPotId(event.target.value)}>
               <option value="">Choose pot</option>
@@ -274,229 +478,110 @@ export function PotsPage({
               placeholder="25.00"
             />
           </Field>
-          <div className="flex items-end">
-            <Button onClick={submitPotTopUp} disabled={!canTopUpPot}>
-              <Plus size={18} />
-              Top up pot
-            </Button>
-          </div>
         </div>
-        <div className="mt-4 border-t border-slate-100 pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-950">Top-up history</h3>
-              <p className="mt-1 text-xs text-slate-500">
-                {selectedPayPeriod ? `From the ${selectedPayPeriod.payday} paycheck.` : 'Choose a paycheck to see top-ups.'}
-              </p>
-            </div>
-            {topUpHistory.length > 0 && (
-              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                {formatPence(topUpHistory.reduce((total, item) => total + item.allocation.amountPence, 0))}
-              </span>
-            )}
-          </div>
-          {topUpHistory.length > 0 ? (
-            <div className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
-              {topUpHistory.map(({ allocation, pot }) => {
-                const potName = pot?.name ?? 'Deleted pot'
-
-                return (
-                  <div key={allocation.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-slate-50/80">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-950">{potName}</p>
-                      <p className="mt-0.5 truncate text-xs text-slate-500">
-                        Added {formatTopUpDate(allocation.createdAt)}
-                      </p>
-                    </div>
-                    <p className="text-sm font-semibold text-slate-950">{formatPence(allocation.amountPence)}</p>
-                    <button
-                      type="button"
-                      onClick={() => void deleteTopUp(allocation.id)}
-                      aria-label={`Delete ${potName} top-up`}
-                      title={`Delete ${potName} top-up`}
-                      className="inline-flex size-8 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <p className="mt-3 rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 px-3 py-2 text-sm text-slate-500">
-              No manual top-ups for this paycheck yet.
-            </p>
-          )}
-        </div>
-      </Panel>
-
-      <Panel
-        title="Pots"
-        description="Click a pot to see spending, recurring payments, and allocations tied to it."
-        accent="blue"
-        density="compact"
-        action={
-          onCreateModalOpenChange ? undefined : (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus size={18} />
-              Create pot
-            </Button>
-          )
-        }
-      >
-        <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {categoryOptions.map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => setActiveCategory(category)}
-                  className={clsx(
-                    'inline-flex min-h-10 items-center justify-center rounded-xl border px-4 text-sm font-semibold transition',
-                    activeCategory === category
-                      ? 'border-blue-600 bg-blue-600 bg-[linear-gradient(135deg,#2563eb,#0891b2)] text-white shadow-sm shadow-blue-600/25'
-                      : 'border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white',
-                  )}
-                >
-                  {category}
-                </button>
-              ))}
-              <button
-                type="button"
-                aria-label="Add pot category"
-                onClick={() => setIsAddingCategory((current) => !current)}
-                className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200/90 bg-white/90 text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
-              >
-                <Plus size={16} />
-              </button>
-            </div>
-
-            {isAddingCategory && (
-              <div className="flex flex-col gap-2 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-3 shadow-inner shadow-slate-200/60 sm:flex-row">
-                <TextInput
-                  value={newCategory}
-                  onChange={(event) => setNewCategory(event.target.value)}
-                  placeholder="New section name"
-                  aria-label="New pot category"
-                />
-                <Button onClick={submitCustomCategory}>Add section</Button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              {visiblePots.map((pot) => {
-                const isOpen = openPotId === pot.id
-                const activityItems = getPotActivityItems(pot.id, snapshot)
-                const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
-                const progress = getPotProgress(pot, snapshot, today)
-
-                return (
-                  <PotCard
-                    key={pot.id}
-                    pot={pot}
-                    progress={progress}
-                    activityItems={activityItems}
-                    linkedRecurringPayments={linkedRecurringPayments}
-                    today={today}
-                    isOpen={isOpen}
-                    onToggle={() => setOpenPotId(isOpen ? null : pot.id)}
-                    onEdit={() => startEditingPot(pot.id)}
-                    onDelete={() => {
-                      if (window.confirm(`Delete ${pot.name}?`)) {
-                        void actions.deletePot(pot.id)
-                      }
-                    }}
-                  />
-                )
-              })}
-
-              {visiblePots.length === 0 && (
-                <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500 sm:col-span-2 lg:col-span-3 2xl:col-span-4">
-                  No pots in this section yet.
-                </p>
-              )}
-            </div>
-          </div>
-      </Panel>
-
-      {isCreateOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Create pot"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
-          >
-            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h2 className="text-base font-semibold text-slate-950">Create pot</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Add money you already set aside, then linked payments can spend from that pot when due.
-                </p>
-              </div>
-              <Button variant="ghost" onClick={() => setCreateOpen(false)} aria-label="Close create pot">
-                <X size={18} />
-              </Button>
-            </div>
-            <div className="space-y-4">
-              <PotFormFields
-                form={createForm}
-                snapshot={snapshot}
-                categoryOptions={categoryOptions}
-                onChange={setCreateForm}
-              />
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={submitPot} disabled={!canSaveCreatePot}>Add pot</Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    resetCreateForm()
-                    setCreateOpen(false)
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </FormDrawer>
 
       {editingPotId && editForm && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Edit pot"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/[0.96] p-5 shadow-[0_26px_80px_rgba(15,23,42,0.22)] backdrop-blur"
-          >
-            <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h2 className="text-base font-semibold text-slate-950">Edit pot</h2>
-                <p className="mt-1 text-sm text-slate-500">Update this pot without replacing the create form.</p>
-              </div>
-              <Button variant="ghost" onClick={closeEditModal} aria-label="Close edit pot">
-                <X size={18} />
+        <FormDrawer
+          open
+          title="Edit pot"
+          description="Update this pot without replacing the create form."
+          closeLabel="Close edit pot"
+          onClose={closeEditModal}
+          footer={
+            <>
+              <Button variant="secondary" onClick={closeEditModal}>
+                Cancel
               </Button>
-            </div>
-            <div className="space-y-4">
-              <PotFormFields
-                form={editForm}
-                snapshot={snapshot}
-                categoryOptions={categoryOptions}
-                onChange={setEditForm}
-              />
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={submitEditedPot} disabled={!canSaveEditPot}>Save pot</Button>
-                <Button variant="secondary" onClick={closeEditModal}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
+              <Button onClick={submitEditedPot} disabled={!canSaveEditPot}>Save pot</Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <PotFormFields
+              form={editForm}
+              snapshot={snapshot}
+              categoryOptions={categoryOptions}
+              onChange={setEditForm}
+            />
           </div>
-        </div>
+        </FormDrawer>
       )}
+
+      <PotDetailDrawer
+        pot={detailPot}
+        snapshot={snapshot}
+        today={today}
+        onClose={() => setOpenPotId(null)}
+      />
     </div>
+  )
+}
+
+function getPotsSummary(pots: Pot[]): PotsSummary {
+  return pots.reduce<PotsSummary>(
+    (summary, pot) => {
+      const balancePence = pot.balancePence
+
+      summary.totalPence += balancePence
+      summary.activePotCount += 1
+
+      if (pot.type === 'spending') {
+        summary.spendingPence += balancePence
+      }
+
+      if (isSavingsPotType(pot.type)) {
+        summary.savingsPence += balancePence
+      }
+
+      if (pot.type === 'reserved' || pot.linkedCreditCardId) {
+        summary.reservedCardPence += balancePence
+      }
+
+      return summary
+    },
+    {
+      totalPence: 0,
+      spendingPence: 0,
+      savingsPence: 0,
+      reservedCardPence: 0,
+      activePotCount: 0,
+    },
+  )
+}
+
+function PotsSummaryHeader({ summary }: { summary: PotsSummary }) {
+  return (
+    <section
+      aria-label="Pots summary"
+      className="fintech-surface relative max-w-full min-w-0 overflow-hidden rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]"
+    >
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[var(--color-emerald)]" aria-hidden="true" />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[var(--color-emerald)]">
+            <PiggyBank size={18} aria-hidden="true" />
+            <h1 className="text-2xl font-semibold leading-8 text-[var(--color-text-primary)] md:text-3xl md:leading-10">Pots</h1>
+          </div>
+          <p className="mt-2 max-w-2xl text-sm leading-5 text-[var(--color-text-muted)]">
+            {summary.activePotCount > 0
+              ? `${summary.activePotCount} active pot${summary.activePotCount === 1 ? '' : 's'} across spending, savings, and reserves.`
+              : 'No active pots yet.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        <span className="inline-flex min-h-9 items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 text-sm font-semibold text-[var(--color-text-primary)]">
+          <Wallet size={15} aria-hidden="true" />
+          Total in pots
+          <strong>{formatPence(summary.totalPence)}</strong>
+        </span>
+        <span className="inline-flex min-h-9 items-center rounded-[var(--radius-pill)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm font-semibold text-[var(--color-text-secondary)]">
+          {summary.activePotCount} active pot{summary.activePotCount === 1 ? '' : 's'}
+        </span>
+      </div>
+    </section>
   )
 }
 
@@ -504,20 +589,16 @@ function PotCard({
   pot,
   progress,
   activityItems,
-  linkedRecurringPayments,
   today,
-  isOpen,
-  onToggle,
+  onViewDetails,
   onEdit,
   onDelete,
 }: {
   pot: Pot
   progress: PotProgress
   activityItems: PotActivityItem[]
-  linkedRecurringPayments: RecurringPayment[]
   today: string
-  isOpen: boolean
-  onToggle: () => void
+  onViewDetails: () => void
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -526,42 +607,39 @@ function PotCard({
   const dueLabel = getPotDueLabel(progress, today)
   const sourceLabels = progress.sourceLabels.slice(0, 2)
   const hiddenSourceLabelCount = Math.max(0, progress.sourceLabels.length - sourceLabels.length)
+  const previewActivity = activityItems[0] ?? null
 
   return (
-    <div
+    <article
+      role="article"
+      aria-label={`${pot.name} pot card`}
       data-testid="pot-card"
-      className={clsx(
-        'flex flex-col rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_18px_48px_rgba(15,23,42,0.065)] transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_24px_58px_rgba(15,23,42,0.1)]',
-        isOpen ? 'min-h-[330px]' : 'h-[330px]',
-      )}
+      className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-none transition hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-soft)]"
     >
-      <div className="flex min-h-[64px] items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <button
           type="button"
-          onClick={onToggle}
-          aria-expanded={isOpen}
-          aria-label={`${isOpen ? 'Hide' : 'View'} ${pot.name} activity`}
-          className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-start gap-3 rounded-xl text-left outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+          onClick={onViewDetails}
+          aria-label={`View ${pot.name} details`}
+          className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-start gap-3 rounded-[var(--radius-control)] text-left outline-none focus-visible:ring-4 focus-visible:ring-[rgba(11,61,46,0.12)]"
         >
           <span
-            className="flex size-14 shrink-0 items-center justify-center rounded-xl shadow-sm"
-            style={{
-              backgroundColor: withAlpha(pot.color, 0.14),
-              color: pot.color,
-            }}
+            className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-emerald)]"
           >
-            <Icon size={26} strokeWidth={2.4} />
+            <Icon size={19} strokeWidth={2.2} />
           </span>
-          <span className="min-w-0 pt-2">
-            <span className="block truncate text-base font-semibold text-slate-950">{pot.name}</span>
-            <span className="mt-0.5 block truncate text-sm text-slate-500">{getPotCategory(pot)}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-[var(--color-text-primary)]">{pot.name}</span>
+            <span className="mt-1 inline-flex rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-text-secondary)]">
+              {formatPotTypeLabel(pot.type)}
+            </span>
           </span>
         </button>
 
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className="inline-flex size-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100/90 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            className="inline-flex size-7 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] transition hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-emerald)]"
             onClick={onEdit}
             aria-label={`Edit ${pot.name}`}
             title={`Edit ${pot.name}`}
@@ -570,7 +648,7 @@ function PotCard({
           </button>
           <button
             type="button"
-            className="inline-flex size-7 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+            className="inline-flex size-7 items-center justify-center rounded-md border border-[color:rgba(177,58,50,0.22)] bg-[rgba(177,58,50,0.06)] text-[var(--color-danger)] transition hover:-translate-y-0.5 hover:bg-[rgba(177,58,50,0.1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-danger)]"
             onClick={onDelete}
             aria-label={`Delete ${pot.name}`}
             title={`Delete ${pot.name}`}
@@ -580,101 +658,179 @@ function PotCard({
         </div>
       </div>
 
-      <p className="mt-5 text-3xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(pot.balancePence)}</p>
+      <p className="mt-4 text-2xl font-semibold leading-7 text-[var(--color-text-primary)]">{formatPence(pot.balancePence)}</p>
 
-      <div className="mt-4">
-        <ProgressRail percent={progress.targetPence > 0 ? progress.percent : 0} color={pot.color} />
-        <div className="mt-3 flex items-center justify-between gap-3 text-sm">
-          <span className="font-semibold" style={{ color: pot.color }}>
-            {progress.targetPence > 0 ? `${progress.percent}%` : '0%'}
-          </span>
-          <span className="min-w-0 truncate text-right text-slate-500" title={progress.targetLabel}>
-            {progress.targetLabel}
-          </span>
-        </div>
+      <div className="mt-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-3">
+        {progress.targetPence > 0 ? (
+          <>
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-semibold text-[var(--color-emerald)]">{progress.percent}%</span>
+              <span className="min-w-0 truncate text-right text-[var(--color-text-muted)]" title={progress.targetLabel}>
+                {progress.targetLabel}
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]" aria-hidden="true">
+              <div
+                className="h-full rounded-full bg-[var(--color-emerald)]"
+                style={{ width: `${Math.min(progress.percent, 100)}%` }}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-semibold text-[var(--color-text-secondary)]">No target</span>
+            <span className="min-w-0 truncate text-right text-[var(--color-text-muted)]">Balance only</span>
+          </div>
+        )}
       </div>
 
-      <div className="mt-auto pt-4">
-        <div className="min-h-12">
+      <div className="mt-3 grid gap-2 text-xs">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-semibold text-[var(--color-text-secondary)]">{getActivityCountLabel(activityItems.length)}</span>
+          {previewActivity && (
+            <span className={clsx('font-semibold', previewActivity.amountPence < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-success)]')}>
+              {formatSignedPence(previewActivity.amountPence)}
+            </span>
+          )}
+        </div>
+        <p className="truncate text-[var(--color-text-muted)]" title={previewActivity?.title ?? 'No recent activity'}>
+          {previewActivity?.title ?? 'No recent activity'}
+        </p>
+      </div>
+
+      {(dueLabel || sourceLabels.length > 0) && (
+        <div className="mt-3 space-y-2">
           {dueLabel && (
-            <div
-              className="truncate rounded-xl px-3 py-2 text-sm font-medium"
-              style={{
-                backgroundColor: withAlpha(pot.color, 0.1),
-                color: pot.color,
-              }}
-              title={dueLabel}
-            >
+            <div className="truncate rounded-[var(--radius-control)] border border-[color:rgba(183,121,31,0.22)] bg-[rgba(183,121,31,0.08)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-warning)]" title={dueLabel}>
               {dueLabel}
             </div>
           )}
-        </div>
 
-        <div className="mt-2 flex min-h-7 flex-nowrap gap-1.5 overflow-hidden">
-          {sourceLabels.map((label) => (
-            <span
-              key={label}
-              className="max-w-[9rem] truncate rounded-full border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-medium text-slate-600"
-              title={label}
-            >
-              {label}
-            </span>
-          ))}
-          {hiddenSourceLabelCount > 0 && (
-            <span className="shrink-0 rounded-full border border-slate-200/80 bg-white/80 px-2 py-1 text-xs font-medium text-slate-600">
-              +{hiddenSourceLabelCount}
-            </span>
+          {sourceLabels.length > 0 && (
+            <div className="flex min-h-7 flex-nowrap gap-1.5 overflow-hidden">
+              {sourceLabels.map((label) => (
+                <span
+                  key={label}
+                  className="max-w-[9rem] truncate rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)]"
+                  title={label}
+                >
+                  {label}
+                </span>
+              ))}
+              {hiddenSourceLabelCount > 0 && (
+                <span className="shrink-0 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)]">
+                  +{hiddenSourceLabelCount}
+                </span>
+              )}
+            </div>
           )}
         </div>
-      </div>
+      )}
 
-      {isOpen && (
-        <div role="region" aria-label={`${pot.name} activity`} className="mt-4 border-t border-slate-100 pt-4">
-          <CalculationDetails breakdown={getPotBalanceBreakdown(pot.id, pot.balancePence, activityItems)} />
+    </article>
+  )
+}
+
+function PotDetailDrawer({
+  pot,
+  snapshot,
+  today,
+  onClose,
+}: {
+  pot: Pot | null
+  snapshot: PlannerSnapshot
+  today: string
+  onClose: () => void
+}) {
+  if (!pot) {
+    return null
+  }
+
+  const activityItems = getPotActivityItems(pot.id, snapshot)
+  const linkedRecurringPayments = getPotLinkedRecurringPayments(pot.id, snapshot)
+  const progress = getPotProgress(pot, snapshot, today)
+  const dueLabel = getPotDueLabel(progress, today)
+
+  return (
+    <FormDrawer
+      open
+      title={`${pot.name} pot details`}
+      description={`${formatPence(pot.balancePence)} saved in ${formatPotTypeLabel(pot.type).toLowerCase()} money.`}
+      closeLabel={`Close ${pot.name} pot details`}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <CompactPotDetail label="Balance" value={formatPence(pot.balancePence)} />
+          <CompactPotDetail label="Target" value={progress.targetPence > 0 ? progress.targetLabel : 'No target'} />
+          <CompactPotDetail label="Progress" value={progress.targetPence > 0 ? `${progress.percent}%` : 'Balance only'} />
+          <CompactPotDetail label="Type" value={formatPotTypeLabel(pot.type)} />
+        </div>
+
+        {dueLabel && (
+          <p className="rounded-[var(--radius-card)] border border-[color:rgba(183,121,31,0.22)] bg-[rgba(183,121,31,0.08)] p-3 text-sm font-semibold text-[var(--color-warning)]">
+            {dueLabel}
+          </p>
+        )}
+
+        <CalculationDetails breakdown={getPotBalanceBreakdown(pot.id, pot.balancePence, activityItems)} />
+
+        <section aria-label={`${pot.name} activity`} className="space-y-2">
+          <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Activity</h3>
           {activityItems.length > 0 ? (
-            <div className="mt-3 space-y-2">
+            <div className="space-y-2">
               {activityItems.map((item) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2 shadow-sm shadow-slate-200/50"
+                  className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-2"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-950">{item.title}</p>
-                    <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                    <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{item.title}</p>
+                    <p className="mt-1 text-xs text-[var(--color-text-muted)]">{item.detail}</p>
                   </div>
-                  <p className={clsx('text-sm font-semibold', item.amountPence < 0 ? 'text-red-700' : 'text-emerald-700')}>
+                  <p className={clsx('text-sm font-semibold', item.amountPence < 0 ? 'text-[var(--color-danger)]' : 'text-[var(--color-success)]')}>
                     {formatSignedPence(item.amountPence)}
                   </p>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
+            <p className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-soft)] p-3 text-sm text-[var(--color-text-muted)]">
               No activity recorded for this pot yet.
             </p>
           )}
-          {linkedRecurringPayments.length > 0 && (
-            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
-              <div className="border-b border-slate-100 px-3 py-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked recurring payments</p>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {linkedRecurringPayments.map((payment) => (
-                  <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-950">{payment.name}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {payment.frequency} · due day {payment.dueDay ?? 'set date'}
-                      </p>
-                    </div>
-                    <p className="text-sm font-semibold text-slate-950">{formatPence(payment.amountPence)}</p>
-                  </div>
-                ))}
-              </div>
+        </section>
+
+        {linkedRecurringPayments.length > 0 && (
+          <section aria-label={`${pot.name} linked recurring payments`} className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="border-b border-[var(--color-border)] px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Linked recurring payments</p>
             </div>
-          )}
-        </div>
-      )}
+            <div className="divide-y divide-[var(--color-border)]">
+              {linkedRecurringPayments.map((payment) => (
+                <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{payment.name}</p>
+                    <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                      {payment.frequency} · due day {payment.dueDay ?? 'set date'}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">{formatPence(payment.amountPence)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </FormDrawer>
+  )
+}
+
+function CompactPotDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-[var(--color-text-primary)]">{value}</p>
     </div>
   )
 }
@@ -951,6 +1107,38 @@ function getPotLinkType(pot: Pot): PotLinkType {
   }
 
   return 'none'
+}
+
+function isSavingsPotType(type: PotType): boolean {
+  return type === 'saving' || type === 'investment' || type === 'buffer'
+}
+
+function formatPotTypeLabel(type: PotType): string {
+  if (type === 'saving') {
+    return 'Saving'
+  }
+
+  if (type === 'reserved') {
+    return 'Reserved'
+  }
+
+  if (type === 'investment') {
+    return 'Investment'
+  }
+
+  if (type === 'buffer') {
+    return 'Buffer'
+  }
+
+  return 'Spending'
+}
+
+function getActivityCountLabel(count: number): string {
+  if (count === 0) {
+    return 'No activity'
+  }
+
+  return `${count} activit${count === 1 ? 'y' : 'ies'}`
 }
 
 function getPotProgress(pot: Pot, snapshot: PlannerSnapshot, today: string): PotProgress {
@@ -1325,20 +1513,6 @@ function isoDateToUtcMillis(value: string): number {
   const [year, month, day] = value.split('-').map(Number)
 
   return Date.UTC(year, month - 1, day)
-}
-
-function withAlpha(color: string, alpha: number): string {
-  const hex = color.replace('#', '')
-
-  if (!/^[\da-f]{6}$/i.test(hex)) {
-    return color
-  }
-
-  const red = parseInt(hex.slice(0, 2), 16)
-  const green = parseInt(hex.slice(2, 4), 16)
-  const blue = parseInt(hex.slice(4, 6), 16)
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
 function formatTransactionType(type: Transaction['type']): string {

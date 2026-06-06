@@ -1,0 +1,637 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000101 /* NewMoneyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000201 /* NewMoneyApp.swift */; };
+		100000000000000000000102 /* AppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000202 /* AppView.swift */; };
+		100000000000000000000103 /* FinanceEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000203 /* FinanceEngineTests.swift */; };
+		100000000000000000000104 /* PlannerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000206 /* PlannerModels.swift */; };
+		100000000000000000000105 /* MoneyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000207 /* MoneyParser.swift */; };
+		100000000000000000000106 /* FinanceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000208 /* FinanceEngine.swift */; };
+		100000000000000000000107 /* DateUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000209 /* DateUtilities.swift */; };
+		100000000000000000000108 /* DefaultData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000210 /* DefaultData.swift */; };
+		100000000000000000000109 /* PlannerRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000211 /* PlannerRepository.swift */; };
+		100000000000000000000110 /* PlannerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000212 /* PlannerStore.swift */; };
+		100000000000000000000111 /* ServicePlaceholders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000213 /* ServicePlaceholders.swift */; };
+		100000000000000000000112 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000214 /* AppTheme.swift */; };
+		100000000000000000000113 /* AppComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000215 /* AppComponents.swift */; };
+		100000000000000000000114 /* PlannerDerivedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000216 /* PlannerDerivedData.swift */; };
+		100000000000000000000115 /* ScreenComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000217 /* ScreenComponents.swift */; };
+		100000000000000000000116 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000218 /* DashboardView.swift */; };
+		100000000000000000000117 /* PaydayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000219 /* PaydayView.swift */; };
+		100000000000000000000118 /* PotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000220 /* PotsView.swift */; };
+		100000000000000000000119 /* CardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000221 /* CardsView.swift */; };
+		100000000000000000000120 /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* MoreView.swift */; };
+		100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* SecondaryFeatureViews.swift */; };
+		100000000000000000000122 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		100000000000000000000301 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000401;
+			remoteInfo = NewMoneyIPhone;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000201 /* NewMoneyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMoneyApp.swift; sourceTree = "<group>"; };
+		100000000000000000000202 /* AppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppView.swift; sourceTree = "<group>"; };
+		100000000000000000000203 /* FinanceEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceEngineTests.swift; sourceTree = "<group>"; };
+		100000000000000000000204 /* NewMoneyIPhone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NewMoneyIPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000205 /* NewMoneyIPhoneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NewMoneyIPhoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000206 /* PlannerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerModels.swift; sourceTree = "<group>"; };
+		100000000000000000000207 /* MoneyParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyParser.swift; sourceTree = "<group>"; };
+		100000000000000000000208 /* FinanceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceEngine.swift; sourceTree = "<group>"; };
+		100000000000000000000209 /* DateUtilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateUtilities.swift; sourceTree = "<group>"; };
+		100000000000000000000210 /* DefaultData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultData.swift; sourceTree = "<group>"; };
+		100000000000000000000211 /* PlannerRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerRepository.swift; sourceTree = "<group>"; };
+		100000000000000000000212 /* PlannerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerStore.swift; sourceTree = "<group>"; };
+		100000000000000000000213 /* ServicePlaceholders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicePlaceholders.swift; sourceTree = "<group>"; };
+		100000000000000000000214 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		100000000000000000000215 /* AppComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppComponents.swift; sourceTree = "<group>"; };
+		100000000000000000000216 /* PlannerDerivedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerDerivedData.swift; sourceTree = "<group>"; };
+		100000000000000000000217 /* ScreenComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenComponents.swift; sourceTree = "<group>"; };
+		100000000000000000000218 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		100000000000000000000219 /* PaydayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaydayView.swift; sourceTree = "<group>"; };
+		100000000000000000000220 /* PotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PotsView.swift; sourceTree = "<group>"; };
+		100000000000000000000221 /* CardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardsView.swift; sourceTree = "<group>"; };
+		100000000000000000000222 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
+		100000000000000000000223 /* SecondaryFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryFeatureViews.swift; sourceTree = "<group>"; };
+		100000000000000000000224 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000501 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000502 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000601 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000602 /* NewMoney */,
+				100000000000000000000603 /* NewMoneyTests */,
+				100000000000000000000604 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000602 /* NewMoney */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000605 /* App */,
+				100000000000000000000606 /* Models */,
+				100000000000000000000607 /* Domain */,
+				100000000000000000000608 /* Data */,
+				100000000000000000000609 /* Utilities */,
+				100000000000000000000610 /* Theme */,
+				100000000000000000000611 /* Components */,
+				100000000000000000000612 /* Services */,
+				100000000000000000000613 /* Features */,
+				100000000000000000000224 /* Assets.xcassets */,
+			);
+			path = NewMoney;
+			sourceTree = "<group>";
+		};
+		100000000000000000000603 /* NewMoneyTests */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000203 /* FinanceEngineTests.swift */,
+			);
+			path = NewMoneyTests;
+			sourceTree = "<group>";
+		};
+		100000000000000000000604 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000204 /* NewMoneyIPhone.app */,
+				100000000000000000000205 /* NewMoneyIPhoneTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		100000000000000000000605 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000201 /* NewMoneyApp.swift */,
+				100000000000000000000202 /* AppView.swift */,
+				100000000000000000000212 /* PlannerStore.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		100000000000000000000606 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000206 /* PlannerModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		100000000000000000000607 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000208 /* FinanceEngine.swift */,
+				100000000000000000000216 /* PlannerDerivedData.swift */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		100000000000000000000608 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000210 /* DefaultData.swift */,
+				100000000000000000000211 /* PlannerRepository.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		100000000000000000000609 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000207 /* MoneyParser.swift */,
+				100000000000000000000209 /* DateUtilities.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		100000000000000000000610 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000214 /* AppTheme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		100000000000000000000611 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000215 /* AppComponents.swift */,
+				100000000000000000000217 /* ScreenComponents.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		100000000000000000000612 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000213 /* ServicePlaceholders.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		100000000000000000000613 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000614 /* Dashboard */,
+				100000000000000000000615 /* Payday */,
+				100000000000000000000616 /* Pots */,
+				100000000000000000000617 /* Cards */,
+				100000000000000000000618 /* More */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		100000000000000000000614 /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000218 /* DashboardView.swift */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		100000000000000000000615 /* Payday */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000219 /* PaydayView.swift */,
+			);
+			path = Payday;
+			sourceTree = "<group>";
+		};
+		100000000000000000000616 /* Pots */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000220 /* PotsView.swift */,
+			);
+			path = Pots;
+			sourceTree = "<group>";
+		};
+		100000000000000000000617 /* Cards */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000221 /* CardsView.swift */,
+			);
+			path = Cards;
+			sourceTree = "<group>";
+		};
+		100000000000000000000618 /* More */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000222 /* MoreView.swift */,
+				100000000000000000000223 /* SecondaryFeatureViews.swift */,
+			);
+			path = More;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000401 /* NewMoneyIPhone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000701 /* Build configuration list for PBXNativeTarget "NewMoneyIPhone" */;
+			buildPhases = (
+				100000000000000000000801 /* Sources */,
+				100000000000000000000501 /* Frameworks */,
+				100000000000000000000901 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = NewMoneyIPhone;
+			productName = NewMoneyIPhone;
+			productReference = 100000000000000000000204 /* NewMoneyIPhone.app */;
+			productType = "com.apple.product-type.application";
+		};
+		100000000000000000000402 /* NewMoneyIPhoneTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000702 /* Build configuration list for PBXNativeTarget "NewMoneyIPhoneTests" */;
+			buildPhases = (
+				100000000000000000000802 /* Sources */,
+				100000000000000000000502 /* Frameworks */,
+				100000000000000000000902 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				100000000000000000000302 /* PBXTargetDependency */,
+			);
+			name = NewMoneyIPhoneTests;
+			productName = NewMoneyIPhoneTests;
+			productReference = 100000000000000000000205 /* NewMoneyIPhoneTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2650;
+				LastUpgradeCheck = 2650;
+				TargetAttributes = {
+					100000000000000000000401 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					100000000000000000000402 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 100000000000000000000401;
+					};
+				};
+			};
+			buildConfigurationList = 100000000000000000000703 /* Build configuration list for PBXProject "NewMoneyIPhone" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 100000000000000000000601;
+			productRefGroup = 100000000000000000000604 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000401 /* NewMoneyIPhone */,
+				100000000000000000000402 /* NewMoneyIPhoneTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000901 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000122 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000902 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000801 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000101 /* NewMoneyApp.swift in Sources */,
+				100000000000000000000102 /* AppView.swift in Sources */,
+				100000000000000000000104 /* PlannerModels.swift in Sources */,
+				100000000000000000000105 /* MoneyParser.swift in Sources */,
+				100000000000000000000106 /* FinanceEngine.swift in Sources */,
+				100000000000000000000107 /* DateUtilities.swift in Sources */,
+				100000000000000000000108 /* DefaultData.swift in Sources */,
+				100000000000000000000109 /* PlannerRepository.swift in Sources */,
+				100000000000000000000110 /* PlannerStore.swift in Sources */,
+				100000000000000000000111 /* ServicePlaceholders.swift in Sources */,
+				100000000000000000000112 /* AppTheme.swift in Sources */,
+				100000000000000000000113 /* AppComponents.swift in Sources */,
+				100000000000000000000114 /* PlannerDerivedData.swift in Sources */,
+				100000000000000000000115 /* ScreenComponents.swift in Sources */,
+				100000000000000000000116 /* DashboardView.swift in Sources */,
+				100000000000000000000117 /* PaydayView.swift in Sources */,
+				100000000000000000000118 /* PotsView.swift in Sources */,
+				100000000000000000000119 /* CardsView.swift in Sources */,
+				100000000000000000000120 /* MoreView.swift in Sources */,
+				100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000802 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000103 /* FinanceEngineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		100000000000000000000302 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 100000000000000000000401 /* NewMoneyIPhone */;
+			targetProxy = 100000000000000000000301 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		100000000000000000001001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		100000000000000000001002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		100000000000000000001101 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = XK5H4LTL88;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "New Money";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = space.scriptai.money.NewMoneyIPhone;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		100000000000000000001102 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = XK5H4LTL88;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "New Money";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = space.scriptai.money.NewMoneyIPhone;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		100000000000000000001201 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = space.scriptai.money.NewMoneyIPhoneTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NewMoneyIPhone.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/NewMoneyIPhone";
+			};
+			name = Debug;
+		};
+		100000000000000000001202 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = space.scriptai.money.NewMoneyIPhoneTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NewMoneyIPhone.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/NewMoneyIPhone";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000701 /* Build configuration list for PBXNativeTarget "NewMoneyIPhone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000001101 /* Debug */,
+				100000000000000000001102 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000702 /* Build configuration list for PBXNativeTarget "NewMoneyIPhoneTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000001201 /* Debug */,
+				100000000000000000001202 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000703 /* Build configuration list for PBXProject "NewMoneyIPhone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000001001 /* Debug */,
+				100000000000000000001002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000001 /* Project object */;
+}

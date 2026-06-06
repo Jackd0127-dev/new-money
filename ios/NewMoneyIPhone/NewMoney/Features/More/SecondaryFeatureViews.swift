@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SpendingView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .inline
+    var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var paymentMethod: PaymentMethod = .pot
     @State private var selectedPotId = ""
     @State private var selectedCardId = ""
@@ -10,7 +12,12 @@ struct SpendingView: View {
     @State private var date = Date()
 
     var body: some View {
-        ScreenScaffold(title: "Spending", subtitle: "Record pot or credit-card spend with period links.") {
+        ScreenScaffold(
+            title: "Spending",
+            subtitle: "Record pot or credit-card spend with period links.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
+        ) {
             AppCard(glow: true) {
                 Picker("Route", selection: $paymentMethod) {
                     Text("Pot").tag(PaymentMethod.pot)
@@ -84,6 +91,96 @@ struct SpendingView: View {
     }
 }
 
+struct SpendingSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        NavigationStack {
+            SpendingView(store: store, navigationMode: .inline, toolbarMode: .none)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+    }
+}
+
+struct AddBillSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var name = ""
+    @State private var amount = ""
+    @State private var dueDay = ""
+    @State private var frequency: RecurringFrequency = .monthly
+    @State private var priority: RecurringPriority = .essential
+    @State private var potId = ""
+    @State private var cardId = ""
+    @State private var routeToCard = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                AppCard(glow: true) {
+                    SectionTitle("Add recurring payment")
+                    TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
+                    MoneyField(title: "Amount", text: $amount)
+                    TextField("Due day", text: $dueDay).keyboardType(.numberPad).textFieldStyle(AppTextFieldStyle())
+                    Picker("Frequency", selection: $frequency) {
+                        ForEach(RecurringFrequency.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Priority", selection: $priority) {
+                        ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("Linked to card", isOn: $routeToCard)
+                        .tint(AppTheme.Colors.primaryOrange)
+                    if routeToCard {
+                        Picker("Card", selection: $cardId) {
+                            Text("No card").tag("")
+                            ForEach(store.activeCards) { Text($0.name).tag($0.id) }
+                        }
+                    } else {
+                        Picker("Pot", selection: $potId) {
+                            Text("No pot").tag("")
+                            ForEach(store.activePots) { Text($0.name).tag($0.id) }
+                        }
+                    }
+                    PrimaryButton(title: "Add bill", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(amount) <= 0) {
+                        store.addRecurringPayment(
+                            name: name,
+                            amountPence: MoneyParser.parsePoundsToPence(amount),
+                            dueDay: Int(dueDay),
+                            frequency: frequency,
+                            potId: routeToCard ? nil : potId.nilIfBlank,
+                            creditCardId: routeToCard ? cardId.nilIfBlank : nil,
+                            priority: priority
+                        )
+                        reset()
+                        dismiss()
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Add bill")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
+        }
+        .onAppear {
+            potId = store.activePots.first?.id ?? ""
+            cardId = store.activeCards.first?.id ?? ""
+        }
+    }
+
+    private func reset() {
+        name = ""
+        amount = ""
+        dueDay = ""
+        frequency = .monthly
+        priority = .essential
+        routeToCard = false
+    }
+}
+
 struct BillsView: View {
     @ObservedObject var store: PlannerStore
     @State private var name = ""
@@ -96,7 +193,12 @@ struct BillsView: View {
     @State private var routeToCard = false
 
     var body: some View {
-        ScreenScaffold(title: "Bills", subtitle: "Recurring payment templates and upcoming bill agenda.") {
+        ScreenScaffold(
+            title: "Bills",
+            subtitle: "Recurring payment templates and upcoming bill agenda.",
+            navigationMode: .inline,
+            toolbarMode: .secondarySingle
+        ) {
             AppCard(glow: true) {
                 SectionTitle("Add recurring payment")
                 TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
@@ -200,6 +302,68 @@ struct BillsView: View {
     }
 }
 
+struct AddDebtSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var name = ""
+    @State private var lender = ""
+    @State private var original = ""
+    @State private var balance = ""
+    @State private var minimum = ""
+    @State private var dueDate = Date()
+    @State private var apr = ""
+    @State private var note = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                AppCard(glow: true) {
+                    SectionTitle("Add debt")
+                    TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
+                    TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
+                    MoneyField(title: "Original amount", text: $original)
+                    MoneyField(title: "Current balance", text: $balance)
+                    MoneyField(title: "Minimum payment", text: $minimum)
+                    DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                        .tint(AppTheme.Colors.primaryOrange)
+                    TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
+                    TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+                    PrimaryButton(title: "Add debt", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(balance) <= 0) {
+                        store.addDebt(
+                            name: name,
+                            lender: lender,
+                            originalAmountPence: MoneyParser.parsePoundsToPence(original),
+                            currentBalancePence: MoneyParser.parsePoundsToPence(balance),
+                            minimumPaymentPence: MoneyParser.parsePoundsToPence(minimum),
+                            dueDate: dueDate.isoDateString,
+                            apr: Double(apr),
+                            note: note
+                        )
+                        reset()
+                        dismiss()
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Add debt")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
+        }
+    }
+
+    private func reset() {
+        name = ""
+        lender = ""
+        original = ""
+        balance = ""
+        minimum = ""
+        dueDate = Date()
+        apr = ""
+        note = ""
+    }
+}
+
 struct DebtsView: View {
     @ObservedObject var store: PlannerStore
     @State private var name = ""
@@ -213,7 +377,12 @@ struct DebtsView: View {
     @State private var selectedDebt: Debt?
 
     var body: some View {
-        ScreenScaffold(title: "Debts", subtitle: "Balances, reserves, minimums, and payoff progress.") {
+        ScreenScaffold(
+            title: "Debts",
+            subtitle: "Balances, reserves, minimums, and payoff progress.",
+            navigationMode: .inline,
+            toolbarMode: .secondarySingle
+        ) {
             debtSummary
             addDebtCard
             SectionTitle("Active debts")
@@ -345,6 +514,7 @@ private struct DebtDetailView: View {
             .premiumScreenBackground()
             .navigationTitle(debt.name)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
         }
     }
 
@@ -355,10 +525,17 @@ private struct DebtDetailView: View {
 
 struct CalendarPlannerView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .inline
+    var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var month = Date()
 
     var body: some View {
-        ScreenScaffold(title: "Calendar", subtitle: "Money events by month.") {
+        ScreenScaffold(
+            title: "Calendar",
+            subtitle: "Money events by month.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
+        ) {
             AppCard(glow: true) {
                 HStack {
                     Button {
@@ -434,11 +611,28 @@ struct CalendarPlannerView: View {
     }
 }
 
+struct CalendarSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        NavigationStack {
+            CalendarPlannerView(store: store, navigationMode: .inline, toolbarMode: .none)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+    }
+}
+
 struct HistoryView: View {
     @ObservedObject var store: PlannerStore
 
     var body: some View {
-        ScreenScaffold(title: "History", subtitle: "Closed and active paycheck plans with allocations.") {
+        ScreenScaffold(
+            title: "History",
+            subtitle: "Closed and active paycheck plans with allocations.",
+            navigationMode: .inline,
+            toolbarMode: .secondarySingle
+        ) {
             AppCard(glow: true) {
                 MetricRow(label: "Paychecks", value: "\(store.snapshot.paychecks.count)")
                 MetricRow(label: "Total income", value: MoneyParser.formatPence(store.snapshot.payPeriods.reduce(0) { $0 + $1.incomePence }), valueColor: AppTheme.Colors.success)
@@ -469,13 +663,20 @@ struct HistoryView: View {
 
 struct SettingsView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .inline
+    var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var hourlyRate = ""
     @State private var hours = ""
     @State private var manualDate = Date()
     @State private var showResetAlert = false
 
     var body: some View {
-        ScreenScaffold(title: "Settings", subtitle: "Planner defaults, account placeholders, and local data controls.") {
+        ScreenScaffold(
+            title: "Settings",
+            subtitle: "Planner defaults, account placeholders, and local data controls.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
+        ) {
             AppCard(glow: true) {
                 SectionTitle("Pay defaults")
                 Picker("Pay frequency", selection: bindingPayFrequency) {
@@ -596,9 +797,27 @@ struct SettingsView: View {
     }
 }
 
+struct SettingsSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        NavigationStack {
+            SettingsView(store: store, navigationMode: .inline, toolbarMode: .none)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+    }
+}
+
+enum AssistantPresentationMode: Equatable {
+    case modal
+    case pushed
+}
+
 struct AssistantView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
+    var presentationMode: AssistantPresentationMode = .modal
     @State private var prompt = ""
     @State private var messages: [AssistantMessage] = [
         AssistantMessage(role: "Assistant", text: "I can summarise your local planner. Authenticated AI chat needs the native Firebase/backend TODOs in Settings.")
@@ -606,62 +825,75 @@ struct AssistantView: View {
     @FocusState private var isPromptFocused: Bool
     private let assistantCoordinateSpace = "assistantScrollSpace"
 
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                GeometryReader { geometry in
-                    ZStack(alignment: .bottom) {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                                AppCard(glow: true) {
-                                    MetricRow(label: "Spendable", value: MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots)), valueColor: AppTheme.Colors.primaryOrange)
-                                    MetricRow(label: "Active cards", value: "\(store.activeCards.count)")
-                                    MetricRow(label: "Active debts", value: "\(store.activeDebts.count)")
+        switch presentationMode {
+        case .modal:
+            NavigationStack {
+                assistantContent
+            }
+        case .pushed:
+            assistantContent
+        }
+    }
+
+    private var assistantContent: some View {
+        ScrollViewReader { proxy in
+            GeometryReader { geometry in
+                ZStack(alignment: .bottom) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                            AppCard(glow: true) {
+                                MetricRow(label: "Spendable", value: MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots)), valueColor: AppTheme.Colors.primaryOrange)
+                                MetricRow(label: "Active cards", value: "\(store.activeCards.count)")
+                                MetricRow(label: "Active debts", value: "\(store.activeDebts.count)")
+                            }
+                            .assistantBottomContentBlur(viewportHeight: geometry.size.height, coordinateSpaceName: assistantCoordinateSpace)
+
+                            ForEach(messages) { message in
+                                HStack {
+                                    if message.role == "You" { Spacer() }
+                                    Text(message.text)
+                                        .font(.subheadline)
+                                        .foregroundStyle(AppTheme.Colors.primaryText)
+                                        .padding(AppTheme.Spacing.md)
+                                        .background(message.role == "You" ? AppTheme.Colors.primaryOrange.opacity(0.32) : AppTheme.Colors.elevatedSurface)
+                                        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+                                    if message.role != "You" { Spacer() }
                                 }
                                 .assistantBottomContentBlur(viewportHeight: geometry.size.height, coordinateSpaceName: assistantCoordinateSpace)
-
-                                ForEach(messages) { message in
-                                    HStack {
-                                        if message.role == "You" { Spacer() }
-                                        Text(message.text)
-                                            .font(.subheadline)
-                                            .foregroundStyle(AppTheme.Colors.primaryText)
-                                            .padding(AppTheme.Spacing.md)
-                                            .background(message.role == "You" ? AppTheme.Colors.primaryOrange.opacity(0.32) : AppTheme.Colors.elevatedSurface)
-                                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
-                                        if message.role != "You" { Spacer() }
-                                    }
-                                    .assistantBottomContentBlur(viewportHeight: geometry.size.height, coordinateSpaceName: assistantCoordinateSpace)
-                                }
-                            }
-                            .padding(.horizontal, AppTheme.Spacing.lg)
-                            .padding(.top, AppTheme.Spacing.lg)
-                        }
-                        .scrollDismissesKeyboard(.interactively)
-                        .onAppear {
-                            scrollToBottom(with: proxy, animated: false)
-                        }
-                        .onChange(of: messages.count) { _, _ in
-                            scrollToBottom(with: proxy)
-                        }
-                        .onChange(of: isPromptFocused) { _, isFocused in
-                            if isFocused {
-                                scrollToBottomAfterLayoutSettles(with: proxy)
                             }
                         }
-
-                        assistantComposer(proxy: proxy)
-                            .zIndex(1)
+                        .padding(.horizontal, AppTheme.Spacing.lg)
+                        .padding(.top, AppTheme.Spacing.lg)
                     }
-                    .coordinateSpace(name: assistantCoordinateSpace)
-                    .premiumScreenBackground()
-                    .navigationTitle("Assistant")
-                    .toolbar {
+                    .scrollDismissesKeyboard(.interactively)
+                    .onAppear {
+                        scrollToBottom(with: proxy, animated: false)
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        scrollToBottom(with: proxy)
+                    }
+                    .onChange(of: isPromptFocused) { _, isFocused in
+                        if isFocused {
+                            scrollToBottomAfterLayoutSettles(with: proxy)
+                        }
+                    }
+
+                    assistantComposer(proxy: proxy)
+                        .zIndex(1)
+                }
+                .coordinateSpace(name: assistantCoordinateSpace)
+                .premiumScreenBackground()
+                .navigationTitle("Assistant")
+                .toolbar {
+                    if presentationMode == .modal {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") { dismiss() }
                         }
                     }
                 }
+                .appPlaceholderToolbar(presentationMode == .modal ? .modalSingle : .secondarySingle)
             }
         }
     }

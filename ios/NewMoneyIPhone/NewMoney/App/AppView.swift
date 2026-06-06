@@ -30,37 +30,55 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+private enum AppToolbarSheet: String, Identifiable {
+    case spending
+    case calendar
+    case settings
+
+    var id: String { rawValue }
+}
+
 struct AppView: View {
     @StateObject private var store = PlannerStore()
     @State private var selectedTab: AppTab = .dashboard
     @State private var isAssistantPresented = false
+    @State private var activeToolbarSheet: AppToolbarSheet?
+    @Namespace private var rootToolbarNamespace
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            TabView(selection: $selectedTab) {
-                DashboardView(store: store)
-                    .tabItem { Label(AppTab.dashboard.title, systemImage: AppTab.dashboard.symbol) }
-                    .tag(AppTab.dashboard)
+            NavigationStack {
+                TabView(selection: selectedTabBinding) {
+                    DashboardView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                        .tabItem { Label(AppTab.dashboard.title, systemImage: AppTab.dashboard.symbol) }
+                        .tag(AppTab.dashboard)
 
-                PaydayView(store: store)
-                    .tabItem { Label(AppTab.payday.title, systemImage: AppTab.payday.symbol) }
-                    .tag(AppTab.payday)
+                    PaydayView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                        .tabItem { Label(AppTab.payday.title, systemImage: AppTab.payday.symbol) }
+                        .tag(AppTab.payday)
 
-                PotsView(store: store)
-                    .tabItem { Label(AppTab.pots.title, systemImage: AppTab.pots.symbol) }
-                    .tag(AppTab.pots)
+                    PotsView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                        .tabItem { Label(AppTab.pots.title, systemImage: AppTab.pots.symbol) }
+                        .tag(AppTab.pots)
 
-                CardsView(store: store)
-                    .tabItem { Label(AppTab.cards.title, systemImage: AppTab.cards.symbol) }
-                    .tag(AppTab.cards)
+                    CardsView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                        .tabItem { Label(AppTab.cards.title, systemImage: AppTab.cards.symbol) }
+                        .tag(AppTab.cards)
 
-                MoreView(store: store)
-                    .tabItem { Label(AppTab.more.title, systemImage: AppTab.more.symbol) }
-                    .tag(AppTab.more)
-            }
-            .tint(AppTheme.Colors.primaryOrange)
-            .task {
-                await store.load()
+                    MoreView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                        .tabItem { Label(AppTab.more.title, systemImage: AppTab.more.symbol) }
+                        .tag(AppTab.more)
+                }
+                .tint(AppTheme.Colors.primaryOrange)
+                .navigationTitle(selectedTab.title)
+                .navigationBarTitleDisplayMode(.large)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbar(id: "root-tab-toolbar") {
+                    rootTabToolbarContent
+                }
+                .task {
+                    await store.load()
+                }
             }
 
             Button {
@@ -82,12 +100,102 @@ struct AppView: View {
         .background(AppTheme.Colors.appBackground)
         .dismissKeyboardOnBackgroundTap()
         .preferredColorScheme(.dark)
+        .sheet(item: $activeToolbarSheet) { sheet in
+            switch sheet {
+            case .spending:
+                SpendingSheetView(store: store)
+            case .calendar:
+                CalendarSheetView(store: store)
+            case .settings:
+                SettingsSheetView(store: store)
+            }
+        }
         .sheet(isPresented: $isAssistantPresented) {
-            AssistantView(store: store)
+            AssistantView(store: store, presentationMode: .modal)
         }
         .onAppear {
             configureTabBarAppearance()
         }
+    }
+
+    @ToolbarContentBuilder
+    private var rootTabToolbarContent: some CustomizableToolbarContent {
+        if let secondaryToolbarAction {
+            rootToolbarItem(secondaryToolbarAction)
+        }
+        if let primaryToolbarAction {
+            rootToolbarItem(primaryToolbarAction)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private func rootToolbarItem(_ action: AppToolbarAction) -> some CustomizableToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(id: action.id, placement: .topBarTrailing) {
+                AppToolbarButton(action: action)
+            }
+            .matchedTransitionSource(id: action.id, in: rootToolbarNamespace)
+        } else {
+            ToolbarItem(id: action.id, placement: .topBarTrailing) {
+                AppToolbarButton(action: action)
+            }
+        }
+    }
+
+    private var primaryToolbarAction: AppToolbarAction? {
+        selectedTabToolbarActions.last
+    }
+
+    private var secondaryToolbarAction: AppToolbarAction? {
+        selectedTabToolbarActions.count > 1 ? selectedTabToolbarActions.first : nil
+    }
+
+    private var selectedTabToolbarActions: [AppToolbarAction] {
+        switch selectedTab {
+        case .dashboard:
+            overviewToolbarActions
+        case .payday, .pots, .cards:
+            spendingToolbarActions
+        case .more:
+            moreToolbarActions
+        }
+    }
+
+    private var selectedTabBinding: Binding<AppTab> {
+        Binding {
+            selectedTab
+        } set: { newTab in
+            withAnimation(.smooth(duration: 0.32)) {
+                selectedTab = newTab
+            }
+        }
+    }
+
+    private var spendingToolbarActions: [AppToolbarAction] {
+        [
+            AppToolbarAction(id: "primary-toolbar-action", symbol: "plus", accessibilityLabel: "Record Spending") {
+                activeToolbarSheet = .spending
+            }
+        ]
+    }
+
+    private var moreToolbarActions: [AppToolbarAction] {
+        [
+            AppToolbarAction(id: "primary-toolbar-action", symbol: "gearshape", accessibilityLabel: "Open Settings") {
+                activeToolbarSheet = .settings
+            }
+        ]
+    }
+
+    private var overviewToolbarActions: [AppToolbarAction] {
+        [
+            AppToolbarAction(id: "secondary-toolbar-action", symbol: "calendar", accessibilityLabel: "Open Calendar") {
+                activeToolbarSheet = .calendar
+            },
+            AppToolbarAction(id: "primary-toolbar-action", symbol: "plus", accessibilityLabel: "Record Spending") {
+                activeToolbarSheet = .spending
+            }
+        ]
     }
 
     private func configureTabBarAppearance() {

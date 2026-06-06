@@ -2,13 +2,17 @@ import SwiftUI
 
 struct CardsView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
     @State private var isAddPresented = false
     @State private var selectedCard: CreditCard?
 
     var body: some View {
         ScreenScaffold(
             title: "Cards",
-            subtitle: "Track card balances, repayments, saved payments, and cover pots."
+            subtitle: "Track card balances, repayments, saved payments, and cover pots.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
         ) {
             summary
             SectionTitle("Active cards", actionTitle: "Add") {
@@ -120,6 +124,7 @@ private struct CardFormView: View {
             .premiumScreenBackground()
             .navigationTitle("Add card")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
         }
     }
 }
@@ -179,6 +184,7 @@ private struct CardDetailView: View {
             .premiumScreenBackground()
             .navigationTitle(card.name)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
         }
     }
 }

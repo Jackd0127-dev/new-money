@@ -1,26 +1,143 @@
 import SwiftUI
 
+struct AppToolbarAction: Identifiable {
+    let id: String
+    let symbol: String
+    let accessibilityLabel: String
+    let action: () -> Void
+}
+
+struct AppToolbarButton: View {
+    let action: AppToolbarAction
+
+    var body: some View {
+        Button(action: action.action) {
+            Image(systemName: action.symbol)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .accessibilityLabel(action.accessibilityLabel)
+    }
+}
+
+enum AppToolbarMode {
+    case none
+    case primaryDouble
+    case secondarySingle
+    case modalSingle
+    case add(action: () -> Void)
+    case actions([AppToolbarAction])
+}
+
+enum ScreenNavigationMode {
+    case root
+    case inline
+    case tabRoot
+}
+
 struct ScreenScaffold<Content: View>: View {
     var title: String
     var subtitle: String
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
     @ViewBuilder var content: Content
 
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
-                    ScreenHeader(subtitle: subtitle)
-                    content
-                }
-                .padding(.horizontal, AppTheme.Spacing.lg)
-                .padding(.top, AppTheme.Spacing.sm)
-                .padding(.bottom, 110)
+        switch navigationMode {
+        case .root:
+            NavigationStack {
+                screenContentWithNavigation
             }
-            .premiumScreenBackground()
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+        case .inline:
+            screenContentWithNavigation
+        case .tabRoot:
+            screenContent
         }
+    }
+
+    private var screenContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                ScreenHeader(subtitle: subtitle)
+                content
+            }
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.top, AppTheme.Spacing.sm)
+            .padding(.bottom, 110)
+        }
+        .premiumScreenBackground()
+    }
+
+    private var screenContentWithNavigation: some View {
+        screenContent
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .appPlaceholderToolbar(toolbarMode)
+    }
+}
+
+private struct PlaceholderToolbarModifier: ViewModifier {
+    var mode: AppToolbarMode
+
+    func body(content: Content) -> some View {
+        switch mode {
+        case .none:
+            content
+        default:
+            content.toolbar {
+                if let secondaryAction {
+                    ToolbarItem(id: secondaryAction.id, placement: .topBarTrailing) {
+                        toolbarButton(secondaryAction)
+                    }
+                }
+                if let primaryAction {
+                    ToolbarItem(id: primaryAction.id, placement: .topBarTrailing) {
+                        toolbarButton(primaryAction)
+                    }
+                }
+            }
+        }
+    }
+
+    private var primaryAction: AppToolbarAction? {
+        actions.last
+    }
+
+    private var secondaryAction: AppToolbarAction? {
+        actions.count > 1 ? actions.first : nil
+    }
+
+    private var actions: [AppToolbarAction] {
+        switch mode {
+        case .none:
+            []
+        case .primaryDouble:
+            [
+                AppToolbarAction(id: "placeholder-options", symbol: "slider.horizontal.3", accessibilityLabel: "Placeholder options") {},
+                AppToolbarAction(id: "placeholder-action", symbol: "ellipsis.circle", accessibilityLabel: "Placeholder action") {}
+            ]
+        case .secondarySingle, .modalSingle:
+            [
+                AppToolbarAction(id: "placeholder-action", symbol: "ellipsis.circle", accessibilityLabel: "Placeholder action") {}
+            ]
+        case .add(let action):
+            [
+                AppToolbarAction(id: "add", symbol: "plus", accessibilityLabel: "Add", action: action)
+            ]
+        case .actions(let actions):
+            actions
+        }
+    }
+
+    private func toolbarButton(_ action: AppToolbarAction) -> some View {
+        AppToolbarButton(action: action)
+    }
+}
+
+extension View {
+    func appPlaceholderToolbar(_ mode: AppToolbarMode) -> some View {
+        modifier(PlaceholderToolbarModifier(mode: mode))
     }
 }
 

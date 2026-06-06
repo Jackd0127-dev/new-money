@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PaydayView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
     @State private var payday = Date()
     @State private var hoursWorked = ""
     @State private var hourlyRate = ""
@@ -12,7 +14,9 @@ struct PaydayView: View {
     var body: some View {
         ScreenScaffold(
             title: "Payday",
-            subtitle: "Calculate pay, create periods, and set money aside."
+            subtitle: "Calculate pay, create periods, and set money aside.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
         ) {
             createPlanCard
             allocationCard

@@ -2,19 +2,17 @@ import SwiftUI
 
 struct MoreView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
 
     var body: some View {
         ScreenScaffold(
             title: "More",
-            subtitle: "Spending, bills, debts, calendar, history, settings, and account tools."
+            subtitle: "History and account settings.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
         ) {
-            moreLink("Spending", subtitle: "Record pot or credit-card spend.", symbol: "cart", destination: SpendingView(store: store))
-            moreLink("Bills", subtitle: "Recurring payments and upcoming bill agenda.", symbol: "calendar.badge.clock", destination: BillsView(store: store))
-            moreLink("Debts", subtitle: "Balances, reserves, and payments.", symbol: "exclamationmark.shield", destination: DebtsView(store: store))
-            moreLink("Calendar", subtitle: "Paydays, bills, spending, cards, and debt events.", symbol: "calendar", destination: CalendarPlannerView(store: store))
             moreLink("History", subtitle: "Paycheck and allocation history.", symbol: "clock.arrow.circlepath", destination: HistoryView(store: store))
-            moreLink("Settings", subtitle: "Date mode, pay defaults, account, AI, and reset.", symbol: "gearshape", destination: SettingsView(store: store))
-            moreLink("Assistant", subtitle: "AI planner placeholder and local financial facts.", symbol: "sparkles", destination: AssistantView(store: store))
         }
     }
 

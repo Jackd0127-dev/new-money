@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PotsView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
     @State private var query = ""
     @State private var selectedType: PotType?
     @State private var isAddPresented = false
@@ -18,7 +20,9 @@ struct PotsView: View {
     var body: some View {
         ScreenScaffold(
             title: "Pots",
-            subtitle: "Buckets for bills, spending, savings, investments, and buffers."
+            subtitle: "Buckets for bills, spending, savings, investments, and buffers.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
         ) {
             summaryCard
             controls
@@ -163,6 +167,7 @@ private struct PotFormView: View {
             .premiumScreenBackground()
             .navigationTitle("Add pot")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
         }
     }
 }
@@ -206,6 +211,7 @@ private struct PotDetailView: View {
             .premiumScreenBackground()
             .navigationTitle(pot.name)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .appPlaceholderToolbar(.modalSingle)
         }
     }
 

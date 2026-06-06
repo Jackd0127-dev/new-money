@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DashboardView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
     @State private var selectedPaycheck: Paycheck?
 
     private var snapshot: PlannerSnapshot { store.snapshot }
@@ -9,7 +11,9 @@ struct DashboardView: View {
     var body: some View {
         ScreenScaffold(
             title: "Overview",
-            subtitle: "Payday pressure, pots, cards, debts, and recent activity."
+            subtitle: "Payday pressure, pots, cards, debts, and recent activity.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
         ) {
             if store.isLoading {
                 LoadingView()
@@ -236,6 +240,7 @@ private struct DashboardActivityRowView: View {
 private struct DashboardBreakdownScaffold<Content: View>: View {
     var title: String
     var subtitle: String
+    var toolbarMode: AppToolbarMode = .secondarySingle
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -252,6 +257,7 @@ private struct DashboardBreakdownScaffold<Content: View>: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .appPlaceholderToolbar(toolbarMode)
     }
 }
 
@@ -329,11 +335,16 @@ private struct IncomeBreakdownView: View {
 
 private struct BillsBreakdownView: View {
     @ObservedObject var store: PlannerStore
+    @State private var isAddBillPresented = false
 
     private var snapshot: PlannerSnapshot { store.snapshot }
 
     var body: some View {
-        DashboardBreakdownScaffold(title: "Bills", subtitle: "Recurring bills, upcoming due dates, and linked accounts.") {
+        DashboardBreakdownScaffold(
+            title: "Bills",
+            subtitle: "Recurring bills, upcoming due dates, and linked accounts.",
+            toolbarMode: .add(action: { isAddBillPresented = true })
+        ) {
             AppCard(glow: true) {
                 MetricRow(label: "Due in period", value: MoneyParser.formatPence(currentPeriodBills), valueColor: AppTheme.Colors.warning)
                 MetricRow(label: "Active bills", value: "\(snapshot.recurringPayments.filter(\.active).count)")
@@ -371,6 +382,9 @@ private struct BillsBreakdownView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $isAddBillPresented) {
+            AddBillSheetView(store: store)
         }
     }
 
@@ -501,6 +515,7 @@ private struct CardsBreakdownView: View {
 
 private struct DebtsBreakdownView: View {
     @ObservedObject var store: PlannerStore
+    @State private var isAddDebtPresented = false
 
     private var snapshot: PlannerSnapshot { store.snapshot }
     private var summary: DebtSummary {
@@ -510,7 +525,11 @@ private struct DebtsBreakdownView: View {
     private var inactiveDebts: [Debt] { snapshot.debts.filter { $0.status != .active } }
 
     var body: some View {
-        DashboardBreakdownScaffold(title: "Debts", subtitle: "Balances, due dates, reserves, payments, and payoff progress.") {
+        DashboardBreakdownScaffold(
+            title: "Debts",
+            subtitle: "Balances, due dates, reserves, payments, and payoff progress.",
+            toolbarMode: .add(action: { isAddDebtPresented = true })
+        ) {
             AppCard(glow: true) {
                 MetricRow(label: "Current balance", value: MoneyParser.formatPence(summary.totalCurrentBalancePence), valueColor: AppTheme.Colors.orangeHighlight)
                 MetricRow(label: "Original debt", value: MoneyParser.formatPence(summary.totalOriginalAmountPence))
@@ -556,6 +575,9 @@ private struct DebtsBreakdownView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $isAddDebtPresented) {
+            AddDebtSheetView(store: store)
         }
     }
 
@@ -625,6 +647,7 @@ private struct PaycheckDetailView: View {
                     Button("Close") { dismiss() }
                 }
             }
+            .appPlaceholderToolbar(.modalSingle)
             .alert("Delete paycheck?", isPresented: $showDeleteAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {

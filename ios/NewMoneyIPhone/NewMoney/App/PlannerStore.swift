@@ -14,6 +14,9 @@ final class PlannerStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let repository: PlannerRepository
+#if DEBUG
+    private var suppressAutomaticDueCatchUpForSimulation = false
+#endif
 
     init(repository: PlannerRepository = PlannerLaunchProfile.repository()) {
         self.repository = repository
@@ -44,7 +47,7 @@ final class PlannerStore: ObservableObject {
     }
 
     var activeDebts: [Debt] {
-        snapshot.debts.filter { $0.status == .active }
+        snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 }
     }
 
     var todayIso: String {
@@ -67,6 +70,9 @@ final class PlannerStore: ObservableObject {
             let migration = DefaultData.migratedSnapshot(loadedSnapshot)
             snapshot = migration.snapshot
             var shouldPersist = migration.didChange
+            if ensureDebtSchedules(today: todayIso) {
+                shouldPersist = true
+            }
             if catchUpDueObligations(to: todayIso) {
                 shouldPersist = true
             }
@@ -529,10 +535,29 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    func addDebt(name: String, lender: String, currentBalancePence: Int, minimumPaymentPence: Int, dueDate: String, apr: Double?, note: String, linkedPotId: String? = nil) {
+    func addDebt(
+        name: String,
+        lender: String,
+        currentBalancePence: Int,
+        minimumPaymentPence: Int,
+        dueDate: String,
+        apr: Double?,
+        note: String,
+        linkedPotId: String? = nil,
+        type: DebtType = .other,
+        interestType: DebtInterestType? = nil,
+        fixedFeePence: Int = 0,
+        extraPaymentPence: Int = 0,
+        repaymentStrategy: DebtRepaymentStrategy? = nil,
+        paymentFrequency: DebtPaymentFrequency = .monthly,
+        paymentDay: Int? = nil,
+        payFirstTiming: DebtPayFirstTiming = .nextPayday,
+        customFirstPaymentDate: String? = nil
+    ) {
         let now = DateUtilities.nowIsoString()
         let currentBalancePence = max(0, currentBalancePence)
         let debtId = DateUtilities.newId(prefix: "debt")
+        let aprBasisPoints = apr.map { Int(($0 * 100).rounded()) }
         snapshot.debts.insert(
             Debt(
                 id: debtId,
@@ -544,14 +569,28 @@ final class PlannerStore: ObservableObject {
                 dueDate: dueDate,
                 interestRateApr: apr,
                 note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                status: currentBalancePence > 0 ? .active : .paid,
+                status: currentBalancePence > 0 ? .active : .paidOff,
                 createdAt: now,
                 updatedAt: now,
-                deletedAt: nil
+                deletedAt: nil,
+                type: type,
+                startingBalancePence: currentBalancePence,
+                targetPayoffDate: dueDate.nilIfBlank,
+                interestType: interestType,
+                aprBasisPoints: aprBasisPoints,
+                interestAccrualMode: interestType == .apr ? .dailyEstimated : nil,
+                fixedFeePence: fixedFeePence,
+                extraPaymentPence: extraPaymentPence,
+                repaymentStrategy: repaymentStrategy,
+                paymentFrequency: paymentFrequency,
+                paymentDay: paymentDay,
+                payFirstTiming: payFirstTiming,
+                customFirstPaymentDate: customFirstPaymentDate
             ),
             at: 0
         )
         applyDebtPotLink(debtId: debtId, potId: linkedPotId?.nilIfBlank, now: now)
+        regenerateDebtSchedule(debtId: debtId, today: todayIso, now: now)
         persist()
     }
 
@@ -567,9 +606,10 @@ final class PlannerStore: ObservableObject {
         updated.currentBalancePence = currentBalancePence
         updated.minimumPaymentPence = max(0, debt.minimumPaymentPence)
         updated.note = debt.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.status = currentBalancePence > 0 ? debt.status : .paid
+        updated.status = currentBalancePence > 0 ? debt.status : .paidOff
         updated.updatedAt = now
         snapshot.debts[index] = updated
+        regenerateDebtSchedule(debtId: debt.id, today: todayIso, now: now)
         persist()
     }
 
@@ -593,6 +633,8 @@ final class PlannerStore: ObservableObject {
         snapshot.debts.removeAll { $0.id == id }
         snapshot.debtPayments.removeAll { $0.debtId == id }
         snapshot.debtReserves.removeAll { $0.debtId == id }
+        snapshot.debtPaymentScheduleItems.removeAll { $0.debtId == id }
+        snapshot.debtSnapshots.removeAll { $0.debtId == id }
         for index in snapshot.pots.indices where snapshot.pots[index].linkedDebtId == id {
             snapshot.pots[index].linkedDebtId = nil
             snapshot.pots[index].updatedAt = now
@@ -608,28 +650,132 @@ final class PlannerStore: ObservableObject {
     }
 
     func recordDebtPayment(debtId: String, amountPence: Int, date: String, note: String) {
-        let now = DateUtilities.nowIsoString()
-        let amountPence = abs(amountPence)
-        guard amountPence > 0, let debtIndex = snapshot.debts.firstIndex(where: { $0.id == debtId }) else { return }
-        let appliedAmountPence = min(amountPence, max(0, snapshot.debts[debtIndex].currentBalancePence))
-        guard appliedAmountPence > 0 else { return }
+        recordManualDebtPayment(
+            debtId: debtId,
+            amountPence: amountPence,
+            date: date,
+            paymentType: .manualPayNow,
+            recalculationMode: .finishEarlier,
+            note: note
+        )
+    }
 
+    func recordManualDebtPayment(
+        debtId: String,
+        amountPence: Int,
+        date: String,
+        paymentType: DebtPaymentType,
+        recalculationMode: DebtRecalculationMode,
+        note: String
+    ) {
+        let requestedAmountPence = max(0, abs(amountPence))
+        guard requestedAmountPence > 0,
+              let debtIndex = snapshot.debts.firstIndex(where: { $0.id == debtId && $0.currentBalancePence > 0 && $0.status.isActiveLike })
+        else { return }
+
+        let now = DateUtilities.nowIsoString()
+        let linkedPotIndex = snapshot.pots.indices
+            .filter { snapshot.pots[$0].linkedDebtId == debtId && !snapshot.pots[$0].archived }
+            .sorted { snapshot.pots[$0].name < snapshot.pots[$1].name }
+            .first
+
+        let cappedAmountPence = min(requestedAmountPence, max(0, snapshot.debts[debtIndex].currentBalancePence))
+        guard cappedAmountPence > 0 else { return }
+
+        if paymentType == .manualSetAside {
+            guard let linkedPotIndex else { return }
+            let allocationId = "manual-debt-set-aside-\(debtId)-\(date)-\(UUID().uuidString.lowercased())"
+            let scheduleItemId = nextDebtScheduleItem(debtId: debtId, onOrAfter: date)?.id
+            snapshot.potAllocations.insert(
+                PotAllocation(
+                    id: allocationId,
+                    payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id ?? "",
+                    potId: snapshot.pots[linkedPotIndex].id,
+                    fundingPotId: nil,
+                    amountPence: cappedAmountPence,
+                    source: .debtFunding,
+                    recurringPaymentId: nil,
+                    recurringDueDate: nil,
+                    debtId: debtId,
+                    debtDueDate: date,
+                    debtScheduleItemId: scheduleItemId,
+                    createdAt: now,
+                    updatedAt: now,
+                    deletedAt: nil
+                ),
+                at: 0
+            )
+            snapshot.pots[linkedPotIndex].balancePence += cappedAmountPence
+            snapshot.pots[linkedPotIndex].updatedAt = now
+            if let scheduleItemId {
+                addDebtScheduleFunding(scheduleItemId: scheduleItemId, amountPence: cappedAmountPence, now: now)
+            }
+            persist()
+            return
+        }
+
+        let scheduleItem = nextDebtScheduleItem(debtId: debtId, onOrAfter: date)
+        if let linkedPotIndex {
+            let allocationId = "manual-debt-pay-now-\(debtId)-\(date)-\(UUID().uuidString.lowercased())"
+            snapshot.potAllocations.insert(
+                PotAllocation(
+                    id: allocationId,
+                    payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id ?? "",
+                    potId: snapshot.pots[linkedPotIndex].id,
+                    fundingPotId: nil,
+                    amountPence: cappedAmountPence,
+                    source: .debtFunding,
+                    recurringPaymentId: nil,
+                    recurringDueDate: nil,
+                    debtId: debtId,
+                    debtDueDate: scheduleItem?.dueDate ?? date,
+                    debtScheduleItemId: scheduleItem?.id,
+                    createdAt: now,
+                    updatedAt: now,
+                    deletedAt: nil
+                ),
+                at: 0
+            )
+            snapshot.pots[linkedPotIndex].balancePence += cappedAmountPence
+            snapshot.pots[linkedPotIndex].balancePence -= cappedAmountPence
+            snapshot.pots[linkedPotIndex].updatedAt = now
+        }
+
+        let application = DebtPlannerEngine.applyPayment(
+            debt: snapshot.debts[debtIndex],
+            scheduleItem: scheduleItem,
+            amountPence: cappedAmountPence,
+            date: date,
+            sourcePotId: linkedPotIndex.map { snapshot.pots[$0].id },
+            paymentType: paymentType,
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+
+        snapshot.debts[debtIndex] = application.debt
+        if let updatedScheduleItem = application.scheduleItem {
+            replaceDebtScheduleItem(updatedScheduleItem)
+        }
         snapshot.debtPayments.insert(
             DebtPayment(
                 id: DateUtilities.newId(prefix: "debt-payment"),
-                debtId: debtId,
-                amountPence: appliedAmountPence,
-                date: date,
-                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                debtId: application.payment.debtId,
+                amountPence: application.payment.amountPence,
+                date: application.payment.date,
+                note: application.payment.note,
                 createdAt: now,
                 updatedAt: now,
-                deletedAt: nil
+                deletedAt: nil,
+                sourcePotId: application.payment.sourcePotId,
+                paymentType: application.payment.paymentType,
+                scheduleItemId: application.payment.scheduleItemId,
+                principalPaidPence: application.payment.principalPaidPence,
+                interestPaidPence: application.payment.interestPaidPence,
+                feePaidPence: application.payment.feePaidPence,
+                recalculationMode: recalculationMode
             ),
             at: 0
         )
-
-        applyDebtPaymentAmount(debtId: debtId, amountPence: appliedAmountPence, now: now)
-
+        recalculateDebtAfterPayment(debtId: debtId, date: date, mode: recalculationMode, now: now)
         persist()
     }
 
@@ -830,6 +976,23 @@ final class PlannerStore: ObservableObject {
             payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
         )
         guard let item = items.first(where: { $0.debtId == debtId && $0.dueDate == dueDate }) else {
+            return false
+        }
+
+        if completed {
+            return completeDebtFunding(item)
+        }
+
+        return reverseDebtFunding(item)
+    }
+
+    @discardableResult
+    func setDebtFundingCompleted(scheduleItemId: String, payPeriodId: String, completed: Bool) -> Bool {
+        let items = PlannerDerivedData.debtFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+        )
+        guard let item = items.first(where: { $0.scheduleItemId == scheduleItemId }) else {
             return false
         }
 
@@ -1122,8 +1285,26 @@ final class PlannerStore: ObservableObject {
     private func applyDueLinkedDebtPotPayments(asOf todayIso: String) -> Bool {
         let now = DateUtilities.nowIsoString()
         var changed = false
+        changed = ensureDebtSchedules(today: todayIso) || changed
 
-        for debt in snapshot.debts.filter({ $0.status == .active && $0.currentBalancePence > 0 && $0.dueDate <= todayIso }) {
+        let dueItems = snapshot.debtPaymentScheduleItems
+            .filter {
+                $0.deletedAt == nil &&
+                $0.status != .paid &&
+                $0.status != .cancelled &&
+                $0.plannedAmountPence > 0 &&
+                $0.dueDate <= todayIso
+            }
+            .sorted {
+                if $0.dueDate == $1.dueDate {
+                    return $0.id < $1.id
+                }
+                return $0.dueDate < $1.dueDate
+            }
+
+        for item in dueItems {
+            guard let debtIndex = snapshot.debts.firstIndex(where: { $0.id == item.debtId && $0.status.isActiveLike && $0.currentBalancePence > 0 }) else { continue }
+            let debt = snapshot.debts[debtIndex]
             let linkedPotIndices = snapshot.pots.indices
                 .filter { index in
                     let pot = snapshot.pots[index]
@@ -1133,16 +1314,30 @@ final class PlannerStore: ObservableObject {
 
             guard !linkedPotIndices.isEmpty else { continue }
 
-            let paymentId = linkedDebtPotPaymentId(debtId: debt.id, dueDate: debt.dueDate)
+            let paymentId = linkedDebtPotPaymentId(debtId: debt.id, dueDate: item.dueDate)
             guard !snapshot.debtPayments.contains(where: { $0.id == paymentId }) else { continue }
 
             let availableInLinkedPotsPence = linkedPotIndices.reduce(0) { total, index in
                 total + max(0, snapshot.pots[index].balancePence)
             }
-            let paymentAmountPence = min(debt.currentBalancePence, availableInLinkedPotsPence)
-            guard paymentAmountPence > 0 else { continue }
+            let requiredPaymentPence = max(0, item.plannedAmountPence - item.paidAmountPence)
+            guard requiredPaymentPence > 0 else { continue }
 
-            var remainingToDeductPence = paymentAmountPence
+            guard item.fundedAmountPence >= requiredPaymentPence,
+                  availableInLinkedPotsPence >= requiredPaymentPence
+            else {
+                if let scheduleIndex = snapshot.debtPaymentScheduleItems.firstIndex(where: { $0.id == item.id }) {
+                    let fundedPence = max(item.fundedAmountPence, min(availableInLinkedPotsPence, requiredPaymentPence))
+                    snapshot.debtPaymentScheduleItems[scheduleIndex].fundedAmountPence = fundedPence
+                    snapshot.debtPaymentScheduleItems[scheduleIndex].status = fundedPence > 0 ? (item.dueDate < todayIso ? .overdue : .partFunded) : (item.dueDate < todayIso ? .overdue : .missed)
+                    snapshot.debtPaymentScheduleItems[scheduleIndex].updatedAt = now
+                    updateDebtStatus(debtId: item.debtId, asOf: todayIso, now: now)
+                    changed = true
+                }
+                continue
+            }
+
+            var remainingToDeductPence = requiredPaymentPence
             for index in linkedPotIndices {
                 if remainingToDeductPence <= 0 {
                     break
@@ -1158,26 +1353,26 @@ final class PlannerStore: ObservableObject {
                 ? "Automatic \(debt.name) payment from \(snapshot.pots[linkedPotIndices[0]].name)"
                 : "Automatic \(debt.name) payment from linked debt pots"
 
-            snapshot.debtPayments.insert(
-                DebtPayment(
-                    id: paymentId,
-                    debtId: debt.id,
-                    amountPence: paymentAmountPence,
-                    date: debt.dueDate,
-                    note: note,
-                    createdAt: now,
-                    updatedAt: now,
-                    deletedAt: nil
-                ),
-                at: 0
+            let application = DebtPlannerEngine.applyPayment(
+                debt: debt,
+                scheduleItem: item,
+                amountPence: requiredPaymentPence,
+                date: item.dueDate,
+                sourcePotId: linkedPotIndices.first.map { snapshot.pots[$0].id },
+                paymentType: .scheduled,
+                note: note
             )
 
-            if let debtIndex = snapshot.debts.firstIndex(where: { $0.id == debt.id }) {
-                let nextBalancePence = max(0, snapshot.debts[debtIndex].currentBalancePence - paymentAmountPence)
-                snapshot.debts[debtIndex].currentBalancePence = nextBalancePence
-                snapshot.debts[debtIndex].status = nextBalancePence > 0 ? .active : .paid
-                snapshot.debts[debtIndex].updatedAt = now
+            var payment = application.payment
+            payment.id = paymentId
+            payment.createdAt = now
+            payment.updatedAt = now
+            snapshot.debtPayments.insert(payment, at: 0)
+            snapshot.debts[debtIndex] = application.debt
+            if let updatedScheduleItem = application.scheduleItem {
+                replaceDebtScheduleItem(updatedScheduleItem)
             }
+            recalculateDebtAfterPayment(debtId: debt.id, date: item.dueDate, mode: debt.recalculationMode, now: now)
             changed = true
         }
 
@@ -1283,6 +1478,10 @@ final class PlannerStore: ObservableObject {
 
     private func debtFundingAllocationId(debtId: String, dueDate: String, payPeriodId: String) -> String {
         "debt-funding-allocation-\(debtId)-\(dueDate)-\(payPeriodId)"
+    }
+
+    private func debtFundingAllocationId(scheduleItemId: String, payPeriodId: String) -> String {
+        "debt-funding-allocation-\(scheduleItemId)-\(payPeriodId)"
     }
 
     private func linkedDebtPotPaymentId(debtId: String, dueDate: String) -> String {
@@ -1489,7 +1688,7 @@ final class PlannerStore: ObservableObject {
         }
         guard item.amountPence > 0,
               !hasMatchingAllocation,
-              let potIndex = snapshot.pots.firstIndex(where: { $0.id == item.potId && !$0.archived })
+              snapshot.pots.contains(where: { $0.id == item.potId && !$0.archived })
         else { return true }
 
         let now = DateUtilities.nowIsoString()
@@ -1515,8 +1714,6 @@ final class PlannerStore: ObservableObject {
             ),
             at: 0
         )
-        snapshot.pots[potIndex].balancePence += item.amountPence
-        snapshot.pots[potIndex].updatedAt = now
         if shouldPersist {
             persist()
         }
@@ -1532,21 +1729,6 @@ final class PlannerStore: ObservableObject {
         }
         guard !matchingAllocationIndices.isEmpty else { return true }
 
-        let amountToReverse = matchingAllocationIndices.reduce(0) { total, index in
-            total + max(0, snapshot.potAllocations[index].amountPence)
-        }
-        guard amountToReverse > 0,
-              let potIndex = snapshot.pots.firstIndex(where: { $0.id == item.potId && !$0.archived })
-        else { return false }
-
-        guard snapshot.pots[potIndex].balancePence >= amountToReverse else {
-            errorMessage = "Unable to undo \(item.transactionName) funding because \(item.potName) no longer has enough money."
-            return false
-        }
-
-        let now = DateUtilities.nowIsoString()
-        snapshot.pots[potIndex].balancePence -= amountToReverse
-        snapshot.pots[potIndex].updatedAt = now
         for index in matchingAllocationIndices.sorted(by: >) {
             snapshot.potAllocations.remove(at: index)
         }
@@ -1636,7 +1818,7 @@ final class PlannerStore: ObservableObject {
     }
 
     private func completeDebtFunding(_ item: DebtFundingChecklistItem) -> Bool {
-        let allocationId = debtFundingAllocationId(debtId: item.debtId, dueDate: item.dueDate, payPeriodId: item.payPeriodId)
+        let allocationId = debtFundingAllocationId(scheduleItemId: item.scheduleItemId, payPeriodId: item.payPeriodId)
         if snapshot.potAllocations.contains(where: { $0.id == allocationId }) {
             return true
         }
@@ -1647,7 +1829,10 @@ final class PlannerStore: ObservableObject {
             $0.potId == item.potId &&
             $0.source == .debtFunding &&
             $0.debtId == item.debtId &&
-            $0.debtDueDate == item.dueDate
+            (
+                $0.debtScheduleItemId == item.scheduleItemId ||
+                ($0.debtScheduleItemId == nil && $0.debtDueDate == item.dueDate)
+            )
         }
         guard item.amountPence > 0,
               !hasMatchingAllocation,
@@ -1667,6 +1852,7 @@ final class PlannerStore: ObservableObject {
                 recurringDueDate: nil,
                 debtId: item.debtId,
                 debtDueDate: item.dueDate,
+                debtScheduleItemId: item.scheduleItemId,
                 createdAt: now,
                 updatedAt: now,
                 deletedAt: nil
@@ -1675,6 +1861,7 @@ final class PlannerStore: ObservableObject {
         )
         snapshot.pots[potIndex].balancePence += item.amountPence
         snapshot.pots[potIndex].updatedAt = now
+        addDebtScheduleFunding(scheduleItemId: item.scheduleItemId, amountPence: item.amountPence, now: now)
         persist()
         return true
     }
@@ -1686,7 +1873,10 @@ final class PlannerStore: ObservableObject {
             snapshot.potAllocations[$0].potId == item.potId &&
             snapshot.potAllocations[$0].source == .debtFunding &&
             snapshot.potAllocations[$0].debtId == item.debtId &&
-            snapshot.potAllocations[$0].debtDueDate == item.dueDate
+            (
+                snapshot.potAllocations[$0].debtScheduleItemId == item.scheduleItemId ||
+                (snapshot.potAllocations[$0].debtScheduleItemId == nil && snapshot.potAllocations[$0].debtDueDate == item.dueDate)
+            )
         }
         guard !matchingAllocationIndices.isEmpty else { return true }
 
@@ -1708,6 +1898,7 @@ final class PlannerStore: ObservableObject {
         for index in matchingAllocationIndices.sorted(by: >) {
             snapshot.potAllocations.remove(at: index)
         }
+        removeDebtScheduleFunding(scheduleItemId: item.scheduleItemId, amountPence: amountToReverse, now: now)
         persist()
         return true
     }
@@ -1720,29 +1911,10 @@ final class PlannerStore: ObservableObject {
         }
         guard !matchingAllocationIndices.isEmpty else { return [] }
 
-        var amountByPotId: [String: Int] = [:]
         var payPeriodIds = Set<String>()
         for index in matchingAllocationIndices {
             let allocation = snapshot.potAllocations[index]
-            amountByPotId[allocation.potId, default: 0] += max(0, allocation.amountPence)
             payPeriodIds.insert(allocation.payPeriodId)
-        }
-
-        for (potId, amountPence) in amountByPotId {
-            guard amountPence > 0,
-                  let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived })
-            else { return nil }
-
-            guard snapshot.pots[potIndex].balancePence >= amountPence else {
-                errorMessage = "Unable to update card spend funding because \(snapshot.pots[potIndex].name) no longer has enough money."
-                return nil
-            }
-        }
-
-        for (potId, amountPence) in amountByPotId {
-            guard let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived }) else { continue }
-            snapshot.pots[potIndex].balancePence -= amountPence
-            snapshot.pots[potIndex].updatedAt = now
         }
 
         for index in matchingAllocationIndices.sorted(by: >) {
@@ -1783,7 +1955,13 @@ final class PlannerStore: ObservableObject {
     }
 
     private func persist() {
+#if DEBUG
+        if !suppressAutomaticDueCatchUpForSimulation {
+            _ = catchUpDueObligations(to: todayIso)
+        }
+#else
         _ = catchUpDueObligations(to: todayIso)
+#endif
         let snapshot = snapshot
         Task {
             do {
@@ -1949,7 +2127,7 @@ final class PlannerStore: ObservableObject {
         guard let index = snapshot.debts.firstIndex(where: { $0.id == debtId }) else { return }
         let nextBalancePence = max(0, snapshot.debts[index].currentBalancePence - abs(amountPence))
         snapshot.debts[index].currentBalancePence = nextBalancePence
-        snapshot.debts[index].status = nextBalancePence > 0 ? .active : .paid
+        snapshot.debts[index].status = nextBalancePence > 0 ? .active : .paidOff
         snapshot.debts[index].updatedAt = now
     }
 
@@ -1960,10 +2138,167 @@ final class PlannerStore: ObservableObject {
             snapshot.debts[index].currentBalancePence + abs(payment.amountPence)
         )
         snapshot.debts[index].currentBalancePence = restoredBalancePence
-        snapshot.debts[index].status = restoredBalancePence > 0 ? .active : .paid
+        snapshot.debts[index].status = restoredBalancePence > 0 ? .active : .paidOff
         snapshot.debts[index].updatedAt = now
     }
+
+    @discardableResult
+    private func ensureDebtSchedules(today: String) -> Bool {
+        let existingDebtIds = Set(snapshot.debtPaymentScheduleItems.map(\.debtId))
+        var changed = false
+        for debt in snapshot.debts where debt.status.isActiveLike && debt.currentBalancePence > 0 && !existingDebtIds.contains(debt.id) {
+            let scheduleItems = DebtPlannerEngine.generateSchedule(for: debt, payPeriods: snapshot.payPeriods, today: today)
+            guard !scheduleItems.isEmpty else { continue }
+            snapshot.debtPaymentScheduleItems.append(contentsOf: scheduleItems)
+            changed = true
+        }
+        return changed
+    }
+
+    private func regenerateDebtSchedule(debtId: String, today: String, now: String) {
+        guard let debt = snapshot.debts.first(where: { $0.id == debtId }) else { return }
+        snapshot.debtPaymentScheduleItems.removeAll {
+            $0.debtId == debtId && $0.status != .paid
+        }
+        guard debt.status.isActiveLike && debt.currentBalancePence > 0 else { return }
+        snapshot.debtPaymentScheduleItems.append(contentsOf: DebtPlannerEngine.generateSchedule(for: debt, payPeriods: snapshot.payPeriods, today: today))
+        updateDebtStatus(debtId: debtId, asOf: today, now: now)
+    }
+
+    private func recalculateDebtAfterPayment(debtId: String, date: String, mode: DebtRecalculationMode, now: String) {
+        guard let debtIndex = snapshot.debts.firstIndex(where: { $0.id == debtId }) else { return }
+        if snapshot.debts[debtIndex].currentBalancePence <= 0 {
+            snapshot.debts[debtIndex].currentBalancePence = 0
+            snapshot.debts[debtIndex].status = .paidOff
+            snapshot.debts[debtIndex].updatedAt = now
+            cancelFutureDebtScheduleItems(debtId: debtId, now: now)
+            return
+        }
+
+        let futureItems = DebtPlannerEngine.generateSchedule(for: snapshot.debts[debtIndex], payPeriods: snapshot.payPeriods, today: date)
+        snapshot.debtPaymentScheduleItems.removeAll { $0.debtId == debtId && $0.status != .paid }
+        snapshot.debtPaymentScheduleItems.append(contentsOf: futureItems)
+        updateDebtStatus(debtId: debtId, asOf: date, now: now)
+    }
+
+    private func cancelFutureDebtScheduleItems(debtId: String, now: String) {
+        for index in snapshot.debtPaymentScheduleItems.indices where snapshot.debtPaymentScheduleItems[index].debtId == debtId && snapshot.debtPaymentScheduleItems[index].status != .paid {
+            snapshot.debtPaymentScheduleItems[index].status = .cancelled
+            snapshot.debtPaymentScheduleItems[index].plannedAmountPence = 0
+            snapshot.debtPaymentScheduleItems[index].principalAmountPence = 0
+            snapshot.debtPaymentScheduleItems[index].interestAmountPence = 0
+            snapshot.debtPaymentScheduleItems[index].feeAmountPence = 0
+            snapshot.debtPaymentScheduleItems[index].fundedAmountPence = 0
+            snapshot.debtPaymentScheduleItems[index].updatedAt = now
+        }
+    }
+
+    private func nextDebtScheduleItem(debtId: String, onOrAfter date: String) -> DebtPaymentScheduleItem? {
+        if !snapshot.debtPaymentScheduleItems.contains(where: { $0.debtId == debtId }) {
+            _ = ensureDebtSchedules(today: date)
+        }
+        return snapshot.debtPaymentScheduleItems
+            .filter { $0.debtId == debtId && $0.status != .paid && $0.status != .cancelled && $0.dueDate >= date }
+            .sorted {
+                if $0.dueDate == $1.dueDate {
+                    return $0.id < $1.id
+                }
+                return $0.dueDate < $1.dueDate
+            }
+            .first
+    }
+
+    private func replaceDebtScheduleItem(_ item: DebtPaymentScheduleItem) {
+        if let index = snapshot.debtPaymentScheduleItems.firstIndex(where: { $0.id == item.id }) {
+            snapshot.debtPaymentScheduleItems[index] = item
+        } else {
+            snapshot.debtPaymentScheduleItems.append(item)
+        }
+    }
+
+    private func addDebtScheduleFunding(scheduleItemId: String, amountPence: Int, now: String) {
+        guard let index = snapshot.debtPaymentScheduleItems.firstIndex(where: { $0.id == scheduleItemId }) else { return }
+        let planned = max(0, snapshot.debtPaymentScheduleItems[index].plannedAmountPence - snapshot.debtPaymentScheduleItems[index].paidAmountPence)
+        let funded = min(planned, max(0, snapshot.debtPaymentScheduleItems[index].fundedAmountPence + max(0, amountPence)))
+        snapshot.debtPaymentScheduleItems[index].fundedAmountPence = funded
+        snapshot.debtPaymentScheduleItems[index].status = funded >= planned ? .funded : (funded > 0 ? .partFunded : .planned)
+        snapshot.debtPaymentScheduleItems[index].updatedAt = now
+        updateDebtStatus(debtId: snapshot.debtPaymentScheduleItems[index].debtId, asOf: todayIso, now: now)
+    }
+
+    private func removeDebtScheduleFunding(scheduleItemId: String, amountPence: Int, now: String) {
+        guard let index = snapshot.debtPaymentScheduleItems.firstIndex(where: { $0.id == scheduleItemId }) else { return }
+        let funded = max(0, snapshot.debtPaymentScheduleItems[index].fundedAmountPence - max(0, amountPence))
+        snapshot.debtPaymentScheduleItems[index].fundedAmountPence = funded
+        snapshot.debtPaymentScheduleItems[index].status = funded > 0 ? .partFunded : .planned
+        snapshot.debtPaymentScheduleItems[index].updatedAt = now
+        updateDebtStatus(debtId: snapshot.debtPaymentScheduleItems[index].debtId, asOf: todayIso, now: now)
+    }
+
+    private func updateDebtStatus(debtId: String, asOf today: String, now: String) {
+        guard let debtIndex = snapshot.debts.firstIndex(where: { $0.id == debtId }) else { return }
+        guard snapshot.debts[debtIndex].currentBalancePence > 0 else {
+            snapshot.debts[debtIndex].status = .paidOff
+            snapshot.debts[debtIndex].updatedAt = now
+            return
+        }
+        let items = snapshot.debtPaymentScheduleItems
+            .filter { $0.debtId == debtId && $0.status != .paid && $0.status != .cancelled }
+            .sorted { $0.dueDate < $1.dueDate }
+        let nextItem = items.first
+        if items.contains(where: { $0.dueDate < today && $0.status != .paid }) {
+            snapshot.debts[debtIndex].status = .overdue
+        } else if nextItem?.dueDate == today {
+            snapshot.debts[debtIndex].status = .dueToday
+        } else if let nextItem, nextItem.status == .funded {
+            snapshot.debts[debtIndex].status = .funded
+        } else if let nextItem, nextItem.status == .partFunded {
+            snapshot.debts[debtIndex].status = .partFunded
+        } else if let nextItem, nextItem.dueDate <= FinanceEngine.addIsoDays(date: today, days: 7) {
+            snapshot.debts[debtIndex].status = .dueSoon
+        } else if snapshot.debts[debtIndex].interestType == .apr,
+                  DebtPlannerEngine.hasInterestRisk(debt: snapshot.debts[debtIndex], paymentAmountPence: max(0, snapshot.debts[debtIndex].minimumPaymentPence + snapshot.debts[debtIndex].extraPaymentPence), days: 30) {
+            snapshot.debts[debtIndex].status = .interestRisk
+        } else {
+            snapshot.debts[debtIndex].status = .active
+        }
+        snapshot.debts[debtIndex].updatedAt = now
+    }
 }
+
+#if DEBUG
+extension PlannerStore {
+    func useSnapshotForSimulation(_ snapshot: PlannerSnapshot) {
+        suppressAutomaticDueCatchUpForSimulation = true
+        self.snapshot = snapshot
+    }
+
+    func setManualTodayForSimulation(_ todayIso: String) {
+        guard FinanceEngine.isIsoDate(todayIso) else { return }
+        snapshot.settings.appDateMode = .manual
+        snapshot.settings.manualTodayIso = todayIso
+        snapshot.settings.lastProcessedDateIso = todayIso
+        snapshot.settings.updatedAt = DateUtilities.nowIsoString()
+    }
+
+    @discardableResult
+    func applyDueScheduledPaymentsForSimulation(asOf todayIso: String) -> Bool {
+        var changed = false
+        changed = applyDueRecurringPotPayments(asOf: todayIso) || changed
+        changed = applyDueCreditCardRecurringPayments(asOf: todayIso) || changed
+        changed = applyDueLinkedDebtPotPayments(asOf: todayIso) || changed
+        return changed
+    }
+
+    @discardableResult
+    func applyDueCreditCardPaymentsForSimulation(asOf todayIso: String) -> Bool {
+        var changed = false
+        changed = applyDueCreditCardOpeningBalanceRepayments(asOf: todayIso) || changed
+        changed = applyDueCreditCardStatementRepayments(asOf: todayIso) || changed
+        return changed
+    }
+}
+#endif
 
 private extension String {
     var nilIfBlank: String? {

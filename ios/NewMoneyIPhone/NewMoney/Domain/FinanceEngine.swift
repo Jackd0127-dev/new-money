@@ -215,8 +215,8 @@ enum FinanceEngine {
         pots: [Pot],
         today: String
     ) -> DebtSummary {
-        let activeDebts = debts.filter { $0.status == .active && $0.currentBalancePence > 0 }
-        let overdueDebtCount = activeDebts.filter { $0.dueDate < today }.count
+        let activeDebts = debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 }
+        let overdueDebtCount = activeDebts.filter { $0.status == .overdue || ($0.targetPayoffDate ?? $0.dueDate) < today }.count
         let current = activeDebts.reduce(0) { $0 + $1.currentBalancePence }
         let original = activeDebts.reduce(0) { $0 + $1.originalAmountPence }
         let paidFromBalances = max(0, original - current)

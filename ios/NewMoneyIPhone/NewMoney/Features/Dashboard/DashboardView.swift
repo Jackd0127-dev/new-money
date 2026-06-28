@@ -1067,8 +1067,8 @@ private struct DebtsBreakdownView: View {
     private var summary: DebtSummary {
         FinanceEngine.getDebtSummary(debts: snapshot.debts, payments: snapshot.debtPayments, reserves: snapshot.debtReserves, pots: snapshot.pots, today: store.todayIso)
     }
-    private var activeDebts: [Debt] { snapshot.debts.filter { $0.status == .active && $0.currentBalancePence > 0 } }
-    private var inactiveDebts: [Debt] { snapshot.debts.filter { $0.status != .active } }
+    private var activeDebts: [Debt] { snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 } }
+    private var inactiveDebts: [Debt] { snapshot.debts.filter { !$0.status.isActiveLike || $0.currentBalancePence <= 0 } }
 
     var body: some View {
         DashboardBreakdownScaffold(
@@ -1172,34 +1172,83 @@ private struct DebtsBreakdownView: View {
         NavigationLink {
             DebtDetailScreenView(store: store, debt: debt)
         } label: {
-            AppCard(glow: debt.status == .active && debt.dueDate < store.todayIso) {
-                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(debt.name)
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-                            .lineLimit(1)
-                        Text(debtLinkedSummary(for: debt, in: snapshot))
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                            .lineLimit(1)
+            AppCard(glow: debt.status == .overdue || debt.status == .dueToday) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(debt.name)
+                                .font(.headline)
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                                .lineLimit(1)
+                            Text(debtLinkedSummary(for: debt, in: snapshot))
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: AppTheme.Spacing.md)
+                        VStack(alignment: .trailing, spacing: 8) {
+                            Text(MoneyParser.formatPence(debt.currentBalancePence))
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.orangeHighlight)
+                                .lineLimit(1)
+                            Text(debtStatusLabel(debt.status))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(debt.status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
                     }
-                    Spacer(minLength: AppTheme.Spacing.md)
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Text(MoneyParser.formatPence(debt.currentBalancePence))
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.orangeHighlight)
-                            .lineLimit(1)
-                        Text("Due \(debtDateLabel(debt.dueDate, relativeTo: store.todayIso))")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                            .lineLimit(1)
+                    ProgressView(value: debtProgress(debt))
+                        .tint(AppTheme.Colors.primaryOrange)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Next")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            Text(nextPaymentText(for: debt))
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Funded")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            Text(MoneyParser.formatPence(nextFundedPence(for: debt)))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.success)
+                        }
                     }
                 }
             }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open \(debt.name)")
+    }
+
+    private func scheduleItems(for debt: Debt) -> [DebtPaymentScheduleItem] {
+        PlannerDerivedData.debtScheduleItems(snapshot: snapshot, payPeriod: nil)
+            .filter { $0.debtId == debt.id && $0.status != .cancelled }
+            .sorted { $0.dueDate == $1.dueDate ? $0.id < $1.id : $0.dueDate < $1.dueDate }
+    }
+
+    private func nextScheduleItem(for debt: Debt) -> DebtPaymentScheduleItem? {
+        scheduleItems(for: debt).first { $0.status != .paid }
+    }
+
+    private func nextPaymentText(for debt: Debt) -> String {
+        guard let item = nextScheduleItem(for: debt) else { return "No scheduled payment" }
+        return "\(MoneyParser.formatPence(item.plannedAmountPence)) · \(item.dueDate)"
+    }
+
+    private func nextFundedPence(for debt: Debt) -> Int {
+        nextScheduleItem(for: debt)?.fundedAmountPence ?? 0
+    }
+
+    private func debtProgress(_ debt: Debt) -> Double {
+        let starting = max(1, debt.startingBalancePence)
+        let paid = max(0, starting - debt.currentBalancePence)
+        return min(1, max(0, Double(paid) / Double(starting)))
     }
 
     private func debtPaymentRow(_ payment: DebtPayment) -> some View {
@@ -1234,9 +1283,9 @@ private struct DebtsBreakdownView: View {
 
     private func debtLinkedSummary(for debt: Debt, in snapshot: PlannerSnapshot) -> String {
         if let potName = linkedDebtPotName(in: snapshot, debtId: debt.id) {
-            return "\(debt.lender) · \(potName)"
+            return "\(debt.lender) · \(potName) · \(debtStrategyLabel(debt.repaymentStrategy))"
         }
-        return debt.lender
+        return "\(debt.lender) · \(debtStrategyLabel(debt.repaymentStrategy))"
     }
 }
 
@@ -1246,11 +1295,13 @@ private struct RecordDebtPaymentSheetView: View {
     @State private var debtId: String
     @State private var amount = ""
     @State private var paymentDate = Date()
+    @State private var paymentType: DebtPaymentType = .manualPayNow
+    @State private var recalculationMode: DebtRecalculationMode = .finishEarlier
     @State private var note = ""
 
     init(store: PlannerStore) {
         self.store = store
-        _debtId = State(initialValue: store.snapshot.debts.first { $0.status == .active && $0.currentBalancePence > 0 }?.id ?? "")
+        _debtId = State(initialValue: store.snapshot.debts.first { $0.status.isActiveLike && $0.currentBalancePence > 0 }?.id ?? "")
     }
 
     var body: some View {
@@ -1261,8 +1312,8 @@ private struct RecordDebtPaymentSheetView: View {
                     if let debt = selectedPaymentDebt {
                         AppCard {
                             MetricRow(label: "Current debt", value: MoneyParser.formatPence(debt.currentBalancePence), valueColor: AppTheme.Colors.orangeHighlight)
-                            MetricRow(label: "Payment", value: "-\(MoneyParser.formatPence(parsedAmountPence))", valueColor: AppTheme.Colors.success)
-                            MetricRow(label: "Balance after payment", value: MoneyParser.formatPence(max(0, debt.currentBalancePence - parsedAmountPence)), valueColor: AppTheme.Colors.primaryOrange)
+                            MetricRow(label: paymentType == .manualSetAside ? "Set aside" : "Payment", value: MoneyParser.formatPence(parsedAmountPence), valueColor: AppTheme.Colors.success)
+                            MetricRow(label: "Balance after", value: MoneyParser.formatPence(paymentType == .manualSetAside ? debt.currentBalancePence : max(0, debt.currentBalancePence - parsedAmountPence)), valueColor: AppTheme.Colors.primaryOrange)
                         }
                     }
                 }
@@ -1293,14 +1344,27 @@ private struct RecordDebtPaymentSheetView: View {
             }
             .pickerStyle(.menu)
             MoneyField(title: "Payment amount", text: $amount)
+            Picker("Action", selection: $paymentType) {
+                Text("Pay now").tag(DebtPaymentType.manualPayNow)
+                Text("Set aside").tag(DebtPaymentType.manualSetAside)
+            }
+            .pickerStyle(.segmented)
+            Picker("Recalculate", selection: $recalculationMode) {
+                Text("Lower payments").tag(DebtRecalculationMode.lowerFuturePayments)
+                Text("Finish earlier").tag(DebtRecalculationMode.finishEarlier)
+                Text("Skip next").tag(DebtRecalculationMode.skipNextPayment)
+            }
+            .pickerStyle(.menu)
             DatePicker("Payment date", selection: $paymentDate, displayedComponents: .date)
                 .tint(AppTheme.Colors.primaryOrange)
             TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
             PrimaryButton(title: "Record payment", systemImage: "checkmark.circle", isDisabled: !canSave) {
-                store.recordDebtPayment(
+                store.recordManualDebtPayment(
                     debtId: debtId,
                     amountPence: parsedAmountPence,
                     date: paymentDate.isoDateString,
+                    paymentType: paymentType,
+                    recalculationMode: recalculationMode,
                     note: note
                 )
                 dismiss()
@@ -1309,7 +1373,7 @@ private struct RecordDebtPaymentSheetView: View {
     }
 
     private var selectableDebts: [Debt] {
-        store.snapshot.debts.filter { $0.status == .active && $0.currentBalancePence > 0 }
+        store.snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 }
     }
 
     private var selectedPaymentDebt: Debt? {
@@ -1358,6 +1422,9 @@ private struct DebtDetailScreenView: View {
         ScrollView {
             VStack(spacing: AppTheme.Spacing.lg) {
                 summaryCard
+                scheduleCard
+                paymentHistoryCard
+                interestCard
                 editCard
                 SecondaryButton(title: "Delete debt", systemImage: "trash", role: .destructive) {
                     showDeleteAlert = true
@@ -1386,13 +1453,75 @@ private struct DebtDetailScreenView: View {
             MetricRow(label: "Name", value: currentDebt.name)
             MetricRow(label: "Lender", value: currentDebt.lender)
             MetricRow(label: "Current debt", value: MoneyParser.formatPence(currentDebt.currentBalancePence), valueColor: AppTheme.Colors.orangeHighlight)
+            MetricRow(label: "Original balance", value: MoneyParser.formatPence(currentDebt.startingBalancePence))
+            ProgressView(value: debtProgress)
+                .tint(AppTheme.Colors.primaryOrange)
             MetricRow(label: "Minimum payment", value: MoneyParser.formatPence(currentDebt.minimumPaymentPence))
-            MetricRow(label: "Due date", value: debtDateLabel(currentDebt.dueDate, relativeTo: store.todayIso))
+            MetricRow(label: "Strategy", value: debtStrategyLabel(currentDebt.repaymentStrategy))
+            MetricRow(label: "Next payment", value: nextScheduleItem.map { "\(MoneyParser.formatPence($0.plannedAmountPence)) on \($0.dueDate)" } ?? "None")
             MetricRow(label: "APR", value: currentDebt.interestRateApr.map { String(format: "%.2f%%", $0) } ?? "Not set")
             MetricRow(label: "Payments", value: MoneyParser.formatPence(paymentsTotalPence), valueColor: AppTheme.Colors.success)
             MetricRow(label: "Linked pot", value: linkedDebtPotName(in: store.snapshot, debtId: currentDebt.id) ?? "None")
-            MetricRow(label: "Status", value: currentDebt.status.rawValue.capitalized, valueColor: currentDebt.status == .active ? AppTheme.Colors.success : AppTheme.Colors.tertiaryText)
+            MetricRow(label: "Status", value: debtStatusLabel(currentDebt.status), valueColor: currentDebt.status.isActiveLike ? AppTheme.Colors.success : AppTheme.Colors.tertiaryText)
             MetricRow(label: "Note", value: currentDebt.note.isBlank ? "No note" : currentDebt.note)
+        }
+    }
+
+    private var scheduleCard: some View {
+        AppCard {
+            SectionTitle("Schedule")
+            if scheduleItems.isEmpty {
+                EmptyStateView(title: "No scheduled payments", message: "Manual-only debts show payments after you add them.", systemImage: "calendar")
+            } else {
+                ForEach(scheduleItems, id: \.id) { (item: DebtPaymentScheduleItem) in
+                    scheduleRow(item)
+                    Divider().overlay(AppTheme.Colors.divider)
+                }
+            }
+        }
+    }
+
+    private func scheduleRow(_ item: DebtPaymentScheduleItem) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.dueDate)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text("\(item.status.rawValue.replacingOccurrences(of: "_", with: " ")) · funded \(MoneyParser.formatPence(item.fundedAmountPence))")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+            Spacer()
+            Text(MoneyParser.formatPence(item.plannedAmountPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(item.status == .paid ? AppTheme.Colors.success : AppTheme.Colors.orangeHighlight)
+        }
+    }
+
+    private var paymentHistoryCard: some View {
+        AppCard {
+            SectionTitle("Payment history")
+            let payments = store.snapshot.debtPayments.filter { $0.debtId == currentDebt.id }.sorted { $0.date > $1.date }
+            if payments.isEmpty {
+                EmptyStateView(title: "No payments yet", message: "Debt payments will appear here.", systemImage: "checkmark.circle")
+            } else {
+                ForEach(payments) { payment in
+                    MetricRow(label: payment.date, value: MoneyParser.formatPence(payment.amountPence), valueColor: AppTheme.Colors.success)
+                }
+            }
+        }
+    }
+
+    private var interestCard: some View {
+        AppCard {
+            SectionTitle("Interest")
+            MetricRow(label: "Type", value: debtInterestLabel(currentDebt.interestType))
+            MetricRow(label: "Estimated scheduled interest", value: MoneyParser.formatPence(scheduleItems.reduce(0) { $0 + $1.interestAmountPence }))
+            if currentDebt.status == .interestRisk {
+                Text("Payment does not cover estimated interest. Debt may increase.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.danger)
+            }
         }
     }
 
@@ -1429,8 +1558,10 @@ private struct DebtDetailScreenView: View {
                 updated.minimumPaymentPence = MoneyParser.parsePoundsToPence(minimum)
                 updated.dueDate = dueDate.isoDateString
                 updated.interestRateApr = Double(apr)
+                updated.aprBasisPoints = Double(apr).map { Int(($0 * 100).rounded()) }
+                updated.interestType = updated.aprBasisPoints == nil ? .none : .apr
                 updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                updated.status = currentBalancePence > 0 ? status : .paid
+                updated.status = currentBalancePence > 0 ? status : .paidOff
                 store.updateDebt(updated)
                 _ = store.setDebtLinkedPot(debtId: updated.id, potId: linkedPotId.nilIfBlank)
             }
@@ -1445,6 +1576,21 @@ private struct DebtDetailScreenView: View {
         store.snapshot.debtPayments
             .filter { $0.debtId == currentDebt.id }
             .reduce(0) { $0 + $1.amountPence }
+    }
+
+    private var scheduleItems: [DebtPaymentScheduleItem] {
+        PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
+            .filter { $0.debtId == currentDebt.id && $0.status != .cancelled }
+            .sorted { $0.dueDate == $1.dueDate ? $0.id < $1.id : $0.dueDate < $1.dueDate }
+    }
+
+    private var nextScheduleItem: DebtPaymentScheduleItem? {
+        scheduleItems.first { $0.status != .paid }
+    }
+
+    private var debtProgress: Double {
+        let starting = max(1, currentDebt.startingBalancePence)
+        return min(1, max(0, Double(max(0, starting - currentDebt.currentBalancePence)) / Double(starting)))
     }
 
     private var canSave: Bool {
@@ -1547,7 +1693,7 @@ private struct DebtPaymentEditSheetView: View {
     }
 
     private var selectableDebts: [Debt] {
-        var debts = store.snapshot.debts.filter { $0.status == .active && $0.currentBalancePence > 0 }
+        var debts = store.snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 }
         if let linkedDebt = store.snapshot.debts.first(where: { $0.id == currentPayment.debtId }),
            !debts.contains(where: { $0.id == linkedDebt.id }) {
             debts.insert(linkedDebt, at: 0)
@@ -1582,6 +1728,30 @@ private func debtDateLabel(_ isoDate: String, relativeTo todayIso: String) -> St
 
     guard year != currentYear else { return baseLabel }
     return "\(baseLabel) \(String(format: "%02d", year % 100))"
+}
+
+private func debtStatusLabel(_ status: DebtStatus) -> String {
+    status.rawValue
+        .replacingOccurrences(of: "_", with: " ")
+        .capitalized
+}
+
+private func debtStrategyLabel(_ strategy: DebtRepaymentStrategy) -> String {
+    switch strategy {
+    case .autoSpreadUntilDueDate: return "Auto spread"
+    case .payIn4: return "Pay in 4"
+    case .fixedPayment: return "Fixed payment"
+    case .minimumPlusExtra: return "Minimum + extra"
+    case .manualOnly: return "Manual only"
+    }
+}
+
+private func debtInterestLabel(_ type: DebtInterestType) -> String {
+    switch type {
+    case .none: return "None"
+    case .apr: return "APR"
+    case .fixedFee: return "Fixed fee"
+    }
 }
 
 private func eligibleDebtPots(in snapshot: PlannerSnapshot, debtId: String?) -> [Pot] {

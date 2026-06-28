@@ -689,6 +689,15 @@ struct AddDebtSheetView: View {
     @State private var dueDate = Date()
     @State private var linkedPotId = ""
     @State private var apr = ""
+    @State private var fixedFee = ""
+    @State private var extraPayment = ""
+    @State private var debtType: DebtType = .other
+    @State private var interestType: DebtInterestType = .none
+    @State private var repaymentStrategy: DebtRepaymentStrategy = .autoSpreadUntilDueDate
+    @State private var paymentFrequency: DebtPaymentFrequency = .monthly
+    @State private var paymentDay = ""
+    @State private var payFirstTiming: DebtPayFirstTiming = .nextPayday
+    @State private var hasFixedDueDate = true
     @State private var note = ""
 
     var body: some View {
@@ -699,9 +708,56 @@ struct AddDebtSheetView: View {
                     TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
                     TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
                     MoneyField(title: "Current balance", text: $balance)
-                    MoneyField(title: "Minimum payment", text: $minimum)
-                    DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                    Picker("Debt type", selection: $debtType) {
+                        ForEach(DebtType.allCases) { type in
+                            Text(debtTypeLabel(type)).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Interest", selection: $interestType) {
+                        ForEach(DebtInterestType.allCases) { type in
+                            Text(debtInterestLabel(type)).tag(type)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    if interestType == .apr {
+                        TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
+                    } else if interestType == .fixedFee {
+                        MoneyField(title: "Fixed fee", text: $fixedFee)
+                    }
+                    Toggle("Fixed payoff date", isOn: $hasFixedDueDate)
                         .tint(AppTheme.Colors.primaryOrange)
+                    if hasFixedDueDate {
+                        DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                            .tint(AppTheme.Colors.primaryOrange)
+                    }
+                    Picker("Strategy", selection: $repaymentStrategy) {
+                        ForEach(DebtRepaymentStrategy.allCases) { strategy in
+                            Text(debtStrategyLabel(strategy)).tag(strategy)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Frequency", selection: $paymentFrequency) {
+                        ForEach(DebtPaymentFrequency.allCases) { frequency in
+                            Text(debtFrequencyLabel(frequency)).tag(frequency)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("Payment day", text: $paymentDay)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(AppTextFieldStyle())
+                    MoneyField(title: repaymentStrategy == .fixedPayment ? "Fixed payment" : "Minimum payment", text: $minimum)
+                    if repaymentStrategy == .minimumPlusExtra {
+                        MoneyField(title: "Extra payment", text: $extraPayment)
+                    }
+                    if repaymentStrategy == .payIn4 {
+                        Picker("First payment", selection: $payFirstTiming) {
+                            ForEach(DebtPayFirstTiming.allCases) { timing in
+                                Text(debtFirstPaymentLabel(timing)).tag(timing)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     Picker("Linked pot", selection: $linkedPotId) {
                         Text("No linked pot").tag("")
                         ForEach(eligibleDebtPots(in: store.snapshot, debtId: nil)) { pot in
@@ -709,18 +765,26 @@ struct AddDebtSheetView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
                     TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+                    previewCard
                     PrimaryButton(title: "Add debt", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(balance) <= 0) {
                         store.addDebt(
                             name: name,
                             lender: lender,
                             currentBalancePence: MoneyParser.parsePoundsToPence(balance),
                             minimumPaymentPence: MoneyParser.parsePoundsToPence(minimum),
-                            dueDate: dueDate.isoDateString,
-                            apr: Double(apr),
+                            dueDate: hasFixedDueDate ? dueDate.isoDateString : "",
+                            apr: interestType == .apr ? Double(apr) : nil,
                             note: note,
-                            linkedPotId: linkedPotId.nilIfBlank
+                            linkedPotId: linkedPotId.nilIfBlank,
+                            type: debtType,
+                            interestType: interestType,
+                            fixedFeePence: MoneyParser.parsePoundsToPence(fixedFee),
+                            extraPaymentPence: MoneyParser.parsePoundsToPence(extraPayment),
+                            repaymentStrategy: repaymentStrategy,
+                            paymentFrequency: paymentFrequency,
+                            paymentDay: Int(paymentDay).map { min(31, max(1, $0)) },
+                            payFirstTiming: payFirstTiming
                         )
                         reset()
                         dismiss()
@@ -735,6 +799,49 @@ struct AddDebtSheetView: View {
         }
     }
 
+    private var previewCard: some View {
+        let schedule = previewSchedule
+        return VStack(alignment: .leading, spacing: 8) {
+            SectionTitle("Preview")
+            MetricRow(label: "First payment", value: schedule.first.map { "\(MoneyParser.formatPence($0.plannedAmountPence)) on \($0.dueDate)" } ?? "No automatic payment")
+            MetricRow(label: "Commitment", value: MoneyParser.formatPence(schedule.reduce(0) { $0 + $1.plannedAmountPence }))
+            MetricRow(label: "Estimated payoff", value: schedule.last?.dueDate ?? (hasFixedDueDate ? dueDate.isoDateString : "Manual"))
+            MetricRow(label: "Projected interest", value: MoneyParser.formatPence(schedule.reduce(0) { $0 + $1.interestAmountPence }))
+        }
+    }
+
+    private var previewSchedule: [DebtPaymentScheduleItem] {
+        let amountPence = MoneyParser.parsePoundsToPence(balance)
+        guard amountPence > 0 else { return [] }
+        let debt = Debt(
+            id: "preview-debt",
+            name: name.isBlank ? "Debt" : name,
+            lender: lender,
+            originalAmountPence: amountPence,
+            currentBalancePence: amountPence,
+            minimumPaymentPence: MoneyParser.parsePoundsToPence(minimum),
+            dueDate: hasFixedDueDate ? dueDate.isoDateString : "",
+            interestRateApr: interestType == .apr ? Double(apr) : nil,
+            note: note,
+            status: .active,
+            createdAt: DateUtilities.nowIsoString(),
+            updatedAt: DateUtilities.nowIsoString(),
+            deletedAt: nil,
+            type: debtType,
+            startingBalancePence: amountPence,
+            targetPayoffDate: hasFixedDueDate ? dueDate.isoDateString : nil,
+            interestType: interestType,
+            aprBasisPoints: Double(apr).map { Int(($0 * 100).rounded()) },
+            fixedFeePence: MoneyParser.parsePoundsToPence(fixedFee),
+            extraPaymentPence: MoneyParser.parsePoundsToPence(extraPayment),
+            repaymentStrategy: repaymentStrategy,
+            paymentFrequency: paymentFrequency,
+            paymentDay: Int(paymentDay).map { min(31, max(1, $0)) },
+            payFirstTiming: payFirstTiming
+        )
+        return DebtPlannerEngine.generateSchedule(for: debt, payPeriods: store.snapshot.payPeriods, today: store.todayIso)
+    }
+
     private func reset() {
         name = ""
         lender = ""
@@ -743,6 +850,15 @@ struct AddDebtSheetView: View {
         dueDate = Date()
         linkedPotId = ""
         apr = ""
+        fixedFee = ""
+        extraPayment = ""
+        debtType = .other
+        interestType = .none
+        repaymentStrategy = .autoSpreadUntilDueDate
+        paymentFrequency = .monthly
+        paymentDay = ""
+        payFirstTiming = .nextPayday
+        hasFixedDueDate = true
         note = ""
     }
 }
@@ -758,6 +874,7 @@ struct DebtsView: View {
     @State private var apr = ""
     @State private var note = ""
     @State private var selectedDebt: Debt?
+    @State private var isAddDebtPresented = false
 
     var body: some View {
         ScreenScaffold(
@@ -785,6 +902,9 @@ struct DebtsView: View {
         .sheet(item: $selectedDebt) { debt in
             DebtDetailView(store: store, debt: debt)
         }
+        .sheet(isPresented: $isAddDebtPresented) {
+            AddDebtSheetView(store: store)
+        }
     }
 
     private var debtSummary: some View {
@@ -799,44 +919,23 @@ struct DebtsView: View {
 
     private var addDebtCard: some View {
         AppCard {
-            SectionTitle("Add debt")
-            TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
-            TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
-            MoneyField(title: "Current balance", text: $balance)
-            MoneyField(title: "Minimum payment", text: $minimum)
-            DatePicker("Due date", selection: $dueDate, displayedComponents: .date).tint(AppTheme.Colors.primaryOrange)
-            Picker("Linked pot", selection: $linkedPotId) {
-                Text("No linked pot").tag("")
-                ForEach(eligibleDebtPots(in: store.snapshot, debtId: nil)) { pot in
-                    Text(pot.name).tag(pot.id)
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    SectionTitle("Add debt")
+                    Text("Create a balance-based repayment plan.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
-            }
-            .pickerStyle(.menu)
-            TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
-            TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
-            PrimaryButton(title: "Add debt", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(balance) <= 0) {
-                store.addDebt(
-                    name: name,
-                    lender: lender,
-                    currentBalancePence: MoneyParser.parsePoundsToPence(balance),
-                    minimumPaymentPence: MoneyParser.parsePoundsToPence(minimum),
-                    dueDate: dueDate.isoDateString,
-                    apr: Double(apr),
-                    note: note,
-                    linkedPotId: linkedPotId.nilIfBlank
-                )
-                name = ""
-                lender = ""
-                balance = ""
-                minimum = ""
-                linkedPotId = ""
-                note = ""
+                Spacer()
+                PrimaryButton(title: "Add", systemImage: "plus") {
+                    isAddDebtPresented = true
+                }
             }
         }
     }
 
     private func debtRow(_ debt: Debt) -> some View {
-        AppCard(glow: debt.dueDate < store.todayIso) {
+        AppCard(glow: debt.status == .overdue || debt.status == .dueToday) {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(debt.name)
@@ -851,12 +950,21 @@ struct DebtsView: View {
                     Text(MoneyParser.formatPence(debt.currentBalancePence))
                         .font(.headline.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.primaryOrange)
-                    Text("Min \(MoneyParser.formatPence(debt.minimumPaymentPence))")
+                    Text(nextDebtPaymentLine(for: debt))
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.tertiaryText)
                 }
             }
         }
+    }
+
+    private func nextDebtPaymentLine(for debt: Debt) -> String {
+        let item = PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
+            .filter { $0.debtId == debt.id && $0.status != .paid && $0.status != .cancelled }
+            .sorted { $0.dueDate < $1.dueDate }
+            .first
+        guard let item else { return debtStrategyLabel(debt.repaymentStrategy) }
+        return "\(MoneyParser.formatPence(item.plannedAmountPence)) due \(item.dueDate)"
     }
 }
 
@@ -873,9 +981,19 @@ private struct DebtDetailView: View {
                 VStack(spacing: AppTheme.Spacing.lg) {
                     AppCard(glow: true) {
                         MetricRow(label: "Balance", value: MoneyParser.formatPence(currentDebt.currentBalancePence), valueColor: AppTheme.Colors.primaryOrange)
+                        MetricRow(label: "Original", value: MoneyParser.formatPence(currentDebt.startingBalancePence))
                         MetricRow(label: "Minimum", value: MoneyParser.formatPence(currentDebt.minimumPaymentPence))
-                        MetricRow(label: "Due date", value: currentDebt.dueDate)
+                        MetricRow(label: "Strategy", value: debtStrategyLabel(currentDebt.repaymentStrategy))
+                        MetricRow(label: "Next payment", value: nextScheduleItem.map { "\(MoneyParser.formatPence($0.plannedAmountPence)) on \($0.dueDate)" } ?? "None")
+                        MetricRow(label: "Funded", value: MoneyParser.formatPence(nextScheduleItem?.fundedAmountPence ?? 0), valueColor: AppTheme.Colors.success)
+                        MetricRow(label: "Status", value: debtStatusLabel(currentDebt.status))
                         MetricRow(label: "Linked pot", value: linkedDebtPotName(in: store.snapshot, debtId: currentDebt.id) ?? "None")
+                    }
+                    AppCard {
+                        SectionTitle("Schedule")
+                        ForEach(scheduleItems, id: \.id) { (item: DebtPaymentScheduleItem) in
+                            MetricRow(label: item.dueDate, value: "\(MoneyParser.formatPence(item.plannedAmountPence)) · \(item.status.rawValue.replacingOccurrences(of: "_", with: " "))")
+                        }
                     }
                     AppCard {
                         SectionTitle("Payment")
@@ -903,6 +1021,16 @@ private struct DebtDetailView: View {
 
     private var currentDebt: Debt {
         store.snapshot.debts.first(where: { $0.id == debt.id }) ?? debt
+    }
+
+    private var scheduleItems: [DebtPaymentScheduleItem] {
+        PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
+            .filter { $0.debtId == currentDebt.id && $0.status != .cancelled }
+            .sorted { $0.dueDate < $1.dueDate }
+    }
+
+    private var nextScheduleItem: DebtPaymentScheduleItem? {
+        scheduleItems.first { $0.status != .paid }
     }
 
 }
@@ -1903,9 +2031,61 @@ private func linkedDebtPotName(in snapshot: PlannerSnapshot, debtId: String) -> 
 
 private func debtSummaryLine(for debt: Debt, in snapshot: PlannerSnapshot) -> String {
     if let potName = linkedDebtPotName(in: snapshot, debtId: debt.id) {
-        return "\(debt.lender) · \(potName) · due \(debt.dueDate)"
+        return "\(debt.lender) · \(potName) · \(debtStrategyLabel(debt.repaymentStrategy))"
     }
-    return "\(debt.lender) · due \(debt.dueDate)"
+    return "\(debt.lender) · \(debtStrategyLabel(debt.repaymentStrategy))"
+}
+
+private func debtTypeLabel(_ type: DebtType) -> String {
+    switch type {
+    case .informal: return "Informal"
+    case .bnpl: return "BNPL"
+    case .personalLoan: return "Personal loan"
+    case .overdraft: return "Overdraft"
+    case .creditAgreement: return "Credit agreement"
+    case .other: return "Other"
+    }
+}
+
+private func debtInterestLabel(_ type: DebtInterestType) -> String {
+    switch type {
+    case .none: return "None"
+    case .apr: return "APR"
+    case .fixedFee: return "Fee"
+    }
+}
+
+private func debtStrategyLabel(_ strategy: DebtRepaymentStrategy) -> String {
+    switch strategy {
+    case .autoSpreadUntilDueDate: return "Auto spread"
+    case .payIn4: return "Pay in 4"
+    case .fixedPayment: return "Fixed payment"
+    case .minimumPlusExtra: return "Minimum + extra"
+    case .manualOnly: return "Manual only"
+    }
+}
+
+private func debtFrequencyLabel(_ frequency: DebtPaymentFrequency) -> String {
+    switch frequency {
+    case .weekly: return "Weekly"
+    case .fortnightly: return "Fortnightly"
+    case .monthly: return "Monthly"
+    case .custom: return "Custom"
+    }
+}
+
+private func debtFirstPaymentLabel(_ timing: DebtPayFirstTiming) -> String {
+    switch timing {
+    case .today: return "Today"
+    case .nextPayday: return "Next payday"
+    case .customDate: return "Custom"
+    }
+}
+
+private func debtStatusLabel(_ status: DebtStatus) -> String {
+    status.rawValue
+        .replacingOccurrences(of: "_", with: " ")
+        .capitalized
 }
 
 private struct AssistantMessage: Identifiable {

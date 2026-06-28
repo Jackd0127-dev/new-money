@@ -179,6 +179,7 @@ struct CreditCardOpeningBalanceFundingChecklistItem: Identifiable, Equatable, Se
 
 struct DebtFundingChecklistItem: Identifiable, Equatable, Sendable {
     var id: String
+    var scheduleItemId: String
     var debtId: String
     var debtName: String
     var lenderName: String
@@ -209,6 +210,407 @@ struct CalendarEvent: Identifiable, Equatable, Sendable {
     var amountPence: Int?
     var type: CalendarEventType
     var detail: String
+}
+
+struct DebtPaymentApplication: Equatable, Sendable {
+    var debt: Debt
+    var scheduleItem: DebtPaymentScheduleItem?
+    var payment: DebtPayment
+}
+
+enum DebtPlannerEngine {
+    static func generateSchedule(for debt: Debt, payPeriods: [PayPeriod], today: String) -> [DebtPaymentScheduleItem] {
+        guard debt.currentBalancePence > 0, debt.status != .archived, !debt.status.isPaidLike else { return [] }
+
+        switch debt.repaymentStrategy {
+        case .manualOnly:
+            return []
+        case .autoSpreadUntilDueDate:
+            guard let targetPayoffDate = debt.targetPayoffDate ?? nonblank(debt.dueDate) else { return [] }
+            let paymentDates = scheduledDates(
+                from: today,
+                through: targetPayoffDate,
+                frequency: debt.paymentFrequency,
+                paymentDay: debt.paymentDay ?? dayOfMonth(targetPayoffDate)
+            )
+            return buildSplitSchedule(debt: debt, dates: paymentDates, today: today)
+        case .payIn4:
+            let firstDate = firstPaymentDate(for: debt, payPeriods: payPeriods, today: today)
+            let paymentDates = (0..<4).map { addMonthsClamped(date: firstDate, months: $0) }
+            return buildSplitSchedule(debt: debt, dates: paymentDates, today: today)
+        case .fixedPayment:
+            return buildFixedSchedule(debt: debt, payPeriods: payPeriods, today: today, regularPaymentPence: max(0, debt.minimumPaymentPence))
+        case .minimumPlusExtra:
+            return buildFixedSchedule(debt: debt, payPeriods: payPeriods, today: today, regularPaymentPence: max(0, debt.minimumPaymentPence + debt.extraPaymentPence))
+        }
+    }
+
+    static func estimatedInterestPence(balancePence: Int, aprBasisPoints: Int, days: Int) -> Int {
+        guard balancePence > 0, aprBasisPoints > 0, days > 0 else { return 0 }
+        let aprDecimal = Double(aprBasisPoints) / 10_000.0
+        let dailyRate = pow(1.0 + aprDecimal, 1.0 / 365.0) - 1.0
+        let interestPounds = (Double(balancePence) / 100.0) * (pow(1.0 + dailyRate, Double(days)) - 1.0)
+        return max(0, Int((interestPounds * 100.0).rounded()))
+    }
+
+    static func hasInterestRisk(debt: Debt, paymentAmountPence: Int, days: Int) -> Bool {
+        guard debt.interestType == .apr, let aprBasisPoints = debt.aprBasisPoints else { return false }
+        return paymentAmountPence < estimatedInterestPence(balancePence: debt.currentBalancePence, aprBasisPoints: aprBasisPoints, days: days)
+    }
+
+    static func applyPayment(
+        debt: Debt,
+        scheduleItem: DebtPaymentScheduleItem?,
+        amountPence: Int,
+        date: String,
+        sourcePotId: String?,
+        paymentType: DebtPaymentType,
+        note: String = ""
+    ) -> DebtPaymentApplication {
+        let requested = max(0, abs(amountPence))
+        let outstandingFee = max(0, (scheduleItem?.feeAmountPence ?? 0) - (scheduleItem?.paidAmountPence ?? 0))
+        var remaining = min(requested, max(0, debt.currentBalancePence + (scheduleItem?.interestAmountPence ?? 0) + outstandingFee))
+
+        let feePaid = min(remaining, max(0, scheduleItem?.feeAmountPence ?? 0))
+        remaining -= feePaid
+        let interestPaid = min(remaining, max(0, scheduleItem?.interestAmountPence ?? 0))
+        remaining -= interestPaid
+        let principalPaid = min(remaining, max(0, debt.currentBalancePence))
+        let applied = feePaid + interestPaid + principalPaid
+
+        var updatedDebt = debt
+        updatedDebt.currentBalancePence = max(0, debt.currentBalancePence - principalPaid)
+        updatedDebt.status = updatedDebt.currentBalancePence == 0 ? .paidOff : .active
+        updatedDebt.updatedAt = DateUtilities.nowIsoString()
+
+        var updatedScheduleItem = scheduleItem
+        if var item = updatedScheduleItem {
+            item.paidAmountPence = min(item.plannedAmountPence, item.paidAmountPence + applied)
+            item.fundedAmountPence = max(0, item.fundedAmountPence - applied)
+            item.paidDate = item.paidAmountPence >= item.plannedAmountPence ? date : item.paidDate
+            item.status = item.paidAmountPence >= item.plannedAmountPence ? .paid : .partFunded
+            item.updatedAt = DateUtilities.nowIsoString()
+            updatedScheduleItem = item
+        }
+
+        let payment = DebtPayment(
+            id: scheduleItem.map { "linked-debt-pot-payment-\($0.debtId)-\($0.dueDate)" } ?? DateUtilities.newId(prefix: "debt-payment"),
+            debtId: debt.id,
+            amountPence: applied,
+            date: date,
+            note: note,
+            createdAt: DateUtilities.nowIsoString(),
+            updatedAt: DateUtilities.nowIsoString(),
+            deletedAt: nil,
+            sourcePotId: sourcePotId,
+            paymentType: paymentType,
+            scheduleItemId: scheduleItem?.id,
+            principalPaidPence: principalPaid,
+            interestPaidPence: interestPaid,
+            feePaidPence: feePaid
+        )
+
+        return DebtPaymentApplication(debt: updatedDebt, scheduleItem: updatedScheduleItem, payment: payment)
+    }
+
+    static func recalculateSchedule(
+        afterExtraPaymentPence extraPaymentPence: Int,
+        debt: Debt,
+        scheduleItems: [DebtPaymentScheduleItem],
+        mode: DebtRecalculationMode,
+        payPeriods: [PayPeriod],
+        today: String
+    ) -> [DebtPaymentScheduleItem] {
+        let unpaidItems = scheduleItems
+            .filter { $0.debtId == debt.id && $0.status != .paid && $0.status != .cancelled }
+            .sorted { $0.dueDate == $1.dueDate ? $0.id < $1.id : $0.dueDate < $1.dueDate }
+        guard !unpaidItems.isEmpty else { return [] }
+
+        let remainingTotal = max(0, unpaidItems.reduce(0) { $0 + $1.plannedAmountPence } - max(0, extraPaymentPence))
+        guard remainingTotal > 0 else {
+            return unpaidItems.map { item in
+                var item = item
+                item.status = .cancelled
+                item.plannedAmountPence = 0
+                item.principalAmountPence = 0
+                item.interestAmountPence = 0
+                item.feeAmountPence = 0
+                return item
+            }
+        }
+
+        switch mode {
+        case .lowerFuturePayments:
+            if debt.repaymentStrategy == .payIn4 {
+                return lowerFinalPayment(total: remainingTotal, items: unpaidItems)
+            }
+            let split = splitPence(remainingTotal, count: unpaidItems.count)
+            return zip(unpaidItems, split).map { item, amount in
+                scheduleItem(from: item, amountPence: amount, interestPence: 0, feePence: 0)
+            }
+        case .finishEarlier:
+            var remaining = remainingTotal
+            var result: [DebtPaymentScheduleItem] = []
+            for item in unpaidItems {
+                guard remaining > 0 else { break }
+                let amount = min(item.plannedAmountPence, remaining)
+                result.append(scheduleItem(from: item, amountPence: amount, interestPence: 0, feePence: 0))
+                remaining -= amount
+            }
+            return result
+        case .skipNextPayment:
+            var items = unpaidItems
+            if !items.isEmpty {
+                items[0].status = .cancelled
+            }
+            let activeItems = Array(items.dropFirst())
+            let split = splitPence(remainingTotal, count: max(1, activeItems.count))
+            return [items[0]] + zip(activeItems, split).map { item, amount in
+                scheduleItem(from: item, amountPence: amount, interestPence: 0, feePence: 0)
+            }
+        }
+    }
+
+    static func snapshot(for debt: Debt, scheduleItems: [DebtPaymentScheduleItem], payments: [DebtPayment], date: String) -> DebtSnapshot {
+        let dayPayments = payments.filter { $0.debtId == debt.id && $0.date == date }
+        let paymentsMade = dayPayments.reduce(0) { $0 + $1.amountPence }
+        let interest = dayPayments.reduce(0) { $0 + $1.interestPaidPence }
+        let remainingScheduled = scheduleItems
+            .filter { $0.debtId == debt.id && $0.status != .paid && $0.status != .cancelled }
+            .reduce(0) { $0 + max(0, $1.plannedAmountPence - $1.paidAmountPence) }
+        return DebtSnapshot(
+            date: date,
+            debtId: debt.id,
+            openingBalancePence: debt.currentBalancePence + dayPayments.reduce(0) { $0 + $1.principalPaidPence },
+            interestAccruedPence: interest,
+            paymentsMadePence: paymentsMade,
+            closingBalancePence: debt.currentBalancePence,
+            remainingScheduledAmountPence: remainingScheduled,
+            status: debt.status
+        )
+    }
+
+    private static func buildSplitSchedule(debt: Debt, dates: [String], today: String) -> [DebtPaymentScheduleItem] {
+        let cleanDates = dates.filter { $0 >= today }.uniqued()
+        guard !cleanDates.isEmpty else { return [] }
+        let feeTotal = debt.interestType == .fixedFee ? debt.fixedFeePence : 0
+        let interestTotal = estimatedInterestTotal(debt: debt, dates: cleanDates, today: today)
+        let total = debt.currentBalancePence + feeTotal + interestTotal
+        let amounts = splitPence(total, count: cleanDates.count)
+        var remainingPrincipal = debt.currentBalancePence
+        var remainingInterest = interestTotal
+        var remainingFee = feeTotal
+
+        return zip(cleanDates, amounts).map { date, amount in
+            let fee = min(remainingFee, amount)
+            remainingFee -= fee
+            let interest = min(remainingInterest, max(0, amount - fee))
+            remainingInterest -= interest
+            let principal = min(remainingPrincipal, max(0, amount - fee - interest))
+            remainingPrincipal -= principal
+            return scheduleItem(id: scheduleItemId(debtId: debt.id, dueDate: date), debtId: debt.id, dueDate: date, amountPence: amount, principalPence: principal, interestPence: interest, feePence: fee)
+        }
+    }
+
+    private static func buildFixedSchedule(debt: Debt, payPeriods: [PayPeriod], today: String, regularPaymentPence: Int) -> [DebtPaymentScheduleItem] {
+        guard regularPaymentPence > 0 else { return [] }
+        var items: [DebtPaymentScheduleItem] = []
+        var balance = debt.currentBalancePence
+        var previousDate = today
+        var dueDate = firstPaymentDate(for: debt, payPeriods: payPeriods, today: today)
+        var index = 0
+
+        while balance > 0 && index < 600 {
+            let days = max(1, FinanceEngine.getDaysInclusive(startDate: previousDate, endDate: dueDate))
+            let interest = debt.interestType == .apr ? estimatedInterestPence(balancePence: balance, aprBasisPoints: debt.aprBasisPoints ?? 0, days: days) : 0
+            let fee = debt.interestType == .fixedFee && index == 0 ? debt.fixedFeePence : 0
+            let planned = min(max(regularPaymentPence, interest + fee), balance + interest + fee)
+            let principal = max(0, min(balance, planned - interest - fee))
+            items.append(scheduleItem(id: scheduleItemId(debtId: debt.id, dueDate: dueDate), debtId: debt.id, dueDate: dueDate, amountPence: planned, principalPence: principal, interestPence: min(interest, planned), feePence: min(fee, planned)))
+            guard principal > 0 else { break }
+            balance -= principal
+            previousDate = dueDate
+            dueDate = nextDate(after: dueDate, frequency: debt.paymentFrequency, paymentDay: debt.paymentDay)
+            index += 1
+        }
+
+        return items
+    }
+
+    private static func estimatedInterestTotal(debt: Debt, dates: [String], today: String) -> Int {
+        guard debt.interestType == .apr, let aprBasisPoints = debt.aprBasisPoints else { return 0 }
+        var total = 0
+        var previousDate = today
+        let remainingPrincipal = debt.currentBalancePence
+        for date in dates {
+            let days = max(1, FinanceEngine.getDaysInclusive(startDate: previousDate, endDate: date))
+            let interest = estimatedInterestPence(balancePence: remainingPrincipal, aprBasisPoints: aprBasisPoints, days: days)
+            total += interest
+            previousDate = date
+        }
+        return total
+    }
+
+    private static func firstPaymentDate(for debt: Debt, payPeriods: [PayPeriod], today: String) -> String {
+        switch debt.payFirstTiming {
+        case .today:
+            return today
+        case .customDate:
+            if let customDate = debt.customFirstPaymentDate, customDate >= today {
+                return customDate
+            }
+        case .nextPayday:
+            if let payday = payPeriods.map(\.payday).filter({ $0 >= today }).sorted().first {
+                return payday
+            }
+        }
+
+        if let paymentDay = debt.paymentDay {
+            return nextDayOfMonth(day: paymentDay, onOrAfter: today)
+        }
+        return today
+    }
+
+    private static func scheduledDates(from today: String, through targetDate: String, frequency: DebtPaymentFrequency, paymentDay: Int?) -> [String] {
+        guard targetDate >= today else { return [targetDate] }
+        var dates: [String] = []
+        var cursor = paymentDay.map { nextDayOfMonth(day: $0, onOrAfter: today) } ?? today
+        while cursor <= targetDate && dates.count < 600 {
+            dates.append(cursor)
+            cursor = nextDate(after: cursor, frequency: frequency, paymentDay: paymentDay)
+        }
+        if dates.last != targetDate {
+            dates.append(targetDate)
+        }
+        return dates
+    }
+
+    private static func nextDate(after date: String, frequency: DebtPaymentFrequency, paymentDay: Int?) -> String {
+        switch frequency {
+        case .weekly:
+            return FinanceEngine.addIsoDays(date: date, days: 7)
+        case .fortnightly:
+            return FinanceEngine.addIsoDays(date: date, days: 14)
+        case .monthly, .custom:
+            if let paymentDay {
+                return nextDayOfMonth(day: paymentDay, onOrAfter: FinanceEngine.addIsoDays(date: date, days: 1))
+            }
+            return addMonthsClamped(date: date, months: 1)
+        }
+    }
+
+    private static func splitPence(_ totalPence: Int, count: Int) -> [Int] {
+        guard count > 0, totalPence > 0 else { return [] }
+        let base = totalPence / count
+        let remainder = totalPence % count
+        return (0..<count).map { index in base + (index < remainder ? 1 : 0) }
+    }
+
+    private static func lowerFinalPayment(total: Int, items: [DebtPaymentScheduleItem]) -> [DebtPaymentScheduleItem] {
+        guard !items.isEmpty else { return [] }
+        let prefixTotal = items.dropLast().reduce(0) { $0 + $1.plannedAmountPence }
+        if prefixTotal >= total {
+            return Array(items.dropLast()).reduce(into: (remaining: total, result: [DebtPaymentScheduleItem]())) { state, item in
+                guard state.remaining > 0 else { return }
+                let amount = min(item.plannedAmountPence, state.remaining)
+                state.result.append(scheduleItem(from: item, amountPence: amount, interestPence: 0, feePence: 0))
+                state.remaining -= amount
+            }.result
+        }
+        var result = Array(items.dropLast())
+        if let last = items.last {
+            result.append(scheduleItem(from: last, amountPence: max(0, total - prefixTotal), interestPence: 0, feePence: 0))
+        }
+        return result
+    }
+
+    private static func scheduleItem(from item: DebtPaymentScheduleItem, amountPence: Int, interestPence: Int, feePence: Int) -> DebtPaymentScheduleItem {
+        var item = item
+        item.plannedAmountPence = max(0, amountPence)
+        item.interestAmountPence = max(0, min(interestPence, amountPence))
+        item.feeAmountPence = max(0, min(feePence, amountPence - item.interestAmountPence))
+        item.principalAmountPence = max(0, amountPence - item.interestAmountPence - item.feeAmountPence)
+        item.fundedAmountPence = min(item.fundedAmountPence, item.plannedAmountPence)
+        item.updatedAt = DateUtilities.nowIsoString()
+        return item
+    }
+
+    private static func scheduleItem(id: String, debtId: String, dueDate: String, amountPence: Int, principalPence: Int, interestPence: Int, feePence: Int) -> DebtPaymentScheduleItem {
+        DebtPaymentScheduleItem(
+            id: id,
+            debtId: debtId,
+            dueDate: dueDate,
+            plannedAmountPence: max(0, amountPence),
+            principalAmountPence: max(0, principalPence),
+            interestAmountPence: max(0, interestPence),
+            feeAmountPence: max(0, feePence),
+            fundedAmountPence: 0,
+            paidAmountPence: 0,
+            paidDate: nil,
+            status: .planned,
+            createdAt: DateUtilities.nowIsoString(),
+            updatedAt: DateUtilities.nowIsoString(),
+            deletedAt: nil
+        )
+    }
+
+    private static func scheduleItemId(debtId: String, dueDate: String) -> String {
+        "debt-schedule-\(debtId)-\(dueDate)"
+    }
+
+    private static func addMonthsClamped(date: String, months: Int) -> String {
+        let parsed = FinanceEngine.parseDate(date)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let next = calendar.date(byAdding: .month, value: months, to: parsed) ?? parsed
+        return FinanceEngine.toIsoDate(next)
+    }
+
+    private static func nextDayOfMonth(day: Int, onOrAfter today: String) -> String {
+        let clampedDay = min(max(1, day), 31)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let todayDate = FinanceEngine.parseDate(today)
+        var components = calendar.dateComponents([.year, .month], from: todayDate)
+        components.day = min(clampedDay, lastDayOfMonth(year: components.year ?? 1970, month: components.month ?? 1))
+        var candidate = calendar.date(from: components) ?? todayDate
+        if FinanceEngine.toIsoDate(candidate) < today {
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: todayDate) ?? todayDate
+            components = calendar.dateComponents([.year, .month], from: nextMonth)
+            components.day = min(clampedDay, lastDayOfMonth(year: components.year ?? 1970, month: components.month ?? 1))
+            candidate = calendar.date(from: components) ?? nextMonth
+        }
+        return FinanceEngine.toIsoDate(candidate)
+    }
+
+    private static func dayOfMonth(_ isoDate: String) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar.component(.day, from: FinanceEngine.parseDate(isoDate))
+    }
+
+    private static func lastDayOfMonth(year: Int, month: Int) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        var components = DateComponents()
+        components.year = year
+        components.month = month + 1
+        components.day = 0
+        let date = calendar.date(from: components) ?? Date()
+        return calendar.component(.day, from: date)
+    }
+
+    private static func nonblank(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private extension Array where Element == String {
+    func uniqued() -> [String] {
+        var seen = Set<String>()
+        return filter { seen.insert($0).inserted }
+    }
 }
 
 enum PlannerDerivedData {
@@ -306,11 +708,21 @@ enum PlannerDerivedData {
         }
 
         if let debtId = pot.linkedDebtId,
-           let debt = snapshot.debts.first(where: { $0.id == debtId && $0.status != .archived }),
+           let debt = snapshot.debts.first(where: { $0.id == debtId && $0.status.isActiveLike }),
            debt.currentBalancePence > 0 {
-            linkedTargetPence += debt.currentBalancePence
-            sourceLabels.append("\(debt.name) debt")
-            dueIso = minIsoDate(dueIso, debt.dueDate)
+            let targetItems = debtScheduleItems(snapshot: snapshot, payPeriod: payPeriod)
+                .filter {
+                    $0.debtId == debtId &&
+                    $0.status != .paid &&
+                    $0.status != .cancelled &&
+                    $0.dueDate >= today
+                }
+            let targetPence = targetItems.reduce(0) { $0 + max(0, $1.plannedAmountPence - $1.paidAmountPence) }
+            if targetPence > 0 {
+                linkedTargetPence += targetPence
+                sourceLabels.append("\(debt.name) debt")
+                dueIso = minIsoDate(dueIso, targetItems.map(\.dueDate).sorted().first)
+            }
         }
 
         let manualTargetPence = max(0, pot.targetPence ?? 0)
@@ -701,51 +1113,82 @@ enum PlannerDerivedData {
     static func debtFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [DebtFundingChecklistItem] {
         guard let payPeriod else { return [] }
 
-        return snapshot.debts
-            .filter { $0.status == .active && $0.currentBalancePence > 0 && isIsoDate($0.dueDate, in: payPeriod) }
-            .sorted { lhs, rhs in
-                if lhs.dueDate == rhs.dueDate {
-                    return lhs.name < rhs.name
-                }
-                return lhs.dueDate < rhs.dueDate
+        let scheduleItems = debtScheduleItems(snapshot: snapshot, payPeriod: payPeriod)
+            .filter {
+                $0.deletedAt == nil &&
+                $0.status != .paid &&
+                $0.status != .cancelled &&
+                $0.plannedAmountPence > 0 &&
+                isIsoDate($0.dueDate, in: payPeriod)
             }
-            .compactMap { debt -> DebtFundingChecklistItem? in
+
+        return scheduleItems
+            .compactMap { item -> (DebtPaymentScheduleItem, Debt)? in
+                guard let debt = snapshot.debts.first(where: { $0.id == item.debtId && $0.status.isActiveLike && $0.currentBalancePence > 0 }) else {
+                    return nil
+                }
+                return (item, debt)
+            }
+            .sorted { lhs, rhs in
+                if lhs.0.dueDate == rhs.0.dueDate {
+                    return lhs.1.name < rhs.1.name
+                }
+                return lhs.0.dueDate < rhs.0.dueDate
+            }
+            .compactMap { item, debt -> DebtFundingChecklistItem? in
                 let linkedPots = activeLinkedDebtPots(snapshot: snapshot, debtId: debt.id)
                 guard let fundingPot = linkedPots.first else { return nil }
 
-                let matchingFundingPence = snapshot.potAllocations
+                let allocationFundingPence = snapshot.potAllocations
                     .filter {
                         $0.deletedAt == nil &&
                         $0.payPeriodId == payPeriod.id &&
                         $0.source == .debtFunding &&
                         $0.debtId == debt.id &&
-                        $0.debtDueDate == debt.dueDate
+                        (
+                            $0.debtScheduleItemId == item.id ||
+                            ($0.debtScheduleItemId == nil && $0.debtDueDate == item.dueDate)
+                        )
                     }
                     .reduce(0) { $0 + max(0, $1.amountPence) }
+                let matchingFundingPence = max(allocationFundingPence, max(0, item.fundedAmountPence))
 
                 let linkedPotBalancePence = linkedPots.reduce(0) { $0 + max(0, $1.balancePence) }
                 let existingNonChecklistBalancePence = max(0, linkedPotBalancePence - matchingFundingPence)
-                let amountPence = max(0, debt.currentBalancePence - existingNonChecklistBalancePence)
+                let requiredFundingPence = max(0, item.plannedAmountPence - item.paidAmountPence - existingNonChecklistBalancePence)
 
-                guard amountPence > 0 || matchingFundingPence > 0 else { return nil }
+                guard requiredFundingPence > 0 || matchingFundingPence > 0 else { return nil }
 
                 return DebtFundingChecklistItem(
-                    id: debtFundingChecklistId(debtId: debt.id, dueDate: debt.dueDate),
+                    id: debtFundingChecklistId(debtId: debt.id, dueDate: item.dueDate),
+                    scheduleItemId: item.id,
                     debtId: debt.id,
                     debtName: debt.name,
                     lenderName: debt.lender,
-                    amountPence: amountPence,
-                    dueDate: debt.dueDate,
+                    amountPence: requiredFundingPence,
+                    dueDate: item.dueDate,
                     payPeriodId: payPeriod.id,
                     potId: fundingPot.id,
                     potName: fundingPot.name,
-                    isCompleted: amountPence > 0 && matchingFundingPence >= amountPence
+                    isCompleted: requiredFundingPence > 0 && matchingFundingPence >= requiredFundingPence
                 )
             }
     }
 
     static func debtFundingChecklistId(debtId: String, dueDate: String) -> String {
         "debt-funding-\(debtId)-\(dueDate)"
+    }
+
+    static func debtScheduleItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [DebtPaymentScheduleItem] {
+        let existingItems = snapshot.debtPaymentScheduleItems
+        let debtIdsWithExistingItems = Set(existingItems.map(\.debtId))
+        let today = payPeriod?.startDate ?? FinanceEngine.getAppTodayIso(settings: snapshot.settings)
+        let generatedItems = snapshot.debts
+            .filter { $0.status.isActiveLike && $0.currentBalancePence > 0 && !debtIdsWithExistingItems.contains($0.id) }
+            .flatMap { debt in
+                DebtPlannerEngine.generateSchedule(for: debt, payPeriods: snapshot.payPeriods, today: today)
+            }
+        return existingItems + generatedItems
     }
 
     static func creditCardStatementPayments(
@@ -923,7 +1366,7 @@ enum PlannerDerivedData {
         startDate: String? = nil,
         endDate: String
     ) -> Int {
-        return snapshot.transactions.reduce(0) { total, transaction in
+        let recurringFundingPence = snapshot.transactions.reduce(0) { total, transaction in
             guard transaction.deletedAt == nil,
                   transaction.type == .spending,
                   transaction.paymentMethod == .creditCard,
@@ -946,6 +1389,29 @@ enum PlannerDerivedData {
 
             return total + min(max(0, transaction.amountPence), fundedPence)
         }
+
+        let manualSpendFundingPence = snapshot.transactions.reduce(0) { total, transaction in
+            guard transaction.deletedAt == nil,
+                  transaction.type == .spending,
+                  transaction.paymentMethod == .creditCard,
+                  transaction.creditCardId == cardId,
+                  transaction.recurringPaymentId == nil,
+                  transaction.date <= endDate,
+                  startDate.map({ transaction.date >= $0 }) ?? true
+            else { return total }
+
+            let fundedPence = snapshot.potAllocations
+                .filter {
+                    $0.deletedAt == nil &&
+                    $0.source == .cardSpendFunding &&
+                    $0.transactionId == transaction.id
+                }
+                .reduce(0) { $0 + max(0, $1.amountPence) }
+
+            return total + min(max(0, transaction.amountPence), fundedPence)
+        }
+
+        return recurringFundingPence + manualSpendFundingPence
     }
 
     static func findPayPeriod(payPeriods: [PayPeriod], date: String) -> PayPeriod? {
@@ -1092,21 +1558,22 @@ enum PlannerDerivedData {
                 )
             }
 
-        let debtMinimumItems = snapshot.debts
-            .filter { $0.status == .active && $0.currentBalancePence > 0 && $0.dueDate <= payPeriod.endDate }
-            .filter { debt in
-                !(isIsoDate(debt.dueDate, in: payPeriod) && !activeLinkedDebtPots(snapshot: snapshot, debtId: debt.id).isEmpty)
+        let debtMinimumItems = debtScheduleItems(snapshot: snapshot, payPeriod: payPeriod)
+            .filter {
+                $0.status != .paid &&
+                $0.status != .cancelled &&
+                $0.plannedAmountPence > 0 &&
+                isIsoDate($0.dueDate, in: payPeriod)
             }
-            .map { debt in
-                PeriodCostItem(
-                    id: "debt-\(debt.id)",
+            .compactMap { item -> PeriodCostItem? in
+                guard let debt = snapshot.debts.first(where: { $0.id == item.debtId && $0.status.isActiveLike && $0.currentBalancePence > 0 }),
+                      activeLinkedDebtPots(snapshot: snapshot, debtId: debt.id).isEmpty
+                else { return nil }
+                return PeriodCostItem(
+                    id: "debt-\(item.id)",
                     label: debt.name,
-                    amountPence: FinanceEngine.getDebtDueAmountAfterReservesAndLinkedPotsPence(
-                        debt: debt,
-                        reserves: snapshot.debtReserves,
-                        pots: snapshot.pots
-                    ),
-                    date: debt.dueDate,
+                    amountPence: max(0, item.plannedAmountPence - item.paidAmountPence),
+                    date: item.dueDate,
                     source: .debtMinimum,
                     creditCardId: nil,
                     potId: nil,
@@ -1260,8 +1727,11 @@ enum PlannerDerivedData {
             CalendarEvent(id: "transaction-\($0.id)", date: $0.date, title: $0.note.isEmpty ? "Spending" : $0.note, amountPence: $0.amountPence, type: .spending, detail: $0.paymentMethod?.rawValue ?? $0.type.rawValue)
         }
 
-        events += snapshot.debts.filter { $0.status == .active }.map {
-            CalendarEvent(id: "debt-\($0.id)", date: $0.dueDate, title: $0.name, amountPence: $0.minimumPaymentPence, type: .debtDue, detail: $0.lender)
+        events += debtScheduleItems(snapshot: snapshot, payPeriod: nil)
+            .filter { $0.status != .paid && $0.status != .cancelled }
+            .compactMap { item -> CalendarEvent? in
+                guard let debt = snapshot.debts.first(where: { $0.id == item.debtId && $0.status.isActiveLike }) else { return nil }
+                return CalendarEvent(id: "debt-\(item.id)", date: item.dueDate, title: debt.name, amountPence: item.plannedAmountPence, type: .debtDue, detail: debt.lender)
         }
 
         events += snapshot.debtReserves.map {
@@ -1992,9 +2462,7 @@ private extension PlannerDerivedData {
                 $0.potId == potId &&
                 (
                     $0.source == .recurringBillFunding ||
-                    $0.source == .cardBillFunding ||
-                    $0.source == .cardSpendFunding ||
-                    $0.source == .cardOpeningBalanceFunding
+                    $0.source == .cardBillFunding
                 )
             }
             .reduce(0) { total, allocation in
@@ -2204,10 +2672,18 @@ private extension PlannerDerivedData {
     }
 
     static func paidDateForDebtFunding(item: DebtFundingChecklistItem, snapshot: PlannerSnapshot, asOfDate: String) -> String? {
+        if let scheduleItem = snapshot.debtPaymentScheduleItems.first(where: { $0.id == item.scheduleItemId }),
+           scheduleItem.status == .paid,
+           let paidDate = scheduleItem.paidDate,
+           paidDate <= asOfDate {
+            return paidDate
+        }
+
         let paymentDate = snapshot.debtPayments
             .filter {
                 $0.deletedAt == nil &&
                 $0.debtId == item.debtId &&
+                ($0.scheduleItemId == item.scheduleItemId || ($0.scheduleItemId == nil && $0.date == item.dueDate)) &&
                 $0.date <= asOfDate &&
                 $0.amountPence > 0
             }
@@ -2220,7 +2696,7 @@ private extension PlannerDerivedData {
         }
 
         guard item.dueDate <= asOfDate,
-              snapshot.debts.contains(where: { $0.id == item.debtId && $0.status == .paid })
+              snapshot.debts.contains(where: { $0.id == item.debtId && $0.status.isPaidLike })
         else { return nil }
 
         return item.dueDate

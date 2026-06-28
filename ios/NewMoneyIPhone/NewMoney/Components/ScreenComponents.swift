@@ -13,7 +13,6 @@ struct AppToolbarButton: View {
     var body: some View {
         Button(action: action.action) {
             Image(systemName: action.symbol)
-                .contentTransition(.symbolEffect(.replace))
         }
         .accessibilityLabel(action.accessibilityLabel)
     }
@@ -58,7 +57,9 @@ struct ScreenScaffold<Content: View>: View {
     private var screenContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
-                ScreenHeader(subtitle: subtitle)
+                if navigationMode != .tabRoot {
+                    ScreenHeader(subtitle: subtitle)
+                }
                 content
             }
             .padding(.horizontal, AppTheme.Spacing.lg)

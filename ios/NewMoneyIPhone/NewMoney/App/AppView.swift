@@ -12,7 +12,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .dashboard: "Overview"
-        case .payday: "Payday"
+        case .payday: "Spending"
         case .pots: "Pots"
         case .cards: "Cards"
         case .more: "More"
@@ -22,7 +22,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .dashboard: "chart.line.uptrend.xyaxis"
-        case .payday: "sterlingsign.circle"
+        case .payday: "receipt"
         case .pots: "wallet.pass"
         case .cards: "creditcard"
         case .more: "square.grid.2x2"
@@ -32,8 +32,13 @@ enum AppTab: String, CaseIterable, Identifiable {
 
 private enum AppToolbarSheet: String, Identifiable {
     case spending
+    case spendingHistory
     case calendar
     case settings
+    case addPot
+    case potHistory
+    case addCard
+    case cardPayments
 
     var id: String { rawValue }
 }
@@ -49,7 +54,12 @@ struct AppView: View {
         ZStack(alignment: .bottomTrailing) {
             NavigationStack {
                 TabView(selection: selectedTabBinding) {
-                    DashboardView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                    DashboardView(
+                        store: store,
+                        navigationMode: .tabRoot,
+                        toolbarMode: .none,
+                        onOpenCards: { selectedTab = .cards }
+                    )
                         .tabItem { Label(AppTab.dashboard.title, systemImage: AppTab.dashboard.symbol) }
                         .tag(AppTab.dashboard)
 
@@ -93,8 +103,8 @@ struct AppView: View {
                     .shadow(color: AppTheme.Colors.glowOrange, radius: 20, y: 8)
             }
             .buttonStyle(ScaleButtonStyle())
-            .padding(.trailing, AppTheme.Spacing.lg)
-            .padding(.bottom, 72)
+            .padding(.trailing, AppTheme.Spacing.sm)
+            .padding(.bottom, 58)
             .accessibilityLabel("Open Assistant")
         }
         .background(AppTheme.Colors.appBackground)
@@ -104,10 +114,20 @@ struct AppView: View {
             switch sheet {
             case .spending:
                 SpendingSheetView(store: store)
+            case .spendingHistory:
+                SpendingHistorySheetView(store: store)
             case .calendar:
                 CalendarSheetView(store: store)
             case .settings:
                 SettingsSheetView(store: store)
+            case .addPot:
+                PotFormView(store: store)
+            case .potHistory:
+                PotHistorySheetView(store: store)
+            case .addCard:
+                CardFormView(store: store)
+            case .cardPayments:
+                CardPaymentFlowSheetView(store: store)
             }
         }
         .sheet(isPresented: $isAssistantPresented) {
@@ -154,8 +174,12 @@ struct AppView: View {
         switch selectedTab {
         case .dashboard:
             overviewToolbarActions
-        case .payday, .pots, .cards:
+        case .payday:
             spendingToolbarActions
+        case .pots:
+            addPotToolbarActions
+        case .cards:
+            cardsToolbarActions
         case .more:
             moreToolbarActions
         }
@@ -173,8 +197,33 @@ struct AppView: View {
 
     private var spendingToolbarActions: [AppToolbarAction] {
         [
+            AppToolbarAction(id: "secondary-toolbar-action", symbol: "receipt", accessibilityLabel: "Spending History") {
+                activeToolbarSheet = .spendingHistory
+            },
             AppToolbarAction(id: "primary-toolbar-action", symbol: "plus", accessibilityLabel: "Record Spending") {
                 activeToolbarSheet = .spending
+            }
+        ]
+    }
+
+    private var addPotToolbarActions: [AppToolbarAction] {
+        [
+            AppToolbarAction(id: "secondary-toolbar-action", symbol: "receipt", accessibilityLabel: "Pots History") {
+                activeToolbarSheet = .potHistory
+            },
+            AppToolbarAction(id: "primary-toolbar-action", symbol: "plus", accessibilityLabel: "Add Pot") {
+                activeToolbarSheet = .addPot
+            }
+        ]
+    }
+
+    private var cardsToolbarActions: [AppToolbarAction] {
+        [
+            AppToolbarAction(id: "secondary-toolbar-action", symbol: "receipt", accessibilityLabel: "Card Payments") {
+                activeToolbarSheet = .cardPayments
+            },
+            AppToolbarAction(id: "primary-toolbar-action", symbol: "plus", accessibilityLabel: "Add Card") {
+                activeToolbarSheet = .addCard
             }
         ]
     }

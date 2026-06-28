@@ -4,7 +4,6 @@ struct CardsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
-    @State private var isAddPresented = false
     @State private var selectedCard: CreditCard?
 
     var body: some View {
@@ -15,26 +14,26 @@ struct CardsView: View {
             toolbarMode: toolbarMode
         ) {
             summary
-            SectionTitle("Active cards", actionTitle: "Add") {
-                isAddPresented = true
-            }
+            paymentAllocationLink
+            SectionTitle("Active cards")
             if store.activeCards.isEmpty {
                 AppCard {
-                    EmptyStateView(title: "No cards yet", message: "Add a card to route credit-card spending and repayments.", systemImage: "creditcard")
+                    EmptyStateView(title: "No cards yet", message: "Use the top-right plus to add a card.", systemImage: "creditcard")
                 }
             } else {
                 ForEach(store.activeCards) { card in
                     Button {
                         selectedCard = card
                     } label: {
-                        CreditCardRow(card: card, balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot))
+                        CreditCardRow(
+                            card: card,
+                            balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot),
+                            availability: availabilitySummary(for: card)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
             }
-        }
-        .sheet(isPresented: $isAddPresented) {
-            CardFormView(store: store)
         }
         .sheet(item: $selectedCard) { card in
             CardDetailView(store: store, card: card)
@@ -42,20 +41,71 @@ struct CardsView: View {
     }
 
     private var summary: some View {
-        let owed = store.activeCards.reduce(0) { $0 + PlannerDerivedData.cardBalance(card: $1, snapshot: store.snapshot) }
-        let limits = store.activeCards.reduce(0) { $0 + $1.limitPence }
-        let available = max(0, limits - owed)
+        let summaries = store.activeCards.map { availabilitySummary(for: $0) }
+        let owed = summaries.reduce(0) { $0 + $1.actualOwedPence }
+        let forecastOwed = summaries.reduce(0) { $0 + $1.forecastOwedPence }
+        let available = summaries.reduce(0) { $0 + $1.actualAvailablePence }
+        let forecastAvailable = summaries.reduce(0) { $0 + $1.forecastAvailablePence }
         return AppCard(glow: true) {
             MetricRow(label: "Owed", value: MoneyParser.formatPence(owed), valueColor: AppTheme.Colors.orangeHighlight)
-            MetricRow(label: "Available credit", value: MoneyParser.formatPence(available))
-            MetricRow(label: "Cover pots", value: MoneyParser.formatPence(store.snapshot.creditCardPots.filter { $0.status == .active }.reduce(0) { $0 + $1.amountPence }))
+            MetricRow(
+                label: available < 0 ? "Over limit" : "Available credit",
+                value: MoneyParser.formatPence(abs(available)),
+                valueColor: available < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText
+            )
+            if forecastOwed != owed || forecastAvailable != available {
+                MetricRow(
+                    label: forecastAvailable < 0 ? "Forecast over limit" : "Forecast availability",
+                    value: MoneyParser.formatPence(abs(forecastAvailable)),
+                    valueColor: forecastAvailable < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning
+                )
+            }
         }
+    }
+
+    private func availabilitySummary(for card: CreditCard) -> CreditCardAvailabilitySummary {
+        PlannerDerivedData.creditCardAvailabilitySummary(
+            card: card,
+            snapshot: store.snapshot,
+            payPeriod: store.selectedPayPeriod,
+            asOfDate: store.todayIso
+        )
+    }
+
+    private var paymentAllocationLink: some View {
+        NavigationLink {
+            CardPaymentAllocationListView(store: store)
+        } label: {
+            AppCard {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "list.bullet.rectangle")
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .frame(width: 40, height: 40)
+                        .background(AppTheme.Colors.primaryOrange.opacity(0.12))
+                        .clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("View Payment allocation list")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                        Text("Bills, one-off payments, spending, and repayments.")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct CreditCardRow: View {
     var card: CreditCard
     var balancePence: Int
+    var availability: CreditCardAvailabilitySummary? = nil
 
     var body: some View {
         AppCard(glow: balancePence > card.limitPence) {
@@ -83,99 +133,162 @@ private struct CreditCardRow: View {
                         Pill(text: "Due day \(dueDay)", systemImage: "calendar")
                     }
                 }
+                HStack {
+                    Text(cardAvailabilityLabel(actualAvailablePence))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                    Spacer()
+                    if forecastAvailablePence != actualAvailablePence {
+                        Text(forecastAvailabilityLabel(forecastAvailablePence))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning)
+                    }
+                }
             }
         }
     }
+
+    private var actualAvailablePence: Int {
+        availability?.actualAvailablePence ?? card.limitPence - balancePence
+    }
+
+    private var forecastAvailablePence: Int {
+        availability?.forecastAvailablePence ?? actualAvailablePence
+    }
 }
 
-private struct CardFormView: View {
+struct CardFormView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     @State private var name = ""
     @State private var provider = ""
     @State private var limit = ""
     @State private var opening = ""
-    @State private var dueDay = ""
+    @State private var openingStatement = ""
+    @State private var statementDay = 1
+    @State private var directDebitDay = 1
     @State private var color = "#E85002"
+
+    private let cardColors = ["#E85002", "#2563EB", "#16A34A", "#7C3AED", "#0F766E", "#4338CA", "#475569"]
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: AppTheme.Spacing.md) {
-                TextField("Card name", text: $name).textFieldStyle(AppTextFieldStyle())
-                TextField("Provider", text: $provider).textFieldStyle(AppTextFieldStyle())
-                MoneyField(title: "Credit limit", text: $limit)
-                MoneyField(title: "Opening balance", text: $opening)
-                TextField("Due day", text: $dueDay).keyboardType(.numberPad).textFieldStyle(AppTextFieldStyle())
-                TextField("Colour hex", text: $color).textFieldStyle(AppTextFieldStyle())
-                PrimaryButton(title: "Add card", systemImage: "plus", isDisabled: name.isBlank || limit.isBlank) {
-                    store.addCreditCard(
-                        name: name,
-                        provider: provider.isBlank ? "Card" : provider,
-                        limitPence: MoneyParser.parsePoundsToPence(limit),
-                        openingBalancePence: MoneyParser.parsePoundsToPence(opening),
-                        dueDay: Int(dueDay),
-                        color: color
-                    )
-                    dismiss()
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.md) {
+                    TextField("Card name", text: $name).textFieldStyle(AppTextFieldStyle())
+                    TextField("Provider", text: $provider).textFieldStyle(AppTextFieldStyle())
+                    MoneyField(title: "Credit limit", text: $limit)
+                    MoneyField(title: "Opening balance", text: $opening)
+                    MoneyField(title: "Existing statement due", text: $openingStatement)
+
+                    SelectionField(title: "Statement day", value: creditCardDaySelectionValue(statementDay), systemImage: "calendar") {
+                        ForEach(1...31, id: \.self) { day in
+                            Button(creditCardDaySelectionValue(day)) {
+                                statementDay = day
+                            }
+                        }
+                    }
+
+                    SelectionField(title: "Direct debit day", value: creditCardDaySelectionValue(directDebitDay), systemImage: "calendar.badge.clock") {
+                        ForEach(1...31, id: \.self) { day in
+                            Button(creditCardDaySelectionValue(day)) {
+                                directDebitDay = day
+                            }
+                        }
+                    }
+
+                    colorSwatches
+
+                    PrimaryButton(title: "Add card", systemImage: "plus", isDisabled: name.isBlank || limit.isBlank) {
+                        store.addCreditCard(
+                            name: name,
+                            provider: provider.isBlank ? "Card" : provider,
+                            limitPence: MoneyParser.parsePoundsToPence(limit),
+                            openingBalancePence: MoneyParser.parsePoundsToPence(opening),
+                            openingStatementBalancePence: openingStatement.isBlank ? nil : MoneyParser.parsePoundsToPence(openingStatement),
+                            statementDay: statementDay,
+                            dueDay: directDebitDay,
+                            dueDate: nil,
+                            color: color
+                        )
+                        dismiss()
+                    }
                 }
-                Spacer()
+                .padding(AppTheme.Spacing.lg)
             }
-            .padding(AppTheme.Spacing.lg)
             .premiumScreenBackground()
             .navigationTitle("Add card")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
             .appPlaceholderToolbar(.modalSingle)
         }
     }
+
+    private var colorSwatches: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            ForEach(cardColors, id: \.self) { swatch in
+                Button {
+                    color = swatch
+                } label: {
+                    Circle()
+                        .fill(Color(hex: swatch))
+                        .frame(width: 30, height: 30)
+                        .overlay(
+                            Circle()
+                                .stroke(color == swatch ? AppTheme.Colors.primaryText : .clear, lineWidth: 2)
+                        )
+                        .overlay {
+                            if color == swatch {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                }
+                .buttonStyle(ScaleButtonStyle())
+                .accessibilityLabel("Card color")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+func creditCardDaySelectionValue(_ day: Int) -> String {
+    "Day \(day)"
 }
 
 private struct CardDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var card: CreditCard
-    @State private var repayment = ""
-    @State private var potAmount = ""
-    @State private var customName = ""
-    @State private var customAmount = ""
-    @State private var customDueDate = Date()
+    @State private var isHistoryExpanded = true
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
+    }
+
+    private var cardAvailability: CreditCardAvailabilitySummary {
+        PlannerDerivedData.creditCardAvailabilitySummary(
+            card: currentCard,
+            snapshot: store.snapshot,
+            payPeriod: store.selectedPayPeriod,
+            asOfDate: store.todayIso
+        )
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: AppTheme.Spacing.lg) {
-                    CreditCardRow(card: currentCard, balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot))
-                    AppCard {
-                        SectionTitle("Repay or cover")
-                        MoneyField(title: "Repayment amount", text: $repayment)
-                        SecondaryButton(title: "Record repayment", systemImage: "arrow.down.circle") {
-                            store.recordCardRepayment(cardId: card.id, amountPence: MoneyParser.parsePoundsToPence(repayment), date: Date().isoDateString, note: "Manual repayment")
-                            repayment = ""
-                        }
-                        AppDivider()
-                        MoneyField(title: "Cover pot amount", text: $potAmount)
-                        SecondaryButton(title: "Create cover pot", systemImage: "plus.circle") {
-                            store.addCreditCardPot(cardId: card.id, name: "\(card.name) cover", amountPence: MoneyParser.parsePoundsToPence(potAmount), source: .paycheck)
-                            potAmount = ""
-                        }
-                    }
-                    AppCard {
-                        SectionTitle("Saved card payment")
-                        TextField("Payment name", text: $customName).textFieldStyle(AppTextFieldStyle())
-                        MoneyField(title: "Amount", text: $customAmount)
-                        DatePicker("Due date", selection: $customDueDate, displayedComponents: .date)
-                            .tint(AppTheme.Colors.primaryOrange)
-                        SecondaryButton(title: "Save payment", systemImage: "calendar.badge.plus") {
-                            store.addCustomPayment(name: customName.isBlank ? "Saved payment" : customName, amountPence: MoneyParser.parsePoundsToPence(customAmount), dueDate: customDueDate.isoDateString, creditCardId: card.id)
-                            customName = ""
-                            customAmount = ""
-                        }
-                    }
-                    SecondaryButton(title: "Archive card", systemImage: "archivebox", role: .destructive) {
-                        store.archiveCreditCard(id: card.id)
+                    CreditCardRow(
+                        card: currentCard,
+                        balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot),
+                        availability: cardAvailability
+                    )
+                    statementSummaryCard
+                    linkedSection
+                    historySection
+                    SecondaryButton(title: "Delete card", systemImage: "trash", role: .destructive) {
+                        store.deleteCreditCard(id: card.id)
                         dismiss()
                     }
                 }
@@ -187,10 +300,507 @@ private struct CardDetailView: View {
             .appPlaceholderToolbar(.modalSingle)
         }
     }
+
+    private var statementSummaryCard: some View {
+        AppCard {
+            SectionTitle("Statement")
+            MetricRow(label: "Statement day", value: statementDayLabel)
+            MetricRow(label: "Next statement", value: nextStatementDate.map(friendlyDate) ?? "Not set")
+            MetricRow(label: "Direct debit", value: nextDirectDebitDate.map(friendlyDate) ?? "Not set")
+            MetricRow(label: "Current statement due", value: MoneyParser.formatPence(currentStatementDuePence), valueColor: currentStatementDuePence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
+            MetricRow(
+                label: cardAvailability.actualAvailablePence < 0 ? "Over limit" : "Available",
+                value: MoneyParser.formatPence(abs(cardAvailability.actualAvailablePence)),
+                valueColor: cardAvailability.actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
+            )
+            if cardAvailability.forecastAvailablePence != cardAvailability.actualAvailablePence {
+                MetricRow(
+                    label: cardAvailability.forecastAvailablePence < 0 ? "Forecast over limit" : "Forecast availability",
+                    value: MoneyParser.formatPence(abs(cardAvailability.forecastAvailablePence)),
+                    valueColor: cardAvailability.forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning
+                )
+            }
+            MetricRow(label: "Linked pot cover", value: MoneyParser.formatPence(linkedPotCoverPence), valueColor: AppTheme.Colors.primaryOrange)
+            MetricRow(label: "Paycheck impact", value: MoneyParser.formatPence(directDebitPaycheckImpactPence), valueColor: directDebitPaycheckImpactPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success)
+        }
+    }
+
+    private var linkedSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Linked to this card")
+            if linkedRows.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "Nothing linked", message: "Bills, one-off payments, and pots linked to this card will appear here.", systemImage: "link")
+                }
+            } else {
+                ForEach(linkedRows) { row in
+                    CardPaymentAllocationRowCard(row: row)
+                }
+            }
+        }
+    }
+
+    private var historySection: some View {
+        DisclosureGroup(isExpanded: $isHistoryExpanded) {
+            if historyRows.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No card history", message: "Charges, payments, cover pots, and card spending will appear here.", systemImage: "clock.arrow.circlepath")
+                }
+            } else {
+                VStack(spacing: AppTheme.Spacing.md) {
+                    ForEach(historyRows) { row in
+                        CardPaymentAllocationRowCard(row: row)
+                    }
+                }
+                .padding(.top, AppTheme.Spacing.sm)
+            }
+        } label: {
+            SectionTitle("Card history")
+        }
+        .tint(AppTheme.Colors.primaryOrange)
+    }
+
+    private var linkedRows: [CardPaymentAllocationRow] {
+        let recurring = store.snapshot.recurringPayments
+            .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
+            .map { payment in
+                CardPaymentAllocationRow(
+                    id: "linked-recurring-\(payment.id)",
+                    title: payment.name,
+                    detail: recurringLinkedDetail(payment),
+                    amount: MoneyParser.formatPence(payment.amountPence),
+                    amountColor: AppTheme.Colors.warning,
+                    context: "Bill",
+                    symbol: "calendar.badge.clock",
+                    sortDate: recurringSortDate(payment)
+                )
+            }
+
+        let custom = store.snapshot.customPayments
+            .filter { $0.deletedAt == nil && $0.status != .archived && $0.creditCardId == currentCard.id }
+            .map { payment in
+                CardPaymentAllocationRow(
+                    id: "linked-custom-\(payment.id)",
+                    title: payment.name,
+                    detail: friendlyDate(payment.dueDate),
+                    amount: MoneyParser.formatPence(payment.amountPence),
+                    amountColor: AppTheme.Colors.primaryOrange,
+                    context: "One-off",
+                    symbol: "calendar.badge.plus",
+                    sortDate: payment.dueDate
+                )
+            }
+
+        let linkedPots = store.snapshot.pots
+            .filter { !$0.archived && $0.linkedCreditCardId == currentCard.id }
+            .map { pot in
+                CardPaymentAllocationRow(
+                    id: "linked-pot-\(pot.id)",
+                    title: pot.name,
+                    detail: "\(pot.type.rawValue.capitalized) pot",
+                    amount: MoneyParser.formatPence(pot.balancePence),
+                    amountColor: AppTheme.Colors.primaryOrange,
+                    context: "Pot",
+                    symbol: "wallet.pass",
+                    sortDate: String(pot.updatedAt.prefix(10))
+                )
+            }
+
+        let coverPots = store.snapshot.creditCardPots
+            .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id && $0.status == .active }
+            .map { pot in
+                CardPaymentAllocationRow(
+                    id: "linked-cover-\(pot.id)",
+                    title: pot.name,
+                    detail: coverPotSourceLabel(pot.source),
+                    amount: MoneyParser.formatPence(pot.amountPence),
+                    amountColor: AppTheme.Colors.success,
+                    context: "Cover pot",
+                    symbol: "wallet.pass",
+                    sortDate: creditCardPotDate(pot)
+                )
+            }
+
+        return (recurring + custom + linkedPots + coverPots).sorted { $0.sortDate > $1.sortDate }
+    }
+
+    private var historyRows: [CardPaymentAllocationRow] {
+        let recurring = store.snapshot.recurringPayments
+            .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
+            .map { payment in
+                CardPaymentAllocationRow(
+                    id: "history-recurring-\(payment.id)",
+                    title: payment.name,
+                    detail: "\(payment.frequency.rawValue.capitalized) · \(payment.dueDay.map { "Day \($0)" } ?? "No due day")",
+                    amount: MoneyParser.formatPence(payment.amountPence),
+                    amountColor: AppTheme.Colors.warning,
+                    context: "Bill",
+                    symbol: "calendar.badge.clock",
+                    sortDate: recurringSortDate(payment)
+                )
+            }
+
+        let custom = store.snapshot.customPayments
+            .filter { $0.deletedAt == nil && $0.status != .archived && $0.creditCardId == currentCard.id }
+            .map { payment in
+                CardPaymentAllocationRow(
+                    id: "history-custom-\(payment.id)",
+                    title: payment.name,
+                    detail: friendlyDate(payment.dueDate),
+                    amount: MoneyParser.formatPence(payment.amountPence),
+                    amountColor: AppTheme.Colors.primaryOrange,
+                    context: "One-off",
+                    symbol: "calendar.badge.plus",
+                    sortDate: payment.dueDate
+                )
+            }
+
+        let spending = store.snapshot.transactions
+            .filter { $0.deletedAt == nil && $0.type == .spending && $0.creditCardId == currentCard.id }
+            .map { transaction in
+                CardPaymentAllocationRow(
+                    id: "history-spending-\(transaction.id)",
+                    title: transaction.note.isBlank ? "Card spending" : transaction.note,
+                    detail: friendlyDate(transaction.date),
+                    amount: "-\(MoneyParser.formatPence(transaction.amountPence))",
+                    amountColor: AppTheme.Colors.orangeHighlight,
+                    context: "Spending",
+                    symbol: "receipt",
+                    sortDate: transaction.date
+                )
+            }
+
+        let repayments = store.snapshot.creditCardRepayments
+            .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
+            .map { repayment in
+                CardPaymentAllocationRow(
+                    id: "history-repayment-\(repayment.id)",
+                    title: repayment.note.isBlank ? "Card payment" : repayment.note,
+                    detail: friendlyDate(repayment.date),
+                    amount: MoneyParser.formatPence(repayment.amountPence),
+                    amountColor: AppTheme.Colors.success,
+                    context: "Payment",
+                    symbol: "arrow.down.circle",
+                    sortDate: repayment.date
+                )
+            }
+
+        let coverPots = store.snapshot.creditCardPots
+            .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
+            .map { pot in
+                CardPaymentAllocationRow(
+                    id: "history-cover-\(pot.id)",
+                    title: pot.name,
+                    detail: "\(friendlyDate(creditCardPotDate(pot))) · \(coverPotSourceLabel(pot.source))",
+                    amount: "-\(MoneyParser.formatPence(pot.amountPence))",
+                    amountColor: AppTheme.Colors.success,
+                    context: "Cover pot",
+                    symbol: "wallet.pass",
+                    sortDate: creditCardPotDate(pot)
+                )
+            }
+
+        return (recurring + custom + spending + repayments + coverPots).sorted { $0.sortDate > $1.sortDate }
+    }
+
+    private func recurringSortDate(_ payment: RecurringPayment) -> String {
+        payment.dueDate ?? "9999-12-\(String(format: "%02d", payment.dueDay ?? 1))"
+    }
+
+    private func recurringLinkedDetail(_ payment: RecurringPayment) -> String {
+        var parts = [payment.frequency.rawValue.capitalized, payment.dueDay.map { "Day \($0)" } ?? "No due day"]
+        if let potId = payment.potId,
+           let pot = store.snapshot.pots.first(where: { $0.id == potId }) {
+            parts.append(pot.name)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func creditCardPotDate(_ pot: CreditCardPot) -> String {
+        pot.payday ?? pot.periodStartDate ?? String(pot.createdAt.prefix(10))
+    }
+
+    private func coverPotSourceLabel(_ source: CreditCardPotSource) -> String {
+        switch source {
+        case .paycheck:
+            return "Paycheck cover"
+        case .external:
+            return "External cover"
+        }
+    }
+
+    private var statementDayLabel: String {
+        guard let statementDate = currentCard.statementDate else { return "Not set" }
+        let day = Calendar.current.component(.day, from: FinanceEngine.parseDate(statementDate))
+        return "Day \(day)"
+    }
+
+    private var nextStatementDate: String? {
+        guard var statementDate = currentCard.statementDate, FinanceEngine.isIsoDate(statementDate) else { return nil }
+
+        for _ in 0..<240 where statementDate < store.todayIso {
+            statementDate = PlannerDerivedData.addIsoMonthsClamped(date: statementDate, months: 1)
+        }
+
+        return statementDate
+    }
+
+    private var nextDirectDebitDate: String? {
+        guard let statementDate = nextStatementDate,
+              let dueDay = currentCard.dueDay
+        else { return nil }
+        return PlannerDerivedData.creditCardDirectDebitDate(statementDate: statementDate, dueDay: dueDay)
+    }
+
+    private var nextStatementPayment: CreditCardStatementPayment? {
+        PlannerDerivedData.creditCardStatementPayments(
+            card: currentCard,
+            snapshot: store.snapshot,
+            startDate: store.todayIso,
+            endDate: FinanceEngine.addIsoDays(date: store.todayIso, days: 90),
+            asOfDate: store.todayIso
+        )
+        .first
+    }
+
+    private var currentStatementDuePence: Int {
+        nextStatementPayment?.actualDuePence ?? 0
+    }
+
+    private var linkedPotCoverPence: Int {
+        FinanceEngine.getLinkedCreditCardPotPence(pots: store.snapshot.pots, creditCardId: currentCard.id)
+    }
+
+    private var directDebitPaycheckImpactPence: Int {
+        if let repayment = store.snapshot.creditCardRepayments
+            .filter({ $0.creditCardId == currentCard.id && $0.directDebitDate == nextDirectDebitDate })
+            .sorted(by: { $0.date > $1.date })
+            .first {
+            return max(0, repayment.paycheckContributionPence ?? repayment.amountPence)
+        }
+
+        return max(0, currentStatementDuePence - linkedPotCoverPence)
+    }
+
+    private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+struct CardPaymentFlowSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var repaymentCardId = ""
+    @State private var repaymentAmount = ""
+    @State private var repaymentDate = Date()
+    @State private var repaymentNote = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.lg) {
+                    repaymentCard
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Card payments")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+            .onAppear {
+                repaymentCardId = repaymentCardId.isEmpty ? store.activeCards.first?.id ?? "" : repaymentCardId
+            }
+        }
+    }
+
+    private var repaymentCard: some View {
+        AppCard(glow: true) {
+            SectionTitle("Record payment")
+            Picker("Card", selection: $repaymentCardId) {
+                ForEach(store.activeCards) { Text($0.name).tag($0.id) }
+            }
+            .pickerStyle(.menu)
+            .tint(AppTheme.Colors.primaryOrange)
+            MoneyField(title: "Amount", text: $repaymentAmount)
+            DatePicker("Date", selection: $repaymentDate, displayedComponents: .date)
+                .tint(AppTheme.Colors.primaryOrange)
+            TextField("Note", text: $repaymentNote).textFieldStyle(AppTextFieldStyle())
+            PrimaryButton(title: "Record payment", systemImage: "arrow.down.circle", isDisabled: repaymentCardId.isEmpty || MoneyParser.parsePoundsToPence(repaymentAmount) <= 0) {
+                store.recordCardRepayment(
+                    cardId: repaymentCardId,
+                    amountPence: MoneyParser.parsePoundsToPence(repaymentAmount),
+                    date: repaymentDate.isoDateString,
+                    note: repaymentNote
+                )
+                repaymentAmount = ""
+                repaymentNote = ""
+            }
+        }
+    }
+}
+
+private struct CardPaymentAllocationListView: View {
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Payment allocation",
+            subtitle: "Card-linked bills, one-off payments, spending, and repayments.",
+            navigationMode: .inline,
+            toolbarMode: .secondarySingle
+        ) {
+            if rows.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No payment allocations", message: "Card payments, linked bills, and spending routes will appear here.", systemImage: "list.bullet.rectangle")
+                }
+            } else {
+                ForEach(rows) { row in
+                    CardPaymentAllocationRowCard(row: row)
+                }
+            }
+        }
+    }
+
+    private var rows: [CardPaymentAllocationRow] {
+        let recurring = store.snapshot.recurringPayments.map {
+            CardPaymentAllocationRow(
+                id: "recurring-\($0.id)",
+                title: $0.name,
+                detail: "\($0.dueDay.map { "Day \($0)" } ?? "No due day") · \(cardName(for: $0.creditCardId))",
+                amount: MoneyParser.formatPence($0.amountPence),
+                amountColor: AppTheme.Colors.warning,
+                context: $0.creditCardId == nil ? "Bill" : "Recurring",
+                symbol: "calendar.badge.clock",
+                sortDate: $0.dueDate ?? "9999-12-\(String(format: "%02d", $0.dueDay ?? 1))"
+            )
+        }
+
+        let custom = store.snapshot.customPayments.filter { $0.status != .archived }.map {
+            CardPaymentAllocationRow(
+                id: "custom-\($0.id)",
+                title: $0.name,
+                detail: "\(friendlyDate($0.dueDate)) · \(cardName(for: $0.creditCardId))",
+                amount: MoneyParser.formatPence($0.amountPence),
+                amountColor: AppTheme.Colors.primaryOrange,
+                context: "One-off",
+                symbol: "calendar.badge.plus",
+                sortDate: $0.dueDate
+            )
+        }
+
+        let spending = store.snapshot.transactions.filter { $0.type == .spending }.map {
+            CardPaymentAllocationRow(
+                id: "transaction-\($0.id)",
+                title: $0.note.isEmpty ? "Manual spend" : $0.note,
+                detail: "\(friendlyDate($0.date)) · \(allocationTarget(for: $0))",
+                amount: "-\(MoneyParser.formatPence($0.amountPence))",
+                amountColor: AppTheme.Colors.orangeHighlight,
+                context: "Spending",
+                symbol: "receipt",
+                sortDate: $0.date
+            )
+        }
+
+        let repayments = store.snapshot.creditCardRepayments.map {
+            CardPaymentAllocationRow(
+                id: "repayment-\($0.id)",
+                title: $0.note.isEmpty ? "Card repayment" : $0.note,
+                detail: "\(friendlyDate($0.date)) · \(cardName(for: $0.creditCardId))",
+                amount: MoneyParser.formatPence($0.amountPence),
+                amountColor: AppTheme.Colors.success,
+                context: "Repayment",
+                symbol: "arrow.down.circle",
+                sortDate: $0.date
+            )
+        }
+
+        return (recurring + custom + spending + repayments).sorted { $0.sortDate > $1.sortDate }
+    }
+
+    private func allocationTarget(for transaction: Transaction) -> String {
+        if transaction.paymentMethod == .creditCard || transaction.creditCardId != nil {
+            return cardName(for: transaction.creditCardId)
+        }
+
+        if let potId = transaction.potId {
+            return store.snapshot.pots.first { $0.id == potId }?.name ?? "Pot"
+        }
+
+        return "Unlinked"
+    }
+
+    private func cardName(for id: String?) -> String {
+        guard let id else { return "No card" }
+        return store.snapshot.creditCards.first { $0.id == id }?.name ?? "Card"
+    }
+
+    private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct CardPaymentAllocationRowCard: View {
+    var row: CardPaymentAllocationRow
+
+    var body: some View {
+        AppCard {
+            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(row.title)
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                    Text(row.detail)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: AppTheme.Spacing.md)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(row.amount)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(row.amountColor)
+                        .multilineTextAlignment(.trailing)
+                    Pill(text: row.context, systemImage: row.symbol, color: row.amountColor)
+                }
+            }
+        }
+    }
+}
+
+private struct CardPaymentAllocationRow: Identifiable {
+    var id: String
+    var title: String
+    var detail: String
+    var amount: String
+    var amountColor: Color
+    var context: String
+    var symbol: String
+    var sortDate: String
+}
+
+private func cardAvailabilityLabel(_ availablePence: Int) -> String {
+    availablePence < 0
+        ? "Over limit by \(MoneyParser.formatPence(abs(availablePence)))"
+        : "Available \(MoneyParser.formatPence(availablePence))"
+}
+
+private func forecastAvailabilityLabel(_ availablePence: Int) -> String {
+    availablePence < 0
+        ? "Forecast over limit by \(MoneyParser.formatPence(abs(availablePence)))"
+        : "Forecast available \(MoneyParser.formatPence(availablePence))"
 }
 
 private extension String {
     var isBlank: Bool {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var nilIfBlank: String? {
+        isBlank ? nil : self
     }
 }

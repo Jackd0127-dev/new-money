@@ -55,30 +55,6 @@ struct SpendingView: View {
                     note = ""
                 }
             }
-
-            SectionTitle("Transactions")
-            if store.snapshot.transactions.isEmpty {
-                AppCard { EmptyStateView(title: "No spending recorded", message: "Transactions will show here and in History.", systemImage: "cart") }
-            } else {
-                ForEach(store.snapshot.transactions.sorted { $0.date > $1.date }) { transaction in
-                    AppCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(transaction.note.isEmpty ? "Spending" : transaction.note)
-                                    .font(.headline)
-                                    .foregroundStyle(AppTheme.Colors.primaryText)
-                                Text(transaction.date)
-                                    .font(.caption)
-                                    .foregroundStyle(AppTheme.Colors.secondaryText)
-                            }
-                            Spacer()
-                            Text("-\(MoneyParser.formatPence(transaction.amountPence))")
-                                .font(.headline.weight(.bold))
-                                .foregroundStyle(AppTheme.Colors.orangeHighlight)
-                        }
-                    }
-                }
-            }
         }
         .onAppear {
             selectedPotId = store.activePots.first?.id ?? ""
@@ -89,6 +65,290 @@ struct SpendingView: View {
     private var canSubmit: Bool {
         MoneyParser.parsePoundsToPence(amount) > 0 && (paymentMethod == .pot ? !selectedPotId.isEmpty : !selectedCardId.isEmpty)
     }
+}
+
+struct SpendingHistorySheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                    if spendingGroups.isEmpty {
+                        AppCard {
+                            EmptyStateView(title: "No spending yet", message: "Recorded spending will appear here by pay period.", systemImage: "receipt")
+                        }
+                    } else {
+                        ForEach(spendingGroups) { group in
+                            AppCard(glow: group.isSelected) {
+                                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(group.title)
+                                            .font(.headline)
+                                            .foregroundStyle(AppTheme.Colors.primaryText)
+                                        Text(group.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                                    }
+                                    Spacer()
+                                    Text("-\(MoneyParser.formatPence(group.totalPence))")
+                                        .font(.headline.weight(.bold))
+                                        .foregroundStyle(group.totalPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.tertiaryText)
+                                }
+
+                                AppDivider()
+
+                                ForEach(group.transactions) { transaction in
+                                    NavigationLink {
+                                        SpendingTransactionDetailView(store: store, transaction: transaction)
+                                    } label: {
+                                        SpendingHistoryRow(transaction: transaction, routeLabel: routeLabel(for: transaction), dateLabel: friendlyDate(transaction.date))
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    if transaction.id != group.transactions.last?.id {
+                                        AppDivider()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Spending history")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+        }
+    }
+
+    private var spendingGroups: [SpendingHistoryGroup] {
+        var groups: [String: SpendingHistoryGroup] = [:]
+
+        for transaction in store.snapshot.transactions where transaction.type == .spending {
+            let period = period(for: transaction)
+            let id = period?.id ?? "outside-periods"
+            var group = groups[id] ?? SpendingHistoryGroup(
+                id: id,
+                title: period.map { "\(friendlyDate($0.payday)) pay period" } ?? "Outside saved pay periods",
+                subtitle: period.map { "\(friendlyDate($0.startDate)) to \(friendlyDate($0.endDate))" } ?? "No matching pay period",
+                transactions: [],
+                totalPence: 0,
+                isSelected: period?.id == store.selectedPayPeriod?.id,
+                sortDate: period?.startDate ?? transaction.date
+            )
+            group.transactions.append(transaction)
+            group.totalPence += transaction.amountPence
+            groups[id] = group
+        }
+
+        return groups.values
+            .map { group in
+                var copy = group
+                copy.transactions.sort { $0.date > $1.date }
+                return copy
+            }
+            .sorted {
+                if $0.isSelected != $1.isSelected {
+                    return $0.isSelected
+                }
+                return $0.sortDate > $1.sortDate
+            }
+    }
+
+    private func period(for transaction: Transaction) -> PayPeriod? {
+        if let payPeriodId = transaction.payPeriodId,
+           let period = store.snapshot.payPeriods.first(where: { $0.id == payPeriodId }) {
+            return period
+        }
+
+        return PlannerDerivedData.findPayPeriod(payPeriods: store.snapshot.payPeriods, date: transaction.date)
+    }
+
+    private func routeLabel(for transaction: Transaction) -> String {
+        spendingRouteLabel(for: transaction, snapshot: store.snapshot)
+    }
+
+    private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct SpendingHistoryGroup: Identifiable {
+    var id: String
+    var title: String
+    var subtitle: String
+    var transactions: [Transaction]
+    var totalPence: Int
+    var isSelected: Bool
+    var sortDate: String
+}
+
+private struct SpendingHistoryRow: View {
+    var transaction: Transaction
+    var routeLabel: String
+    var dateLabel: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(transaction.note.isBlank ? "Spending" : transaction.note)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(1)
+                Text("\(dateLabel) · \(routeLabel)")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Text("-\(MoneyParser.formatPence(transaction.amountPence))")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.orangeHighlight)
+                .multilineTextAlignment(.trailing)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct SpendingTransactionDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var transaction: Transaction
+    @State private var paymentMethod: PaymentMethod
+    @State private var selectedPotId: String
+    @State private var selectedCardId: String
+    @State private var amount: String
+    @State private var note: String
+    @State private var date: Date
+    @State private var isDeleteConfirmationPresented = false
+
+    init(store: PlannerStore, transaction: Transaction) {
+        self.store = store
+        self.transaction = transaction
+        let initialMethod = transaction.paymentMethod ?? (transaction.creditCardId == nil ? .pot : .creditCard)
+        _paymentMethod = State(initialValue: initialMethod)
+        _selectedPotId = State(initialValue: transaction.potId ?? "")
+        _selectedCardId = State(initialValue: transaction.creditCardId ?? "")
+        _amount = State(initialValue: transaction.amountPence > 0 ? String(format: "%.2f", Double(transaction.amountPence) / 100) : "")
+        _note = State(initialValue: transaction.note)
+        _date = State(initialValue: FinanceEngine.parseDate(transaction.date))
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: AppTheme.Spacing.lg) {
+                AppCard(glow: true) {
+                    SectionTitle("Spending details")
+                    Picker("Route", selection: $paymentMethod) {
+                        Text("Pot").tag(PaymentMethod.pot)
+                        Text("Card").tag(PaymentMethod.creditCard)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if paymentMethod == .pot {
+                        Picker("Pot", selection: $selectedPotId) {
+                            ForEach(selectablePots) { pot in
+                                Text(pot.name).tag(pot.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    } else {
+                        Picker("Card", selection: $selectedCardId) {
+                            ForEach(selectableCards) { card in
+                                Text(card.name).tag(card.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    MoneyField(title: "Amount", text: $amount)
+                    TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                        .tint(AppTheme.Colors.primaryOrange)
+                    PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
+                        store.updateTransaction(
+                            id: transaction.id,
+                            potId: paymentMethod == .pot ? selectedPotId : nil,
+                            creditCardId: paymentMethod == .creditCard ? selectedCardId : nil,
+                            paymentMethod: paymentMethod,
+                            amountPence: MoneyParser.parsePoundsToPence(amount),
+                            date: date.isoDateString,
+                            note: note
+                        )
+                        dismiss()
+                    }
+                }
+
+                SecondaryButton(title: "Delete spending", systemImage: "trash", role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                }
+            }
+            .padding(AppTheme.Spacing.lg)
+        }
+        .premiumScreenBackground()
+        .navigationTitle("Edit spending")
+        .navigationBarTitleDisplayMode(.large)
+        .onAppear {
+            if selectedPotId.isEmpty {
+                selectedPotId = selectablePots.first?.id ?? ""
+            }
+            if selectedCardId.isEmpty {
+                selectedCardId = selectableCards.first?.id ?? ""
+            }
+        }
+        .alert("Delete spending?", isPresented: $isDeleteConfirmationPresented) {
+            Button("Delete spending", role: .destructive) {
+                store.deleteTransaction(id: transaction.id)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the spending record and restores any linked pot balance.")
+        }
+    }
+
+    private var selectablePots: [Pot] {
+        let active = store.activePots
+        guard let currentPotId = transaction.potId,
+              !active.contains(where: { $0.id == currentPotId }),
+              let currentPot = store.snapshot.pots.first(where: { $0.id == currentPotId })
+        else { return active }
+        return active + [currentPot]
+    }
+
+    private var selectableCards: [CreditCard] {
+        let active = store.activeCards
+        guard let currentCardId = transaction.creditCardId,
+              !active.contains(where: { $0.id == currentCardId }),
+              let currentCard = store.snapshot.creditCards.first(where: { $0.id == currentCardId })
+        else { return active }
+        return active + [currentCard]
+    }
+
+    private var canSave: Bool {
+        MoneyParser.parsePoundsToPence(amount) > 0 && (paymentMethod == .pot ? !selectedPotId.isEmpty : !selectedCardId.isEmpty)
+    }
+
+}
+
+private func spendingRouteLabel(for transaction: Transaction, snapshot: PlannerSnapshot) -> String {
+    if transaction.paymentMethod == .creditCard || transaction.creditCardId != nil {
+        guard let cardId = transaction.creditCardId else { return "Credit card" }
+        return snapshot.creditCards.first { $0.id == cardId }?.name ?? "Credit card"
+    }
+
+    if let potId = transaction.potId {
+        return snapshot.pots.first { $0.id == potId }?.name ?? "Pot"
+    }
+
+    return "Unlinked"
 }
 
 struct SpendingSheetView: View {
@@ -134,14 +394,28 @@ struct AddBillSheetView: View {
                     Toggle("Linked to card", isOn: $routeToCard)
                         .tint(AppTheme.Colors.primaryOrange)
                     if routeToCard {
-                        Picker("Card", selection: $cardId) {
-                            Text("No card").tag("")
-                            ForEach(store.activeCards) { Text($0.name).tag($0.id) }
+                        SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
+                            Button("No card") { cardId = "" }
+                            ForEach(store.activeCards) { card in
+                                Button(card.name) { cardId = card.id }
+                            }
+                        }
+                        SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                            Button("No pot") { potId = "" }
+                            if cardLinkedPots.isEmpty {
+                                Text("No linked card pots")
+                            } else {
+                                ForEach(cardLinkedPots) { pot in
+                                    Button(pot.name) { potId = pot.id }
+                                }
+                            }
                         }
                     } else {
-                        Picker("Pot", selection: $potId) {
-                            Text("No pot").tag("")
-                            ForEach(store.activePots) { Text($0.name).tag($0.id) }
+                        SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                            Button("No pot") { potId = "" }
+                            ForEach(store.activePots) { pot in
+                                Button(pot.name) { potId = pot.id }
+                            }
                         }
                     }
                     PrimaryButton(title: "Add bill", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(amount) <= 0) {
@@ -150,7 +424,7 @@ struct AddBillSheetView: View {
                             amountPence: MoneyParser.parsePoundsToPence(amount),
                             dueDay: Int(dueDay),
                             frequency: frequency,
-                            potId: routeToCard ? nil : potId.nilIfBlank,
+                            potId: cleanPotId,
                             creditCardId: routeToCard ? cardId.nilIfBlank : nil,
                             priority: priority
                         )
@@ -168,7 +442,10 @@ struct AddBillSheetView: View {
         .onAppear {
             potId = store.activePots.first?.id ?? ""
             cardId = store.activeCards.first?.id ?? ""
+            normalizeSelectedCardPot()
         }
+        .onChange(of: cardId) { _, _ in normalizeSelectedCardPot() }
+        .onChange(of: routeToCard) { _, _ in normalizeSelectedCardPot() }
     }
 
     private func reset() {
@@ -178,6 +455,33 @@ struct AddBillSheetView: View {
         frequency = .monthly
         priority = .essential
         routeToCard = false
+    }
+
+    private var cardLinkedPots: [Pot] {
+        store.activePots.filter { $0.linkedCreditCardId == cardId }
+    }
+
+    private var selectedCardName: String {
+        store.activeCards.first { $0.id == cardId }?.name ?? ""
+    }
+
+    private var selectedPotName: String {
+        store.activePots.first { $0.id == potId }?.name ?? ""
+    }
+
+    private var cleanPotId: String? {
+        if routeToCard {
+            return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
+        }
+
+        return potId.nilIfBlank
+    }
+
+    private func normalizeSelectedCardPot() {
+        guard routeToCard else { return }
+        if !cardLinkedPots.contains(where: { $0.id == potId }) {
+            potId = cardLinkedPots.first?.id ?? ""
+        }
     }
 }
 
@@ -215,14 +519,28 @@ struct BillsView: View {
                 Toggle("Linked to card", isOn: $routeToCard)
                     .tint(AppTheme.Colors.primaryOrange)
                 if routeToCard {
-                    Picker("Card", selection: $cardId) {
-                        Text("No card").tag("")
-                        ForEach(store.activeCards) { Text($0.name).tag($0.id) }
+                    SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
+                        Button("No card") { cardId = "" }
+                        ForEach(store.activeCards) { card in
+                            Button(card.name) { cardId = card.id }
+                        }
+                    }
+                    SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                        Button("No pot") { potId = "" }
+                        if cardLinkedPots.isEmpty {
+                            Text("No linked card pots")
+                        } else {
+                            ForEach(cardLinkedPots) { pot in
+                                Button(pot.name) { potId = pot.id }
+                            }
+                        }
                     }
                 } else {
-                    Picker("Pot", selection: $potId) {
-                        Text("No pot").tag("")
-                        ForEach(store.activePots) { Text($0.name).tag($0.id) }
+                    SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                        Button("No pot") { potId = "" }
+                        ForEach(store.activePots) { pot in
+                            Button(pot.name) { potId = pot.id }
+                        }
                     }
                 }
                 PrimaryButton(title: "Add bill", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(amount) <= 0) {
@@ -231,7 +549,7 @@ struct BillsView: View {
                         amountPence: MoneyParser.parsePoundsToPence(amount),
                         dueDay: Int(dueDay),
                         frequency: frequency,
-                        potId: routeToCard ? nil : potId.nilIfBlank,
+                        potId: cleanPotId,
                         creditCardId: routeToCard ? cardId.nilIfBlank : nil,
                         priority: priority
                     )
@@ -246,7 +564,10 @@ struct BillsView: View {
         .onAppear {
             potId = store.activePots.first?.id ?? ""
             cardId = store.activeCards.first?.id ?? ""
+            normalizeSelectedCardPot()
         }
+        .onChange(of: cardId) { _, _ in normalizeSelectedCardPot() }
+        .onChange(of: routeToCard) { _, _ in normalizeSelectedCardPot() }
     }
 
     private var upcomingAgenda: some View {
@@ -274,22 +595,31 @@ struct BillsView: View {
             } else {
                 ForEach(store.snapshot.recurringPayments) { payment in
                     AppCard {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+                            VStack(alignment: .leading, spacing: 5) {
                                 Text(payment.name)
-                                    .font(.headline)
+                                    .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
-                                Text("\(payment.frequency.rawValue.capitalized) · day \(payment.dueDay ?? 0) · \(payment.priority.rawValue)")
+                                    .lineLimit(1)
+                                Text("\(payment.frequency.rawValue.capitalized) · \(billDueLabel(payment.dueDay)) · \(payment.priority.rawValue.capitalized)")
                                     .font(.caption)
                                     .foregroundStyle(AppTheme.Colors.secondaryText)
+                                Text(billLinkLabel(payment))
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                                    .lineLimit(1)
                             }
+
                             Spacer()
+
                             VStack(alignment: .trailing, spacing: 8) {
                                 Text(MoneyParser.formatPence(payment.amountPence))
                                     .font(.headline.weight(.bold))
                                     .foregroundStyle(AppTheme.Colors.primaryOrange)
-                                Button("Archive") {
+                                Button {
                                     store.archiveRecurringPayment(id: payment.id)
+                                } label: {
+                                    Label("Archive", systemImage: "archivebox")
                                 }
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(AppTheme.Colors.danger)
@@ -300,6 +630,53 @@ struct BillsView: View {
             }
         }
     }
+
+    private func billDueLabel(_ dueDay: Int?) -> String {
+        dueDay.map { "Day \($0)" } ?? "No due day"
+    }
+
+    private func billLinkLabel(_ payment: RecurringPayment) -> String {
+        let potName = payment.potId.flatMap { potId in store.snapshot.pots.first { $0.id == potId }?.name }
+        let cardName = payment.creditCardId.flatMap { cardId in store.snapshot.creditCards.first { $0.id == cardId }?.name }
+
+        if let cardName, let potName {
+            return "\(cardName) + \(potName)"
+        }
+        if let potName {
+            return potName
+        }
+        if let cardName {
+            return cardName
+        }
+        return "No link"
+    }
+
+    private var cardLinkedPots: [Pot] {
+        store.activePots.filter { $0.linkedCreditCardId == cardId }
+    }
+
+    private var selectedCardName: String {
+        store.activeCards.first { $0.id == cardId }?.name ?? ""
+    }
+
+    private var selectedPotName: String {
+        store.activePots.first { $0.id == potId }?.name ?? ""
+    }
+
+    private var cleanPotId: String? {
+        if routeToCard {
+            return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
+        }
+
+        return potId.nilIfBlank
+    }
+
+    private func normalizeSelectedCardPot() {
+        guard routeToCard else { return }
+        if !cardLinkedPots.contains(where: { $0.id == potId }) {
+            potId = cardLinkedPots.first?.id ?? ""
+        }
+    }
 }
 
 struct AddDebtSheetView: View {
@@ -307,10 +684,10 @@ struct AddDebtSheetView: View {
     @ObservedObject var store: PlannerStore
     @State private var name = ""
     @State private var lender = ""
-    @State private var original = ""
     @State private var balance = ""
     @State private var minimum = ""
     @State private var dueDate = Date()
+    @State private var linkedPotId = ""
     @State private var apr = ""
     @State private var note = ""
 
@@ -321,23 +698,29 @@ struct AddDebtSheetView: View {
                     SectionTitle("Add debt")
                     TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
                     TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
-                    MoneyField(title: "Original amount", text: $original)
                     MoneyField(title: "Current balance", text: $balance)
                     MoneyField(title: "Minimum payment", text: $minimum)
                     DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
                         .tint(AppTheme.Colors.primaryOrange)
+                    Picker("Linked pot", selection: $linkedPotId) {
+                        Text("No linked pot").tag("")
+                        ForEach(eligibleDebtPots(in: store.snapshot, debtId: nil)) { pot in
+                            Text(pot.name).tag(pot.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
                     TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
                     TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
                     PrimaryButton(title: "Add debt", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(balance) <= 0) {
                         store.addDebt(
                             name: name,
                             lender: lender,
-                            originalAmountPence: MoneyParser.parsePoundsToPence(original),
                             currentBalancePence: MoneyParser.parsePoundsToPence(balance),
                             minimumPaymentPence: MoneyParser.parsePoundsToPence(minimum),
                             dueDate: dueDate.isoDateString,
                             apr: Double(apr),
-                            note: note
+                            note: note,
+                            linkedPotId: linkedPotId.nilIfBlank
                         )
                         reset()
                         dismiss()
@@ -355,10 +738,10 @@ struct AddDebtSheetView: View {
     private func reset() {
         name = ""
         lender = ""
-        original = ""
         balance = ""
         minimum = ""
         dueDate = Date()
+        linkedPotId = ""
         apr = ""
         note = ""
     }
@@ -368,10 +751,10 @@ struct DebtsView: View {
     @ObservedObject var store: PlannerStore
     @State private var name = ""
     @State private var lender = ""
-    @State private var original = ""
     @State private var balance = ""
     @State private var minimum = ""
     @State private var dueDate = Date()
+    @State private var linkedPotId = ""
     @State private var apr = ""
     @State private var note = ""
     @State private var selectedDebt: Debt?
@@ -419,28 +802,34 @@ struct DebtsView: View {
             SectionTitle("Add debt")
             TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
             TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
-            MoneyField(title: "Original amount", text: $original)
             MoneyField(title: "Current balance", text: $balance)
             MoneyField(title: "Minimum payment", text: $minimum)
             DatePicker("Due date", selection: $dueDate, displayedComponents: .date).tint(AppTheme.Colors.primaryOrange)
+            Picker("Linked pot", selection: $linkedPotId) {
+                Text("No linked pot").tag("")
+                ForEach(eligibleDebtPots(in: store.snapshot, debtId: nil)) { pot in
+                    Text(pot.name).tag(pot.id)
+                }
+            }
+            .pickerStyle(.menu)
             TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
             TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
             PrimaryButton(title: "Add debt", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(balance) <= 0) {
                 store.addDebt(
                     name: name,
                     lender: lender,
-                    originalAmountPence: MoneyParser.parsePoundsToPence(original),
                     currentBalancePence: MoneyParser.parsePoundsToPence(balance),
                     minimumPaymentPence: MoneyParser.parsePoundsToPence(minimum),
                     dueDate: dueDate.isoDateString,
                     apr: Double(apr),
-                    note: note
+                    note: note,
+                    linkedPotId: linkedPotId.nilIfBlank
                 )
                 name = ""
                 lender = ""
-                original = ""
                 balance = ""
                 minimum = ""
+                linkedPotId = ""
                 note = ""
             }
         }
@@ -453,7 +842,7 @@ struct DebtsView: View {
                     Text(debt.name)
                         .font(.headline)
                         .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text("\(debt.lender) · due \(debt.dueDate)")
+                    Text(debtSummaryLine(for: debt, in: store.snapshot))
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
@@ -476,7 +865,6 @@ private struct DebtDetailView: View {
     @ObservedObject var store: PlannerStore
     var debt: Debt
     @State private var payment = ""
-    @State private var reserve = ""
     @State private var note = ""
 
     var body: some View {
@@ -487,6 +875,7 @@ private struct DebtDetailView: View {
                         MetricRow(label: "Balance", value: MoneyParser.formatPence(currentDebt.currentBalancePence), valueColor: AppTheme.Colors.primaryOrange)
                         MetricRow(label: "Minimum", value: MoneyParser.formatPence(currentDebt.minimumPaymentPence))
                         MetricRow(label: "Due date", value: currentDebt.dueDate)
+                        MetricRow(label: "Linked pot", value: linkedDebtPotName(in: store.snapshot, debtId: currentDebt.id) ?? "None")
                     }
                     AppCard {
                         SectionTitle("Payment")
@@ -496,12 +885,6 @@ private struct DebtDetailView: View {
                             store.recordDebtPayment(debtId: debt.id, amountPence: MoneyParser.parsePoundsToPence(payment), date: Date().isoDateString, note: note)
                             payment = ""
                             note = ""
-                        }
-                        AppDivider()
-                        MoneyField(title: "Reserve amount", text: $reserve)
-                        SecondaryButton(title: "Plan reserve", systemImage: "plus.circle") {
-                            store.addDebtReserve(debtId: debt.id, amountPence: MoneyParser.parsePoundsToPence(reserve), note: "Manual reserve")
-                            reserve = ""
                         }
                     }
                     SecondaryButton(title: "Archive debt", systemImage: "archivebox", role: .destructive) {
@@ -521,6 +904,7 @@ private struct DebtDetailView: View {
     private var currentDebt: Debt {
         store.snapshot.debts.first(where: { $0.id == debt.id }) ?? debt
     }
+
 }
 
 struct CalendarPlannerView: View {
@@ -528,50 +912,205 @@ struct CalendarPlannerView: View {
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var month = Date()
+    @State private var selectedDate = FinanceEngine.toIsoDate(Date())
+    @State private var mode: CalendarDisplayMode = .calendar
 
     var body: some View {
         ScreenScaffold(
             title: "Calendar",
             subtitle: "Money events by month.",
             navigationMode: navigationMode,
-            toolbarMode: toolbarMode
-        ) {
-            AppCard(glow: true) {
-                HStack {
-                    Button {
-                        month = Calendar.current.date(byAdding: .month, value: -1, to: month) ?? month
-                    } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    Spacer()
-                    Text(month, format: .dateTime.month(.wide).year())
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Spacer()
-                    Button {
-                        month = Calendar.current.date(byAdding: .month, value: 1, to: month) ?? month
-                    } label: {
-                        Image(systemName: "chevron.right")
+            toolbarMode: .actions([
+                AppToolbarAction(id: "calendar-mode-toggle", symbol: "ellipsis.circle", accessibilityLabel: "Toggle Calendar View") {
+                    withAnimation(AppTheme.Animation.standard) {
+                        mode = mode == .calendar ? .list : .calendar
                     }
                 }
-                .foregroundStyle(AppTheme.Colors.primaryOrange)
+            ])
+        ) {
+            calendarHeader
+            if mode == .calendar {
+                calendarGrid
+                selectedDayDetails
+            } else {
+                agendaList
             }
+        }
+        .onAppear {
+            if selectedDate < monthStart || selectedDate > monthEnd {
+                selectedDate = monthStart
+            }
+        }
+    }
 
-            if events.isEmpty {
-                AppCard { EmptyStateView(title: "No events this month", message: "Paydays, bills, card payments, spending, and debts appear here.", systemImage: "calendar") }
+    private var calendarHeader: some View {
+        AppCard(glow: true) {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Button {
+                    moveMonth(by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(ScaleButtonStyle())
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Pill(text: month.formatted(.dateTime.month(.wide).year()), systemImage: "calendar")
+                    Text(mode == .calendar ? "Calendar view" : "List view")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(ordinalDay(selectedDate))
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(monthName(selectedDate))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Button {
+                    moveMonth(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(ScaleButtonStyle())
+            }
+        }
+    }
+
+    private var calendarGrid: some View {
+        AppCard {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 8) {
+                ForEach(weekdaySymbols, id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(calendarDays) { day in
+                    if let isoDate = day.isoDate {
+                        Button {
+                            withAnimation(AppTheme.Animation.standard) {
+                                selectedDate = isoDate
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                Text("\(day.dayNumber)")
+                                    .font(.subheadline.weight(day.isToday ? .bold : .semibold))
+                                    .foregroundStyle(dayTextColor(day))
+                                    .frame(width: 34, height: 34)
+                                    .background(dayBackground(day))
+                                    .clipShape(Circle())
+
+                                HStack(spacing: 2) {
+                                    ForEach(Array(eventTypes(for: isoDate).prefix(3)), id: \.rawValue) { type in
+                                        Circle()
+                                            .fill(color(for: type))
+                                            .frame(width: 5, height: 5)
+                                    }
+                                }
+                                .frame(height: 8)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 56)
+                            .opacity(day.isCurrentMonth ? 1 : 0.32)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Color.clear
+                            .frame(minHeight: 56)
+                    }
+                }
+            }
+        }
+    }
+
+    private var selectedDayDetails: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("\(weekdayName(selectedDate)), \(ordinalDay(selectedDate))")
+            let dayEvents = eventsByDate[selectedDate] ?? []
+            if dayEvents.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "Nothing planned", message: "No finance events are scheduled for this day.", systemImage: "calendar")
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                ForEach(dayEvents) { event in
+                    calendarEventCard(event)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+        }
+        .animation(AppTheme.Animation.standard, value: selectedDate)
+    }
+
+    private var agendaList: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("This month")
+            if groupedDates.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No events this month", message: "Paydays, bills, card payments, spending, and debts appear here.", systemImage: "calendar")
+                }
             } else {
                 ForEach(groupedDates, id: \.self) { date in
                     AppCard {
-                        Text(date)
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.primaryText)
+                        HStack(alignment: .firstTextBaseline) {
+                            Pill(text: monthName(date), systemImage: nil, color: AppTheme.Colors.primaryOrange)
+                            Spacer()
+                            Text(ordinalDay(date))
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                        }
                         ForEach(eventsByDate[date] ?? []) { event in
-                            MetricRow(label: event.title, value: event.amountPence.map { MoneyParser.formatPence($0) } ?? event.detail, valueColor: color(for: event.type))
+                            calendarEventLine(event)
                         }
                     }
                 }
             }
         }
+    }
+
+    private func calendarEventCard(_ event: CalendarEvent) -> some View {
+        AppCard {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: symbol(for: event.type))
+                    .foregroundStyle(color(for: event.type))
+                    .frame(width: 34, height: 34)
+                    .background(color(for: event.type).opacity(0.12))
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(event.title)
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(eventSubtitle(event))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+                Spacer()
+                if let amountPence = event.amountPence {
+                    Text(MoneyParser.formatPence(amountPence))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(color(for: event.type))
+                }
+            }
+        }
+    }
+
+    private func calendarEventLine(_ event: CalendarEvent) -> some View {
+        MetricRow(
+            label: "\(event.title) · \(eventTypeLabel(event.type))",
+            value: event.amountPence.map { MoneyParser.formatPence($0) } ?? eventSubtitle(event),
+            valueColor: color(for: event.type)
+        )
     }
 
     private var monthStart: String {
@@ -601,6 +1140,116 @@ struct CalendarPlannerView: View {
         eventsByDate.keys.sorted()
     }
 
+    private var weekdaySymbols: [String] {
+        ["M", "T", "W", "T", "F", "S", "S"]
+    }
+
+    private var calendarDays: [CalendarDay] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let start = FinanceEngine.parseDate(monthStart)
+        let dayRange = calendar.range(of: .day, in: .month, for: start) ?? 1..<1
+        let weekday = calendar.component(.weekday, from: start)
+        let leadingEmptyCount = (weekday + 5) % 7
+        var days = (0..<leadingEmptyCount).map { CalendarDay(id: "blank-\($0)", date: nil, isoDate: nil, dayNumber: 0, isCurrentMonth: false, isToday: false) }
+
+        days += dayRange.map { day in
+            var components = calendar.dateComponents([.year, .month], from: start)
+            components.day = day
+            let date = calendar.date(from: components) ?? start
+            let isoDate = FinanceEngine.toIsoDate(date)
+            return CalendarDay(id: isoDate, date: date, isoDate: isoDate, dayNumber: day, isCurrentMonth: true, isToday: isoDate == store.todayIso)
+        }
+
+        while days.count % 7 != 0 {
+            days.append(CalendarDay(id: "blank-\(days.count)", date: nil, isoDate: nil, dayNumber: 0, isCurrentMonth: false, isToday: false))
+        }
+
+        return days
+    }
+
+    private func moveMonth(by value: Int) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        month = calendar.date(byAdding: .month, value: value, to: month) ?? month
+        selectedDate = monthStart
+    }
+
+    private func eventTypes(for date: String) -> [CalendarEventType] {
+        Array(Set(eventsByDate[date]?.map(\.type) ?? []))
+            .sorted { eventRank($0) < eventRank($1) }
+    }
+
+    private func dayTextColor(_ day: CalendarDay) -> Color {
+        guard let isoDate = day.isoDate else { return AppTheme.Colors.tertiaryText }
+        if isoDate == selectedDate || day.isToday {
+            return .white
+        }
+        return AppTheme.Colors.primaryText
+    }
+
+    private func dayBackground(_ day: CalendarDay) -> AnyShapeStyle {
+        guard let isoDate = day.isoDate else { return AnyShapeStyle(Color.clear) }
+        if isoDate == selectedDate {
+            return AnyShapeStyle(AppTheme.Gradients.primary)
+        }
+        if day.isToday {
+            return AnyShapeStyle(AppTheme.Colors.primaryOrange.opacity(0.34))
+        }
+        return AnyShapeStyle(Color.clear)
+    }
+
+    private func eventSubtitle(_ event: CalendarEvent) -> String {
+        switch event.type {
+        case .payday:
+            return event.amountPence == nil ? "Next period starts" : "Income lands"
+        case .recurring:
+            return event.detail.replacingOccurrences(of: "_", with: " ").capitalized
+        case .savedPayment:
+            return "Saved payment"
+        case .spending:
+            return event.detail.replacingOccurrences(of: "_", with: " ").capitalized
+        case .cardPayment:
+            return "Card repayment"
+        case .debtDue:
+            return event.detail
+        case .debtReserve:
+            return "Debt reserve"
+        case .debtPayment:
+            return event.detail.isEmpty ? "Debt payment" : event.detail
+        case .allocation:
+            return "Pot allocation"
+        }
+    }
+
+    private func eventTypeLabel(_ type: CalendarEventType) -> String {
+        switch type {
+        case .payday: "Payday"
+        case .recurring: "Bill"
+        case .savedPayment: "Saved"
+        case .spending: "Spend"
+        case .cardPayment: "Card"
+        case .debtDue: "Debt"
+        case .debtReserve: "Reserve"
+        case .debtPayment: "Debt paid"
+        case .allocation: "Pot"
+        }
+    }
+
+    private func symbol(for type: CalendarEventType) -> String {
+        switch type {
+        case .payday: "sterlingsign.circle"
+        case .recurring: "calendar.badge.clock"
+        case .savedPayment: "calendar.badge.plus"
+        case .spending: "receipt"
+        case .cardPayment: "creditcard"
+        case .debtDue: "exclamationmark.shield"
+        case .debtReserve: "plus.circle"
+        case .debtPayment: "checkmark.circle"
+        case .allocation: "wallet.pass"
+        }
+    }
+
     private func color(for type: CalendarEventType) -> Color {
         switch type {
         case .payday: AppTheme.Colors.success
@@ -609,6 +1258,58 @@ struct CalendarPlannerView: View {
         case .debtReserve, .debtPayment, .allocation: AppTheme.Colors.primaryOrange
         }
     }
+
+    private func eventRank(_ type: CalendarEventType) -> Int {
+        switch type {
+        case .payday: 0
+        case .recurring: 1
+        case .savedPayment: 2
+        case .debtDue: 3
+        case .cardPayment: 4
+        case .spending: 5
+        case .debtReserve: 6
+        case .debtPayment: 7
+        case .allocation: 8
+        }
+    }
+
+    private func ordinalDay(_ isoDate: String) -> String {
+        let day = Calendar(identifier: .gregorian).component(.day, from: FinanceEngine.parseDate(isoDate))
+        let suffix: String
+        if (11...13).contains(day % 100) {
+            suffix = "th"
+        } else {
+            switch day % 10 {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
+        }
+        return "\(day)\(suffix)"
+    }
+
+    private func monthName(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.month(.abbreviated))
+    }
+
+    private func weekdayName(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.weekday(.wide))
+    }
+}
+
+private enum CalendarDisplayMode {
+    case calendar
+    case list
+}
+
+private struct CalendarDay: Identifiable {
+    var id: String
+    var date: Date?
+    var isoDate: String?
+    var dayNumber: Int
+    var isCurrentMonth: Bool
+    var isToday: Bool
 }
 
 struct CalendarSheetView: View {
@@ -667,8 +1368,8 @@ struct SettingsView: View {
     var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var hourlyRate = ""
     @State private var hours = ""
-    @State private var manualDate = Date()
     @State private var showResetAlert = false
+    @State private var resetDataToggle = false
 
     var body: some View {
         ScreenScaffold(
@@ -693,22 +1394,9 @@ struct SettingsView: View {
                 }
             }
 
-            AppCard {
-                SectionTitle("Date mode")
-                Picker("Mode", selection: bindingDateMode) {
-                    ForEach(AppDateMode.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                if store.snapshot.settings.appDateMode == .manual {
-                    DatePicker("Manual today", selection: $manualDate, displayedComponents: .date)
-                        .tint(AppTheme.Colors.primaryOrange)
-                    SecondaryButton(title: "Use selected date", systemImage: "calendar") {
-                        var settings = store.snapshot.settings
-                        settings.manualTodayIso = manualDate.isoDateString
-                        store.updateSettings(settings)
-                    }
-                }
-            }
+            DateSimulationCard(store: store)
+
+            historyLink
 
             AppCard {
                 SectionTitle("AI")
@@ -727,21 +1415,57 @@ struct SettingsView: View {
 
             accountCard
 
-            SecondaryButton(title: "Reset local planner", systemImage: "trash", role: .destructive) {
-                showResetAlert = true
-            }
+            resetDataCard
         }
         .onAppear {
             hourlyRate = String(format: "%.2f", Double(store.snapshot.settings.hourlyRatePence) / 100)
             hours = String(format: "%.0f", store.snapshot.settings.defaultHoursWorked)
-            manualDate = store.snapshot.settings.manualTodayIso?.isoDate ?? Date()
         }
         .alert("Reset local planner?", isPresented: $showResetAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) { store.resetLocalData() }
+            Button("Cancel", role: .cancel) {
+                resetDataToggle = false
+            }
+            Button("Reset", role: .destructive) {
+                store.resetLocalData()
+                hourlyRate = "0.00"
+                hours = "0"
+                resetDataToggle = false
+            }
         } message: {
-            Text("This clears the local iPhone snapshot. The existing web app code and ignored web dist files are untouched.")
+            Text("This clears local iPhone planner inputs and returns the app to its default data.")
         }
+    }
+
+    private var historyLink: some View {
+        NavigationLink {
+            HistoryView(store: store)
+        } label: {
+            AppCard {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .frame(width: 40, height: 40)
+                        .background(AppTheme.Colors.primaryOrange.opacity(0.12))
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("History")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                        Text("Paycheck and allocation history.")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private var accountCard: some View {
@@ -755,6 +1479,29 @@ struct SettingsView: View {
         }
     }
 
+    private var resetDataCard: some View {
+        AppCard {
+            SectionTitle("Data")
+            Toggle("Reset data", isOn: resetDataBinding)
+                .tint(AppTheme.Colors.danger)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Text("Clears paychecks, pots, bills, cards, debts, spending, history, date simulation, and saved settings from this iPhone.")
+                .font(.footnote)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
+    }
+
+    private var resetDataBinding: Binding<Bool> {
+        Binding {
+            resetDataToggle
+        } set: { isOn in
+            resetDataToggle = isOn
+            if isOn {
+                showResetAlert = true
+            }
+        }
+    }
+
     private var bindingPayFrequency: Binding<PayFrequency> {
         Binding {
             store.snapshot.settings.payFrequency
@@ -762,16 +1509,6 @@ struct SettingsView: View {
             var settings = store.snapshot.settings
             settings.payFrequency = $0
             settings.defaultPayPeriodDays = FinanceEngine.frequencyToDays($0)
-            store.updateSettings(settings)
-        }
-    }
-
-    private var bindingDateMode: Binding<AppDateMode> {
-        Binding {
-            store.snapshot.settings.appDateMode
-        } set: {
-            var settings = store.snapshot.settings
-            settings.appDateMode = $0
             store.updateSettings(settings)
         }
     }
@@ -819,6 +1556,8 @@ struct AssistantView: View {
     @ObservedObject var store: PlannerStore
     var presentationMode: AssistantPresentationMode = .modal
     @State private var prompt = ""
+    @State private var isAssistantOptionsPresented = false
+    @State private var activeAssistantSheet: AssistantSettingsSheet?
     @State private var messages: [AssistantMessage] = [
         AssistantMessage(role: "Assistant", text: "I can summarise your local planner. Authenticated AI chat needs the native Firebase/backend TODOs in Settings.")
     ]
@@ -893,7 +1632,28 @@ struct AssistantView: View {
                         }
                     }
                 }
-                .appPlaceholderToolbar(presentationMode == .modal ? .modalSingle : .secondarySingle)
+                .appPlaceholderToolbar(.actions([
+                    AppToolbarAction(id: "assistant-options", symbol: "ellipsis.circle", accessibilityLabel: "Assistant Options") {
+                        isAssistantOptionsPresented = true
+                    }
+                ]))
+                .confirmationDialog("Assistant options", isPresented: $isAssistantOptionsPresented, titleVisibility: .visible) {
+                    Button("Add custom instructions") {
+                        activeAssistantSheet = .instructions
+                    }
+                    Button("Customise assistant") {
+                        activeAssistantSheet = .customise
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+                .sheet(item: $activeAssistantSheet) { sheet in
+                    switch sheet {
+                    case .instructions:
+                        AssistantCustomInstructionsView(store: store)
+                    case .customise:
+                        AssistantCustomiseView(store: store)
+                    }
+                }
             }
         }
     }
@@ -961,8 +1721,133 @@ struct AssistantView: View {
         messages.append(AssistantMessage(role: "You", text: text))
         prompt = ""
         let period = store.selectedPayPeriod
+        let name = store.snapshot.settings.assistantName?.nilIfBlank ?? "Assistant"
         let reply = "Local summary: \(MoneyParser.formatPence(period?.incomePence ?? 0)) income in the current plan, \(MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots))) spendable, and \(store.snapshot.recurringPayments.filter(\.active).count) active bills. Authenticated AI actions are waiting on native Firebase ID tokens."
-        messages.append(AssistantMessage(role: "Assistant", text: reply))
+        messages.append(AssistantMessage(role: name, text: reply))
+    }
+}
+
+private enum AssistantSettingsSheet: String, Identifiable {
+    case instructions
+    case customise
+
+    var id: String { rawValue }
+}
+
+private struct AssistantCustomInstructionsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var instructions = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.lg) {
+                    AppCard(glow: true) {
+                        SectionTitle("Custom instructions")
+                        Text("Type or paste the prompt the assistant should remember when helping with your planner.")
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                        TextEditor(text: $instructions)
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 220)
+                            .padding(AppTheme.Spacing.sm)
+                            .background(AppTheme.Colors.elevatedSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+                            )
+                        PrimaryButton(title: "Save instructions", systemImage: "checkmark") {
+                            var settings = store.snapshot.settings
+                            settings.aiInstructions = instructions
+                            store.updateSettings(settings)
+                            dismiss()
+                        }
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Instructions")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+            .onAppear {
+                instructions = store.snapshot.settings.aiInstructions
+            }
+        }
+    }
+}
+
+private struct AssistantCustomiseView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var assistantName = ""
+    @State private var responseStyle: AssistantResponseStyle = .straightToThePoint
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.lg) {
+                    AppCard(glow: true) {
+                        SectionTitle("Customise assistant")
+                        TextField("Assistant name", text: $assistantName)
+                            .textFieldStyle(AppTextFieldStyle())
+                        VStack(spacing: AppTheme.Spacing.sm) {
+                            ForEach(AssistantResponseStyle.allCases) { style in
+                                Button {
+                                    responseStyle = style
+                                } label: {
+                                    HStack {
+                                        Text(style.label)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(AppTheme.Colors.primaryText)
+                                        Spacer()
+                                        if responseStyle == style {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                                        }
+                                    }
+                                    .padding(AppTheme.Spacing.md)
+                                    .background(responseStyle == style ? AppTheme.Colors.primaryOrange.opacity(0.12) : AppTheme.Colors.elevatedSurface)
+                                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                                            .stroke(responseStyle == style ? AppTheme.Colors.primaryOrange.opacity(0.5) : AppTheme.Colors.border, lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        PrimaryButton(title: "Save assistant", systemImage: "checkmark") {
+                            var settings = store.snapshot.settings
+                            settings.assistantName = assistantName.nilIfBlank ?? "Assistant"
+                            settings.assistantResponseStyle = responseStyle
+                            store.updateSettings(settings)
+                            dismiss()
+                        }
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Customise")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+            .onAppear {
+                assistantName = store.snapshot.settings.assistantName?.nilIfBlank ?? "Assistant"
+                responseStyle = store.snapshot.settings.assistantResponseStyle ?? .straightToThePoint
+            }
+        }
     }
 }
 
@@ -990,6 +1875,37 @@ private extension View {
     func assistantBottomContentBlur(viewportHeight: CGFloat, coordinateSpaceName: String) -> some View {
         modifier(AssistantBottomContentBlurModifier(viewportHeight: viewportHeight, coordinateSpaceName: coordinateSpaceName))
     }
+}
+
+private func eligibleDebtPots(in snapshot: PlannerSnapshot, debtId: String?) -> [Pot] {
+    snapshot.pots
+        .filter {
+            !$0.archived &&
+            $0.linkedCreditCardId == nil &&
+            ($0.linkedDebtId == nil || $0.linkedDebtId == debtId)
+        }
+        .sorted { lhs, rhs in
+            if lhs.name == rhs.name {
+                return lhs.id < rhs.id
+            }
+            return lhs.name < rhs.name
+        }
+}
+
+private func linkedDebtPot(in snapshot: PlannerSnapshot, debtId: String) -> Pot? {
+    eligibleDebtPots(in: snapshot, debtId: debtId)
+        .first { $0.linkedDebtId == debtId }
+}
+
+private func linkedDebtPotName(in snapshot: PlannerSnapshot, debtId: String) -> String? {
+    linkedDebtPot(in: snapshot, debtId: debtId)?.name
+}
+
+private func debtSummaryLine(for debt: Debt, in snapshot: PlannerSnapshot) -> String {
+    if let potName = linkedDebtPotName(in: snapshot, debtId: debt.id) {
+        return "\(debt.lender) · \(potName) · due \(debt.dueDate)"
+    }
+    return "\(debt.lender) · due \(debt.dueDate)"
 }
 
 private struct AssistantMessage: Identifiable {

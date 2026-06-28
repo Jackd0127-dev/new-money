@@ -20,6 +20,31 @@ enum AIProvider: String, Codable, Sendable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AssistantResponseStyle: String, Codable, Sendable, CaseIterable, Identifiable {
+    case straightToThePoint = "straight_to_the_point"
+    case affirmative
+    case enthusiastic
+    case friendly
+    case flirty
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .straightToThePoint:
+            return "Straight to the point"
+        case .affirmative:
+            return "Affirmative"
+        case .enthusiastic:
+            return "Enthusiastic"
+        case .friendly:
+            return "Friendly"
+        case .flirty:
+            return "Flirty"
+        }
+    }
+}
+
 enum AppDateMode: String, Codable, Sendable, CaseIterable, Identifiable {
     case automatic
     case manual
@@ -38,9 +63,11 @@ enum PotType: String, Codable, Sendable, CaseIterable, Identifiable {
 }
 
 enum RecurringFrequency: String, Codable, Sendable, CaseIterable, Identifiable {
+    case once
     case weekly
     case biweekly
     case monthly
+    case quarterly
     case yearly
 
     var id: String { rawValue }
@@ -70,6 +97,11 @@ enum TransactionType: String, Codable, Sendable, CaseIterable {
 enum PotAllocationSource: String, Codable, Sendable {
     case manual
     case recurring
+    case recurringBillFunding = "recurring_bill_funding"
+    case cardBillFunding = "card_bill_funding"
+    case cardSpendFunding = "card_spend_funding"
+    case cardOpeningBalanceFunding = "card_opening_balance_funding"
+    case debtFunding = "debt_funding"
     case potAuto = "pot_auto"
 }
 
@@ -101,6 +133,12 @@ enum CreditCardPotStatus: String, Codable, Sendable, CaseIterable {
     case cancelled
 }
 
+enum CreditCardRepaymentSource: String, Codable, Sendable, CaseIterable {
+    case manual
+    case automaticStatement = "automatic_statement"
+    case linkedPotStatement = "linked_pot_statement"
+}
+
 enum DebtReserveStatus: String, Codable, Sendable, CaseIterable {
     case planned
     case skipped
@@ -128,8 +166,11 @@ struct Settings: Codable, Equatable, Identifiable, Sendable {
     var defaultHoursWorked: Double
     var appDateMode: AppDateMode
     var manualTodayIso: String?
+    var lastProcessedDateIso: String? = nil
     var aiInstructions: String
     var aiProvider: AIProvider
+    var assistantName: String?
+    var assistantResponseStyle: AssistantResponseStyle?
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -202,6 +243,13 @@ struct PotAllocation: Codable, Equatable, Identifiable, Sendable {
     var amountPence: Int
     var source: PotAllocationSource?
     var recurringPaymentId: String?
+    var recurringDueDate: String?
+    var debtId: String?
+    var debtDueDate: String?
+    var transactionId: String? = nil
+    var transactionDate: String? = nil
+    var creditCardId: String? = nil
+    var creditCardDirectDebitDate: String? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -302,6 +350,12 @@ struct CreditCardRepayment: Codable, Equatable, Identifiable, Sendable {
     var amountPence: Int
     var date: String
     var note: String
+    var statementDate: String? = nil
+    var directDebitDate: String? = nil
+    var source: CreditCardRepaymentSource? = nil
+    var potId: String? = nil
+    var potContributionPence: Int? = nil
+    var paycheckContributionPence: Int? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -371,6 +425,52 @@ struct PayPeriodMoneySummary: Equatable, Sendable {
     var totalPaymentsDuePence: Int
     var moneyLeftPence: Int
     var isOverCommitted: Bool
+}
+
+enum PeriodCostItemSource: String, Sendable {
+    case recurring
+    case savedPayment = "saved_payment"
+    case manualSpend = "manual_spend"
+    case potAllocation = "pot_allocation"
+    case debtMinimum = "debt_minimum"
+    case debtReserve = "debt_reserve"
+    case creditCardPot = "credit_card_pot"
+    case creditCardRepayment = "credit_card_repayment"
+}
+
+struct PeriodCostItem: Identifiable, Equatable, Sendable {
+    var id: String
+    var label: String
+    var amountPence: Int
+    var date: String
+    var source: PeriodCostItemSource
+    var creditCardId: String?
+    var potId: String?
+    var fundingPotId: String?
+    var isProjected: Bool = false
+}
+
+struct PayPeriodCostSummary: Equatable, Sendable {
+    var payReceivedPence: Int
+    var directRecurringPence: Int
+    var savedPaymentsPence: Int
+    var manualSpendingPence: Int
+    var potAllocationsPence: Int
+    var debtMinimumsPence: Int
+    var debtReservesPence: Int
+    var creditCardPotsPence: Int
+    var creditCardChargesPence: Int
+    var creditCardRepaymentsPence: Int
+    var creditCardNetPence: Int
+    var committedCostsPence: Int
+    var unfundedChecklistPence: Int
+    var projectedCostsPence: Int
+    var currentMoneyLeftPence: Int
+    var projectedMoneyLeftPence: Int
+    var totalCostsPence: Int
+    var moneyLeftPence: Int
+    var isOverCommitted: Bool
+    var items: [PeriodCostItem]
 }
 
 struct DebtSummary: Equatable, Sendable {

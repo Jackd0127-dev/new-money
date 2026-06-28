@@ -28,6 +28,26 @@ enum FinanceEngine {
         return Int((hoursWorked * Double(hourlyRatePence)).rounded())
     }
 
+    static func formatPaydayLabel(_ isoDate: String) -> String {
+        let date = parseDate(isoDate)
+        let calendar = utcCalendar
+        let day = calendar.component(.day, from: date)
+        let month = calendar.component(.month, from: date)
+        let year = calendar.component(.year, from: date)
+
+        return "\(ordinalDayLabel(day)) \(fullMonthLabel(month)) \(String(format: "%02d", year % 100))"
+    }
+
+    static func formatShortDateLabel(_ isoDate: String) -> String {
+        let date = parseDate(isoDate)
+        let calendar = utcCalendar
+        let day = calendar.component(.day, from: date)
+        let month = calendar.component(.month, from: date)
+        let year = calendar.component(.year, from: date)
+
+        return "\(day) \(shortMonthLabel(month)) \(year)"
+    }
+
     static func getAllocationBalance(
         incomePence: Int,
         reservedPence: Int,
@@ -195,12 +215,15 @@ enum FinanceEngine {
         pots: [Pot],
         today: String
     ) -> DebtSummary {
-        let activeDebts = debts.filter { $0.status == .active }
+        let activeDebts = debts.filter { $0.status == .active && $0.currentBalancePence > 0 }
         let overdueDebtCount = activeDebts.filter { $0.dueDate < today }.count
         let current = activeDebts.reduce(0) { $0 + $1.currentBalancePence }
         let original = activeDebts.reduce(0) { $0 + $1.originalAmountPence }
         let paidFromBalances = max(0, original - current)
-        let paidFromPayments = payments.reduce(0) { $0 + $1.amountPence }
+        let activeDebtIds = Set(activeDebts.map(\.id))
+        let paidFromPayments = payments
+            .filter { activeDebtIds.contains($0.debtId) }
+            .reduce(0) { $0 + $1.amountPence }
         let due = activeDebts.reduce(0) { total, debt in
             total + getDebtDueAmountAfterReservesAndLinkedPotsPence(debt: debt, reserves: reserves, pots: pots)
         }
@@ -240,6 +263,26 @@ enum FinanceEngine {
         toIsoDate(addDays(parseDate(date), days: days))
     }
 
+    static func monthlyDate(onOrAfter isoDate: String, day: Int) -> String {
+        let calendar = utcCalendar
+        let date = parseDate(isoDate)
+        let components = calendar.dateComponents([.year, .month], from: date)
+        var year = components.year ?? 1970
+        var month = components.month ?? 1
+        var candidate = monthlyDate(year: year, month: month, day: day)
+
+        if candidate < isoDate {
+            month += 1
+            if month > 12 {
+                month = 1
+                year += 1
+            }
+            candidate = monthlyDate(year: year, month: month, day: day)
+        }
+
+        return candidate
+    }
+
     static func parseDate(_ value: String) -> Date {
         makeIsoFormatter().date(from: value) ?? Date(timeIntervalSince1970: 0)
     }
@@ -257,5 +300,48 @@ enum FinanceEngine {
         case .biweekly, .custom:
             return 14
         }
+    }
+
+    private static func monthlyDate(year: Int, month: Int, day: Int) -> String {
+        var components = DateComponents()
+        components.calendar = utcCalendar
+        components.year = year
+        components.month = month
+        components.day = 1
+        let firstOfMonth = utcCalendar.date(from: components) ?? Date(timeIntervalSince1970: 0)
+        let lastDay = utcCalendar.range(of: .day, in: .month, for: firstOfMonth)?.count ?? 28
+        components.day = min(max(1, day), lastDay)
+        return toIsoDate(utcCalendar.date(from: components) ?? firstOfMonth)
+    }
+
+    private static func ordinalDayLabel(_ day: Int) -> String {
+        let suffix: String
+        switch day {
+        case 11, 12, 13:
+            suffix = "th"
+        default:
+            switch day % 10 {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
+        }
+        return "\(day)\(suffix)"
+    }
+
+    private static func fullMonthLabel(_ month: Int) -> String {
+        let months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ]
+        guard months.indices.contains(month - 1) else { return "January" }
+        return months[month - 1]
+    }
+
+    private static func shortMonthLabel(_ month: Int) -> String {
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        guard months.indices.contains(month - 1) else { return "Jan" }
+        return months[month - 1]
     }
 }

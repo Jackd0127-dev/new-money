@@ -6,6 +6,51 @@ protocol PlannerRepository: Sendable {
     func resetSnapshot() async throws
 }
 
+enum PlannerLaunchProfile {
+    static let fixtureEnvironmentKey = "NEWMONEY_PLANNER_FIXTURE"
+    static let basicDataFixtureValue = "basic-data"
+    static let complexStressFixtureValue = "complex-stress-sep-oct-2026"
+    static let complexStressJanMar2027FixtureValue = "complex-stress-jan-mar-2027"
+    static let groupedComplexJanMar2027FixtureValue = "grouped-complex-jan-mar-2027"
+
+    static func repository(environment: [String: String] = ProcessInfo.processInfo.environment) -> PlannerRepository {
+        switch environment[fixtureEnvironmentKey] {
+        case basicDataFixtureValue:
+            return InMemoryPlannerRepository(seedSnapshot: DefaultData.basicDataSnapshot)
+        case complexStressFixtureValue:
+            return InMemoryPlannerRepository(seedSnapshot: DefaultData.complexStressSnapshot)
+        case complexStressJanMar2027FixtureValue:
+            return InMemoryPlannerRepository(seedSnapshot: DefaultData.complexStressJanMar2027Snapshot)
+        case groupedComplexJanMar2027FixtureValue:
+            return InMemoryPlannerRepository(seedSnapshot: DefaultData.groupedComplexJanMar2027Snapshot)
+        default:
+            return FilePlannerRepository()
+        }
+    }
+}
+
+actor InMemoryPlannerRepository: PlannerRepository {
+    private let seedSnapshot: PlannerSnapshot
+    private var snapshot: PlannerSnapshot
+
+    init(seedSnapshot: PlannerSnapshot) {
+        self.seedSnapshot = seedSnapshot
+        self.snapshot = seedSnapshot
+    }
+
+    func loadSnapshot() async throws -> PlannerSnapshot {
+        snapshot
+    }
+
+    func saveSnapshot(_ snapshot: PlannerSnapshot) async throws {
+        self.snapshot = snapshot
+    }
+
+    func resetSnapshot() async throws {
+        snapshot = seedSnapshot
+    }
+}
+
 actor FilePlannerRepository: PlannerRepository {
     private let fileURL: URL
 

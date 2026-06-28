@@ -214,6 +214,75 @@ struct AppTextFieldStyle: TextFieldStyle {
     }
 }
 
+struct SelectionField<MenuContent: View>: View {
+    var title: String
+    var value: String
+    var placeholder: String = "Select"
+    var systemImage: String? = nil
+    var isDisabled = false
+    var menuContent: MenuContent
+
+    init(
+        title: String,
+        value: String,
+        placeholder: String = "Select",
+        systemImage: String? = nil,
+        isDisabled: Bool = false,
+        @ViewBuilder menuContent: () -> MenuContent
+    ) {
+        self.title = title
+        self.value = value
+        self.placeholder = placeholder
+        self.systemImage = systemImage
+        self.isDisabled = isDisabled
+        self.menuContent = menuContent()
+    }
+
+    var body: some View {
+        let displayValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        Menu {
+            menuContent
+        } label: {
+            HStack(spacing: AppTheme.Spacing.md) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .frame(width: 22)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                    Text(displayValue.isEmpty ? placeholder : displayValue)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(displayValue.isEmpty ? AppTheme.Colors.tertiaryText : AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: AppTheme.Spacing.md)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+            .padding(.horizontal, AppTheme.Spacing.md)
+            .frame(minHeight: 48)
+            .background(AppTheme.Colors.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+            )
+            .opacity(isDisabled ? 0.55 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+}
+
 struct ScaleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

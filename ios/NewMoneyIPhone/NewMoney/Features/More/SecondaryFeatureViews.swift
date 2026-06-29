@@ -1491,18 +1491,20 @@ struct HistoryView: View {
 }
 
 struct SettingsView: View {
+    @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var hourlyRate = ""
     @State private var hours = ""
     @State private var showResetAlert = false
+    @State private var showDeleteAccountAlert = false
     @State private var resetDataToggle = false
 
     var body: some View {
         ScreenScaffold(
             title: "Settings",
-            subtitle: "Planner defaults, account placeholders, and local data controls.",
+            subtitle: "Planner defaults, account, and local data controls.",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
@@ -1562,6 +1564,16 @@ struct SettingsView: View {
         } message: {
             Text("This clears local iPhone planner inputs and returns the app to its default data.")
         }
+        .alert("Delete account?", isPresented: $showDeleteAccountAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    await authSession.deleteAccount()
+                }
+            }
+        } message: {
+            Text("This deletes your account through the backend account endpoint. Local data on this iPhone is not reset by this action.")
+        }
     }
 
     private var historyLink: some View {
@@ -1599,11 +1611,40 @@ struct SettingsView: View {
     private var accountCard: some View {
         AppCard {
             SectionTitle("Account")
-            MetricRow(label: "Native Firebase", value: "Not configured", valueColor: AppTheme.Colors.warning)
-            MetricRow(label: "Cloud sync", value: "Placeholder service")
-            Text("TODO: add Firebase iOS Auth, GoogleService-Info.plist, Google/Apple provider setup, and Firestore snapshot sync for users/{uid}/planner/snapshot.")
-                .font(.footnote)
-                .foregroundStyle(AppTheme.Colors.secondaryText)
+            if let user = currentAuthUser {
+                MetricRow(label: "Provider", value: user.providerLabel, valueColor: AppTheme.Colors.success)
+                if let email = user.email {
+                    MetricRow(label: "Email", value: email)
+                }
+                if let phoneNumber = user.phoneNumber {
+                    MetricRow(label: "Phone", value: phoneNumber)
+                }
+                MetricRow(label: "Cloud sync", value: authSession.cloudStatus)
+
+                SecondaryButton(title: "Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
+                    Task {
+                        await authSession.signOut()
+                    }
+                }
+
+                SecondaryButton(title: "Delete Account", systemImage: "trash", role: .destructive) {
+                    showDeleteAccountAlert = true
+                }
+            } else {
+                MetricRow(label: "Status", value: "Signed out", valueColor: AppTheme.Colors.warning)
+            }
+        }
+    }
+
+    private var currentAuthUser: AuthUser? {
+        switch authSession.state {
+        case .emailVerificationRequired(let user),
+             .syncing(let user, _),
+             .conflict(let user, _),
+             .ready(let user):
+            return user
+        case .loading, .signedOut, .failed:
+            return nil
         }
     }
 

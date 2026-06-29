@@ -31,7 +31,7 @@ AI features only work on Vercel when `FIREBASE_SERVICE_ACCOUNT_JSON` and at leas
 
 Required services:
 
-- Firebase Authentication with Email/Password and Google providers enabled.
+- Firebase Authentication with Email/Password, Phone, Google, and Apple providers enabled.
 - Cloud Firestore in production mode.
 - Firestore rules that limit each user to their own document tree. The checked-in rules live in `firestore.rules`:
 
@@ -53,7 +53,9 @@ Deploy them after changing production Firebase rules:
 firebase deploy --only firestore:rules
 ```
 
-Apple sign-in is implemented in code but stays disabled until the Firebase Apple provider is configured with an Apple Developer Services ID, Team ID, Key ID, and private key. Set `VITE_ENABLE_APPLE_AUTH=true` after the provider is fully enabled.
+Phone authentication is enabled for SMS sign-in. Firebase limits new or no-billing projects to a low daily sent-SMS quota until billing is attached.
+
+Apple sign-in is enabled in Firebase. Set `VITE_ENABLE_APPLE_AUTH=true` in deployed web environments after the provider is fully configured.
 
 ## Gemini Daily Brief
 

@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { collection, doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
 
 import { defaultSettings } from '../data/defaults'
 import { firebaseDb } from './client'
@@ -11,8 +11,13 @@ export interface CloudPlannerRecord {
 
 interface CloudPlannerDocument {
   version: 1
+  updatedAt: unknown
   updatedAtIso: string
   snapshot: PlannerSnapshot
+}
+
+interface CloudPlannerBackupDocument extends CloudPlannerDocument {
+  backupVersion: 1
 }
 
 export async function getCloudPlannerSnapshot(userId: string): Promise<CloudPlannerRecord | null> {
@@ -38,14 +43,24 @@ export async function saveCloudPlannerSnapshot(
   userId: string,
   snapshot: PlannerSnapshot,
 ): Promise<string> {
+  const firestore = requireFirestore()
   const updatedAtIso = new Date().toISOString()
-
-  await setDoc(getSnapshotRef(userId), {
+  const cloudSnapshot = pruneUndefined(snapshot)
+  const currentDocument: CloudPlannerDocument = {
     version: 1,
     updatedAt: serverTimestamp(),
     updatedAtIso,
-    snapshot: pruneUndefined(snapshot),
-  })
+    snapshot: cloudSnapshot,
+  }
+  const backupDocument: CloudPlannerBackupDocument = {
+    ...currentDocument,
+    backupVersion: 1,
+  }
+
+  const batch = writeBatch(firestore)
+  batch.set(doc(getSnapshotBackupsRef(userId, firestore)), backupDocument)
+  batch.set(getSnapshotRef(userId, firestore), currentDocument)
+  await batch.commit()
 
   return updatedAtIso
 }
@@ -102,9 +117,12 @@ export function getPlannerSnapshotUpdatedAtIso(snapshot: PlannerSnapshot): strin
   return timestamps.sort().at(-1) ?? snapshot.settings.createdAt
 }
 
-function getSnapshotRef(userId: string) {
-  const firestore = requireFirestore()
+function getSnapshotRef(userId: string, firestore = requireFirestore()) {
   return doc(firestore, 'users', userId, 'planner', 'snapshot')
+}
+
+function getSnapshotBackupsRef(userId: string, firestore = requireFirestore()) {
+  return collection(firestore, 'users', userId, 'planner', 'snapshot', 'backups')
 }
 
 function requireFirestore() {

@@ -3,13 +3,36 @@ import Foundation
 struct AuthUser: Sendable, Equatable {
     var uid: String
     var email: String?
+    var phoneNumber: String?
+    var isEmailVerified: Bool
+    var providerIDs: [String]
+
+    var requiresEmailVerification: Bool {
+        providerIDs.contains("password") && !isEmailVerified
+    }
+
+    var providerLabel: String {
+        if providerIDs.contains("apple.com") { return "Apple" }
+        if providerIDs.contains("google.com") { return "Google" }
+        if providerIDs.contains("phone") { return "Phone" }
+        if providerIDs.contains("password") { return "Email" }
+        return "Firebase"
+    }
 }
 
-protocol AuthService: Sendable {
+@MainActor
+protocol AuthService {
     var isConfigured: Bool { get }
     func currentUser() async -> AuthUser?
+    func refreshCurrentUser() async throws -> AuthUser?
     func signInWithEmail(email: String, password: String) async throws -> AuthUser
     func createEmailAccount(email: String, password: String) async throws -> AuthUser
+    func sendEmailVerification() async throws
+    func startPhoneSignIn(phoneNumber: String) async throws -> String
+    func confirmPhoneCode(verificationID: String, code: String) async throws -> AuthUser
+    func signInWithGoogle() async throws -> AuthUser
+    func signInWithApple(idToken: String, nonce: String, fullName: PersonNameComponents?) async throws -> AuthUser
+    func idToken(forceRefresh: Bool) async throws -> String
     func signOut() async throws
     func deleteAccount(idToken: String) async throws
 }
@@ -18,6 +41,8 @@ struct PlaceholderAuthService: AuthService {
     var isConfigured: Bool { false }
 
     func currentUser() async -> AuthUser? { nil }
+
+    func refreshCurrentUser() async throws -> AuthUser? { nil }
 
     // TODO: Add Firebase iOS Auth plus GoogleService-Info.plist before enabling native account sign-in.
     func signInWithEmail(email: String, password: String) async throws -> AuthUser {
@@ -28,6 +53,30 @@ struct PlaceholderAuthService: AuthService {
         throw ServicePlaceholderError.missingNativeFirebaseConfiguration
     }
 
+    func sendEmailVerification() async throws {
+        throw ServicePlaceholderError.missingNativeFirebaseConfiguration
+    }
+
+    func startPhoneSignIn(phoneNumber: String) async throws -> String {
+        throw ServicePlaceholderError.missingNativeFirebaseConfiguration
+    }
+
+    func confirmPhoneCode(verificationID: String, code: String) async throws -> AuthUser {
+        throw ServicePlaceholderError.missingNativeFirebaseConfiguration
+    }
+
+    func signInWithGoogle() async throws -> AuthUser {
+        throw ServicePlaceholderError.missingNativeFirebaseConfiguration
+    }
+
+    func signInWithApple(idToken: String, nonce: String, fullName: PersonNameComponents?) async throws -> AuthUser {
+        throw ServicePlaceholderError.missingNativeFirebaseConfiguration
+    }
+
+    func idToken(forceRefresh: Bool) async throws -> String {
+        throw ServicePlaceholderError.missingNativeFirebaseConfiguration
+    }
+
     func signOut() async throws {}
 
     func deleteAccount(idToken: String) async throws {
@@ -35,14 +84,15 @@ struct PlaceholderAuthService: AuthService {
     }
 }
 
-protocol CloudSyncService: Sendable {
-    func pullSnapshot(for user: AuthUser) async throws -> PlannerSnapshot
+@MainActor
+protocol CloudSyncService {
+    func pullSnapshot(for user: AuthUser) async throws -> CloudPlannerSnapshotRecord?
     func pushSnapshot(_ snapshot: PlannerSnapshot, for user: AuthUser) async throws
 }
 
 struct PlaceholderCloudSyncService: CloudSyncService {
     // TODO: Mirror the web Firestore document users/{uid}/planner/snapshot once native auth can provide a UID.
-    func pullSnapshot(for user: AuthUser) async throws -> PlannerSnapshot {
+    func pullSnapshot(for user: AuthUser) async throws -> CloudPlannerSnapshotRecord? {
         throw ServicePlaceholderError.missingFirestoreConfiguration
     }
 

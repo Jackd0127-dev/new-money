@@ -44,11 +44,15 @@ private enum AppToolbarSheet: String, Identifiable {
 }
 
 struct AppView: View {
-    @StateObject private var store = PlannerStore()
+    @ObservedObject var store: PlannerStore
     @State private var selectedTab: AppTab = .dashboard
     @State private var isAssistantPresented = false
     @State private var activeToolbarSheet: AppToolbarSheet?
     @Namespace private var rootToolbarNamespace
+
+    init(store: PlannerStore = PlannerStore()) {
+        self.store = store
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -85,9 +89,6 @@ struct AppView: View {
                 .toolbarColorScheme(.dark, for: .navigationBar)
                 .toolbar(id: "root-tab-toolbar") {
                     rootTabToolbarContent
-                }
-                .task {
-                    await store.load()
                 }
             }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SwiftUI
 
 private struct LinkedPotContribution {
@@ -20,6 +21,10 @@ final class PlannerStore: ObservableObject {
 
     init(repository: PlannerRepository = PlannerLaunchProfile.repository()) {
         self.repository = repository
+    }
+
+    var snapshotPublisher: Published<PlannerSnapshot>.Publisher {
+        $snapshot
     }
 
     var selectedPayPeriod: PayPeriod? {
@@ -82,6 +87,16 @@ final class PlannerStore: ObservableObject {
         } catch {
             errorMessage = "Unable to load local planner data."
         }
+    }
+
+    func replaceSnapshot(_ replacement: PlannerSnapshot) async throws {
+        let migration = DefaultData.migratedSnapshot(replacement)
+        snapshot = migration.snapshot
+        try await repository.saveSnapshot(snapshot)
+    }
+
+    func saveCurrentSnapshot() async throws {
+        try await repository.saveSnapshot(snapshot)
     }
 
     func resetLocalData() {

@@ -35,11 +35,11 @@ final class FirebasePhoneAuthAPNsBridge {
     }
 
     func registerForRemoteNotificationsIfNeeded(application: UIApplication = .shared) {
+        _ = prepareFirebaseAuth()
+
 #if targetEnvironment(simulator)
         debugLog("skipped remote notification registration on simulator")
 #else
-        _ = prepareFirebaseAuth()
-
         guard !didRequestRemoteNotifications else {
             return
         }
@@ -78,7 +78,7 @@ final class FirebasePhoneAuthAPNsBridge {
 #endif
     }
 
-    func waitForAPNSTokenIfNeeded(timeoutNanoseconds: UInt64 = 2_000_000_000) async {
+    func waitForAPNSTokenIfNeeded(timeoutNanoseconds: UInt64 = 8_000_000_000) async {
 #if targetEnvironment(simulator)
         debugLog("skipped APNs token wait on simulator")
 #else

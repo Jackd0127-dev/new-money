@@ -39,6 +39,7 @@ final class FirebaseAuthService: NSObject, AuthService {
 
     func startPhoneSignIn(phoneNumber: String) async throws -> String {
         let normalizedPhoneNumber = PhoneSignInNumberFormatter.normalizedForFirebase(phoneNumber)
+        await FirebasePhoneAuthAPNsBridge.shared.waitForAPNSTokenIfNeeded()
         let retryDelays: [UInt64] = [
             250_000_000,
             750_000_000,

@@ -14,21 +14,104 @@ enum NativeAuthCallbackHandler {
     }
 }
 
-final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
-    private var isFirebaseProxyingEnabled: Bool {
-        Bundle.main.object(forInfoDictionaryKey: "FirebaseAppDelegateProxyEnabled") as? Bool != false
+@MainActor
+final class FirebasePhoneAuthAPNsBridge {
+    static let shared = FirebasePhoneAuthAPNsBridge()
+
+    private var didRequestRemoteNotifications = false
+    private var hasAPNSToken = false
+
+    private init() {}
+
+    @discardableResult
+    func prepareFirebaseAuth() -> Auth {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+
+        let auth = Auth.auth()
+        _ = auth.currentUser
+        return auth
     }
 
+    func registerForRemoteNotificationsIfNeeded(application: UIApplication = .shared) {
+#if targetEnvironment(simulator)
+        debugLog("skipped remote notification registration on simulator")
+#else
+        _ = prepareFirebaseAuth()
+
+        guard !didRequestRemoteNotifications else {
+            return
+        }
+
+        didRequestRemoteNotifications = true
+        application.registerForRemoteNotifications()
+        debugLog("requested remote notifications")
+#endif
+    }
+
+    func setAPNSToken(_ deviceToken: Data) {
+#if targetEnvironment(simulator)
+        debugLog("ignored simulator APNs token callback")
+#else
+        let auth = prepareFirebaseAuth()
+
+#if DEBUG
+        auth.setAPNSToken(deviceToken, type: .sandbox)
+        debugLog("set sandbox APNs token (\(deviceToken.count) bytes)")
+#else
+        auth.setAPNSToken(deviceToken, type: .prod)
+        debugLog("set production APNs token (\(deviceToken.count) bytes)")
+#endif
+        hasAPNSToken = true
+#endif
+    }
+
+    func handleRemoteNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
+#if targetEnvironment(simulator)
+        debugLog("ignored simulator remote notification callback")
+        return false
+#else
+        let handled = prepareFirebaseAuth().canHandleNotification(userInfo)
+        debugLog("received remote notification; firebaseHandled=\(handled)")
+        return handled
+#endif
+    }
+
+    func waitForAPNSTokenIfNeeded(timeoutNanoseconds: UInt64 = 2_000_000_000) async {
+#if targetEnvironment(simulator)
+        debugLog("skipped APNs token wait on simulator")
+#else
+        guard !hasAPNSToken else {
+            return
+        }
+
+        registerForRemoteNotificationsIfNeeded()
+
+        let interval: UInt64 = 100_000_000
+        var elapsed: UInt64 = 0
+        while !hasAPNSToken, elapsed < timeoutNanoseconds {
+            try? await Task.sleep(nanoseconds: interval)
+            elapsed += interval
+        }
+
+        debugLog("APNs token wait finished; hasToken=\(hasAPNSToken)")
+#endif
+    }
+
+    private func debugLog(_ message: String) {
+#if DEBUG
+        print("FirebasePhoneAuthAPNsBridge: \(message)")
+#endif
+    }
+}
+
+final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
-        _ = Auth.auth()
-
-        application.registerForRemoteNotifications()
+        FirebasePhoneAuthAPNsBridge.shared.registerForRemoteNotificationsIfNeeded(application: application)
 
         return true
     }
@@ -37,17 +120,7 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-#if !targetEnvironment(simulator)
-        guard isFirebaseProxyingEnabled == false else {
-            return
-        }
-
-#if DEBUG
-        Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
-#else
-        Auth.auth().setAPNSToken(deviceToken, type: .prod)
-#endif
-#endif
+        FirebasePhoneAuthAPNsBridge.shared.setAPNSToken(deviceToken)
     }
 
     func application(
@@ -63,11 +136,7 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        guard isFirebaseProxyingEnabled == false else {
-            completionHandler(.noData)
-            return
-        }
-        if Auth.auth().canHandleNotification(userInfo) {
+        if FirebasePhoneAuthAPNsBridge.shared.handleRemoteNotification(userInfo) {
             completionHandler(.noData)
             return
         }

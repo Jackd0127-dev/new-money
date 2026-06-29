@@ -22,8 +22,8 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
+        _ = Auth.auth()
 
-        application.registerForRemoteNotifications()
         return true
     }
 

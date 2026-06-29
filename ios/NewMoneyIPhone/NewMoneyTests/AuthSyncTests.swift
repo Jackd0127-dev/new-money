@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseAuth
 import XCTest
 @testable import NewMoneyIPhone
 
@@ -29,6 +30,80 @@ final class AuthSyncTests: XCTestCase {
         )
 
         XCTAssertEqual(AuthAccessRouter.route(for: user), .signedIn)
+    }
+
+    func testPhoneSignInNumberFormatterKeepsE164Number() {
+        XCTAssertEqual(
+            PhoneSignInNumberFormatter.normalizedForFirebase("+44 7483 260885"),
+            "+447483260885"
+        )
+    }
+
+    func testPhoneSignInNumberFormatterConvertsUkMobileWithLeadingZero() {
+        XCTAssertEqual(
+            PhoneSignInNumberFormatter.normalizedForFirebase("07483 260885"),
+            "+447483260885"
+        )
+    }
+
+    func testPhoneSignInNumberFormatterConvertsUkMobileWithoutLeadingZero() {
+        XCTAssertEqual(
+            PhoneSignInNumberFormatter.normalizedForFirebase("7483260885"),
+            "+447483260885"
+        )
+    }
+
+    func testPhoneSignInNumberFormatterConvertsInternationalPrefix() {
+        XCTAssertEqual(
+            PhoneSignInNumberFormatter.normalizedForFirebase("0044 7483 260885"),
+            "+447483260885"
+        )
+    }
+
+    func testPhoneAuthStartupRetryPolicyOnlyRetriesNotificationForwardingError() {
+        let retryableError = NSError(
+            domain: "FIRAuthErrorDomain",
+            code: AuthErrorCode.notificationNotForwarded.rawValue
+        )
+        let otherAuthError = NSError(
+            domain: "FIRAuthErrorDomain",
+            code: AuthErrorCode.invalidPhoneNumber.rawValue
+        )
+        let otherDomainError = NSError(domain: NSURLErrorDomain, code: AuthErrorCode.notificationNotForwarded.rawValue)
+
+        XCTAssertTrue(PhoneAuthStartupRetryPolicy.shouldRetry(retryableError))
+        XCTAssertFalse(PhoneAuthStartupRetryPolicy.shouldRetry(otherAuthError))
+        XCTAssertFalse(PhoneAuthStartupRetryPolicy.shouldRetry(otherDomainError))
+    }
+
+    func testFirebaseAuthErrorPresenterIncludesFirebaseCodeAndConsoleHint() {
+        let error = NSError(
+            domain: AuthErrors.domain,
+            code: AuthErrorCode.operationNotAllowed.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "This provider is disabled.",
+                AuthErrors.userInfoNameKey: "ERROR_OPERATION_NOT_ALLOWED"
+            ]
+        )
+
+        let message = FirebaseAuthErrorPresenter.message(for: error)
+
+        XCTAssertTrue(message.contains("This provider is disabled."))
+        XCTAssertTrue(message.contains("Authentication > Sign-in method > Phone"))
+        XCTAssertTrue(message.contains("Firebase Auth: ERROR_OPERATION_NOT_ALLOWED (17006)"))
+    }
+
+    func testFirebaseAuthErrorPresenterLeavesNonFirebaseErrorsSimple() {
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorNotConnectedToInternet,
+            userInfo: [NSLocalizedDescriptionKey: "The internet connection appears to be offline."]
+        )
+
+        XCTAssertEqual(
+            FirebaseAuthErrorPresenter.message(for: error),
+            "The internet connection appears to be offline."
+        )
     }
 
     func testSyncDecisionUploadsMeaningfulLocalSnapshotWhenCloudIsMissing() {

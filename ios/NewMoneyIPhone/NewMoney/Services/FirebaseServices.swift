@@ -38,7 +38,26 @@ final class FirebaseAuthService: NSObject, AuthService {
     }
 
     func startPhoneSignIn(phoneNumber: String) async throws -> String {
-        try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines), uiDelegate: nil)
+        let normalizedPhoneNumber = PhoneSignInNumberFormatter.normalizedForFirebase(phoneNumber)
+        let retryDelays: [UInt64] = [
+            250_000_000,
+            750_000_000,
+            1_500_000_000
+        ]
+
+        for attempt in 0...retryDelays.count {
+            do {
+                return try await PhoneAuthProvider.provider().verifyPhoneNumber(normalizedPhoneNumber, uiDelegate: nil)
+            } catch {
+                guard PhoneAuthStartupRetryPolicy.shouldRetry(error),
+                      attempt < retryDelays.count else {
+                    throw error
+                }
+                try await Task.sleep(nanoseconds: retryDelays[attempt])
+            }
+        }
+
+        return try await PhoneAuthProvider.provider().verifyPhoneNumber(normalizedPhoneNumber, uiDelegate: nil)
     }
 
     func confirmPhoneCode(verificationID: String, code: String) async throws -> AuthUser {
@@ -108,6 +127,58 @@ final class FirebaseAuthService: NSObject, AuthService {
 
         GIDSignIn.sharedInstance.signOut()
         try? Auth.auth().signOut()
+    }
+}
+
+enum PhoneAuthStartupRetryPolicy {
+    static func shouldRetry(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "FIRAuthErrorDomain"
+            && nsError.code == AuthErrorCode.notificationNotForwarded.rawValue
+    }
+}
+
+enum PhoneSignInNumberFormatter {
+    static func normalizedForFirebase(_ rawValue: String, defaultCountryCode: String = "+44") -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("+") {
+            let digits = trimmed.dropFirst().filter(\.isNumber)
+            return digits.isEmpty ? trimmed : "+\(digits)"
+        }
+
+        let digits = trimmed.filter(\.isNumber)
+        guard !digits.isEmpty else { return trimmed }
+
+        if digits.hasPrefix("00") {
+            let internationalDigits = String(digits.dropFirst(2))
+            return internationalDigits.isEmpty ? trimmed : "+\(internationalDigits)"
+        }
+
+        let countryCode = normalizedCountryCode(defaultCountryCode)
+        let countryDigits = countryCode.filter(\.isNumber)
+        if !countryDigits.isEmpty, digits.hasPrefix(countryDigits) {
+            return "+\(digits)"
+        }
+
+        if countryDigits == "44" {
+            if digits.hasPrefix("0") {
+                return "+44\(String(digits.dropFirst()))"
+            }
+            if digits.hasPrefix("7"), digits.count == 10 {
+                return "+44\(digits)"
+            }
+        }
+
+        if countryDigits == "1", digits.count == 10 {
+            return "+1\(digits)"
+        }
+
+        return "\(countryCode)\(digits)"
+    }
+
+    private static func normalizedCountryCode(_ rawValue: String) -> String {
+        let digits = rawValue.filter(\.isNumber)
+        return digits.isEmpty ? "+44" : "+\(digits)"
     }
 }
 

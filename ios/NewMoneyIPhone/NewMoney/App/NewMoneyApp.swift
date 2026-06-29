@@ -1,3 +1,4 @@
+import FirebaseAuth
 import FirebaseCore
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct NewMoneyApp: App {
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
+        _ = Auth.auth()
     }
 
     var body: some Scene {

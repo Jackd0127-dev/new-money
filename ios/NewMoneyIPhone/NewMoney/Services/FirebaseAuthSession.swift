@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseAuth
 
 enum AuthAccessRoute: Equatable {
     case signedOut
@@ -251,10 +252,60 @@ final class FirebaseAuthSession: ObservableObject {
     }
 
     private func userFacingMessage(for error: Error) -> String {
+        FirebaseAuthErrorPresenter.message(for: error)
+    }
+}
+
+enum FirebaseAuthErrorPresenter {
+    static func message(for error: Error) -> String {
         if let localizedError = error as? LocalizedError,
            let description = localizedError.errorDescription {
-            return description
+            return detailedMessage(for: error, baseDescription: description)
         }
-        return error.localizedDescription
+
+        return detailedMessage(for: error, baseDescription: error.localizedDescription)
+    }
+
+    private static func detailedMessage(for error: Error, baseDescription: String) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == AuthErrors.domain else {
+            return baseDescription
+        }
+
+        let code = AuthErrorCode(rawValue: nsError.code)
+        let codeName = (nsError.userInfo[AuthErrors.userInfoNameKey] as? String)
+            ?? code.map { String(describing: $0) }
+            ?? "UNKNOWN"
+        var parts = [baseDescription]
+
+        if let hint = hint(for: code) {
+            parts.append(hint)
+        }
+
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("Underlying: \(underlying.domain) \(underlying.code) - \(underlying.localizedDescription)")
+        }
+
+        parts.append("Firebase Auth: \(codeName) (\(nsError.code))")
+        return parts.joined(separator: "\n\n")
+    }
+
+    private static func hint(for code: AuthErrorCode?) -> String? {
+        switch code {
+        case .operationNotAllowed:
+            return "Check Firebase Console: Authentication > Sign-in method > Phone must be enabled, and the SMS region policy must allow this country."
+        case .appNotAuthorized:
+            return "Check Firebase Console: the iOS app bundle ID and downloaded GoogleService-Info.plist must match this build."
+        case .missingAppCredential, .invalidAppCredential, .captchaCheckFailed:
+            return "Check Firebase Console: upload/configure APNs for this iOS app, then verify the app URL schemes are present."
+        case .quotaExceeded, .tooManyRequests:
+            return "Firebase is rate-limiting or the SMS quota is exceeded. Wait, use a test phone number, or check Firebase Auth quotas."
+        case .invalidPhoneNumber:
+            return "The phone number Firebase received is invalid. Use full international format, for example +447483260885."
+        case .notificationNotForwarded:
+            return "Firebase Phone Auth could not verify its APNs notification callback. Reinstall the latest build and confirm Firebase app delegate proxying is enabled."
+        default:
+            return nil
+        }
     }
 }

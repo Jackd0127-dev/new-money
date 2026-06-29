@@ -15,6 +15,10 @@ enum NativeAuthCallbackHandler {
 }
 
 final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
+    private var isFirebaseProxyingEnabled: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "FirebaseAppDelegateProxyEnabled") as? Bool != false
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -33,10 +37,16 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
+#if !targetEnvironment(simulator)
+        guard isFirebaseProxyingEnabled == false else {
+            return
+        }
+
 #if DEBUG
         Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
 #else
         Auth.auth().setAPNSToken(deviceToken, type: .prod)
+#endif
 #endif
     }
 
@@ -53,6 +63,10 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        guard isFirebaseProxyingEnabled == false else {
+            completionHandler(.noData)
+            return
+        }
         if Auth.auth().canHandleNotification(userInfo) {
             completionHandler(.noData)
             return

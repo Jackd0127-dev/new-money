@@ -24,6 +24,8 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         }
         _ = Auth.auth()
 
+        application.registerForRemoteNotifications()
+
         return true
     }
 
@@ -32,6 +34,14 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         Auth.auth().setAPNSToken(deviceToken, type: .unknown)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        // App can still continue, but phone auth may fail without APNs on this device.
+        print("Failed to register for remote notifications: \(error.localizedDescription)")
     }
 
     func application(

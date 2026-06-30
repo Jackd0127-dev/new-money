@@ -20,8 +20,18 @@ final class FirebasePhoneAuthAPNsBridge {
 
     private var didRequestRemoteNotifications = false
     private var hasAPNSToken = false
+    private var lastStatusMessage = "Remote notifications not requested yet"
 
     private init() {}
+
+    var debugStatus: String {
+#if targetEnvironment(simulator)
+        return "Simulator build; APNs phone-auth callback is not available."
+#else
+        let tokenStatus = hasAPNSToken ? "APNs token received" : "APNs token missing"
+        return "\(tokenStatus). \(lastStatusMessage)"
+#endif
+    }
 
     @discardableResult
     func prepareFirebaseAuth() -> Auth {
@@ -46,6 +56,7 @@ final class FirebasePhoneAuthAPNsBridge {
 
         didRequestRemoteNotifications = true
         application.registerForRemoteNotifications()
+        lastStatusMessage = "Remote notifications requested"
         debugLog("requested remote notifications")
 #endif
     }
@@ -56,14 +67,10 @@ final class FirebasePhoneAuthAPNsBridge {
 #else
         let auth = prepareFirebaseAuth()
 
-#if DEBUG
-        auth.setAPNSToken(deviceToken, type: .sandbox)
-        debugLog("set sandbox APNs token (\(deviceToken.count) bytes)")
-#else
-        auth.setAPNSToken(deviceToken, type: .prod)
-        debugLog("set production APNs token (\(deviceToken.count) bytes)")
-#endif
+        auth.setAPNSToken(deviceToken, type: .unknown)
+        debugLog("set APNs token (\(deviceToken.count) bytes); Firebase will detect token environment")
         hasAPNSToken = true
+        lastStatusMessage = "APNs token set with Firebase Auth; token environment is auto-detected"
 #endif
     }
 
@@ -74,7 +81,15 @@ final class FirebasePhoneAuthAPNsBridge {
 #else
         let handled = prepareFirebaseAuth().canHandleNotification(userInfo)
         debugLog("received remote notification; firebaseHandled=\(handled)")
+        lastStatusMessage = "Remote notification callback received; Firebase handled=\(handled)"
         return handled
+#endif
+    }
+
+    func recordRemoteNotificationRegistrationFailure(_ error: Error) {
+#if !targetEnvironment(simulator)
+        lastStatusMessage = "APNs registration failed: \(error.localizedDescription)"
+        debugLog(lastStatusMessage)
 #endif
     }
 
@@ -96,6 +111,9 @@ final class FirebasePhoneAuthAPNsBridge {
         }
 
         debugLog("APNs token wait finished; hasToken=\(hasAPNSToken)")
+        if !hasAPNSToken {
+            lastStatusMessage = "APNs token wait timed out before Firebase phone-auth request"
+        }
 #endif
     }
 
@@ -127,8 +145,7 @@ final class NewMoneyAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
-        // App can still continue, but phone auth may fail without APNs on this device.
-        print("Failed to register for remote notifications: \(error.localizedDescription)")
+        FirebasePhoneAuthAPNsBridge.shared.recordRemoteNotificationRegistrationFailure(error)
     }
 
     func application(

@@ -27,14 +27,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: App/package-lock.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Install dependencies
+        working-directory: App
         run: npm ci
 
       - name: Build
+        working-directory: App
         run: npm run build
         env:
           VITE_BASE_PATH: /new-money/
@@ -49,7 +52,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: App/dist
 
   deploy:
     environment:

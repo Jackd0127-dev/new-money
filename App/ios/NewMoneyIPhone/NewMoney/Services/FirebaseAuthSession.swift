@@ -35,6 +35,7 @@ final class FirebaseAuthSession: ObservableObject {
     @Published private(set) var isWorking = false
     @Published var errorMessage: String?
     @Published private(set) var cloudStatus = "Not synced"
+    @Published private(set) var phoneAuthDebugMessage: String?
 
     private let authService: AuthService
     private let cloudSyncService: CloudSyncService
@@ -83,12 +84,28 @@ final class FirebaseAuthSession: ObservableObject {
     func startPhoneVerification(phoneNumber: String) async -> String? {
         isWorking = true
         errorMessage = nil
+        let normalizedPhoneNumber = PhoneSignInNumberFormatter.normalizedForFirebase(phoneNumber)
+        phoneAuthDebugMessage = PhoneAuthDebugPresenter.starting(
+            phoneNumber: normalizedPhoneNumber,
+            apnsStatus: FirebasePhoneAuthAPNsBridge.shared.debugStatus
+        )
         defer { isWorking = false }
 
         do {
-            return try await authService.startPhoneSignIn(phoneNumber: phoneNumber)
+            let verificationID = try await authService.startPhoneSignIn(phoneNumber: phoneNumber)
+            phoneAuthDebugMessage = PhoneAuthDebugPresenter.succeeded(
+                phoneNumber: normalizedPhoneNumber,
+                apnsStatus: FirebasePhoneAuthAPNsBridge.shared.debugStatus
+            )
+            return verificationID
         } catch {
-            errorMessage = userFacingMessage(for: error)
+            let message = userFacingMessage(for: error)
+            errorMessage = message
+            phoneAuthDebugMessage = PhoneAuthDebugPresenter.failed(
+                phoneNumber: normalizedPhoneNumber,
+                apnsStatus: FirebasePhoneAuthAPNsBridge.shared.debugStatus,
+                errorMessage: message
+            )
             return nil
         }
     }
@@ -256,6 +273,43 @@ final class FirebaseAuthSession: ObservableObject {
     }
 }
 
+enum PhoneAuthDebugPresenter {
+    static func starting(phoneNumber: String, apnsStatus: String) -> String {
+        [
+            "Phone auth request started",
+            "Phone: \(maskedPhoneNumber(phoneNumber))",
+            "APNs: \(apnsStatus)"
+        ].joined(separator: "\n")
+    }
+
+    static func succeeded(phoneNumber: String, apnsStatus: String) -> String {
+        [
+            "Phone auth request succeeded",
+            "Phone: \(maskedPhoneNumber(phoneNumber))",
+            "APNs: \(apnsStatus)",
+            "Firebase returned an SMS verification ID."
+        ].joined(separator: "\n")
+    }
+
+    static func failed(phoneNumber: String, apnsStatus: String, errorMessage: String) -> String {
+        [
+            "Phone auth request failed",
+            "Phone: \(maskedPhoneNumber(phoneNumber))",
+            "APNs: \(apnsStatus)",
+            "Error: \(errorMessage)"
+        ].joined(separator: "\n")
+    }
+
+    private static func maskedPhoneNumber(_ phoneNumber: String) -> String {
+        let trimmed = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 8 else { return trimmed }
+
+        let prefix = trimmed.prefix(3)
+        let suffix = trimmed.suffix(4)
+        return "\(prefix)******\(suffix)"
+    }
+}
+
 enum FirebaseAuthErrorPresenter {
     static func message(for error: Error) -> String {
         if let localizedError = error as? LocalizedError,
@@ -284,10 +338,16 @@ enum FirebaseAuthErrorPresenter {
 
         if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
             parts.append("Underlying: \(underlying.domain) \(underlying.code) - \(underlying.localizedDescription)")
+            parts.append(contentsOf: diagnosticParts(for: underlying))
         }
 
+        parts.append(contentsOf: diagnosticParts(for: nsError))
         parts.append("Firebase Auth: \(codeName) (\(nsError.code))")
-        return parts.joined(separator: "\n\n")
+        let message = parts.uniqued().joined(separator: "\n\n")
+#if DEBUG
+        print("Firebase Auth error details:\n\(message)")
+#endif
+        return message
     }
 
     private static func hint(for code: AuthErrorCode?) -> String? {
@@ -307,5 +367,71 @@ enum FirebaseAuthErrorPresenter {
         default:
             return nil
         }
+    }
+
+    private static func diagnosticParts(for error: NSError) -> [String] {
+        var parts: [String] = []
+
+        if let failureReason = error.localizedFailureReason, !failureReason.isEmpty {
+            parts.append("Failure reason: \(failureReason)")
+        }
+
+        if let recoverySuggestion = error.localizedRecoverySuggestion, !recoverySuggestion.isEmpty {
+            parts.append("Recovery suggestion: \(recoverySuggestion)")
+        }
+
+        if let response = error.userInfo["FIRAuthErrorUserInfoDeserializedResponseKey"] {
+            if diagnosticContains("BILLING_NOT_ENABLED", in: response) {
+                parts.append("Billing is not enabled for this Firebase project. Real phone-number SMS verification requires Firebase/Google Cloud billing on the Blaze plan; test phone numbers can still be used without sending SMS.")
+            }
+            parts.append("Firebase response: \(diagnosticDescription(for: response))")
+        }
+
+        return parts
+    }
+
+    private static func diagnosticContains(_ needle: String, in value: Any) -> Bool {
+        switch value {
+        case let string as String:
+            return string.localizedCaseInsensitiveContains(needle)
+        case let dictionary as [String: Any]:
+            return dictionary.contains { key, value in
+                key.localizedCaseInsensitiveContains(needle) || diagnosticContains(needle, in: value)
+            }
+        case let dictionary as [String: AnyHashable]:
+            return dictionary.contains { key, value in
+                key.localizedCaseInsensitiveContains(needle) || diagnosticContains(needle, in: value)
+            }
+        case let array as [Any]:
+            return array.contains { diagnosticContains(needle, in: $0) }
+        default:
+            return String(describing: value).localizedCaseInsensitiveContains(needle)
+        }
+    }
+
+    private static func diagnosticDescription(for value: Any) -> String {
+        switch value {
+        case let dictionary as [String: Any]:
+            dictionary
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key): \(diagnosticDescription(for: $0.value))" }
+                .joined(separator: ", ")
+        case let dictionary as [String: AnyHashable]:
+            dictionary
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key): \(diagnosticDescription(for: $0.value))" }
+                .joined(separator: ", ")
+        case let array as [Any]:
+            array.map(diagnosticDescription(for:)).joined(separator: ", ")
+        default:
+            String(describing: value)
+        }
+    }
+}
+
+private extension Array where Element == String {
+    func uniqued() -> [String] {
+        var seen = Set<String>()
+        return filter { seen.insert($0).inserted }
     }
 }

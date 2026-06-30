@@ -76,6 +76,31 @@ final class AuthSyncTests: XCTestCase {
         XCTAssertFalse(PhoneAuthStartupRetryPolicy.shouldRetry(otherDomainError))
     }
 
+    func testPhoneAuthDebugPresenterMasksNumberAndShowsAPNsStatus() {
+        let message = PhoneAuthDebugPresenter.starting(
+            phoneNumber: "+447483260885",
+            apnsStatus: "APNs token received"
+        )
+
+        XCTAssertTrue(message.contains("Phone auth request started"))
+        XCTAssertTrue(message.contains("+44******0885"))
+        XCTAssertFalse(message.contains("+447483260885"))
+        XCTAssertTrue(message.contains("APNs token received"))
+    }
+
+    func testPhoneAuthDebugPresenterIncludesFailureDetails() {
+        let message = PhoneAuthDebugPresenter.failed(
+            phoneNumber: "+447483260885",
+            apnsStatus: "APNs token missing",
+            errorMessage: "Firebase response: error: message: INVALID_APP_CREDENTIAL"
+        )
+
+        XCTAssertTrue(message.contains("Phone auth request failed"))
+        XCTAssertTrue(message.contains("+44******0885"))
+        XCTAssertTrue(message.contains("APNs token missing"))
+        XCTAssertTrue(message.contains("INVALID_APP_CREDENTIAL"))
+    }
+
     func testFirebaseAuthErrorPresenterIncludesFirebaseCodeAndConsoleHint() {
         let error = NSError(
             domain: AuthErrors.domain,
@@ -104,6 +129,68 @@ final class AuthSyncTests: XCTestCase {
             FirebaseAuthErrorPresenter.message(for: error),
             "The internet connection appears to be offline."
         )
+    }
+
+    func testFirebaseAuthErrorPresenterSurfacesInternalErrorDiagnostics() {
+        let underlyingError = NSError(
+            domain: "FIRAuthInternalErrorDomain",
+            code: 3,
+            userInfo: [
+                NSLocalizedDescriptionKey: "The operation couldn't be completed.",
+                NSLocalizedFailureReasonErrorKey: "APNs token did not match the Firebase app configuration.",
+                "FIRAuthErrorUserInfoDeserializedResponseKey": [
+                    "error": [
+                        "message": "INVALID_APP_CREDENTIAL"
+                    ]
+                ]
+            ]
+        )
+        let error = NSError(
+            domain: AuthErrors.domain,
+            code: AuthErrorCode.internalError.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "An internal error has occurred.",
+                AuthErrors.userInfoNameKey: "ERROR_INTERNAL_ERROR",
+                NSUnderlyingErrorKey: underlyingError
+            ]
+        )
+
+        let message = FirebaseAuthErrorPresenter.message(for: error)
+
+        XCTAssertTrue(message.contains("APNs token did not match the Firebase app configuration."))
+        XCTAssertTrue(message.contains("INVALID_APP_CREDENTIAL"))
+        XCTAssertTrue(message.contains("Firebase Auth: ERROR_INTERNAL_ERROR (17999)"))
+    }
+
+    func testFirebaseAuthErrorPresenterExplainsBillingNotEnabled() {
+        let underlyingError = NSError(
+            domain: "FIRAuthInternalErrorDomain",
+            code: 3,
+            userInfo: [
+                NSLocalizedDescriptionKey: "The operation couldn't be completed.",
+                "FIRAuthErrorUserInfoDeserializedResponseKey": [
+                    "error": [
+                        "code": 400,
+                        "message": "BILLING_NOT_ENABLED"
+                    ]
+                ]
+            ]
+        )
+        let error = NSError(
+            domain: AuthErrors.domain,
+            code: AuthErrorCode.internalError.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "An internal error has occurred.",
+                AuthErrors.userInfoNameKey: "ERROR_INTERNAL_ERROR",
+                NSUnderlyingErrorKey: underlyingError
+            ]
+        )
+
+        let message = FirebaseAuthErrorPresenter.message(for: error)
+
+        XCTAssertTrue(message.contains("Billing is not enabled"))
+        XCTAssertTrue(message.contains("Blaze"))
+        XCTAssertTrue(message.contains("BILLING_NOT_ENABLED"))
     }
 
     func testSyncDecisionUploadsMeaningfulLocalSnapshotWhenCloudIsMissing() {

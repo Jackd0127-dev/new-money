@@ -7,6 +7,7 @@ import SwiftUI
 struct AuthenticatedRootView: View {
     @StateObject private var store = PlannerStore()
     @StateObject private var session = FirebaseAuthSession()
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
     @State private var didStart = false
 
     var body: some View {
@@ -29,7 +30,7 @@ struct AuthenticatedRootView: View {
             }
         }
         .environmentObject(session)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(AppThemePreset.resolved(from: selectedThemeRawValue).palette.preferredColorScheme)
         .task {
             guard !didStart else { return }
             didStart = true

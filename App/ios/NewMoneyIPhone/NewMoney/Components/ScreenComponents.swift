@@ -89,7 +89,7 @@ struct ScreenScaffold<Content: View>: View {
         screenContent
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
         .appPlaceholderToolbar(toolbarMode)
     }
 }

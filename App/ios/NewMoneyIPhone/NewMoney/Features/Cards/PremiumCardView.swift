@@ -181,7 +181,7 @@ struct PremiumCardView: View {
 
 #Preview {
     ZStack {
-        Color.black.ignoresSafeArea()
+        AppTheme.Colors.appBackground.ignoresSafeArea()
 
         PremiumCardView()
             .frame(maxWidth: 380)

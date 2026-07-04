@@ -308,7 +308,6 @@ extension View {
                 .ignoresSafeArea()
         }
     }
-
 }
 
 private struct KeyboardDismissTapInstaller: UIViewRepresentable {
@@ -368,5 +367,5 @@ private extension UIView {
 }
 
 private extension AppTheme.Colors {
-    static var darkDisabled: Color { Color(hex: "#333333") }
+    static var darkDisabled: Color { AppTheme.Colors.border.opacity(0.82) }
 }

@@ -114,6 +114,7 @@ private enum AppSheetDestination: String, Identifiable {
 
 struct AppView: View {
     @ObservedObject var store: PlannerStore
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
     @State private var selectedTab: AppTab = .home
     @State private var isAssistantPresented = false
     @State private var activeSheet: AppSheetDestination?
@@ -157,7 +158,7 @@ struct AppView: View {
                 .tint(AppTheme.Colors.primaryOrange)
                 .navigationTitle(selectedTab.title)
                 .navigationBarTitleDisplayMode(.large)
-                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarColorScheme(selectedTheme.palette.preferredColorScheme, for: .navigationBar)
                 .toolbar {
                     rootTabToolbarContent
                 }
@@ -181,7 +182,7 @@ struct AppView: View {
         }
         .background(AppTheme.Colors.appBackground)
         .dismissKeyboardOnBackgroundTap()
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(selectedTheme.palette.preferredColorScheme)
         .sheet(item: $activeSheet, onDismiss: presentPendingSheet) { sheet in
             switch sheet {
             case .addMenu:
@@ -221,6 +222,9 @@ struct AppView: View {
         .onAppear {
             configureTabBarAppearance()
         }
+        .onChange(of: selectedThemeRawValue) { _, _ in
+            configureTabBarAppearance()
+        }
     }
 
     @ToolbarContentBuilder
@@ -234,6 +238,10 @@ struct AppView: View {
 
     private var selectedTabToolbarActions: [AppToolbarAction] {
         AppToolbarPolicy.actionIds(for: selectedTab).compactMap(toolbarAction)
+    }
+
+    private var selectedTheme: AppThemePreset {
+        AppThemePreset.resolved(from: selectedThemeRawValue)
     }
 
     private func toolbarAction(for id: String) -> AppToolbarAction? {

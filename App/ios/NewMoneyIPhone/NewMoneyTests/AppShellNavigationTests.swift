@@ -143,3 +143,54 @@ final class ActivityLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.sections, [.recentActivity, .income, .spending])
     }
 }
+
+final class AppThemePresetTests: XCTestCase {
+    func testCurrentThemeIsFirstPreset() {
+        XCTAssertEqual(AppThemePreset.allCases.first, .classic)
+        XCTAssertEqual(AppThemePreset.classic.palette.accentHex, "#E85002")
+        XCTAssertEqual(AppThemePreset.classic.palette.backgroundHex, "#000000")
+        XCTAssertEqual(AppThemePreset.classic.palette.textHex, "#F9F9F9")
+    }
+
+    func testThemePresetIdsAreStableAndUnique() {
+        XCTAssertEqual(
+            AppThemePreset.allCases.map(\.rawValue),
+            [
+                "classic",
+                "goldObsidian",
+                "warmLight",
+                "sagePaper",
+                "navyEmerald",
+                "darkBlueMintGold",
+                "charcoalTeal",
+                "slateCoral",
+                "midnightEmerald"
+            ]
+        )
+        XCTAssertEqual(Set(AppThemePreset.allCases.map(\.rawValue)).count, AppThemePreset.allCases.count)
+    }
+
+    func testListedThemePalettesMapToExpectedHexValues() {
+        let expected: [(AppThemePreset, String, String, String)] = [
+            (.goldObsidian, "#E6B450", "#0B0E14", "#BFBDB6"),
+            (.warmLight, "#CC7D5E", "#F9F9F7", "#2D2D2B"),
+            (.sagePaper, "#3D755D", "#F5F3ED", "#2F312D"),
+            (.navyEmerald, "#1A237E", "#FFFFFF", "#263238"),
+            (.darkBlueMintGold, "#0D47A1", "#F5F5F5", "#263238"),
+            (.charcoalTeal, "#212121", "#FAFAFA", "#424242"),
+            (.slateCoral, "#607D8B", "#FFFFFF", "#333333"),
+            (.midnightEmerald, "#003366", "#E8E8E8", "#263238")
+        ]
+
+        for (preset, accent, background, text) in expected {
+            XCTAssertEqual(preset.palette.accentHex, accent)
+            XCTAssertEqual(preset.palette.backgroundHex, background)
+            XCTAssertEqual(preset.palette.textHex, text)
+        }
+    }
+
+    func testInvalidStoredThemeFallsBackToClassic() {
+        XCTAssertEqual(AppThemePreset.resolved(from: "missing-theme"), .classic)
+        XCTAssertEqual(AppThemePreset.resolved(from: nil), .classic)
+    }
+}

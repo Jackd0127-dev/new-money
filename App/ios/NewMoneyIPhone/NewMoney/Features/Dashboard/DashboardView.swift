@@ -1260,7 +1260,7 @@ private struct DashboardBreakdownScaffold<Content: View>: View {
         .premiumScreenBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
         .appPlaceholderToolbar(toolbarMode)
     }
 }
@@ -2231,7 +2231,7 @@ private struct DebtDetailScreenView: View {
         .premiumScreenBackground()
         .navigationTitle(currentDebt.name.isBlank ? "Debt" : currentDebt.name)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
         .appPlaceholderToolbar(.secondarySingle)
         .alert("Delete debt?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) {}

@@ -1553,6 +1553,7 @@ struct SettingsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
     @State private var hourlyRate = ""
     @State private var hours = ""
     @State private var showResetAlert = false
@@ -1566,6 +1567,8 @@ struct SettingsView: View {
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
+            appearanceCard
+
             AppCard(glow: true) {
                 SectionTitle("Pay defaults")
                 Picker("Pay frequency", selection: bindingPayFrequency) {
@@ -1631,6 +1634,32 @@ struct SettingsView: View {
             }
         } message: {
             Text("This deletes your account through the backend account endpoint. Local data on this iPhone is not reset by this action.")
+        }
+    }
+
+    private var appearanceCard: some View {
+        AppCard(glow: true) {
+            SectionTitle("Appearance")
+            Text("Choose the colour theme used on this iPhone.")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+
+            VStack(spacing: AppTheme.Spacing.sm) {
+                ForEach(AppThemePreset.allCases) { preset in
+                    Button {
+                        withAnimation(AppTheme.Animation.standard) {
+                            selectedThemeRawValue = preset.rawValue
+                        }
+                    } label: {
+                        SettingsThemePresetRow(
+                            preset: preset,
+                            isSelected: selectedThemeRawValue == preset.rawValue
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings-theme-\(preset.rawValue)")
+                }
+            }
         }
     }
 
@@ -1781,6 +1810,68 @@ struct SettingsView: View {
             settings.aiInstructions = $0
             store.updateSettings(settings)
         }
+    }
+}
+
+private struct SettingsThemePresetRow: View {
+    var preset: AppThemePreset
+    var isSelected: Bool
+
+    private var palette: AppThemePalette {
+        preset.palette
+    }
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            SettingsThemeSwatches(palette: palette)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(preset.title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(preset.subtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(isSelected ? AppTheme.Colors.primaryOrange : AppTheme.Colors.tertiaryText)
+        }
+        .padding(AppTheme.Spacing.md)
+        .background(isSelected ? AppTheme.Colors.primaryOrange.opacity(0.14) : AppTheme.Colors.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                .stroke(isSelected ? AppTheme.Colors.primaryOrange.opacity(0.5) : AppTheme.Colors.border, lineWidth: 1)
+        )
+    }
+}
+
+private struct SettingsThemeSwatches: View {
+    var palette: AppThemePalette
+
+    var body: some View {
+        HStack(spacing: -8) {
+            swatch(palette.backgroundHex)
+            swatch(palette.accentHex)
+            swatch(palette.textHex)
+        }
+        .frame(width: 58, alignment: .leading)
+    }
+
+    private func swatch(_ hex: String) -> some View {
+        Circle()
+            .fill(Color(hex: hex))
+            .frame(width: 26, height: 26)
+            .overlay(
+                Circle()
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
     }
 }
 

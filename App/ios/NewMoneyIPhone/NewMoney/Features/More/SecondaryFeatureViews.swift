@@ -487,6 +487,8 @@ struct AddBillSheetView: View {
 
 struct BillsView: View {
     @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .inline
+    var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var name = ""
     @State private var amount = ""
     @State private var dueDay = ""
@@ -500,8 +502,8 @@ struct BillsView: View {
         ScreenScaffold(
             title: "Bills",
             subtitle: "Recurring payment templates and upcoming bill agenda.",
-            navigationMode: .inline,
-            toolbarMode: .secondarySingle
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
         ) {
             AppCard(glow: true) {
                 SectionTitle("Add recurring payment")
@@ -863,16 +865,26 @@ struct AddDebtSheetView: View {
     }
 }
 
+enum DebtsSection: String, Equatable {
+    case summary
+    case addDebt
+    case activeDebts
+}
+
+struct DebtsLayoutPolicy {
+    static let toolbarActionId = "add"
+    static let sections: [DebtsSection] = [
+        .summary,
+        .activeDebts
+    ]
+
+    static func toolbarMode(addAction: @escaping () -> Void) -> AppToolbarMode {
+        .add(action: addAction)
+    }
+}
+
 struct DebtsView: View {
     @ObservedObject var store: PlannerStore
-    @State private var name = ""
-    @State private var lender = ""
-    @State private var balance = ""
-    @State private var minimum = ""
-    @State private var dueDate = Date()
-    @State private var linkedPotId = ""
-    @State private var apr = ""
-    @State private var note = ""
     @State private var selectedDebt: Debt?
     @State private var isAddDebtPresented = false
 
@@ -881,22 +893,12 @@ struct DebtsView: View {
             title: "Debts",
             subtitle: "Balances, reserves, minimums, and payoff progress.",
             navigationMode: .inline,
-            toolbarMode: .secondarySingle
+            toolbarMode: DebtsLayoutPolicy.toolbarMode {
+                isAddDebtPresented = true
+            }
         ) {
-            debtSummary
-            addDebtCard
-            SectionTitle("Active debts")
-            if store.activeDebts.isEmpty {
-                AppCard { EmptyStateView(title: "No active debts", message: "Add debts to track minimums, reserves, and payments.", systemImage: "checkmark.shield") }
-            } else {
-                ForEach(store.activeDebts) { debt in
-                    Button {
-                        selectedDebt = debt
-                    } label: {
-                        debtRow(debt)
-                    }
-                    .buttonStyle(.plain)
-                }
+            ForEach(DebtsLayoutPolicy.sections, id: \.rawValue) { section in
+                debtsSection(section)
             }
         }
         .sheet(item: $selectedDebt) { debt in
@@ -907,6 +909,18 @@ struct DebtsView: View {
         }
     }
 
+    @ViewBuilder
+    private func debtsSection(_ section: DebtsSection) -> some View {
+        switch section {
+        case .summary:
+            debtSummary
+        case .addDebt:
+            addDebtCard
+        case .activeDebts:
+            activeDebtsSection
+        }
+    }
+
     private var debtSummary: some View {
         let summary = FinanceEngine.getDebtSummary(debts: store.snapshot.debts, payments: store.snapshot.debtPayments, reserves: store.snapshot.debtReserves, pots: store.snapshot.pots, today: store.todayIso)
         return AppCard(glow: true) {
@@ -914,6 +928,24 @@ struct DebtsView: View {
             MetricRow(label: "Paid", value: MoneyParser.formatPence(summary.totalPaidPence))
             MetricRow(label: "Progress", value: "\(Int(summary.progressPercent.rounded()))%")
             MetricRow(label: "Overdue", value: "\(summary.overdueDebtCount)", valueColor: summary.overdueDebtCount > 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+        }
+    }
+
+    private var activeDebtsSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Active debts")
+            if store.activeDebts.isEmpty {
+                AppCard { EmptyStateView(title: "No active debts", message: "Use Add in the toolbar to track minimums, reserves, and payments.", systemImage: "checkmark.shield") }
+            } else {
+                ForEach(store.activeDebts) { debt in
+                    Button {
+                        selectedDebt = debt
+                    } label: {
+                        debtRow(debt)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -1490,6 +1522,32 @@ struct HistoryView: View {
     }
 }
 
+enum SettingsRoute: String, CaseIterable, Equatable {
+    case history
+    case creditStatements
+
+    var title: String {
+        switch self {
+        case .history: "History"
+        case .creditStatements: "Credit Statements"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .history: "Paycheck and allocation history."
+        case .creditStatements: "Card statements and direct debit status."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .history: "clock.arrow.circlepath"
+        case .creditStatements: "doc.text.magnifyingglass"
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
@@ -1526,7 +1584,7 @@ struct SettingsView: View {
 
             DateSimulationCard(store: store)
 
-            historyLink
+            settingsRoutes
 
             AppCard {
                 SectionTitle("AI")
@@ -1576,36 +1634,59 @@ struct SettingsView: View {
         }
     }
 
-    private var historyLink: some View {
-        NavigationLink {
-            HistoryView(store: store)
-        } label: {
-            AppCard {
-                HStack(spacing: AppTheme.Spacing.md) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
-                        .frame(width: 40, height: 40)
-                        .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                        .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("History")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-                        Text("Paycheck and allocation history.")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
-                }
+    private var settingsRoutes: some View {
+        VStack(spacing: AppTheme.Spacing.md) {
+            ForEach(SettingsRoute.allCases, id: \.rawValue) { route in
+                settingsRoute(route)
             }
         }
-        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func settingsRoute(_ route: SettingsRoute) -> some View {
+        switch route {
+        case .history:
+            NavigationLink {
+                HistoryView(store: store)
+            } label: {
+                settingsRouteCard(route)
+            }
+            .buttonStyle(.plain)
+        case .creditStatements:
+            NavigationLink {
+                StatementsView(store: store)
+            } label: {
+                settingsRouteCard(route)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func settingsRouteCard(_ route: SettingsRoute) -> some View {
+        AppCard {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: route.symbol)
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .frame(width: 40, height: 40)
+                    .background(AppTheme.Colors.primaryOrange.opacity(0.12))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(route.title)
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(route.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
     }
 
     private var accountCard: some View {

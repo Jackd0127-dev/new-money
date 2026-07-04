@@ -3,8 +3,19 @@ import SwiftUI
 struct AppToolbarAction: Identifiable {
     let id: String
     let symbol: String
+    var title: String? = nil
     let accessibilityLabel: String
     let action: () -> Void
+
+    static func edit(action: @escaping () -> Void = {}) -> AppToolbarAction {
+        AppToolbarAction(
+            id: "edit-toolbar-action",
+            symbol: "pencil",
+            title: "Edit",
+            accessibilityLabel: "Edit",
+            action: action
+        )
+    }
 }
 
 struct AppToolbarButton: View {
@@ -12,7 +23,12 @@ struct AppToolbarButton: View {
 
     var body: some View {
         Button(action: action.action) {
-            Image(systemName: action.symbol)
+            if let title = action.title {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            } else {
+                Image(systemName: action.symbol)
+            }
         }
         .accessibilityLabel(action.accessibilityLabel)
     }

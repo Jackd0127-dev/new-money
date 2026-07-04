@@ -252,3 +252,72 @@ final class AuthSyncTests: XCTestCase {
         XCTAssertEqual(backupPayload["backupVersion"] as? Int, 1)
     }
 }
+
+@MainActor
+final class PlannerAccountsTests: XCTestCase {
+    func testPlannerAccountsCreateUpToThreeAndRejectFourth() async throws {
+        let store = PlannerStore(
+            repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.emptySnapshot),
+            accountRepository: InMemoryPlannerAccountRepository()
+        )
+
+        await store.load()
+
+        XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal"])
+        XCTAssertTrue(store.canCreatePlannerAccount)
+
+        try await store.createPlannerAccount(named: "Work")
+        try await store.createPlannerAccount(named: "Bills")
+
+        XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal", "Work", "Bills"])
+        XCTAssertFalse(store.canCreatePlannerAccount)
+
+        do {
+            try await store.createPlannerAccount(named: "Fourth")
+            XCTFail("Creating a fourth planner account should fail.")
+        } catch PlannerAccountError.limitReached {
+            XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal", "Work", "Bills"])
+        }
+    }
+
+    func testPlannerAccountsKeepSnapshotsIsolatedWhenSwitching() async throws {
+        let store = PlannerStore(
+            repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.emptySnapshot),
+            accountRepository: InMemoryPlannerAccountRepository()
+        )
+
+        await store.load()
+        let personalId = try XCTUnwrap(store.activePlannerAccount?.id)
+
+        store.addPot(
+            name: "Personal Pot",
+            type: .saving,
+            category: nil,
+            targetPence: nil,
+            color: "#F97316",
+            balancePence: 1_500
+        )
+        try await store.saveCurrentSnapshot()
+
+        try await store.createPlannerAccount(named: "Side")
+        let sideId = try XCTUnwrap(store.activePlannerAccount?.id)
+
+        XCTAssertTrue(store.snapshot.pots.isEmpty)
+
+        store.addPot(
+            name: "Side Pot",
+            type: .saving,
+            category: nil,
+            targetPence: nil,
+            color: "#14B8A6",
+            balancePence: 2_500
+        )
+        try await store.saveCurrentSnapshot()
+
+        try await store.switchPlannerAccount(id: personalId)
+        XCTAssertEqual(store.snapshot.pots.map(\.name), ["Personal Pot"])
+
+        try await store.switchPlannerAccount(id: sideId)
+        XCTAssertEqual(store.snapshot.pots.map(\.name), ["Side Pot"])
+    }
+}

@@ -1,18 +1,66 @@
 import SwiftUI
 
+enum DashboardHomeSection: String, Equatable {
+    case hero
+    case accounts
+    case paydayPlanning
+    case spendingSnapshot
+    case monthlySpendChart
+    case upcomingBeforePayday
+    case alerts
+    case fundingChecklist
+    case recentActivity
+}
+
+enum DashboardDetailPresentation: Equatable {
+    case navigationPush
+}
+
+struct DashboardHomeLayoutPolicy {
+    static let homeSections: [DashboardHomeSection] = [
+        .hero,
+        .accounts,
+        .monthlySpendChart,
+        .upcomingBeforePayday,
+        .alerts,
+        .fundingChecklist,
+        .recentActivity
+    ]
+
+    static let moneyLeftDetailSections: [DashboardHomeSection] = [
+        .hero,
+        .spendingSnapshot
+    ]
+
+    static let moneyLeftDetailPresentation: DashboardDetailPresentation = .navigationPush
+}
+
+private enum DashboardSheetDestination: Identifiable {
+    case paycheck(Paycheck)
+
+    var id: String {
+        switch self {
+        case .paycheck(let paycheck):
+            "paycheck-\(paycheck.id)"
+        }
+    }
+}
+
 struct DashboardView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
-    var onOpenCards: (() -> Void)?
-    @State private var selectedPaycheck: Paycheck?
+    var onOpenAccount: (() -> Void)?
+    var onViewPlan: (() -> Void)?
+    var onViewActivity: (() -> Void)?
+    @State private var activeDashboardSheet: DashboardSheetDestination?
 
     private var snapshot: PlannerSnapshot { store.snapshot }
 
     var body: some View {
         ScreenScaffold(
-            title: "Overview",
-            subtitle: "Payday pressure, pots, cards, debts, and recent activity.",
+            title: "Home",
+            subtitle: "Money left, upcoming pressure, and recent activity.",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
@@ -26,69 +74,117 @@ struct DashboardView: View {
                 }
             }
 
-            heroCard
-            fundingChecklist
-            statsGrid
-            recentActivity
+            ForEach(DashboardHomeLayoutPolicy.homeSections, id: \.rawValue) { section in
+                homeSection(section)
+            }
         }
-        .sheet(item: $selectedPaycheck) { paycheck in
-            PaycheckDetailView(store: store, paycheck: paycheck)
+        .sheet(item: $activeDashboardSheet) { sheet in
+            switch sheet {
+            case .paycheck(let paycheck):
+                PaycheckDetailView(store: store, paycheck: paycheck)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func homeSection(_ section: DashboardHomeSection) -> some View {
+        switch section {
+        case .hero:
+            heroCard
+        case .accounts:
+            accountButton
+        case .monthlySpendChart:
+            monthlySpendChart
+        case .upcomingBeforePayday:
+            upcomingBeforePayday
+        case .alerts:
+            homeAlerts
+        case .fundingChecklist:
+            fundingChecklist
+        case .recentActivity:
+            recentActivity
+        case .paydayPlanning, .spendingSnapshot:
+            EmptyView()
+        }
+    }
+
+    private var accountButton: some View {
+        HStack {
+            Button {
+                onOpenAccount?()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "person.2.fill")
+                        .font(.caption.weight(.bold))
+                    Text("Accounts")
+                        .font(.caption.weight(.bold))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 8)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            AppTheme.Colors.elevatedSurface,
+                            AppTheme.Colors.primaryOrange.opacity(0.16)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(AppTheme.Colors.primaryOrange.opacity(0.24), lineWidth: 1)
+                )
+                .shadow(color: AppTheme.Colors.glowOrange.opacity(0.24), radius: 10, y: 5)
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .disabled(onOpenAccount == nil)
+            .accessibilityLabel("Open Accounts")
+
+            Spacer()
         }
     }
 
     private var heroCard: some View {
-        AppCard(glow: true) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                    Text("Money left")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.warmSand)
-                    Text(MoneyParser.formatPence(currentCostSummary.currentMoneyLeftPence))
-                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .foregroundStyle(currentCostSummary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
-                        .minimumScaleFactor(0.62)
-                    Text(heroSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 8) {
-                    Pill(text: store.selectedPayPeriod?.payday ?? "No payday", systemImage: "calendar")
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text("Projected costs")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                        Text(MoneyParser.formatPence(currentCostSummary.projectedCostsPence))
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.warning)
-                    }
-                }
+        NavigationLink {
+            DashboardMoneyLeftDetailView(store: store)
+        } label: {
+            AppCard(glow: true) {
+                DashboardMoneyLeftHeroContent(
+                    summary: currentCostSummary,
+                    subtitle: heroSubtitle,
+                    paydayLabel: paydayLabel,
+                    safeToSpendTodayPence: safeToSpendTodayPence,
+                    showsDetailAffordance: true
+                )
             }
         }
+        .buttonStyle(ScaleButtonStyle())
+        .accessibilityLabel("Open money left details")
+        .accessibilityHint("Shows spending snapshot and money left details.")
     }
 
-    private var statsGrid: some View {
-        VStack(spacing: AppTheme.Spacing.md) {
-            Button {
-                onOpenCards?()
-            } label: {
-                StatCard(title: "Cards", value: MoneyParser.formatPence(totalCardOwed), subtitle: "\(store.activeCards.count) active", systemImage: "creditcard", tone: AppTheme.Colors.orangeHighlight)
-            }
-            .buttonStyle(.plain)
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: AppTheme.Spacing.md) {
-                statLink {
-                    BillsBreakdownView(store: store)
-                } label: {
-                    StatCard(title: "Bills", value: MoneyParser.formatPence(billsDuePence), subtitle: "Due in period", systemImage: "calendar.badge.clock", tone: AppTheme.Colors.warning)
-                }
-                statLink {
-                    DebtsBreakdownView(store: store)
-                } label: {
-                    StatCard(title: "Debts", value: MoneyParser.formatPence(debtSummary.totalCurrentBalancePence), subtitle: "\(debtSummary.activeDebtCount) active", systemImage: "exclamationmark.shield", tone: debtSummary.overdueDebtCount > 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                }
-            }
+    private var paydayLabel: String {
+        guard let period = store.selectedPayPeriod else {
+            return "No payday"
         }
+        return FinanceEngine.formatPaydayLabel(period.payday)
+    }
+
+    private var safeToSpendTodayPence: Int? {
+        guard let period = store.selectedPayPeriod else {
+            return nil
+        }
+        return FinanceEngine.getDailySafeToSpendPence(
+            spendablePence: currentCostSummary.currentMoneyLeftPence,
+            today: store.todayIso,
+            endDate: period.endDate
+        )
     }
 
     @ViewBuilder
@@ -199,19 +295,6 @@ struct DashboardView: View {
         }
     }
 
-    private func statLink<Destination: View, Label: View>(
-        @ViewBuilder destination: () -> Destination,
-        @ViewBuilder label: () -> Label
-    ) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
-            label()
-                .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
     private var recentActivity: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Recent activity")
@@ -220,11 +303,14 @@ struct DashboardView: View {
                     EmptyStateView(title: "No activity yet", message: "Payday plans, pot allocations, and spend records will appear here.", systemImage: "clock")
                 }
             } else {
+                let visibleRows = Array(recentRows.prefix(5))
                 AppCard {
-                    ForEach(recentRows.prefix(6), id: \.id) { row in
+                    ForEach(visibleRows, id: \.id) { row in
                         if let paycheckId = row.paycheckId {
                             Button {
-                                selectedPaycheck = snapshot.paychecks.first(where: { $0.id == paycheckId })
+                                if let paycheck = snapshot.paychecks.first(where: { $0.id == paycheckId }) {
+                                    activeDashboardSheet = .paycheck(paycheck)
+                                }
                             } label: {
                                 DashboardActivityRowView(row: row, showsChevron: true)
                             }
@@ -232,10 +318,92 @@ struct DashboardView: View {
                         } else {
                             DashboardActivityRowView(row: row)
                         }
+
+                        if row.id != visibleRows.last?.id {
+                            AppDivider()
+                        }
+                    }
+
+                    AppDivider()
+                    feedFooterButton("See all", action: onViewActivity)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var homeAlerts: some View {
+        let alerts = alertRows
+        if !alerts.isEmpty {
+            AppCard(glow: true) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    SectionTitle("Alerts")
+                    ForEach(alerts) { alert in
+                        HStack(spacing: AppTheme.Spacing.md) {
+                            Image(systemName: alert.symbol)
+                                .foregroundStyle(alert.color)
+                                .frame(width: 32, height: 32)
+                                .background(alert.color.opacity(0.12))
+                                .clipShape(Circle())
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(alert.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.Colors.primaryText)
+                                Text(alert.message)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var upcomingBeforePayday: some View {
+        if store.selectedPayPeriod != nil {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                SectionTitle("Before payday")
+                AppCard {
+                    if upcomingMoneyEvents.isEmpty {
+                        EmptyStateView(
+                            title: "No planned events before payday",
+                            message: "Bills, debts, card payments, and paydays will appear here.",
+                            systemImage: "calendar.badge.clock"
+                        )
+                    } else {
+                        let visibleEvents = Array(upcomingMoneyEvents.prefix(5))
+                        ForEach(visibleEvents) { event in
+                            DashboardMoneyEventRowView(
+                                title: event.title,
+                                subtitle: "\(friendlyDate(event.date)) · \(homeEventTypeLabel(event.type))",
+                                amount: homeEventAmountText(event),
+                                symbol: homeEventSymbol(event.type),
+                                color: homeEventColor(event.type)
+                            )
+
+                            if event.id != visibleEvents.last?.id {
+                                AppDivider()
+                            }
+                        }
+
+                        AppDivider()
+                        feedFooterButton("See all", action: onViewPlan)
+                    }
+                }
+            }
+        }
+    }
+
+    private var monthlySpendChart: some View {
+        DashboardMonthlySpendChartView(
+            data: DashboardMonthlySpendChartData.make(
+                transactions: snapshot.transactions,
+                todayIso: store.todayIso
+            )
+        )
     }
 
     private var heroSubtitle: String {
@@ -252,22 +420,87 @@ struct DashboardView: View {
         PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
     }
 
-    private var billsDuePence: Int {
-        guard let period = store.selectedPayPeriod else { return 0 }
-        return PlannerDerivedData.recurringOccurrences(
-            payments: snapshot.recurringPayments,
-            startDate: period.startDate,
-            endDate: period.endDate
+    private var alertRows: [HomeAlertRow] {
+        var alerts: [HomeAlertRow] = []
+
+        if currentCostSummary.currentMoneyLeftPence < 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Money left is negative",
+                    message: "\(MoneyParser.formatPence(abs(currentCostSummary.currentMoneyLeftPence))) over the current position.",
+                    symbol: "exclamationmark.triangle",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+
+        if currentCostSummary.unfundedChecklistPence > 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Funding still pending",
+                    message: "\(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is not marked as funded yet.",
+                    symbol: "checklist.unchecked",
+                    color: AppTheme.Colors.warning
+                )
+            )
+        }
+
+        let debtSummary = FinanceEngine.getDebtSummary(
+            debts: snapshot.debts,
+            payments: snapshot.debtPayments,
+            reserves: snapshot.debtReserves,
+            pots: snapshot.pots,
+            today: store.todayIso
         )
-        .reduce(0) { $0 + $1.amountPence }
+        if debtSummary.overdueDebtCount > 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Debt payment overdue",
+                    message: "\(debtSummary.overdueDebtCount) debt item\(debtSummary.overdueDebtCount == 1 ? "" : "s") need attention.",
+                    symbol: "exclamationmark.shield",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+
+        let overdueStatements = PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: store.todayIso)
+            .filter { $0.status == .overdue }
+        if !overdueStatements.isEmpty {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Statement payment overdue",
+                    message: "\(overdueStatements.count) card statement\(overdueStatements.count == 1 ? "" : "s") are overdue.",
+                    symbol: "creditcard.trianglebadge.exclamationmark",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+
+        return alerts
     }
 
-    private var totalCardOwed: Int {
-        store.activeCards.reduce(0) { $0 + PlannerDerivedData.cardBalance(card: $1, snapshot: snapshot) }
+    private var upcomingMoneyEvents: [CalendarEvent] {
+        let fallbackEndDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 14)
+        let endDate = store.selectedPayPeriod?.payday ?? fallbackEndDate
+        return PlannerDerivedData.calendarEvents(snapshot: snapshot, startDate: store.todayIso, endDate: endDate)
+            .filter { $0.date >= store.todayIso && $0.type != .spending }
+            .sorted { $0.date < $1.date }
     }
 
-    private var debtSummary: DebtSummary {
-        FinanceEngine.getDebtSummary(debts: snapshot.debts, payments: snapshot.debtPayments, reserves: snapshot.debtReserves, pots: snapshot.pots, today: store.todayIso)
+    @ViewBuilder
+    private func feedFooterButton(_ title: String, action: (() -> Void)?) -> some View {
+        Button {
+            action?()
+        } label: {
+            Text(title)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .accessibilityLabel(title)
     }
 
     private var recentRows: [DashboardActivityRow] {
@@ -275,7 +508,7 @@ struct DashboardView: View {
             DashboardActivityRow(
                 id: $0.id,
                 title: $0.note.isEmpty ? "Spending" : $0.note,
-                detail: $0.date,
+                detail: friendlyDate($0.date),
                 amount: "-\(MoneyParser.formatPence($0.amountPence))",
                 symbol: $0.paymentMethod == .creditCard ? "creditcard" : "cart",
                 color: AppTheme.Colors.orangeHighlight
@@ -286,7 +519,7 @@ struct DashboardView: View {
                 id: $0.id,
                 title: "Paycheck",
                 detail: $0.createdAt.prefixDateLabel,
-                amount: MoneyParser.formatPence($0.calculatedAmountPence),
+                amount: "+\(MoneyParser.formatPence($0.calculatedAmountPence))",
                 symbol: "sterlingsign.circle",
                 color: AppTheme.Colors.success,
                 paycheckId: $0.id
@@ -297,7 +530,7 @@ struct DashboardView: View {
                 id: allocation.id,
                 title: snapshot.pots.first(where: { pot in pot.id == allocation.potId })?.name ?? "Pot allocation",
                 detail: allocation.createdAt.prefixDateLabel,
-                amount: MoneyParser.formatPence(allocation.amountPence),
+                amount: "-\(MoneyParser.formatPence(allocation.amountPence))",
                 symbol: "wallet.pass",
                 color: AppTheme.Colors.primaryOrange
             )
@@ -306,17 +539,259 @@ struct DashboardView: View {
             DashboardActivityRow(
                 id: $0.id,
                 title: $0.note.isEmpty ? "Card repayment" : $0.note,
-                detail: $0.date,
-                amount: MoneyParser.formatPence($0.amountPence),
+                detail: friendlyDate($0.date),
+                amount: "-\(MoneyParser.formatPence($0.amountPence))",
                 symbol: "creditcard.and.123",
-                color: AppTheme.Colors.success
+                color: AppTheme.Colors.warning
             )
         }
         return (transactions + paychecks + allocations + cardRepayments).prefix(12).map { $0 }
     }
 
+    private func homeEventAmountText(_ event: CalendarEvent) -> String? {
+        guard let amountPence = event.amountPence else { return nil }
+        let formattedAmount = MoneyParser.formatPence(amountPence)
+        return event.type == .payday ? "+\(formattedAmount)" : "-\(formattedAmount)"
+    }
+
+    private func homeEventTypeLabel(_ type: CalendarEventType) -> String {
+        switch type {
+        case .payday: "Money in"
+        case .recurring: "Bill"
+        case .savedPayment: "Saved payment"
+        case .spending: "Spend"
+        case .cardPayment: "Card payment"
+        case .debtDue: "Debt due"
+        case .debtReserve: "Debt reserve"
+        case .debtPayment: "Debt paid"
+        case .allocation: "Pot allocation"
+        }
+    }
+
+    private func homeEventSymbol(_ type: CalendarEventType) -> String {
+        switch type {
+        case .payday: "arrow.down.circle"
+        case .recurring: "calendar.badge.clock"
+        case .savedPayment: "calendar.badge.plus"
+        case .spending: "receipt"
+        case .cardPayment: "creditcard"
+        case .debtDue: "exclamationmark.shield"
+        case .debtReserve: "plus.circle"
+        case .debtPayment: "checkmark.circle"
+        case .allocation: "wallet.pass"
+        }
+    }
+
+    private func homeEventColor(_ type: CalendarEventType) -> Color {
+        switch type {
+        case .payday:
+            AppTheme.Colors.success
+        case .recurring, .savedPayment, .debtDue:
+            AppTheme.Colors.warning
+        case .spending, .cardPayment:
+            AppTheme.Colors.orangeHighlight
+        case .debtReserve, .debtPayment, .allocation:
+            AppTheme.Colors.primaryOrange
+        }
+    }
+
     private func friendlyDate(_ isoDate: String) -> String {
         FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct HomeAlertRow: Identifiable {
+    let id = UUID()
+    var title: String
+    var message: String
+    var symbol: String
+    var color: Color
+}
+
+private struct DashboardMoneyLeftDetailView: View {
+    @ObservedObject var store: PlannerStore
+
+    private var snapshot: PlannerSnapshot { store.snapshot }
+    private var currentCostSummary: PayPeriodCostSummary {
+        PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
+    }
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Money left",
+            subtitle: "Safe-to-spend details and current period spending.",
+            navigationMode: .inline,
+            toolbarMode: .none
+        ) {
+            ForEach(DashboardHomeLayoutPolicy.moneyLeftDetailSections, id: \.rawValue) { section in
+                detailSection(section)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func detailSection(_ section: DashboardHomeSection) -> some View {
+        switch section {
+        case .hero:
+            AppCard(glow: true) {
+                DashboardMoneyLeftHeroContent(
+                    summary: currentCostSummary,
+                    subtitle: heroSubtitle,
+                    paydayLabel: paydayLabel,
+                    safeToSpendTodayPence: safeToSpendTodayPence,
+                    showsDetailAffordance: false
+                )
+            }
+        case .spendingSnapshot:
+            DashboardSpendingSnapshotCard(
+                summary: currentCostSummary,
+                periodLabel: spendingPeriodLabel,
+                entryCount: selectedPeriodTransactions.count
+            )
+        case .accounts, .paydayPlanning, .monthlySpendChart, .upcomingBeforePayday, .alerts, .fundingChecklist, .recentActivity:
+            EmptyView()
+        }
+    }
+
+    private var paydayLabel: String {
+        guard let period = store.selectedPayPeriod else {
+            return "No payday"
+        }
+        return FinanceEngine.formatPaydayLabel(period.payday)
+    }
+
+    private var safeToSpendTodayPence: Int? {
+        guard let period = store.selectedPayPeriod else {
+            return nil
+        }
+        return FinanceEngine.getDailySafeToSpendPence(
+            spendablePence: currentCostSummary.currentMoneyLeftPence,
+            today: store.todayIso,
+            endDate: period.endDate
+        )
+    }
+
+    private var selectedPeriodTransactions: [Transaction] {
+        guard let period = store.selectedPayPeriod else { return [] }
+        return snapshot.transactions.filter {
+            $0.type == .spending &&
+            ($0.payPeriodId == period.id || ($0.date >= period.startDate && $0.date <= period.endDate))
+        }
+    }
+
+    private var spendingPeriodLabel: String {
+        guard let period = store.selectedPayPeriod else {
+            return "No current pay period yet"
+        }
+        return "\(friendlyDate(period.startDate)) to \(friendlyDate(period.endDate))"
+    }
+
+    private var heroSubtitle: String {
+        guard let period = store.selectedPayPeriod else {
+            return "Add income to create a live period."
+        }
+        if currentCostSummary.unfundedChecklistPence > 0 {
+            return "\(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) still unfunded. Projected after funding: \(MoneyParser.formatPence(currentCostSummary.projectedMoneyLeftPence))."
+        }
+        return "Income minus committed costs until \(friendlyDate(period.endDate))."
+    }
+
+    private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct DashboardMoneyLeftHeroContent: View {
+    var summary: PayPeriodCostSummary
+    var subtitle: String
+    var paydayLabel: String
+    var safeToSpendTodayPence: Int?
+    var showsDetailAffordance: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                    Text("Money left")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.warmSand)
+                    Text(MoneyParser.formatPence(summary.currentMoneyLeftPence))
+                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                        .foregroundStyle(summary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                        .minimumScaleFactor(0.62)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 8) {
+                    if showsDetailAffordance {
+                        HStack(spacing: 5) {
+                            Text("Details")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.Colors.primaryOrange.opacity(0.13))
+                        .clipShape(Capsule())
+                    }
+
+                    Pill(text: paydayLabel, systemImage: "calendar")
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("Planned costs")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                        Text(MoneyParser.formatPence(summary.projectedCostsPence))
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.warning)
+                    }
+                }
+            }
+
+            if let safeToSpendTodayPence {
+                AppDivider()
+                MetricRow(
+                    label: "Safe to spend today",
+                    value: MoneyParser.formatPence(safeToSpendTodayPence),
+                    valueColor: safeToSpendTodayPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
+                )
+            }
+        }
+    }
+}
+
+private struct DashboardSpendingSnapshotCard: View {
+    var summary: PayPeriodCostSummary
+    var periodLabel: String
+    var entryCount: Int
+
+    var body: some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        SectionTitle("Spending snapshot")
+                        Text(periodLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Pill(
+                        text: "\(entryCount) entries",
+                        systemImage: "receipt",
+                        color: entryCount == 0 ? AppTheme.Colors.tertiaryText : AppTheme.Colors.warning
+                    )
+                }
+
+                MetricRow(label: "Spent this period", value: MoneyParser.formatPence(summary.manualSpendingPence), valueColor: summary.manualSpendingPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText)
+                MetricRow(label: "Money left", value: MoneyParser.formatPence(summary.currentMoneyLeftPence), valueColor: summary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                MetricRow(label: "Projected end", value: MoneyParser.formatPence(summary.projectedMoneyLeftPence), valueColor: summary.projectedMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+            }
+        }
     }
 }
 
@@ -330,36 +805,357 @@ private struct DashboardActivityRow {
     var paycheckId: String? = nil
 }
 
+struct DashboardMonthlySpendChartPoint: Equatable, Identifiable {
+    var day: Int
+    var amountPence: Int
+    var isFuture: Bool
+
+    var id: Int { day }
+}
+
+struct DashboardMonthlySpendChartData: Equatable {
+    var monthLabel: String
+    var totalPence: Int
+    var averageDailyPence: Int
+    var highestDailyPence: Int
+    var daysElapsed: Int
+    var daysInMonth: Int
+    var points: [DashboardMonthlySpendChartPoint]
+
+    var progressFraction: Double {
+        guard daysInMonth > 0 else { return 0 }
+        return min(1, max(0, Double(daysElapsed) / Double(daysInMonth)))
+    }
+
+    var hasSpending: Bool {
+        totalPence > 0
+    }
+
+    static func make(transactions: [Transaction], todayIso: String) -> DashboardMonthlySpendChartData {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+
+        let today = FinanceEngine.parseDate(todayIso)
+        let todayComponents = calendar.dateComponents([.year, .month, .day], from: today)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: today)?.count ?? 0
+        let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
+
+        var buckets: [Int: Int] = [:]
+        for transaction in transactions where transaction.type == .spending && transaction.deletedAt == nil {
+            let transactionDate = FinanceEngine.parseDate(transaction.date)
+            let transactionComponents = calendar.dateComponents([.year, .month, .day], from: transactionDate)
+            guard transactionComponents.year == todayComponents.year,
+                  transactionComponents.month == todayComponents.month,
+                  let transactionDay = transactionComponents.day,
+                  transactionDay <= currentDay
+            else {
+                continue
+            }
+            buckets[transactionDay, default: 0] += transaction.amountPence
+        }
+
+        let points = (1...max(daysInMonth, 1)).map { day in
+            DashboardMonthlySpendChartPoint(
+                day: day,
+                amountPence: day <= currentDay ? buckets[day, default: 0] : 0,
+                isFuture: day > currentDay
+            )
+        }
+        let totalPence = points.reduce(0) { $0 + ($1.isFuture ? 0 : $1.amountPence) }
+
+        return DashboardMonthlySpendChartData(
+            monthLabel: today.formatted(.dateTime.month(.wide).year()),
+            totalPence: totalPence,
+            averageDailyPence: totalPence / max(currentDay, 1),
+            highestDailyPence: points.map(\.amountPence).max() ?? 0,
+            daysElapsed: currentDay,
+            daysInMonth: max(daysInMonth, 1),
+            points: points
+        )
+    }
+}
+
+private struct DashboardMonthlySpendChartView: View {
+    var data: DashboardMonthlySpendChartData
+
+    var body: some View {
+        AppCard(glow: data.hasSpending) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Spent this month")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.warmSand)
+                            .textCase(.uppercase)
+                        Text(MoneyParser.formatPence(data.totalPence))
+                            .font(.system(.title, design: .rounded, weight: .bold))
+                            .foregroundStyle(data.hasSpending ? AppTheme.Colors.primaryText : AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text(data.hasSpending ? "\(data.monthLabel) so far" : "No spend recorded in \(data.monthLabel)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    DashboardMonthProgressBadge(progress: data.progressFraction, label: "\(data.daysElapsed)/\(data.daysInMonth)")
+                }
+
+                DashboardSpendBarGraph(data: data)
+                    .frame(height: 118)
+
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    DashboardChartMetricPill(label: "Daily avg", value: MoneyParser.formatPence(data.averageDailyPence), color: AppTheme.Colors.primaryOrange)
+                    DashboardChartMetricPill(label: "Highest", value: MoneyParser.formatPence(data.highestDailyPence), color: AppTheme.Colors.warning)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Spent this month \(MoneyParser.formatPence(data.totalPence))")
+    }
+}
+
+private struct DashboardSpendBarGraph: View {
+    var data: DashboardMonthlySpendChartData
+
+    var body: some View {
+        GeometryReader { proxy in
+            let maxAmount = max(data.highestDailyPence, 1)
+            let availableHeight = max(proxy.size.height - 24, 1)
+
+            ZStack(alignment: .bottomLeading) {
+                VStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        AppTheme.Colors.border.opacity(0.45)
+                            .frame(height: 1)
+                        Spacer()
+                    }
+                    AppTheme.Colors.border.opacity(0.45)
+                        .frame(height: 1)
+                }
+
+                HStack(alignment: .bottom, spacing: 3) {
+                    ForEach(data.points) { point in
+                        Capsule(style: .continuous)
+                            .fill(barFill(for: point))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: barHeight(for: point, maxAmount: maxAmount, availableHeight: availableHeight))
+                            .opacity(pointOpacity(point))
+                            .shadow(
+                                color: point.amountPence == data.highestDailyPence && data.hasSpending ? AppTheme.Colors.glowOrange.opacity(0.72) : .clear,
+                                radius: 8,
+                                y: 4
+                            )
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.top, AppTheme.Spacing.sm)
+
+                HStack {
+                    Text("1")
+                    Spacer()
+                    Text("\(data.daysElapsed)")
+                    Spacer()
+                    Text("\(data.daysInMonth)")
+                }
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .offset(y: 18)
+            }
+        }
+    }
+
+    private func barFill(for point: DashboardMonthlySpendChartPoint) -> AnyShapeStyle {
+        if point.isFuture {
+            return AnyShapeStyle(AppTheme.Colors.border.opacity(0.38))
+        }
+        if point.amountPence == 0 {
+            return AnyShapeStyle(AppTheme.Colors.elevatedSurface)
+        }
+        return AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    AppTheme.Colors.primaryOrange,
+                    AppTheme.Colors.warning,
+                    AppTheme.Colors.success.opacity(0.78)
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        )
+    }
+
+    private func barHeight(for point: DashboardMonthlySpendChartPoint, maxAmount: Int, availableHeight: CGFloat) -> CGFloat {
+        guard !point.isFuture, point.amountPence > 0 else { return 7 }
+        return max(12, CGFloat(point.amountPence) / CGFloat(maxAmount) * availableHeight)
+    }
+
+    private func pointOpacity(_ point: DashboardMonthlySpendChartPoint) -> Double {
+        if point.isFuture { return 0.42 }
+        return point.amountPence == 0 ? 0.62 : 1
+    }
+}
+
+private struct DashboardMonthProgressBadge: View {
+    var progress: Double
+    var label: String
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(AppTheme.Colors.border, lineWidth: 7)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    AppTheme.Gradients.primary,
+                    style: StrokeStyle(lineWidth: 7, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 1) {
+                Text(label)
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text("days")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+        .frame(width: 64, height: 64)
+    }
+}
+
+private struct DashboardChartMetricPill: View {
+    var label: String
+    var value: String
+    var color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.11))
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                .stroke(color.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
 private struct DashboardActivityRowView: View {
     var row: DashboardActivityRow
     var showsChevron = false
 
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.md) {
-            Image(systemName: row.symbol)
-                .foregroundStyle(row.color)
-                .frame(width: 32, height: 32)
-                .background(row.color.opacity(0.12))
-                .clipShape(Circle())
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            DashboardFeedIcon(symbol: row.symbol, color: row.color, badgeSymbol: row.paycheckId == nil ? nil : "plus")
+
+            VStack(alignment: .leading, spacing: 5) {
                 Text(row.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(2)
                 Text(row.detail)
                     .font(.caption)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             Text(row.amount)
-                .font(.subheadline.weight(.bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(row.color)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.74)
+
             if showsChevron {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.tertiaryText)
             }
         }
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+}
+
+private struct DashboardMoneyEventRowView: View {
+    var title: String
+    var subtitle: String
+    var amount: String?
+    var symbol: String
+    var color: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            DashboardFeedIcon(symbol: symbol, color: color)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let amount {
+                Text(amount)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(color)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.74)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct DashboardFeedIcon: View {
+    var symbol: String
+    var color: Color
+    var badgeSymbol: String?
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(systemName: symbol)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 46, height: 46)
+                .background(color.opacity(0.14))
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(color.opacity(0.28), lineWidth: 1)
+                )
+
+            if let badgeSymbol {
+                Image(systemName: badgeSymbol)
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.surface)
+                    .frame(width: 18, height: 18)
+                    .background(AppTheme.Colors.primaryText)
+                    .clipShape(Circle())
+                    .offset(x: 2, y: 2)
+            }
+        }
+        .frame(width: 50, height: 50)
     }
 }
 
@@ -485,7 +1281,7 @@ struct IncomeBreakdownView: View {
         DashboardBreakdownScaffold(
             title: "Income",
             subtitle: "Paycheck inputs, pay periods, and period money left.",
-            toolbarMode: .add(action: { isAddIncomePresented = true })
+            toolbarMode: .actions([AppToolbarAction.edit()])
         ) {
             AppCard(glow: true) {
                 MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod?.incomePence ?? 0), valueColor: AppTheme.Colors.success)

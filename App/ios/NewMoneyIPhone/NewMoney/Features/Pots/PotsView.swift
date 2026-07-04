@@ -31,7 +31,9 @@ struct PotsView: View {
             toolbarMode: toolbarMode
         ) {
             summaryCard
-            controls
+            if !store.activePots.isEmpty {
+                controls
+            }
             potList
         }
         .sheet(item: $selectedPot) { pot in
@@ -42,7 +44,7 @@ struct PotsView: View {
     private var summaryCard: some View {
         AppCard(glow: true) {
             MetricRow(
-                label: "Total pot balance",
+                label: "Total saved",
                 value: MoneyParser.formatPence(store.activePots.reduce(0) { $0 + $1.balancePence }),
                 valueColor: AppTheme.Colors.primaryOrange
             )
@@ -73,7 +75,11 @@ struct PotsView: View {
         VStack(spacing: AppTheme.Spacing.md) {
             if filteredPots.isEmpty {
                 AppCard {
-                    EmptyStateView(title: "No pots match", message: "Adjust the search or use the top-right plus to add a pot.", systemImage: "magnifyingglass")
+                    if store.activePots.isEmpty {
+                        EmptyStateView(title: "Create your first pot", message: "Use Add in the toolbar to set up savings, bills, buffers, or goals.", systemImage: "wallet.pass")
+                    } else {
+                        EmptyStateView(title: "No pots match", message: "Adjust the search or clear the selected filter.", systemImage: "magnifyingglass")
+                    }
                 }
             } else {
                 ForEach(filteredPots) { pot in

@@ -3,7 +3,9 @@ import XCTest
 
 final class AuthEmailFormValidationTests: XCTestCase {
     func testSignUpModeUsesCreateAccountCopyAndFourFieldLayout() {
-        XCTAssertEqual(AuthScreenMode.signUp.primaryTitle, "Create Account")
+        XCTAssertEqual(AuthScreenMode.signUp.heroTitle, "Create your account")
+        XCTAssertEqual(AuthScreenMode.signUp.heroSubtitle, "Manage your money the way YOU want to.")
+        XCTAssertEqual(AuthScreenMode.signUp.primaryTitle, "Create account")
         XCTAssertEqual(AuthScreenMode.signUp.emailLabel, "Your email")
         XCTAssertEqual(AuthScreenMode.signUp.passwordLabel, "Your password")
         XCTAssertEqual(AuthScreenMode.signUp.footerPrompt, "Already have an account?")
@@ -13,7 +15,9 @@ final class AuthEmailFormValidationTests: XCTestCase {
     }
 
     func testSignInModeUsesSignInCopyAndTwoFieldLayout() {
-        XCTAssertEqual(AuthScreenMode.signIn.primaryTitle, "Sign In")
+        XCTAssertEqual(AuthScreenMode.signIn.heroTitle, "Sign in")
+        XCTAssertEqual(AuthScreenMode.signIn.heroSubtitle, "Manage your money the way YOU want to.")
+        XCTAssertEqual(AuthScreenMode.signIn.primaryTitle, "Sign in")
         XCTAssertEqual(AuthScreenMode.signIn.emailLabel, "Enter your email")
         XCTAssertEqual(AuthScreenMode.signIn.passwordLabel, "Enter your password")
         XCTAssertEqual(AuthScreenMode.signIn.footerPrompt, "Don't have an account yet?")

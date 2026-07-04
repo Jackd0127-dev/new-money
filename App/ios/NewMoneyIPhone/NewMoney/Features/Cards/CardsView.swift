@@ -1,24 +1,78 @@
 import SwiftUI
 
+enum CardsSection: String, Equatable {
+    case summary
+    case paymentAllocation
+    case activeCards
+}
+
+struct CardsLayoutPolicy {
+    static let toolbarActionId = "add"
+    static let sections: [CardsSection] = [
+        .summary,
+        .activeCards
+    ]
+
+    static func toolbarMode(addAction: @escaping () -> Void) -> AppToolbarMode {
+        .add(action: addAction)
+    }
+}
+
 struct CardsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
     @State private var selectedCard: CreditCard?
+    @State private var isAddCardPresented = false
 
     var body: some View {
         ScreenScaffold(
             title: "Cards",
             subtitle: "Track card balances, repayments, saved payments, and cover pots.",
             navigationMode: navigationMode,
-            toolbarMode: toolbarMode
+            toolbarMode: resolvedToolbarMode
         ) {
+            ForEach(CardsLayoutPolicy.sections, id: \.rawValue) { section in
+                cardsSection(section)
+            }
+        }
+        .sheet(item: $selectedCard) { card in
+            CardDetailView(store: store, card: card)
+        }
+        .sheet(isPresented: $isAddCardPresented) {
+            CardFormView(store: store)
+        }
+    }
+
+    private var resolvedToolbarMode: AppToolbarMode {
+        switch toolbarMode {
+        case .none, .add(_), .actions(_):
+            toolbarMode
+        case .primaryDouble, .secondarySingle, .modalSingle:
+            CardsLayoutPolicy.toolbarMode {
+                isAddCardPresented = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cardsSection(_ section: CardsSection) -> some View {
+        switch section {
+        case .summary:
             summary
-            paymentAllocationLink
+        case .paymentAllocation:
+            EmptyView()
+        case .activeCards:
+            activeCardsSection
+        }
+    }
+
+    private var activeCardsSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Active cards")
             if store.activeCards.isEmpty {
                 AppCard {
-                    EmptyStateView(title: "No cards yet", message: "Use the top-right plus to add a card.", systemImage: "creditcard")
+                    EmptyStateView(title: "Add your first card", message: "Use Add in the toolbar to start tracking card balances and repayments.", systemImage: "creditcard")
                 }
             } else {
                 ForEach(store.activeCards) { card in
@@ -34,9 +88,6 @@ struct CardsView: View {
                     .buttonStyle(.plain)
                 }
             }
-        }
-        .sheet(item: $selectedCard) { card in
-            CardDetailView(store: store, card: card)
         }
     }
 
@@ -72,34 +123,6 @@ struct CardsView: View {
         )
     }
 
-    private var paymentAllocationLink: some View {
-        NavigationLink {
-            CardPaymentAllocationListView(store: store)
-        } label: {
-            AppCard {
-                HStack(spacing: AppTheme.Spacing.md) {
-                    Image(systemName: "list.bullet.rectangle")
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
-                        .frame(width: 40, height: 40)
-                        .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                        .clipShape(Circle())
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("View Payment allocation list")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-                        Text("Bills, one-off payments, spending, and repayments.")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 private struct CreditCardRow: View {
@@ -640,106 +663,6 @@ struct CardPaymentFlowSheetView: View {
                 repaymentNote = ""
             }
         }
-    }
-}
-
-private struct CardPaymentAllocationListView: View {
-    @ObservedObject var store: PlannerStore
-
-    var body: some View {
-        ScreenScaffold(
-            title: "Payment allocation",
-            subtitle: "Card-linked bills, one-off payments, spending, and repayments.",
-            navigationMode: .inline,
-            toolbarMode: .secondarySingle
-        ) {
-            if rows.isEmpty {
-                AppCard {
-                    EmptyStateView(title: "No payment allocations", message: "Card payments, linked bills, and spending routes will appear here.", systemImage: "list.bullet.rectangle")
-                }
-            } else {
-                ForEach(rows) { row in
-                    CardPaymentAllocationRowCard(row: row)
-                }
-            }
-        }
-    }
-
-    private var rows: [CardPaymentAllocationRow] {
-        let recurring = store.snapshot.recurringPayments.map {
-            CardPaymentAllocationRow(
-                id: "recurring-\($0.id)",
-                title: $0.name,
-                detail: "\($0.dueDay.map { "Day \($0)" } ?? "No due day") · \(cardName(for: $0.creditCardId))",
-                amount: MoneyParser.formatPence($0.amountPence),
-                amountColor: AppTheme.Colors.warning,
-                context: $0.creditCardId == nil ? "Bill" : "Recurring",
-                symbol: "calendar.badge.clock",
-                sortDate: $0.dueDate ?? "9999-12-\(String(format: "%02d", $0.dueDay ?? 1))"
-            )
-        }
-
-        let custom = store.snapshot.customPayments.filter { $0.status != .archived }.map {
-            CardPaymentAllocationRow(
-                id: "custom-\($0.id)",
-                title: $0.name,
-                detail: "\(friendlyDate($0.dueDate)) · \(cardName(for: $0.creditCardId))",
-                amount: MoneyParser.formatPence($0.amountPence),
-                amountColor: AppTheme.Colors.primaryOrange,
-                context: "One-off",
-                symbol: "calendar.badge.plus",
-                sortDate: $0.dueDate
-            )
-        }
-
-        let spending = store.snapshot.transactions.filter { $0.type == .spending }.map {
-            CardPaymentAllocationRow(
-                id: "transaction-\($0.id)",
-                title: $0.note.isEmpty ? "Manual spend" : $0.note,
-                detail: "\(friendlyDate($0.date)) · \(allocationTarget(for: $0))",
-                amount: "-\(MoneyParser.formatPence($0.amountPence))",
-                amountColor: AppTheme.Colors.orangeHighlight,
-                context: "Spending",
-                symbol: "receipt",
-                sortDate: $0.date
-            )
-        }
-
-        let repayments = store.snapshot.creditCardRepayments.map {
-            CardPaymentAllocationRow(
-                id: "repayment-\($0.id)",
-                title: $0.note.isEmpty ? "Card repayment" : $0.note,
-                detail: "\(friendlyDate($0.date)) · \(cardName(for: $0.creditCardId))",
-                amount: MoneyParser.formatPence($0.amountPence),
-                amountColor: AppTheme.Colors.success,
-                context: "Repayment",
-                symbol: "arrow.down.circle",
-                sortDate: $0.date
-            )
-        }
-
-        return (recurring + custom + spending + repayments).sorted { $0.sortDate > $1.sortDate }
-    }
-
-    private func allocationTarget(for transaction: Transaction) -> String {
-        if transaction.paymentMethod == .creditCard || transaction.creditCardId != nil {
-            return cardName(for: transaction.creditCardId)
-        }
-
-        if let potId = transaction.potId {
-            return store.snapshot.pots.first { $0.id == potId }?.name ?? "Pot"
-        }
-
-        return "Unlinked"
-    }
-
-    private func cardName(for id: String?) -> String {
-        guard let id else { return "No card" }
-        return store.snapshot.creditCards.first { $0.id == id }?.name ?? "Card"
-    }
-
-    private func friendlyDate(_ isoDate: String) -> String {
-        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }
 

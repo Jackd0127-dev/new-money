@@ -67,9 +67,9 @@ enum AuthScreenMode {
     var primaryTitle: String {
         switch self {
         case .signUp:
-            "Create Account"
+            "Create account"
         case .signIn:
-            "Sign In"
+            "Sign in"
         }
     }
 
@@ -82,13 +82,17 @@ enum AuthScreenMode {
         }
     }
 
-    var headerSubtitle: String {
+    var heroTitle: String {
         switch self {
         case .signUp:
-            "Create your account to protect your planner."
+            "Create your account"
         case .signIn:
-            "Welcome back to your money planner."
+            "Sign in"
         }
+    }
+
+    var heroSubtitle: String {
+        "Manage your money the way YOU want to."
     }
 
     var emailLabel: String {
@@ -163,11 +167,11 @@ private struct AuthEntryView: View {
 
     var body: some View {
         AuthScaffold {
-            AppCard(glow: true) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
                 authHeader
 
                 if let message = session.errorMessage {
-                    ErrorBanner(message: message) {
+                    AuthErrorBanner(message: message) {
                         session.errorMessage = nil
                     }
                 }
@@ -176,9 +180,8 @@ private struct AuthEntryView: View {
                     emailFields
                     modeSupportRow
 
-                    PrimaryButton(
+                    AuthPrimaryButton(
                         title: mode.primaryTitle,
-                        systemImage: mode.primaryIcon,
                         isLoading: session.isWorking,
                         isDisabled: isPrimaryActionDisabled
                     ) {
@@ -186,19 +189,26 @@ private struct AuthEntryView: View {
                     }
                 }
 
-                phoneFallback
-
                 AuthSocialActions(
                     googleAction: {
                         Task {
                             await session.signInWithGoogle(store: store)
                         }
                     },
+                    phoneAction: {
+                        withAnimation(AppTheme.Animation.standard) {
+                            isPhoneFormVisible.toggle()
+                        }
+                    },
+                    isPhoneSelected: isPhoneFormVisible,
                     appleRequest: configureAppleRequest,
                     appleCompletion: handleAppleResult
                 )
 
-                AppDivider()
+                if isPhoneFormVisible {
+                    phoneForm
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 AuthModeFooter(
                     prompt: mode.footerPrompt,
@@ -207,34 +217,25 @@ private struct AuthEntryView: View {
                     switchMode()
                 }
             }
+            .padding(.vertical, AppTheme.Spacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var authHeader: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            HStack(spacing: AppTheme.Spacing.sm) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.orangeHighlight)
-                    .frame(width: 38, height: 38)
-                    .background(AppTheme.Colors.primaryOrange.opacity(0.14))
-                    .clipShape(Circle())
+            Text(mode.heroTitle)
+                .font(.system(size: 38, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.76)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("New Money")
-                        .font(.title.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text(mode.headerSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-            }
-
-            Text("Cloud backup keeps your planner data safe across updates, reinstalls, and new devices.")
-                .font(.caption)
-                .foregroundStyle(AppTheme.Colors.secondaryText)
+            Text(mode.heroSubtitle)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.78))
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -246,7 +247,7 @@ private struct AuthEntryView: View {
                     .submitLabel(.next)
                     .focused($focusedField, equals: .name)
                     .onSubmit { focusedField = .email }
-                    .textFieldStyle(AppTextFieldStyle())
+                    .textFieldStyle(AuthTextFieldStyle())
             }
         }
 
@@ -259,7 +260,7 @@ private struct AuthEntryView: View {
                 .submitLabel(.next)
                 .focused($focusedField, equals: .email)
                 .onSubmit { focusedField = .password }
-                .textFieldStyle(AppTextFieldStyle())
+                .textFieldStyle(AuthTextFieldStyle())
         }
 
         LabeledAuthField(mode.passwordLabel) {
@@ -274,7 +275,7 @@ private struct AuthEntryView: View {
                         submitEmailForm()
                     }
                 }
-                .textFieldStyle(AppTextFieldStyle())
+                .textFieldStyle(AuthTextFieldStyle())
         }
 
         if mode.showsConfirmPasswordField {
@@ -288,13 +289,13 @@ private struct AuthEntryView: View {
                             submitEmailForm()
                         }
                     }
-                    .textFieldStyle(AppTextFieldStyle())
+                    .textFieldStyle(AuthTextFieldStyle())
             }
 
             if !confirmPassword.isEmpty && password != confirmPassword {
                 Text("Passwords need to match.")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.danger)
+                    .foregroundStyle(.white)
             }
         }
     }
@@ -309,25 +310,7 @@ private struct AuthEntryView: View {
                 Spacer()
                 Text("Forgot password?")
                     .font(.footnote.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-            }
-        }
-    }
-
-    private var phoneFallback: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            SecondaryButton(
-                title: isPhoneFormVisible ? "Hide phone sign in" : "Use phone number instead",
-                systemImage: "iphone"
-            ) {
-                withAnimation(AppTheme.Animation.standard) {
-                    isPhoneFormVisible.toggle()
-                }
-            }
-
-            if isPhoneFormVisible {
-                phoneForm
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .foregroundStyle(.white)
             }
         }
     }
@@ -339,7 +322,7 @@ private struct AuthEntryView: View {
                     .keyboardType(.phonePad)
                     .textContentType(.telephoneNumber)
                     .focused($focusedField, equals: .phoneNumber)
-                    .textFieldStyle(AppTextFieldStyle())
+                    .textFieldStyle(AuthTextFieldStyle())
             }
 
             if phoneVerificationID != nil {
@@ -348,13 +331,12 @@ private struct AuthEntryView: View {
                         .keyboardType(.numberPad)
                         .textContentType(.oneTimeCode)
                         .focused($focusedField, equals: .smsCode)
-                        .textFieldStyle(AppTextFieldStyle())
+                        .textFieldStyle(AuthTextFieldStyle())
                 }
             }
 
-            PrimaryButton(
+            AuthPrimaryButton(
                 title: phoneVerificationID == nil ? "Send SMS Code" : "Verify Code",
-                systemImage: phoneVerificationID == nil ? "message" : "checkmark.shield",
                 isLoading: session.isWorking,
                 isDisabled: phoneVerificationID == nil ? phoneNumber.isEmpty : smsCode.isEmpty
             ) {
@@ -380,13 +362,6 @@ private struct AuthEntryView: View {
                 }
             }
         }
-        .padding(AppTheme.Spacing.md)
-        .background(AppTheme.Colors.surface.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
-                .stroke(AppTheme.Colors.border, lineWidth: 1)
-        )
     }
 
     private var isPrimaryActionDisabled: Bool {
@@ -484,6 +459,86 @@ private struct PhoneAuthDiagnosticsBanner: View {
     }
 }
 
+private enum AuthEntryPalette {
+    static let deepRed = Color(hex: "#8F120A")
+    static let fieldFill = Color.white.opacity(0.15)
+    static let fieldBorder = Color.white.opacity(0.24)
+    static let softText = Color.white.opacity(0.76)
+}
+
+private struct AuthPrimaryButton: View {
+    var title: String
+    var isLoading = false
+    var isDisabled = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                if isLoading {
+                    ProgressView()
+                        .tint(AuthEntryPalette.deepRed)
+                }
+
+                Text(title)
+                    .font(.headline.weight(.bold))
+            }
+            .foregroundStyle(isDisabled ? AuthEntryPalette.deepRed.opacity(0.42) : AuthEntryPalette.deepRed)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 54)
+            .background(Color.white.opacity(isDisabled ? 0.54 : 0.96))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .shadow(color: Color.black.opacity(isDisabled ? 0 : 0.16), radius: 16, y: 8)
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .disabled(isDisabled || isLoading)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct AuthErrorBanner: View {
+    var message: String
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.white)
+            Text(message)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+        }
+        .padding(AppTheme.Spacing.md)
+        .background(Color.white.opacity(0.13))
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                .stroke(AuthEntryPalette.fieldBorder, lineWidth: 1)
+        )
+    }
+}
+
+private struct AuthTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .foregroundStyle(.white)
+            .padding(.horizontal, AppTheme.Spacing.md)
+            .frame(minHeight: 50)
+            .background(AuthEntryPalette.fieldFill)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                    .stroke(AuthEntryPalette.fieldBorder, lineWidth: 1)
+            )
+    }
+}
+
 private struct LabeledAuthField<Content: View>: View {
     var title: String
     var content: Content
@@ -497,7 +552,7 @@ private struct LabeledAuthField<Content: View>: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .foregroundStyle(AuthEntryPalette.softText)
             content
         }
     }
@@ -513,18 +568,18 @@ private struct AuthTermsCheckboxRow: View {
             HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
                 Image(systemName: isChecked ? "checkmark.square.fill" : "square")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(isChecked ? AppTheme.Colors.primaryOrange : AppTheme.Colors.secondaryText)
+                    .foregroundStyle(.white)
 
                 (
                     Text("I accept the ")
-                        .foregroundColor(AppTheme.Colors.secondaryText)
+                        .foregroundColor(AuthEntryPalette.softText)
                     + Text("terms of use")
-                        .foregroundColor(AppTheme.Colors.primaryOrange)
+                        .foregroundColor(.white)
                         .fontWeight(.bold)
                     + Text(" and ")
-                        .foregroundColor(AppTheme.Colors.secondaryText)
+                        .foregroundColor(AuthEntryPalette.softText)
                     + Text("privacy policy")
-                        .foregroundColor(AppTheme.Colors.primaryOrange)
+                        .foregroundColor(.white)
                         .fontWeight(.bold)
                 )
                 .font(.caption)
@@ -540,6 +595,8 @@ private struct AuthTermsCheckboxRow: View {
 
 private struct AuthSocialActions: View {
     var googleAction: () -> Void
+    var phoneAction: () -> Void
+    var isPhoneSelected: Bool
     var appleRequest: (ASAuthorizationAppleIDRequest) -> Void
     var appleCompletion: (Result<ASAuthorization, Error>) -> Void
 
@@ -548,6 +605,13 @@ private struct AuthSocialActions: View {
             SocialCircleButton(systemImage: "g.circle", accessibilityLabel: "Continue with Google", action: googleAction)
 
             AppleCircleSignInButton(onRequest: appleRequest, onCompletion: appleCompletion)
+
+            SocialCircleButton(
+                systemImage: "iphone",
+                accessibilityLabel: isPhoneSelected ? "Hide phone sign in" : "Continue with phone number",
+                isSelected: isPhoneSelected,
+                action: phoneAction
+            )
         }
         .frame(maxWidth: .infinity)
     }
@@ -556,20 +620,22 @@ private struct AuthSocialActions: View {
 private struct SocialCircleButton: View {
     var systemImage: String
     var accessibilityLabel: String
+    var isSelected = false
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.title3.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.primaryText)
+                .foregroundStyle(AuthEntryPalette.deepRed)
                 .frame(width: 52, height: 52)
-                .background(AppTheme.Colors.elevatedSurface)
+                .background(Color.white.opacity(isSelected ? 1 : 0.92))
                 .clipShape(Circle())
                 .overlay(
                     Circle()
-                        .stroke(AppTheme.Colors.border, lineWidth: 1)
+                        .stroke(Color.white.opacity(isSelected ? 0.95 : 0.42), lineWidth: isSelected ? 2 : 1)
                 )
+                .shadow(color: Color.black.opacity(0.15), radius: 10, y: 5)
         }
         .buttonStyle(ScaleButtonStyle())
         .accessibilityLabel(accessibilityLabel)
@@ -597,9 +663,9 @@ private struct AppleCircleSignInButton: View {
             }
             .overlay(
                 Circle()
-                    .stroke(AppTheme.Colors.border.opacity(0.8), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.42), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
             .accessibilityLabel("Continue with Apple")
     }
 }
@@ -613,9 +679,9 @@ private struct AuthModeFooter: View {
         Button(action: action) {
             (
                 Text("\(prompt) ")
-                    .foregroundColor(AppTheme.Colors.secondaryText)
+                    .foregroundColor(AuthEntryPalette.softText)
                 + Text(actionTitle)
-                    .foregroundColor(AppTheme.Colors.primaryOrange)
+                    .foregroundColor(.white)
                     .fontWeight(.bold)
             )
             .font(.footnote)
@@ -766,6 +832,10 @@ private struct AuthProgressView: View {
 
 private struct AuthScaffold<Content: View>: View {
     @ViewBuilder var content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
 
     var body: some View {
         GeometryReader { proxy in

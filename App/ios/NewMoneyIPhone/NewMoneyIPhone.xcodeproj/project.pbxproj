@@ -26,6 +26,7 @@
 		100000000000000000000117 /* PaydayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000219 /* PaydayView.swift */; };
 		100000000000000000000118 /* PotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000220 /* PotsView.swift */; };
 		100000000000000000000119 /* CardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000221 /* CardsView.swift */; };
+		34B1E3F02FF884FB007D21AC /* PremiumCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3F12FF884FB007D21AC /* PremiumCardView.swift */; };
 		100000000000000000000120 /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* MoreView.swift */; };
 		100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* SecondaryFeatureViews.swift */; };
 		100000000000000000000122 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* Assets.xcassets */; };
@@ -41,6 +42,9 @@
 		100000000000000000000132 /* AuthGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* AuthGateView.swift */; };
 		100000000000000000000133 /* NewMoneyAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* NewMoneyAppDelegate.swift */; };
 		100000000000000000000134 /* AuthEmailFormValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000234 /* AuthEmailFormValidationTests.swift */; };
+		100000000000000000000135 /* AppShellNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000235 /* AppShellNavigationTests.swift */; };
+		34B1E3EE2FF884FB007D21AC /* muno-splash.html in Resources */ = {isa = PBXBuildFile; fileRef = 34B1E3EC2FF884FB007D21AC /* muno-splash.html */; };
+		34B1E3EF2FF884FB007D21AC /* MUNOSplashWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -75,6 +79,7 @@
 		100000000000000000000219 /* PaydayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaydayView.swift; sourceTree = "<group>"; };
 		100000000000000000000220 /* PotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PotsView.swift; sourceTree = "<group>"; };
 		100000000000000000000221 /* CardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardsView.swift; sourceTree = "<group>"; };
+		34B1E3F12FF884FB007D21AC /* PremiumCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumCardView.swift; sourceTree = "<group>"; };
 		100000000000000000000222 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		100000000000000000000223 /* SecondaryFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryFeatureViews.swift; sourceTree = "<group>"; };
 		100000000000000000000224 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -88,6 +93,10 @@
 		100000000000000000000232 /* NewMoneyAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMoneyAppDelegate.swift; sourceTree = "<group>"; };
 		100000000000000000000233 /* NewMoneyIPhone.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NewMoneyIPhone.entitlements; sourceTree = "<group>"; };
 		100000000000000000000234 /* AuthEmailFormValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthEmailFormValidationTests.swift; sourceTree = "<group>"; };
+		100000000000000000000235 /* AppShellNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellNavigationTests.swift; sourceTree = "<group>"; };
+		34B1E3EB2FF884AA007D21AC /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
+		34B1E3EC2FF884FB007D21AC /* muno-splash.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "muno-splash.html"; sourceTree = "<group>"; };
+		34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MUNOSplashWebView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -115,9 +124,12 @@
 		100000000000000000000601 = {
 			isa = PBXGroup;
 			children = (
+				34B1E3EB2FF884AA007D21AC /* Splash.swift */,
 				100000000000000000000602 /* NewMoney */,
 				100000000000000000000603 /* NewMoneyTests */,
 				100000000000000000000604 /* Products */,
+				34B1E3EC2FF884FB007D21AC /* muno-splash.html */,
+				34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -147,6 +159,7 @@
 				100000000000000000000203 /* FinanceEngineTests.swift */,
 				100000000000000000000226 /* AuthSyncTests.swift */,
 				100000000000000000000234 /* AuthEmailFormValidationTests.swift */,
+				100000000000000000000235 /* AppShellNavigationTests.swift */,
 			);
 			path = NewMoneyTests;
 			sourceTree = "<group>";
@@ -275,6 +288,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000221 /* CardsView.swift */,
+				34B1E3F12FF884FB007D21AC /* PremiumCardView.swift */,
 			);
 			path = Cards;
 			sourceTree = "<group>";
@@ -400,6 +414,7 @@
 			files = (
 				100000000000000000000122 /* Assets.xcassets in Resources */,
 				100000000000000000000123 /* GoogleService-Info.plist in Resources */,
+				34B1E3EE2FF884FB007D21AC /* muno-splash.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -424,6 +439,7 @@
 				100000000000000000000106 /* FinanceEngine.swift in Sources */,
 				100000000000000000000107 /* DateUtilities.swift in Sources */,
 				100000000000000000000108 /* DefaultData.swift in Sources */,
+				34B1E3EF2FF884FB007D21AC /* MUNOSplashWebView.swift in Sources */,
 				100000000000000000000109 /* PlannerRepository.swift in Sources */,
 				100000000000000000000110 /* PlannerStore.swift in Sources */,
 				100000000000000000000111 /* ServicePlaceholders.swift in Sources */,
@@ -435,6 +451,7 @@
 				100000000000000000000117 /* PaydayView.swift in Sources */,
 				100000000000000000000118 /* PotsView.swift in Sources */,
 				100000000000000000000119 /* CardsView.swift in Sources */,
+				34B1E3F02FF884FB007D21AC /* PremiumCardView.swift in Sources */,
 				100000000000000000000120 /* MoreView.swift in Sources */,
 				100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */,
 				100000000000000000000125 /* CloudPlannerSync.swift in Sources */,
@@ -452,6 +469,7 @@
 				100000000000000000000103 /* FinanceEngineTests.swift in Sources */,
 				100000000000000000000124 /* AuthSyncTests.swift in Sources */,
 				100000000000000000000134 /* AuthEmailFormValidationTests.swift in Sources */,
+				100000000000000000000135 /* AppShellNavigationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -464,48 +482,6 @@
 			targetProxy = 100000000000000000000301 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 12.0.0;
-			};
-		};
-		100000000000000000000942 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 9.0.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		100000000000000000000951 /* FirebaseCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseCore;
-		};
-		100000000000000000000952 /* FirebaseAuth */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseAuth;
-		};
-		100000000000000000000953 /* FirebaseFirestore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseFirestore;
-		};
-		100000000000000000000954 /* GoogleSignIn */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 100000000000000000000942 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-			productName = GoogleSignIn;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		100000000000000000001001 /* Debug */ = {
@@ -625,9 +601,9 @@
 		100000000000000000001101 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				APS_ENVIRONMENT = development;
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -655,9 +631,9 @@
 		100000000000000000001102 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				APS_ENVIRONMENT = production;
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -755,6 +731,48 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
+		100000000000000000000942 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		100000000000000000000951 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		100000000000000000000952 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		100000000000000000000953 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		100000000000000000000954 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 100000000000000000000942 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 100000000000000000000001 /* Project object */;
 }

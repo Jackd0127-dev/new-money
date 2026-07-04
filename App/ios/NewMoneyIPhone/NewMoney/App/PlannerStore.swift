@@ -11,20 +11,44 @@ private struct LinkedPotContribution {
 @MainActor
 final class PlannerStore: ObservableObject {
     @Published private(set) var snapshot: PlannerSnapshot = DefaultData.emptySnapshot
+    @Published private(set) var plannerAccounts: [PlannerAccount] = []
+    @Published private(set) var activePlannerAccountId: String?
     @Published var isLoading = false
     @Published var errorMessage: String?
 
     private let repository: PlannerRepository
+    private let accountRepository: PlannerAccountRepository?
+    private var accountCollection: PlannerAccountCollection?
 #if DEBUG
     private var suppressAutomaticDueCatchUpForSimulation = false
 #endif
 
-    init(repository: PlannerRepository = PlannerLaunchProfile.repository()) {
+    init() {
+        let repository = PlannerLaunchProfile.repository()
         self.repository = repository
+        self.accountRepository = PlannerLaunchProfile.isUsingFixture() ? nil : FilePlannerAccountRepository()
+    }
+
+    init(repository: PlannerRepository) {
+        self.repository = repository
+        self.accountRepository = nil
+    }
+
+    init(repository: PlannerRepository, accountRepository: PlannerAccountRepository?) {
+        self.repository = repository
+        self.accountRepository = accountRepository
     }
 
     var snapshotPublisher: Published<PlannerSnapshot>.Publisher {
         $snapshot
+    }
+
+    var activePlannerAccount: PlannerAccount? {
+        accountCollection?.activeAccount
+    }
+
+    var canCreatePlannerAccount: Bool {
+        plannerAccounts.count < PlannerAccountCollection.maxAccounts
     }
 
     var selectedPayPeriod: PayPeriod? {
@@ -71,6 +95,21 @@ final class PlannerStore: ObservableObject {
         defer { isLoading = false }
 
         do {
+            if let accountRepository {
+                let legacySnapshot = try await repository.loadSnapshot()
+                let loadedCollection = try await accountRepository.loadAccountCollection()
+                let collection = loadedCollection ?? PlannerAccountCollection.singleAccount(snapshot: legacySnapshot)
+                applyAccountCollection(collection)
+                var shouldPersist = loadedCollection == nil
+                if prepareLoadedSnapshot() {
+                    shouldPersist = true
+                }
+                if shouldPersist, let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+                    try await accountRepository.saveAccountCollection(updatedCollection)
+                }
+                return
+            }
+
             let loadedSnapshot = try await repository.loadSnapshot()
             let migration = DefaultData.migratedSnapshot(loadedSnapshot)
             snapshot = migration.snapshot
@@ -92,15 +131,35 @@ final class PlannerStore: ObservableObject {
     func replaceSnapshot(_ replacement: PlannerSnapshot) async throws {
         let migration = DefaultData.migratedSnapshot(replacement)
         snapshot = migration.snapshot
-        try await repository.saveSnapshot(snapshot)
+        if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
+            try await accountRepository.saveAccountCollection(collection)
+        } else {
+            try await repository.saveSnapshot(snapshot)
+        }
     }
 
     func saveCurrentSnapshot() async throws {
-        try await repository.saveSnapshot(snapshot)
+        if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
+            try await accountRepository.saveAccountCollection(collection)
+        } else {
+            try await repository.saveSnapshot(snapshot)
+        }
     }
 
     func resetLocalData() {
         snapshot = DefaultData.emptySnapshot
+        if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
+            Task {
+                do {
+                    try await accountRepository.saveAccountCollection(collection)
+                } catch {
+                    await MainActor.run {
+                        errorMessage = "Unable to reset local planner data."
+                    }
+                }
+            }
+            return
+        }
         Task {
             do {
                 try await repository.resetSnapshot()
@@ -110,6 +169,102 @@ final class PlannerStore: ObservableObject {
                 }
             }
         }
+    }
+
+    func createPlannerAccount(named name: String) async throws {
+        guard let accountRepository else { return }
+        let cleanName = try validatedAccountName(name)
+        guard canCreatePlannerAccount else {
+            throw PlannerAccountError.limitReached
+        }
+
+        _ = updateActiveAccountSnapshot(snapshot)
+
+        var collection = accountCollection ?? PlannerAccountCollection.singleAccount(snapshot: snapshot)
+        let now = DateUtilities.nowIsoString()
+        let account = PlannerAccount(
+            id: DateUtilities.newId(prefix: "planner-account"),
+            name: cleanName,
+            color: plannerAccountColor(at: collection.accounts.count),
+            snapshot: DefaultData.emptySnapshot,
+            createdAt: now,
+            updatedAt: now
+        )
+        collection.accounts.append(account)
+        collection.activeAccountId = account.id
+        collection.updatedAt = now
+        applyAccountCollection(collection)
+        snapshot = DefaultData.emptySnapshot
+        if prepareLoadedSnapshot(), let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+            collection = updatedCollection
+        }
+        try await accountRepository.saveAccountCollection(collection)
+    }
+
+    func switchPlannerAccount(id: String) async throws {
+        guard let accountRepository else { return }
+        _ = updateActiveAccountSnapshot(snapshot)
+        guard var collection = accountCollection,
+              let account = collection.accounts.first(where: { $0.id == id })
+        else {
+            throw PlannerAccountError.missingAccount
+        }
+
+        collection.activeAccountId = account.id
+        collection.updatedAt = DateUtilities.nowIsoString()
+        applyAccountCollection(collection)
+        let migration = DefaultData.migratedSnapshot(account.snapshot)
+        snapshot = migration.snapshot
+        var shouldPersist = migration.didChange
+        if prepareLoadedSnapshot() {
+            shouldPersist = true
+        }
+        if shouldPersist, let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+            collection = updatedCollection
+        }
+        try await accountRepository.saveAccountCollection(collection)
+    }
+
+    func renamePlannerAccount(id: String, name: String) async throws {
+        guard let accountRepository else { return }
+        let cleanName = try validatedAccountName(name, excludingAccountId: id)
+        guard var collection = accountCollection,
+              let index = collection.accounts.firstIndex(where: { $0.id == id })
+        else {
+            throw PlannerAccountError.missingAccount
+        }
+
+        collection.accounts[index].name = cleanName
+        collection.accounts[index].updatedAt = DateUtilities.nowIsoString()
+        collection.updatedAt = collection.accounts[index].updatedAt
+        applyAccountCollection(collection)
+        try await accountRepository.saveAccountCollection(collection)
+    }
+
+    func deletePlannerAccount(id: String) async throws {
+        guard let accountRepository else { return }
+        _ = updateActiveAccountSnapshot(snapshot)
+        guard var collection = accountCollection,
+              let index = collection.accounts.firstIndex(where: { $0.id == id })
+        else {
+            throw PlannerAccountError.missingAccount
+        }
+        guard collection.accounts.count > 1 else {
+            throw PlannerAccountError.cannotDeleteLastAccount
+        }
+
+        collection.accounts.remove(at: index)
+        if collection.activeAccountId == id {
+            collection.activeAccountId = collection.accounts[0].id
+            let migration = DefaultData.migratedSnapshot(collection.accounts[0].snapshot)
+            snapshot = migration.snapshot
+        }
+        collection.updatedAt = DateUtilities.nowIsoString()
+        applyAccountCollection(collection)
+        if let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+            collection = updatedCollection
+        }
+        try await accountRepository.saveAccountCollection(collection)
     }
 
     func updateSettings(_ settings: Settings) {
@@ -1969,6 +2124,88 @@ final class PlannerStore: ObservableObject {
         snapshot.pots[index] = FinanceEngine.applyTransactionToPot(snapshot.pots[index], amountPence: transaction.amountPence, type: transaction.type)
     }
 
+    @discardableResult
+    private func prepareLoadedSnapshot() -> Bool {
+        let migration = DefaultData.migratedSnapshot(snapshot)
+        snapshot = migration.snapshot
+        var shouldPersist = migration.didChange
+        if ensureDebtSchedules(today: todayIso) {
+            shouldPersist = true
+        }
+        if catchUpDueObligations(to: todayIso) {
+            shouldPersist = true
+        }
+        return shouldPersist
+    }
+
+    private func applyAccountCollection(_ collection: PlannerAccountCollection) {
+        let sanitizedCollection = sanitizedAccountCollection(collection)
+        accountCollection = sanitizedCollection
+        plannerAccounts = sanitizedCollection.accounts
+        activePlannerAccountId = sanitizedCollection.activeAccountId
+        snapshot = sanitizedCollection.activeAccount?.snapshot ?? DefaultData.emptySnapshot
+    }
+
+    private func sanitizedAccountCollection(_ collection: PlannerAccountCollection) -> PlannerAccountCollection {
+        var accounts = Array(collection.accounts.prefix(PlannerAccountCollection.maxAccounts))
+        if accounts.isEmpty {
+            return PlannerAccountCollection.singleAccount(snapshot: snapshot)
+        }
+
+        for index in accounts.indices {
+            let cleanName = accounts[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
+            accounts[index].name = cleanName.isEmpty ? "Account \(index + 1)" : cleanName
+        }
+
+        let activeId = accounts.contains { $0.id == collection.activeAccountId }
+            ? collection.activeAccountId
+            : accounts[0].id
+        return PlannerAccountCollection(
+            activeAccountId: activeId,
+            accounts: accounts,
+            updatedAt: collection.updatedAt
+        )
+    }
+
+    @discardableResult
+    private func updateActiveAccountSnapshot(_ activeSnapshot: PlannerSnapshot) -> PlannerAccountCollection? {
+        guard var collection = accountCollection,
+              let index = collection.accounts.firstIndex(where: { $0.id == collection.activeAccountId })
+        else {
+            return nil
+        }
+
+        let now = DateUtilities.nowIsoString()
+        collection.accounts[index].snapshot = activeSnapshot
+        collection.accounts[index].updatedAt = now
+        collection.updatedAt = now
+        accountCollection = collection
+        plannerAccounts = collection.accounts
+        activePlannerAccountId = collection.activeAccountId
+        return collection
+    }
+
+    private func validatedAccountName(_ name: String, excludingAccountId: String? = nil) throws -> String {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw PlannerAccountError.blankName
+        }
+        let normalizedName = cleanName.lowercased()
+        let isDuplicate = plannerAccounts.contains { account in
+            account.id != excludingAccountId &&
+                account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedName
+        }
+        guard !isDuplicate else {
+            throw PlannerAccountError.duplicateName
+        }
+        return cleanName
+    }
+
+    private func plannerAccountColor(at index: Int) -> String {
+        let colors = ["#F97316", "#14B8A6", "#8B5CF6"]
+        return colors[min(max(index, 0), colors.count - 1)]
+    }
+
     private func persist() {
 #if DEBUG
         if !suppressAutomaticDueCatchUpForSimulation {
@@ -1978,6 +2215,18 @@ final class PlannerStore: ObservableObject {
         _ = catchUpDueObligations(to: todayIso)
 #endif
         let snapshot = snapshot
+        if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
+            Task {
+                do {
+                    try await accountRepository.saveAccountCollection(collection)
+                } catch {
+                    await MainActor.run {
+                        errorMessage = "Unable to save local planner data."
+                    }
+                }
+            }
+            return
+        }
         Task {
             do {
                 try await repository.saveSnapshot(snapshot)

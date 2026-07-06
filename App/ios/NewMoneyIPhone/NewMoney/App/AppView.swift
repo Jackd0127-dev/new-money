@@ -2,7 +2,7 @@ import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
     case home
-    case plan
+    case bills
     case activity
     case pots
     case credit
@@ -12,7 +12,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: "Home"
-        case .plan: "Plan"
+        case .bills: "Bills"
         case .activity: "Activity"
         case .pots: "Pots"
         case .credit: "Credit"
@@ -22,7 +22,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .home: "house"
-        case .plan: "calendar.badge.clock"
+        case .bills: "calendar.badge.clock"
         case .activity: "list.bullet.rectangle.portrait"
         case .pots: "wallet.pass"
         case .credit: "creditcard.trianglebadge.exclamationmark"
@@ -32,82 +32,205 @@ enum AppTab: String, CaseIterable, Identifiable {
 
 enum AppAddAction: String, CaseIterable, Identifiable {
     case spend
-    case income
     case bill
     case pot
     case card
-    case cardPayment
-    case debt
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .spend: "Add Spend"
-        case .income: "Add Income"
         case .bill: "Add Bill"
         case .pot: "Add Pot"
         case .card: "Add Card"
-        case .cardPayment: "Add Card Payment"
-        case .debt: "Add Debt"
         }
     }
 
     var subtitle: String {
         switch self {
         case .spend: "Record manual spending."
-        case .income: "Create income and payday setup."
         case .bill: "Add a recurring payment."
         case .pot: "Create a savings pot."
         case .card: "Add a credit card."
-        case .cardPayment: "Record a credit-card repayment."
-        case .debt: "Track a debt balance."
         }
     }
 
     var symbol: String {
         switch self {
         case .spend: "receipt"
-        case .income: "sterlingsign.circle"
         case .bill: "calendar.badge.plus"
         case .pot: "wallet.pass"
         case .card: "creditcard"
-        case .cardPayment: "creditcard.and.123"
-        case .debt: "exclamationmark.shield"
+        }
+    }
+}
+
+enum AppAddMenuPolicy {
+    static let showsNavigationDivider = false
+    static let opensSingleActionDirectly = true
+
+    static func actions(for tab: AppTab) -> [AppAddAction] {
+        switch tab {
+        case .home:
+            return [.spend]
+        case .activity:
+            return []
+        case .bills:
+            return [.bill]
+        case .pots:
+            return [.pot]
+        case .credit:
+            return [.card]
         }
     }
 }
 
 enum AppToolbarPolicy {
+    static func leadingActionIds(for tab: AppTab) -> [String] {
+        switch tab {
+        case .home:
+            ["profile-menu-toolbar-action"]
+        case .bills, .activity, .pots, .credit:
+            []
+        }
+    }
+
     static func actionIds(for tab: AppTab) -> [String] {
         var actionIds: [String] = []
 
         switch tab {
-        case .home, .plan, .activity, .credit:
+        case .home:
+            actionIds.append("plan-calendar-toolbar-action")
+        case .bills:
+            break
+        case .activity:
+            actionIds.append("activity-infinity-toolbar-action")
+        case .credit:
             break
         case .pots:
             actionIds.append("pot-history-toolbar-action")
         }
 
-        actionIds.append("add-menu-toolbar-action")
+        if !AppAddMenuPolicy.actions(for: tab).isEmpty {
+            actionIds.append("add-menu-toolbar-action")
+        }
         return actionIds
     }
+}
+
+enum AppNavigationTitlePolicy {
+    static func title(for tab: AppTab, activeAccountName: String?) -> String {
+        guard tab == .home else { return tab.title }
+
+        let accountName = activeAccountName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return accountName.isEmpty ? tab.title : accountName
+    }
+}
+
+enum AppNavigationTitleDisplayStyle: Equatable {
+    case large
+    case inline
+}
+
+enum AppNavigationTitleDisplayPolicy {
+    static func style(for tab: AppTab) -> AppNavigationTitleDisplayStyle {
+        tab == .activity ? .inline : .large
+    }
+
+    static func mode(for tab: AppTab) -> NavigationBarItem.TitleDisplayMode {
+        switch style(for: tab) {
+        case .large:
+            return .large
+        case .inline:
+            return .inline
+        }
+    }
+}
+
+enum AppTabNavigationStackPolicy {
+    static let isolatesNavigationStackPerTab = true
+    static let appliesTitleInsideTabStack = true
+    static let keepsTabRootScrollReset = true
+}
+
+enum ProfileMenuAction: String, CaseIterable, Identifiable {
+    case addIncome
+    case appearance
+    case history
+    case creditStatements
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .addIncome: "Add Income"
+        case .appearance: "Appearance"
+        case .history: "History"
+        case .creditStatements: "Credit Statements"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .addIncome: "Create income and payday setup."
+        case .appearance: "Themes and colour presets."
+        case .history: "Paycheck and allocation history."
+        case .creditStatements: "Card statements and direct debit status."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .addIncome: "sterlingsign.circle"
+        case .appearance: "paintpalette"
+        case .history: "clock.arrow.circlepath"
+        case .creditStatements: "doc.text.magnifyingglass"
+        }
+    }
+}
+
+enum ProfileMenuPresentationStyle: Equatable {
+    case rootNavigationLink
+}
+
+enum ProfileMenuSettingsPresentationStyle: Equatable {
+    case navigationLink
+}
+
+enum ProfileMenuPresentationPolicy {
+    static let profileStyle: ProfileMenuPresentationStyle = .rootNavigationLink
+    static let settingsStyle: ProfileMenuSettingsPresentationStyle = .navigationLink
+    static let centersProfileIdentity = true
+    static let syncsActiveAccountName = true
+    static let syncsActiveAccountAvatar = true
+    static let showsSignOutAction = true
+    static let signOutUsesAuthGateSession = true
+    static let includesAddIncomeAction = true
+    static let opensAppearanceDirectly = true
+    static let usesSystemFullScreenSafeArea = true
+    static let usesInlineNavigationTitle = true
+    static let animatesFromBottom = false
+    static let avoidsSystemNavigationBar = false
 }
 
 private enum AppSheetDestination: String, Identifiable {
     case addMenu
     case addSpend
-    case addIncome
     case addBill
     case addPot
     case addCard
-    case addDebt
     case spendingHistory
     case calendar
-    case settings
     case accounts
     case potHistory
-    case cardPayments
+
+    var id: String { rawValue }
+}
+
+private enum AppNavigationDestination: String, Identifiable {
+    case plan
+    case accountTimeline
 
     var id: String { rawValue }
 }
@@ -116,8 +239,10 @@ struct AppView: View {
     @ObservedObject var store: PlannerStore
     @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
     @State private var selectedTab: AppTab = .home
+    @State private var rootTabScrollState = RootTabScrollState.inactive
     @State private var isAssistantPresented = false
     @State private var activeSheet: AppSheetDestination?
+    @State private var activeNavigationDestination: AppNavigationDestination?
     @State private var pendingSheetAfterDismiss: AppSheetDestination?
 
     init(store: PlannerStore = PlannerStore()) {
@@ -126,50 +251,57 @@ struct AppView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            NavigationStack {
-                TabView(selection: selectedTabBinding) {
+            TabView(selection: selectedTabBinding) {
+                tabNavigationRoot(for: .home) {
                     DashboardView(
                         store: store,
                         navigationMode: .tabRoot,
                         toolbarMode: .none,
                         onOpenAccount: { activeSheet = .accounts },
-                        onViewPlan: { selectedTab = .plan },
-                        onViewActivity: { selectedTab = .activity }
+                        onViewPlan: { activeNavigationDestination = .plan },
+                        onViewActivity: { selectTab(.activity) }
                     )
-                        .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.symbol) }
-                        .tag(AppTab.home)
+                }
+                .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.symbol) }
+                .tag(AppTab.home)
 
-                    PlanView(store: store)
-                        .tabItem { Label(AppTab.plan.title, systemImage: AppTab.plan.symbol) }
-                        .tag(AppTab.plan)
+                tabNavigationRoot(for: .bills) {
+                    BillsView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                }
+                .tabItem { Label(AppTab.bills.title, systemImage: AppTab.bills.symbol) }
+                .tag(AppTab.bills)
 
+                tabNavigationRoot(for: .activity) {
                     ActivityView(store: store)
-                        .tabItem { Label(AppTab.activity.title, systemImage: AppTab.activity.symbol) }
-                        .tag(AppTab.activity)
+                }
+                .tabItem { Label(AppTab.activity.title, systemImage: AppTab.activity.symbol) }
+                .tag(AppTab.activity)
 
+                tabNavigationRoot(for: .pots) {
                     PotsView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
-                        .tabItem { Label(AppTab.pots.title, systemImage: AppTab.pots.symbol) }
-                        .tag(AppTab.pots)
+                }
+                .tabItem { Label(AppTab.pots.title, systemImage: AppTab.pots.symbol) }
+                .tag(AppTab.pots)
 
+                tabNavigationRoot(for: .credit) {
                     CreditView(store: store)
-                        .tabItem { Label(AppTab.credit.title, systemImage: AppTab.credit.symbol) }
-                        .tag(AppTab.credit)
                 }
-                .tint(AppTheme.Colors.primaryOrange)
-                .navigationTitle(selectedTab.title)
-                .navigationBarTitleDisplayMode(.large)
-                .toolbarColorScheme(selectedTheme.palette.preferredColorScheme, for: .navigationBar)
-                .toolbar {
-                    rootTabToolbarContent
-                }
+                .tabItem { Label(AppTab.credit.title, systemImage: AppTab.credit.symbol) }
+                .tag(AppTab.credit)
             }
+            .environment(
+                \.rootTabScrollState,
+                rootTabScrollState
+            )
+            .id("tabs-\(selectedThemeRawValue)")
+            .tint(AppTheme.Colors.primaryOrange)
 
             Button {
                 isAssistantPresented = true
             } label: {
                 Image(systemName: "sparkles")
                     .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppTheme.Colors.controlText)
                     .frame(width: 56, height: 56)
                     .background(AppTheme.Gradients.primary)
                     .clipShape(Circle())
@@ -179,80 +311,124 @@ struct AppView: View {
             .padding(.trailing, AppTheme.Spacing.sm)
             .padding(.bottom, 58)
             .accessibilityLabel("Open Assistant")
+
         }
-        .background(AppTheme.Colors.appBackground)
+        .background {
+            PremiumRootBackground()
+        }
         .dismissKeyboardOnBackgroundTap()
         .preferredColorScheme(selectedTheme.palette.preferredColorScheme)
         .sheet(item: $activeSheet, onDismiss: presentPendingSheet) { sheet in
             switch sheet {
             case .addMenu:
-                AddMenuSheetView { action in
+                AddMenuSheetView(actions: selectedTabAddActions) { action in
                     pendingSheetAfterDismiss = sheetDestination(for: action)
                     activeSheet = nil
                 }
             case .addSpend:
                 SpendingSheetView(store: store)
-            case .addIncome:
-                AddPaycheckSheetView(store: store)
             case .addBill:
                 AddBillSheetView(store: store)
             case .addPot:
                 PotFormView(store: store)
             case .addCard:
                 CardFormView(store: store)
-            case .addDebt:
-                AddDebtSheetView(store: store)
             case .spendingHistory:
                 SpendingHistorySheetView(store: store)
             case .calendar:
                 CalendarSheetView(store: store)
-            case .settings:
-                SettingsSheetView(store: store)
             case .accounts:
                 AccountsSheetView(store: store)
             case .potHistory:
                 PotHistorySheetView(store: store)
-            case .cardPayments:
-                CardPaymentFlowSheetView(store: store)
             }
         }
         .sheet(isPresented: $isAssistantPresented) {
             AssistantView(store: store, presentationMode: .modal)
         }
         .onAppear {
-            configureTabBarAppearance()
+            configureSystemChromeAppearance()
         }
         .onChange(of: selectedThemeRawValue) { _, _ in
-            configureTabBarAppearance()
+            configureSystemChromeAppearance()
+        }
+    }
+
+    @ViewBuilder
+    private func tabNavigationRoot<Content: View>(for tab: AppTab, @ViewBuilder content: () -> Content) -> some View {
+        NavigationStack {
+            content()
+                .navigationTitle(navigationTitle(for: tab))
+                .navigationBarTitleDisplayMode(AppNavigationTitleDisplayPolicy.mode(for: tab))
+                .toolbarColorScheme(selectedTheme.palette.preferredColorScheme, for: .navigationBar)
+                .toolbar {
+                    tabToolbarContent(for: tab)
+                }
+                .navigationDestination(item: $activeNavigationDestination) { destination in
+                    navigationDestination(for: destination)
+                }
         }
     }
 
     @ToolbarContentBuilder
-    private var rootTabToolbarContent: some ToolbarContent {
+    private func tabToolbarContent(for tab: AppTab) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarLeading) {
+            ForEach(leadingToolbarActions(for: tab)) { action in
+                toolbarButton(for: action)
+            }
+        }
+
         ToolbarItemGroup(placement: .topBarTrailing) {
-            ForEach(selectedTabToolbarActions) { action in
-                AppToolbarButton(action: action)
+            ForEach(toolbarActions(for: tab)) { action in
+                toolbarButton(for: action)
             }
         }
     }
 
-    private var selectedTabToolbarActions: [AppToolbarAction] {
-        AppToolbarPolicy.actionIds(for: selectedTab).compactMap(toolbarAction)
+    private func leadingToolbarActions(for tab: AppTab) -> [AppToolbarAction] {
+        AppToolbarPolicy.leadingActionIds(for: tab).compactMap(toolbarAction)
+    }
+
+    private func toolbarActions(for tab: AppTab) -> [AppToolbarAction] {
+        AppToolbarPolicy.actionIds(for: tab).compactMap(toolbarAction)
     }
 
     private var selectedTheme: AppThemePreset {
         AppThemePreset.resolved(from: selectedThemeRawValue)
     }
 
+    private var selectedTabAddActions: [AppAddAction] {
+        AppAddMenuPolicy.actions(for: selectedTab)
+    }
+
+    private func navigationTitle(for tab: AppTab) -> String {
+        AppNavigationTitlePolicy.title(for: tab, activeAccountName: activePlannerAccountName)
+    }
+
+    private var activePlannerAccountName: String? {
+        store.activePlannerAccount?.name
+            ?? store.plannerAccounts.first { $0.id == store.activePlannerAccountId }?.name
+    }
+
     private func toolbarAction(for id: String) -> AppToolbarAction? {
         switch id {
-        case "settings-toolbar-action":
-            AppToolbarAction(id: id, symbol: "gearshape", accessibilityLabel: "Open Settings") {
-                activeSheet = .settings
+        case "profile-menu-toolbar-action":
+            AppToolbarAction(id: id, symbol: "person.fill", accessibilityLabel: "Open Profile") {}
+        case "plan-calendar-toolbar-action":
+            AppToolbarAction(id: id, symbol: "calendar", accessibilityLabel: "Open Planning Calendar") {
+                activeNavigationDestination = .plan
             }
         case "spending-history-toolbar-action":
             AppToolbarAction(id: id, symbol: "receipt", accessibilityLabel: "Open Spending History") {
                 activeSheet = .spendingHistory
+            }
+        case "activity-infinity-toolbar-action":
+            AppToolbarAction(
+                id: id,
+                symbol: ActivityTimelineLayoutPolicy.toolbarSymbol,
+                accessibilityLabel: "Open Account Timeline"
+            ) {
+                activeNavigationDestination = .accountTimeline
             }
         case "pot-history-toolbar-action":
             AppToolbarAction(id: id, symbol: "clock.arrow.circlepath", accessibilityLabel: "Pots History") {
@@ -260,10 +436,29 @@ struct AppView: View {
             }
         case "add-menu-toolbar-action":
             AppToolbarAction(id: id, symbol: "plus", accessibilityLabel: "Open Add Menu") {
-                activeSheet = .addMenu
+                openAddFlowForSelectedTab()
             }
         default:
             nil
+        }
+    }
+
+    @ViewBuilder
+    private func toolbarButton(for action: AppToolbarAction) -> some View {
+        if action.id == "profile-menu-toolbar-action" {
+            ProfileToolbarButton(action: action, store: store)
+        } else {
+            AppToolbarButton(action: action)
+        }
+    }
+
+    @ViewBuilder
+    private func navigationDestination(for destination: AppNavigationDestination) -> some View {
+        switch destination {
+        case .plan:
+            PlanView(store: store, navigationMode: .inline, toolbarMode: .none)
+        case .accountTimeline:
+            ActivityAccountTimelineView(store: store)
         }
     }
 
@@ -271,21 +466,38 @@ struct AppView: View {
         Binding {
             selectedTab
         } set: { newTab in
-            withAnimation(.smooth(duration: 0.32)) {
-                selectedTab = newTab
-            }
+            selectTab(newTab)
+        }
+    }
+
+    private func selectTab(_ tab: AppTab) {
+        requestRootScrollReset(for: tab)
+        selectedTab = tab
+    }
+
+    private func requestRootScrollReset(for tab: AppTab) {
+        rootTabScrollState = RootTabScrollState(
+            selectedTitle: tab.title,
+            revision: rootTabScrollState.revision + 1
+        )
+    }
+
+    private func openAddFlowForSelectedTab() {
+        if AppAddMenuPolicy.opensSingleActionDirectly,
+           selectedTabAddActions.count == 1,
+           let action = selectedTabAddActions.first {
+            activeSheet = sheetDestination(for: action)
+        } else {
+            activeSheet = .addMenu
         }
     }
 
     private func sheetDestination(for action: AppAddAction) -> AppSheetDestination {
         switch action {
         case .spend: .addSpend
-        case .income: .addIncome
         case .bill: .addBill
         case .pot: .addPot
         case .card: .addCard
-        case .cardPayment: .cardPayments
-        case .debt: .addDebt
         }
     }
 
@@ -295,28 +507,124 @@ struct AppView: View {
         activeSheet = pendingSheetAfterDismiss
     }
 
+    private func configureSystemChromeAppearance() {
+        configureNavigationBarAppearance()
+        configureTabBarAppearance()
+    }
+
+    private func configureNavigationBarAppearance() {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(AppTheme.Colors.appBackground)
+        appearance.backgroundEffect = nil
+        appearance.shadowColor = UIColor(AppTheme.Colors.divider)
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.primaryText)]
+        appearance.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.primaryText)]
+
+        let buttonAppearance = UIBarButtonItemAppearance()
+        buttonAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.accent)]
+        buttonAppearance.highlighted.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.accentHighlight)]
+        appearance.buttonAppearance = buttonAppearance
+        appearance.doneButtonAppearance = buttonAppearance
+
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().compactAppearance = appearance
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().tintColor = UIColor(AppTheme.Colors.accent)
+    }
+
     private func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = UIColor(AppTheme.Colors.surface)
-        appearance.stackedLayoutAppearance.selected.iconColor = UIColor(AppTheme.Colors.primaryOrange)
-        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.primaryOrange)]
-        appearance.stackedLayoutAppearance.normal.iconColor = UIColor(AppTheme.Colors.tertiaryText)
-        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.tertiaryText)]
+        appearance.backgroundEffect = nil
+        appearance.shadowColor = UIColor(AppTheme.Colors.divider)
+        appearance.selectionIndicatorTintColor = UIColor(AppTheme.Colors.selectedFill)
+        configureTabBarItemAppearance(appearance.stackedLayoutAppearance)
+        configureTabBarItemAppearance(appearance.inlineLayoutAppearance)
+        configureTabBarItemAppearance(appearance.compactInlineLayoutAppearance)
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+        UITabBar.appearance().tintColor = UIColor(AppTheme.Colors.accent)
+        UITabBar.appearance().unselectedItemTintColor = UIColor(AppTheme.Colors.tertiaryText)
+    }
+
+    private func configureTabBarItemAppearance(_ itemAppearance: UITabBarItemAppearance) {
+        itemAppearance.selected.iconColor = UIColor(AppTheme.Colors.accent)
+        itemAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.accent)]
+        itemAppearance.normal.iconColor = UIColor(AppTheme.Colors.tertiaryText)
+        itemAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(AppTheme.Colors.tertiaryText)]
+    }
+}
+
+private struct PremiumRootBackground: View {
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+
+    var body: some View {
+        ZStack {
+            AppTheme.Colors.appBackground
+            AppTheme.Gradients.screenBackground
+        }
+        .id("root-background-\(selectedThemeRawValue)")
+        .ignoresSafeArea()
+    }
+}
+
+private struct ProfileToolbarButton: View {
+    let action: AppToolbarAction
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        NavigationLink {
+            ProfileMenuScreenView(store: store)
+        } label: {
+            if let activeAccount {
+                PlannerAccountAvatarCircle(
+                    account: activeAccount,
+                    image: store.plannerAccountAvatarImage(for: activeAccount),
+                    size: 34
+                )
+            } else {
+                fallbackAvatar
+            }
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .accessibilityLabel(action.accessibilityLabel)
+    }
+
+    private var activeAccount: PlannerAccount? {
+        store.activePlannerAccount
+            ?? store.plannerAccounts.first { $0.id == store.activePlannerAccountId }
+            ?? store.plannerAccounts.first
+    }
+
+    private var fallbackAvatar: some View {
+        ZStack {
+            Circle()
+                .fill(AppTheme.Colors.elevatedSurface)
+            Image(systemName: action.symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+        }
+        .frame(width: 34, height: 34)
+        .overlay(
+            Circle()
+                .stroke(AppTheme.Colors.border, lineWidth: 1)
+        )
+        .shadow(color: AppTheme.Colors.glowOrange.opacity(0.35), radius: 10, y: 4)
     }
 }
 
 private struct AddMenuSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    var actions: [AppAddAction]
     var onSelect: (AppAddAction) -> Void
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                    ForEach(AppAddAction.allCases) { action in
+                    ForEach(actions) { action in
                         Button {
                             onSelect(action)
                         } label: {
@@ -353,6 +661,7 @@ private struct AddMenuSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add")
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
@@ -360,263 +669,183 @@ private struct AddMenuSheetView: View {
                     }
                 }
             }
-            .appPlaceholderToolbar(.modalSingle)
         }
     }
 }
 
-private struct AccountsSheetView: View {
-    @Environment(\.dismiss) private var dismiss
+private struct ProfileMenuScreenView: View {
+    @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
-    @State private var newAccountName = ""
-    @State private var errorMessage: String?
-    @State private var accountToDelete: PlannerAccount?
-    @State private var accountToRename: PlannerAccount?
-    @State private var renameName = ""
-    @State private var isRenamePresented = false
+    @State private var isAddIncomePresented = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                    headerCard
-
-                    if let errorMessage {
-                        ErrorBanner(message: errorMessage) {
-                            self.errorMessage = nil
-                        }
-                    }
-
-                    createAccountCard
-
-                    VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                        SectionTitle("Your accounts")
-                        ForEach(store.plannerAccounts) { account in
-                            accountRow(account)
-                        }
-                    }
-                }
-                .padding(AppTheme.Spacing.lg)
-            }
-            .premiumScreenBackground()
-            .navigationTitle("Accounts")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-            }
-            .appPlaceholderToolbar(.modalSingle)
+        ScreenScaffold(
+            title: "Profile",
+            subtitle: "Account profile and app preferences.",
+            navigationMode: .inline,
+            toolbarMode: .none
+        ) {
+            profileHeader
+            actionsCard
+            signOutCard
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .alert("Rename account", isPresented: $isRenamePresented) {
-            TextField("Account name", text: $renameName)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                guard let accountToRename else { return }
-                runAccountAction {
-                    try await store.renamePlannerAccount(id: accountToRename.id, name: renameName)
-                }
-            }
-        } message: {
-            Text("Give this planner account a short, clear name.")
-        }
-        .alert("Delete account?", isPresented: deleteConfirmationBinding, presenting: accountToDelete) { account in
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                runAccountAction {
-                    try await store.deletePlannerAccount(id: account.id)
-                }
-            }
-        } message: { account in
-            Text("This removes \(account.name) and all planner data stored inside it on this iPhone.")
+        .sheet(isPresented: $isAddIncomePresented) {
+            AddPaycheckSheetView(store: store)
         }
     }
 
-    private var headerCard: some View {
-        AppCard(glow: true) {
-            HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.Gradients.primary)
-                    Image(systemName: "person.2.fill")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 44, height: 44)
+    private var profileHeader: some View {
+        VStack(spacing: AppTheme.Spacing.sm) {
+            profileAvatar
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Planner accounts")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text("Keep separate money setups for different parts of life.")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
+            Text(activeAccountName)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.76)
 
-                Spacer(minLength: AppTheme.Spacing.sm)
+            Text("\(store.plannerAccounts.count) of \(PlannerAccountCollection.maxAccounts) accounts")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, AppTheme.Spacing.sm)
+        .padding(.bottom, AppTheme.Spacing.md)
+    }
 
-                Pill(
-                    text: "\(store.plannerAccounts.count)/\(PlannerAccountCollection.maxAccounts)",
-                    systemImage: nil,
-                    color: store.canCreatePlannerAccount ? AppTheme.Colors.primaryOrange : AppTheme.Colors.tertiaryText
+    private var profileAvatar: some View {
+        Group {
+            if let activeAccount {
+                PlannerAccountAvatarCircle(
+                    account: activeAccount,
+                    image: store.plannerAccountAvatarImage(for: activeAccount),
+                    size: 86
                 )
+            } else {
+                fallbackProfileAvatar
             }
         }
+        .accessibilityLabel("Profile image for \(activeAccountName)")
     }
 
-    private var createAccountCard: some View {
+    private var actionsCard: some View {
         AppCard {
-            SectionTitle("Create account")
-            TextField("Account name", text: $newAccountName)
-                .textFieldStyle(AppTextFieldStyle())
-                .textInputAutocapitalization(.words)
-                .disabled(!store.canCreatePlannerAccount)
-
-            PrimaryButton(
-                title: store.canCreatePlannerAccount ? "Create account" : "Account limit reached",
-                systemImage: store.canCreatePlannerAccount ? "plus" : "lock",
-                isDisabled: newAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.canCreatePlannerAccount
-            ) {
-                let name = newAccountName
-                runAccountAction {
-                    try await store.createPlannerAccount(named: name)
-                    await MainActor.run {
-                        newAccountName = ""
-                    }
-                }
-            }
-        }
-    }
-
-    private func accountRow(_ account: PlannerAccount) -> some View {
-        let isActive = account.id == store.activePlannerAccountId
-
-        return AppCard(glow: isActive) {
-            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                Circle()
-                    .fill(Color(hex: account.color))
-                    .frame(width: 13, height: 13)
-                    .padding(.top, 6)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: AppTheme.Spacing.sm) {
-                        Text(account.name)
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-                            .lineLimit(1)
-
-                        if isActive {
-                            Pill(text: "Active", systemImage: "checkmark", color: AppTheme.Colors.success)
-                        }
-                    }
-
-                    Text(accountSummary(account))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: AppTheme.Spacing.sm)
-            }
-
-            HStack(spacing: AppTheme.Spacing.sm) {
-                if isActive {
-                    Text("Open now")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.success)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 34)
-                        .background(AppTheme.Colors.success.opacity(0.12))
-                        .clipShape(Capsule())
-                } else {
+            ForEach(Array(ProfileMenuAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
+                if action == .addIncome {
                     Button {
-                        runAccountAction {
-                            try await store.switchPlannerAccount(id: account.id)
-                        }
+                        isAddIncomePresented = true
                     } label: {
-                        Label("Use", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.primaryOrange)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 34)
-                            .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                            .clipShape(Capsule())
+                        ProfileMenuActionRow(action: action)
                     }
-                    .buttonStyle(ScaleButtonStyle())
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile-menu-\(action.rawValue)")
+                } else {
+                    NavigationLink {
+                        profileDestination(for: action)
+                    } label: {
+                        ProfileMenuActionRow(action: action)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile-menu-\(action.rawValue)")
                 }
 
-                Button {
-                    accountToRename = account
-                    renameName = account.name
-                    isRenamePresented = true
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                        .frame(width: 42, height: 34)
-                        .background(AppTheme.Colors.elevatedSurface)
-                        .clipShape(Capsule())
+                if index < ProfileMenuAction.allCases.count - 1 {
+                    AppDivider()
                 }
-                .buttonStyle(ScaleButtonStyle())
-                .accessibilityLabel("Rename \(account.name)")
-
-                Button {
-                    accountToDelete = account
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(store.plannerAccounts.count > 1 ? AppTheme.Colors.danger : AppTheme.Colors.tertiaryText)
-                        .frame(width: 42, height: 34)
-                        .background(AppTheme.Colors.elevatedSurface)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(ScaleButtonStyle())
-                .disabled(store.plannerAccounts.count <= 1)
-                .accessibilityLabel("Delete \(account.name)")
             }
         }
     }
 
-    private var deleteConfirmationBinding: Binding<Bool> {
-        Binding {
-            accountToDelete != nil
-        } set: { isPresented in
-            if !isPresented {
-                accountToDelete = nil
+    private var signOutCard: some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                SectionTitle("Account")
+                SecondaryButton(
+                    title: authSession.isWorking ? "Signing Out..." : "Sign Out",
+                    systemImage: "rectangle.portrait.and.arrow.right",
+                    role: .destructive
+                ) {
+                    Task {
+                        await authSession.signOut()
+                    }
+                }
+                .disabled(authSession.isWorking)
+                .accessibilityIdentifier("profile-sign-out")
             }
         }
     }
 
-    private func accountSummary(_ account: PlannerAccount) -> String {
-        let snapshot = account.snapshot
-        let potCount = snapshot.pots.filter { !$0.archived }.count
-        let cardCount = snapshot.creditCards.filter { !$0.archived }.count
-        let debtCount = snapshot.debts.filter { $0.status.isActiveLike }.count
-        let billCount = snapshot.recurringPayments.filter(\.active).count
-        let activityCount = snapshot.transactions.count
-
-        var parts: [String] = []
-        if potCount > 0 { parts.append("\(potCount) pot\(potCount == 1 ? "" : "s")") }
-        if billCount > 0 { parts.append("\(billCount) bill\(billCount == 1 ? "" : "s")") }
-        if cardCount > 0 { parts.append("\(cardCount) card\(cardCount == 1 ? "" : "s")") }
-        if debtCount > 0 { parts.append("\(debtCount) debt\(debtCount == 1 ? "" : "s")") }
-        if activityCount > 0 { parts.append("\(activityCount) activity") }
-
-        return parts.isEmpty ? "No planner data yet" : parts.joined(separator: " · ")
+    private var fallbackProfileAvatar: some View {
+        ZStack {
+            Circle()
+                .fill(AppTheme.Gradients.primary)
+            Image(systemName: "person.fill")
+                .font(.title.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.controlText)
+        }
+        .frame(width: 86, height: 86)
+        .overlay(
+            Circle()
+                .stroke(AppTheme.Colors.primaryText.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: AppTheme.Colors.glowOrange, radius: 18, y: 8)
     }
 
-    private func runAccountAction(_ action: @escaping () async throws -> Void) {
-        Task {
-            do {
-                try await action()
-                errorMessage = nil
-            } catch {
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
+    private var activeAccount: PlannerAccount? {
+        store.activePlannerAccount
+            ?? store.plannerAccounts.first { $0.id == store.activePlannerAccountId }
+            ?? store.plannerAccounts.first
+    }
+
+    private var activeAccountName: String {
+        activeAccount?.name ?? "Planner account"
+    }
+
+    @ViewBuilder
+    private func profileDestination(for action: ProfileMenuAction) -> some View {
+        switch action {
+        case .addIncome:
+            EmptyView()
+        case .appearance:
+            AppearanceSettingsView(navigationMode: .inline, toolbarMode: .none)
+        case .history:
+            HistoryView(store: store)
+        case .creditStatements:
+            StatementsView(store: store, navigationMode: .inline, toolbarMode: .none)
         }
+    }
+}
+
+private struct ProfileMenuActionRow: View {
+    var action: ProfileMenuAction
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            Image(systemName: action.symbol)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                .frame(width: 38, height: 38)
+                .background(AppTheme.Colors.primaryOrange.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(action.title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(action.subtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+        }
+        .padding(.vertical, AppTheme.Spacing.sm)
+        .contentShape(Rectangle())
     }
 }
 

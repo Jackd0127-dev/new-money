@@ -86,17 +86,17 @@ struct PlaceholderAuthService: AuthService {
 
 @MainActor
 protocol CloudSyncService {
-    func pullSnapshot(for user: AuthUser) async throws -> CloudPlannerSnapshotRecord?
-    func pushSnapshot(_ snapshot: PlannerSnapshot, for user: AuthUser) async throws
+    func pullAccountCollection(for user: AuthUser) async throws -> CloudPlannerAccountCollectionRecord?
+    func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws
 }
 
 struct PlaceholderCloudSyncService: CloudSyncService {
     // TODO: Mirror the web Firestore document users/{uid}/planner/snapshot once native auth can provide a UID.
-    func pullSnapshot(for user: AuthUser) async throws -> CloudPlannerSnapshotRecord? {
+    func pullAccountCollection(for user: AuthUser) async throws -> CloudPlannerAccountCollectionRecord? {
         throw ServicePlaceholderError.missingFirestoreConfiguration
     }
 
-    func pushSnapshot(_ snapshot: PlannerSnapshot, for user: AuthUser) async throws {
+    func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
         throw ServicePlaceholderError.missingFirestoreConfiguration
     }
 }

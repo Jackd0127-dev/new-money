@@ -30,7 +30,7 @@ struct PaydayView: View {
                     VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                         Text("Spent this pay period")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.warmSand)
+                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
                         Text("-\(MoneyParser.formatPence(selectedPeriodSpendPence))")
                             .font(.system(.largeTitle, design: .rounded, weight: .bold))
                             .foregroundStyle(selectedPeriodSpendPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText)
@@ -222,7 +222,6 @@ struct AddPaycheckSheetView: View {
                     Button("Close") { dismiss() }
                 }
             }
-            .appPlaceholderToolbar(.modalSingle)
         }
     }
 }

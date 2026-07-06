@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum SpendingFormLayoutPolicy {
+    static let accountPickerStyle = "selectionFieldBox"
+}
+
 struct SpendingView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
@@ -26,15 +30,17 @@ struct SpendingView: View {
                 .pickerStyle(.segmented)
 
                 if paymentMethod == .pot {
-                    Picker("Pot", selection: $selectedPotId) {
-                        ForEach(store.activePots) { Text($0.name).tag($0.id) }
+                    SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                        ForEach(store.activePots) { pot in
+                            Button(pot.name) { selectedPotId = pot.id }
+                        }
                     }
-                    .pickerStyle(.menu)
                 } else {
-                    Picker("Card", selection: $selectedCardId) {
-                        ForEach(store.activeCards) { Text($0.name).tag($0.id) }
+                    SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
+                        ForEach(store.activeCards) { card in
+                            Button(card.name) { selectedCardId = card.id }
+                        }
                     }
-                    .pickerStyle(.menu)
                 }
 
                 MoneyField(title: "Amount", text: $amount)
@@ -64,6 +70,14 @@ struct SpendingView: View {
 
     private var canSubmit: Bool {
         MoneyParser.parsePoundsToPence(amount) > 0 && (paymentMethod == .pot ? !selectedPotId.isEmpty : !selectedCardId.isEmpty)
+    }
+
+    private var selectedPotName: String {
+        store.activePots.first { $0.id == selectedPotId }?.name ?? ""
+    }
+
+    private var selectedCardName: String {
+        store.activeCards.first { $0.id == selectedCardId }?.name ?? ""
     }
 }
 
@@ -363,6 +377,11 @@ struct SpendingSheetView: View {
     }
 }
 
+enum AddBillFormLayoutPolicy {
+    static let hidesNavigationDivider = true
+    static let allowedFrequencies: [RecurringFrequency] = [.weekly, .biweekly, .monthly, .yearly]
+}
+
 struct AddBillSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
@@ -373,6 +392,7 @@ struct AddBillSheetView: View {
     @State private var priority: RecurringPriority = .essential
     @State private var potId = ""
     @State private var cardId = ""
+    @State private var billGroupId = ""
     @State private var routeToCard = false
 
     var body: some View {
@@ -384,13 +404,23 @@ struct AddBillSheetView: View {
                     MoneyField(title: "Amount", text: $amount)
                     TextField("Due day", text: $dueDay).keyboardType(.numberPad).textFieldStyle(AppTextFieldStyle())
                     Picker("Frequency", selection: $frequency) {
-                        ForEach(RecurringFrequency.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                        ForEach(AddBillFormLayoutPolicy.allowedFrequencies) { frequency in
+                            Text(frequency.rawValue.capitalized).tag(frequency)
+                        }
                     }
                     .pickerStyle(.segmented)
                     Picker("Priority", selection: $priority) {
                         ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    if !store.activeBillGroups.isEmpty {
+                        SelectionField(title: "Group", value: selectedBillGroupName, placeholder: "Ungrouped", systemImage: "folder") {
+                            Button("Ungrouped") { billGroupId = "" }
+                            ForEach(store.activeBillGroups) { group in
+                                Button(group.name) { billGroupId = group.id }
+                            }
+                        }
+                    }
                     Toggle("Linked to card", isOn: $routeToCard)
                         .tint(AppTheme.Colors.primaryOrange)
                     if routeToCard {
@@ -426,7 +456,8 @@ struct AddBillSheetView: View {
                             frequency: frequency,
                             potId: cleanPotId,
                             creditCardId: routeToCard ? cardId.nilIfBlank : nil,
-                            priority: priority
+                            priority: priority,
+                            billGroupId: billGroupId.nilIfBlank
                         )
                         reset()
                         dismiss()
@@ -436,8 +467,8 @@ struct AddBillSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add bill")
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-            .appPlaceholderToolbar(.modalSingle)
         }
         .onAppear {
             potId = store.activePots.first?.id ?? ""
@@ -454,6 +485,7 @@ struct AddBillSheetView: View {
         dueDay = ""
         frequency = .monthly
         priority = .essential
+        billGroupId = ""
         routeToCard = false
     }
 
@@ -467,6 +499,10 @@ struct AddBillSheetView: View {
 
     private var selectedPotName: String {
         store.activePots.first { $0.id == potId }?.name ?? ""
+    }
+
+    private var selectedBillGroupName: String {
+        store.activeBillGroups.first { $0.id == billGroupId }?.name ?? ""
     }
 
     private var cleanPotId: String? {
@@ -485,147 +521,207 @@ struct AddBillSheetView: View {
     }
 }
 
+enum BillsSection: String, Equatable {
+    case overview
+    case groups
+    case upcoming
+    case billGroups
+}
+
+enum BillsOverviewPresentation: Equatable {
+    case navigationPush
+}
+
+enum BillsLayoutPolicy {
+    static let sections: [BillsSection] = [.overview, .groups, .upcoming, .billGroups]
+    static let overviewPresentation: BillsOverviewPresentation = .navigationPush
+    static let groupCreationPlacement = "groupsHeader"
+    static let showsCreditCardAndPotLinksOnBills = true
+    static let billGroupingPersistence = "recurringPayment.billGroupId"
+    static let groupFilterScrollClipsContent = false
+    static let groupFilterHorizontalContentPadding: CGFloat = 3
+    static let overviewHeroUsesGlow = true
+    static let detailShowsDuplicateUpcomingEmptyState = false
+}
+
 struct BillsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
-    @State private var name = ""
-    @State private var amount = ""
-    @State private var dueDay = ""
-    @State private var frequency: RecurringFrequency = .monthly
-    @State private var priority: RecurringPriority = .essential
-    @State private var potId = ""
-    @State private var cardId = ""
-    @State private var routeToCard = false
+    @State private var selectedGroupId: String?
+    @State private var isNewGroupPresented = false
+    @State private var newGroupName = ""
+
+    private let ungroupedGroupId = "ungrouped"
 
     var body: some View {
         ScreenScaffold(
             title: "Bills",
-            subtitle: "Recurring payment templates and upcoming bill agenda.",
+            subtitle: "Recurring bills, groups, due dates, and linked pots or cards.",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
-            AppCard(glow: true) {
-                SectionTitle("Add recurring payment")
-                TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
-                MoneyField(title: "Amount", text: $amount)
-                TextField("Due day", text: $dueDay).keyboardType(.numberPad).textFieldStyle(AppTextFieldStyle())
-                Picker("Frequency", selection: $frequency) {
-                    ForEach(RecurringFrequency.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Picker("Priority", selection: $priority) {
-                    ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Toggle("Linked to card", isOn: $routeToCard)
-                    .tint(AppTheme.Colors.primaryOrange)
-                if routeToCard {
-                    SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
-                        Button("No card") { cardId = "" }
-                        ForEach(store.activeCards) { card in
-                            Button(card.name) { cardId = card.id }
-                        }
-                    }
-                    SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
-                        Button("No pot") { potId = "" }
-                        if cardLinkedPots.isEmpty {
-                            Text("No linked card pots")
-                        } else {
-                            ForEach(cardLinkedPots) { pot in
-                                Button(pot.name) { potId = pot.id }
-                            }
-                        }
-                    }
-                } else {
-                    SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
-                        Button("No pot") { potId = "" }
-                        ForEach(store.activePots) { pot in
-                            Button(pot.name) { potId = pot.id }
-                        }
-                    }
-                }
-                PrimaryButton(title: "Add bill", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(amount) <= 0) {
-                    store.addRecurringPayment(
-                        name: name,
-                        amountPence: MoneyParser.parsePoundsToPence(amount),
-                        dueDay: Int(dueDay),
-                        frequency: frequency,
-                        potId: cleanPotId,
-                        creditCardId: routeToCard ? cardId.nilIfBlank : nil,
-                        priority: priority
-                    )
-                    name = ""
-                    amount = ""
-                }
+            ForEach(BillsLayoutPolicy.sections, id: \.rawValue) { section in
+                billsSection(section)
             }
-
-            upcomingAgenda
-            billList
         }
-        .onAppear {
-            potId = store.activePots.first?.id ?? ""
-            cardId = store.activeCards.first?.id ?? ""
-            normalizeSelectedCardPot()
+        .alert("New bill group", isPresented: $isNewGroupPresented) {
+            TextField("Group name", text: $newGroupName)
+            Button("Cancel", role: .cancel) {
+                newGroupName = ""
+            }
+            Button("Create") {
+                createGroup()
+            }
+            .disabled(newGroupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Use groups to keep subscriptions, home bills, card bills, and savings transfers tidy.")
         }
-        .onChange(of: cardId) { _, _ in normalizeSelectedCardPot() }
-        .onChange(of: routeToCard) { _, _ in normalizeSelectedCardPot() }
-    }
-
-    private var upcomingAgenda: some View {
-        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 30)
-        let upcoming = PlannerDerivedData.recurringOccurrences(payments: store.snapshot.recurringPayments, startDate: store.todayIso, endDate: endDate)
-        return VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            SectionTitle("Next 30 days")
-            AppCard {
-                if upcoming.isEmpty {
-                    EmptyStateView(title: "No upcoming bills", message: "Recurring payments with due dates appear here.", systemImage: "calendar")
-                } else {
-                    ForEach(upcoming.prefix(8)) { occurrence in
-                        MetricRow(label: "\(occurrence.dueDate) · \(occurrence.payment.name)", value: MoneyParser.formatPence(occurrence.amountPence), valueColor: AppTheme.Colors.warning)
-                    }
-                }
+        .onChange(of: store.activeBillGroups.map(\.id)) { _, groupIds in
+            if let selectedGroupId,
+               selectedGroupId != ungroupedGroupId,
+               !groupIds.contains(selectedGroupId) {
+                self.selectedGroupId = nil
             }
         }
     }
 
-    private var billList: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            SectionTitle("Bills list")
-            if store.snapshot.recurringPayments.isEmpty {
-                AppCard { EmptyStateView(title: "No recurring payments", message: "Add rent, subscriptions, utilities, and card-linked bills.", systemImage: "calendar.badge.plus") }
-            } else {
-                ForEach(store.snapshot.recurringPayments) { payment in
-                    AppCard {
-                        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(payment.name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
-                                    .lineLimit(1)
-                                Text("\(payment.frequency.rawValue.capitalized) · \(billDueLabel(payment.dueDay)) · \(payment.priority.rawValue.capitalized)")
-                                    .font(.caption)
-                                    .foregroundStyle(AppTheme.Colors.secondaryText)
-                                Text(billLinkLabel(payment))
-                                    .font(.caption)
-                                    .foregroundStyle(AppTheme.Colors.tertiaryText)
-                                    .lineLimit(1)
-                            }
+    @ViewBuilder
+    private func billsSection(_ section: BillsSection) -> some View {
+        switch section {
+        case .overview:
+            overviewCard
+        case .groups:
+            groupsSection
+        case .upcoming:
+            upcomingSection
+        case .billGroups:
+            groupedBillsSection
+        }
+    }
 
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 8) {
-                                Text(MoneyParser.formatPence(payment.amountPence))
-                                    .font(.headline.weight(.bold))
-                                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-                                Button {
-                                    store.archiveRecurringPayment(id: payment.id)
-                                } label: {
-                                    Label("Archive", systemImage: "archivebox")
-                                }
+    private var overviewCard: some View {
+        NavigationLink {
+            BillsOverviewDetailView(store: store)
+        } label: {
+            AppCard(glow: BillsLayoutPolicy.overviewHeroUsesGlow) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                    HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("Bills")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(AppTheme.Colors.danger)
+                                .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                                .textCase(.uppercase)
+                            Text(MoneyParser.formatPence(activeTemplateTotalPence))
+                                .font(.system(.title, design: .rounded, weight: .bold))
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Text(activeBillCount == 0 ? "No active bills yet" : "\(activeBillCount) active templates")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.sm)
+
+                        VStack(alignment: .trailing, spacing: 8) {
+                            HStack(spacing: 5) {
+                                Text("Details")
+                                Image(systemName: "chevron.right")
                             }
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.Colors.primaryOrange.opacity(0.13))
+                            .clipShape(Capsule())
+
+                            Text(nextBillTitle)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            Text(nextBillDate)
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        }
+                    }
+
+                    HStack(spacing: AppTheme.Spacing.sm) {
+                        BillsOverviewPill(title: "\(linkedBillCount)", subtitle: "linked", color: AppTheme.Colors.success)
+                        BillsOverviewPill(title: "\(store.activeBillGroups.count)", subtitle: "groups", color: AppTheme.Colors.primaryOrange)
+                        BillsOverviewPill(title: "\(ungroupedBills.count)", subtitle: "ungrouped", color: AppTheme.Colors.secondaryText)
+                    }
+                }
+            }
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .accessibilityLabel("Open bill details")
+        .accessibilityHint("Shows bill totals, linked bills, upcoming dates, and groups.")
+    }
+
+    private var groupsSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Groups", actionTitle: "New group") {
+                isNewGroupPresented = true
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    BillsGroupFilterPill(
+                        title: "All",
+                        count: sortedBills.count,
+                        color: AppTheme.Colors.primaryOrange,
+                        isSelected: selectedGroupId == nil
+                    ) {
+                        selectedGroupId = nil
+                    }
+
+                    ForEach(store.activeBillGroups) { group in
+                        BillsGroupFilterPill(
+                            title: group.name,
+                            count: bills(in: group).count,
+                            color: Color(hex: group.color),
+                            isSelected: selectedGroupId == group.id
+                        ) {
+                            selectedGroupId = group.id
+                        }
+                        .contextMenu {
+                            Button("Delete group", role: .destructive) {
+                                store.deleteBillGroup(id: group.id)
+                            }
+                        }
+                    }
+
+                    if !ungroupedBills.isEmpty {
+                        BillsGroupFilterPill(
+                            title: "Ungrouped",
+                            count: ungroupedBills.count,
+                            color: AppTheme.Colors.tertiaryText,
+                            isSelected: selectedGroupId == ungroupedGroupId
+                        ) {
+                            selectedGroupId = ungroupedGroupId
+                        }
+                    }
+                }
+                .padding(.horizontal, BillsLayoutPolicy.groupFilterHorizontalContentPadding)
+                .padding(.vertical, 4)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    private var upcomingSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Taking soon")
+            if upcomingOccurrences.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No upcoming bills", message: "Bills with due dates will appear here.", systemImage: "calendar")
+                }
+            } else {
+                AppCard {
+                    ForEach(Array(upcomingOccurrences.prefix(6).enumerated()), id: \.element.id) { index, occurrence in
+                        BillsUpcomingRow(occurrence: occurrence, snapshot: store.snapshot)
+                        if index != min(upcomingOccurrences.count, 6) - 1 {
+                            AppDivider()
                         }
                     }
                 }
@@ -633,52 +729,707 @@ struct BillsView: View {
         }
     }
 
-    private func billDueLabel(_ dueDay: Int?) -> String {
-        dueDay.map { "Day \($0)" } ?? "No due day"
-    }
-
-    private func billLinkLabel(_ payment: RecurringPayment) -> String {
-        let potName = payment.potId.flatMap { potId in store.snapshot.pots.first { $0.id == potId }?.name }
-        let cardName = payment.creditCardId.flatMap { cardId in store.snapshot.creditCards.first { $0.id == cardId }?.name }
-
-        if let cardName, let potName {
-            return "\(cardName) + \(potName)"
-        }
-        if let potName {
-            return potName
-        }
-        if let cardName {
-            return cardName
-        }
-        return "No link"
-    }
-
-    private var cardLinkedPots: [Pot] {
-        store.activePots.filter { $0.linkedCreditCardId == cardId }
-    }
-
-    private var selectedCardName: String {
-        store.activeCards.first { $0.id == cardId }?.name ?? ""
-    }
-
-    private var selectedPotName: String {
-        store.activePots.first { $0.id == potId }?.name ?? ""
-    }
-
-    private var cleanPotId: String? {
-        if routeToCard {
-            return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
-        }
-
-        return potId.nilIfBlank
-    }
-
-    private func normalizeSelectedCardPot() {
-        guard routeToCard else { return }
-        if !cardLinkedPots.contains(where: { $0.id == potId }) {
-            potId = cardLinkedPots.first?.id ?? ""
+    private var groupedBillsSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Your bills")
+            if sortedBills.isEmpty && store.activeBillGroups.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No bills yet", message: "Use Add to create rent, subscriptions, utilities, transfers, or card-linked bills.", systemImage: "calendar.badge.plus")
+                }
+            } else {
+                ForEach(displaySections) { section in
+                    BillsGroupSectionCard(
+                        section: section,
+                        groups: store.activeBillGroups,
+                        snapshot: store.snapshot,
+                        nextDueLabel: nextDueLabel(for:)
+                    ) { paymentId, groupId in
+                        store.assignRecurringPayment(id: paymentId, toBillGroup: groupId)
+                    } archive: { paymentId in
+                        store.archiveRecurringPayment(id: paymentId)
+                    }
+                }
+            }
         }
     }
+
+    private var activeBillCount: Int {
+        sortedBills.filter(\.active).count
+    }
+
+    private var activeTemplateTotalPence: Int {
+        sortedBills.filter(\.active).reduce(0) { $0 + $1.amountPence }
+    }
+
+    private var linkedBillCount: Int {
+        sortedBills.filter { $0.potId != nil || $0.creditCardId != nil }.count
+    }
+
+    private var nextBillTitle: String {
+        nextBillOccurrence?.payment.name ?? "Next bill"
+    }
+
+    private var nextBillDate: String {
+        nextBillOccurrence.map { billsFriendlyDate($0.dueDate) } ?? "None"
+    }
+
+    private var nextBillOccurrence: RecurringPaymentOccurrence? {
+        upcomingOccurrences.first
+    }
+
+    private var upcomingOccurrences: [RecurringPaymentOccurrence] {
+        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 30)
+        return PlannerDerivedData.recurringOccurrences(payments: sortedBills, startDate: store.todayIso, endDate: endDate)
+            .sorted { lhs, rhs in
+                if lhs.dueDate == rhs.dueDate {
+                    return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
+                }
+                return lhs.dueDate < rhs.dueDate
+            }
+    }
+
+    private var sortedBills: [RecurringPayment] {
+        store.snapshot.recurringPayments
+            .filter { $0.deletedAt == nil }
+            .sorted { lhs, rhs in
+                if lhs.active == rhs.active {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.active && !rhs.active
+            }
+    }
+
+    private var ungroupedBills: [RecurringPayment] {
+        sortedBills.filter { payment in
+            guard let groupId = payment.billGroupId else { return true }
+            return !store.activeBillGroups.contains { $0.id == groupId }
+        }
+    }
+
+    private var displaySections: [BillsDisplaySection] {
+        if selectedGroupId == ungroupedGroupId {
+            return [BillsDisplaySection(id: ungroupedGroupId, title: "Ungrouped", color: AppTheme.Colors.tertiaryText, payments: ungroupedBills)]
+        }
+
+        if let selectedGroupId,
+           let group = store.activeBillGroups.first(where: { $0.id == selectedGroupId }) {
+            return [section(for: group)]
+        }
+
+        var sections = store.activeBillGroups.map(section(for:))
+        if !ungroupedBills.isEmpty {
+            sections.append(BillsDisplaySection(id: ungroupedGroupId, title: "Ungrouped", color: AppTheme.Colors.tertiaryText, payments: ungroupedBills))
+        }
+        return sections
+    }
+
+    private func section(for group: BillGroup) -> BillsDisplaySection {
+        BillsDisplaySection(
+            id: group.id,
+            title: group.name,
+            color: Color(hex: group.color),
+            group: group,
+            payments: bills(in: group)
+        )
+    }
+
+    private func bills(in group: BillGroup) -> [RecurringPayment] {
+        sortedBills.filter { $0.billGroupId == group.id }
+    }
+
+    private func createGroup() {
+        guard let group = store.addBillGroup(named: newGroupName) else { return }
+        selectedGroupId = group.id
+        newGroupName = ""
+    }
+
+    private func nextDueLabel(for payment: RecurringPayment) -> String {
+        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 180)
+        return PlannerDerivedData.recurringOccurrences(payments: [payment], startDate: store.todayIso, endDate: endDate)
+            .sorted { $0.dueDate < $1.dueDate }
+            .first
+            .map { "Next \(billsFriendlyDate($0.dueDate))" }
+            ?? billsDueTemplateLabel(payment)
+    }
+}
+
+private struct BillsOverviewDetailView: View {
+    @ObservedObject var store: PlannerStore
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Bills",
+            subtitle: "Detailed view of bill totals, links, groups, and upcoming dates.",
+            navigationMode: .inline,
+            toolbarMode: .none
+        ) {
+            heroCard
+
+            SectionTitle("Bill breakdown")
+            AppCard {
+                MetricRow(label: "Active bills", value: "\(activeBillCount)")
+                AppDivider()
+                MetricRow(label: "Monthly planned", value: MoneyParser.formatPence(activeTemplateTotalPence), valueColor: AppTheme.Colors.primaryOrange)
+                AppDivider()
+                MetricRow(label: "Linked to cards", value: "\(cardLinkedBillCount)", valueColor: AppTheme.Colors.warning)
+                AppDivider()
+                MetricRow(label: "Linked to pots", value: "\(potLinkedBillCount)", valueColor: AppTheme.Colors.success)
+                AppDivider()
+                MetricRow(label: "Ungrouped", value: "\(ungroupedBills.count)", valueColor: AppTheme.Colors.secondaryText)
+            }
+
+            if !upcomingOccurrences.isEmpty {
+                SectionTitle("Upcoming")
+                AppCard {
+                    ForEach(Array(upcomingOccurrences.prefix(10).enumerated()), id: \.element.id) { index, occurrence in
+                        BillsUpcomingRow(occurrence: occurrence, snapshot: store.snapshot)
+                        if index != min(upcomingOccurrences.count, 10) - 1 {
+                            AppDivider()
+                        }
+                    }
+                }
+            }
+
+            SectionTitle("Groups")
+            if groupSections.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No groups yet", message: "Create groups to organise subscriptions, home bills, card bills, and savings transfers.", systemImage: "folder")
+                }
+            } else {
+                ForEach(groupSections) { section in
+                    BillsOverviewGroupCard(section: section)
+                }
+            }
+        }
+    }
+
+    private var heroCard: some View {
+        AppCard(glow: BillsLayoutPolicy.overviewHeroUsesGlow) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Planned bills")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                            .textCase(.uppercase)
+                        Text(MoneyParser.formatPence(activeTemplateTotalPence))
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.62)
+                        Text(activeBillCount == 0 ? "No active bills yet" : "\(activeBillCount) active bills tracked")
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Text("Next")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
+                        Text(nextBillTitle)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        Text(nextBillDate)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    }
+                    .frame(maxWidth: 132, alignment: .trailing)
+                }
+
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    BillsOverviewPill(title: "\(linkedBillCount)", subtitle: "linked", color: AppTheme.Colors.success)
+                    BillsOverviewPill(title: "\(store.activeBillGroups.count)", subtitle: "groups", color: AppTheme.Colors.primaryOrange)
+                    BillsOverviewPill(title: "\(ungroupedBills.count)", subtitle: "ungrouped", color: AppTheme.Colors.secondaryText)
+                }
+            }
+        }
+    }
+
+    private var activeBillCount: Int {
+        sortedBills.filter(\.active).count
+    }
+
+    private var activeTemplateTotalPence: Int {
+        sortedBills.filter(\.active).reduce(0) { $0 + $1.amountPence }
+    }
+
+    private var cardLinkedBillCount: Int {
+        sortedBills.filter { $0.creditCardId != nil }.count
+    }
+
+    private var potLinkedBillCount: Int {
+        sortedBills.filter { $0.potId != nil }.count
+    }
+
+    private var linkedBillCount: Int {
+        sortedBills.filter { $0.potId != nil || $0.creditCardId != nil }.count
+    }
+
+    private var nextBillTitle: String {
+        nextBillOccurrence?.payment.name ?? "Next bill"
+    }
+
+    private var nextBillDate: String {
+        nextBillOccurrence.map { billsFriendlyDate($0.dueDate) } ?? "None"
+    }
+
+    private var nextBillOccurrence: RecurringPaymentOccurrence? {
+        upcomingOccurrences.first
+    }
+
+    private var upcomingOccurrences: [RecurringPaymentOccurrence] {
+        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 60)
+        return PlannerDerivedData.recurringOccurrences(payments: sortedBills, startDate: store.todayIso, endDate: endDate)
+            .sorted { lhs, rhs in
+                if lhs.dueDate == rhs.dueDate {
+                    return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
+                }
+                return lhs.dueDate < rhs.dueDate
+            }
+    }
+
+    private var sortedBills: [RecurringPayment] {
+        store.snapshot.recurringPayments
+            .filter { $0.deletedAt == nil }
+            .sorted { lhs, rhs in
+                if lhs.active == rhs.active {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.active && !rhs.active
+            }
+    }
+
+    private var ungroupedBills: [RecurringPayment] {
+        sortedBills.filter { payment in
+            guard let groupId = payment.billGroupId else { return true }
+            return !store.activeBillGroups.contains { $0.id == groupId }
+        }
+    }
+
+    private var groupSections: [BillsDisplaySection] {
+        var sections = store.activeBillGroups.map { group in
+            BillsDisplaySection(
+                id: group.id,
+                title: group.name,
+                color: Color(hex: group.color),
+                group: group,
+                payments: sortedBills.filter { $0.billGroupId == group.id }
+            )
+        }
+
+        if !ungroupedBills.isEmpty {
+            sections.append(BillsDisplaySection(id: "ungrouped", title: "Ungrouped", color: AppTheme.Colors.tertiaryText, payments: ungroupedBills))
+        }
+
+        return sections
+    }
+}
+
+private struct BillsOverviewGroupCard: View {
+    var section: BillsDisplaySection
+
+    private var activePayments: [RecurringPayment] {
+        section.payments.filter(\.active)
+    }
+
+    private var totalPence: Int {
+        activePayments.reduce(0) { $0 + $1.amountPence }
+    }
+
+    var body: some View {
+        AppCard {
+            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                Circle()
+                    .fill(section.color)
+                    .frame(width: 10, height: 10)
+                    .shadow(color: section.color.opacity(0.45), radius: 7, y: 2)
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(section.title)
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(activePayments.isEmpty ? "No active bills" : "\(activePayments.count) active bills")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Spacer(minLength: AppTheme.Spacing.sm)
+
+                Text(MoneyParser.formatPence(totalPence))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(totalPence > 0 ? AppTheme.Colors.primaryOrange : AppTheme.Colors.tertiaryText)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+    }
+}
+
+private struct BillsDisplaySection: Identifiable {
+    var id: String
+    var title: String
+    var color: Color
+    var group: BillGroup?
+    var payments: [RecurringPayment]
+}
+
+private struct BillsOverviewPill: View {
+    var title: String
+    var subtitle: String
+    var color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(color)
+            Text(subtitle)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                .stroke(color.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
+private struct BillsGroupFilterPill: View {
+    var title: String
+    var count: Int
+    var color: Color
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: color.opacity(0.6), radius: isSelected ? 8 : 0)
+                Text(title)
+                    .lineLimit(1)
+                Text("\(count)")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(isSelected ? AppTheme.Colors.controlText.opacity(0.9) : color)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background((isSelected ? AppTheme.Colors.controlText : color).opacity(0.14), in: Capsule())
+            }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(isSelected ? AppTheme.Colors.controlText : AppTheme.Colors.primaryText)
+            .padding(.horizontal, 13)
+            .frame(height: 38)
+            .background(isSelected ? AnyShapeStyle(AppTheme.Gradients.primary) : AnyShapeStyle(AppTheme.Colors.elevatedSurface), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isSelected ? AppTheme.Colors.selectedStroke : AppTheme.Colors.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct BillsUpcomingRow: View {
+    var occurrence: RecurringPaymentOccurrence
+    var snapshot: PlannerSnapshot
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+            BillsDateTile(date: occurrence.dueDate)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(occurrence.payment.name)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(1)
+                BillsLinkChipsView(payment: occurrence.payment, snapshot: snapshot)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Text(MoneyParser.formatPence(occurrence.amountPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.warning)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct BillsGroupSectionCard: View {
+    var section: BillsDisplaySection
+    var groups: [BillGroup]
+    var snapshot: PlannerSnapshot
+    var nextDueLabel: (RecurringPayment) -> String
+    var assignGroup: (String, String?) -> Void
+    var archive: (String) -> Void
+
+    private var totalPence: Int {
+        section.payments.filter(\.active).reduce(0) { $0 + $1.amountPence }
+    }
+
+    var body: some View {
+        AppCard {
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
+                HStack(spacing: 9) {
+                    Circle()
+                        .fill(section.color)
+                        .frame(width: 10, height: 10)
+                        .shadow(color: section.color.opacity(0.6), radius: 8)
+                    Text(section.title)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: AppTheme.Spacing.sm)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(MoneyParser.formatPence(totalPence))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    Text("\(section.payments.count) bills")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
+            }
+
+            if section.payments.isEmpty {
+                Text("No bills in this group yet.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .padding(.vertical, AppTheme.Spacing.sm)
+            } else {
+                ForEach(Array(section.payments.enumerated()), id: \.element.id) { index, payment in
+                    BillsPaymentRow(
+                        payment: payment,
+                        group: section.group,
+                        groups: groups,
+                        snapshot: snapshot,
+                        nextDueLabel: nextDueLabel(payment)
+                    ) { groupId in
+                        assignGroup(payment.id, groupId)
+                    } archive: {
+                        archive(payment.id)
+                    }
+
+                    if index != section.payments.count - 1 {
+                        AppDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct BillsPaymentRow: View {
+    var payment: RecurringPayment
+    var group: BillGroup?
+    var groups: [BillGroup]
+    var snapshot: PlannerSnapshot
+    var nextDueLabel: String
+    var assignGroup: (String?) -> Void
+    var archive: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            BillsBillIcon(payment: payment)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    Text(payment.name)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
+                        .lineLimit(1)
+
+                    if !payment.active {
+                        Pill(text: "Inactive", color: AppTheme.Colors.tertiaryText)
+                    }
+                }
+
+                Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                BillsLinkChipsView(payment: payment, snapshot: snapshot)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                Text(MoneyParser.formatPence(payment.amountPence))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .multilineTextAlignment(.trailing)
+
+                Menu {
+                    Button("Ungrouped") {
+                        assignGroup(nil)
+                    }
+
+                    if !groups.isEmpty {
+                        Divider()
+                        ForEach(groups) { group in
+                            Button(group.name) {
+                                assignGroup(group.id)
+                            }
+                        }
+                    }
+
+                    Divider()
+                    Button("Archive bill", role: .destructive, action: archive)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                        Text(group?.name ?? "Group")
+                    }
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background((group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText).opacity(0.12), in: Capsule())
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct BillsBillIcon: View {
+    var payment: RecurringPayment
+
+    private var color: Color {
+        if payment.creditCardId != nil { return AppTheme.Colors.warning }
+        if payment.potId != nil { return AppTheme.Colors.success }
+        return AppTheme.Colors.primaryOrange
+    }
+
+    private var symbol: String {
+        if payment.creditCardId != nil { return "creditcard" }
+        if payment.potId != nil { return "wallet.pass" }
+        return "calendar"
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(color)
+            .frame(width: 38, height: 38)
+            .background(color.opacity(0.12), in: Circle())
+            .overlay(Circle().stroke(color.opacity(0.2), lineWidth: 1))
+    }
+}
+
+private struct BillsDateTile: View {
+    var date: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(billsDayNumber(date))
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Text(billsMonthText(date))
+                .font(.caption2.weight(.black))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
+        .frame(width: 48, height: 50)
+        .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                .stroke(AppTheme.Colors.border, lineWidth: 1)
+        )
+    }
+}
+
+private struct BillsLinkChipsView: View {
+    var payment: RecurringPayment
+    var snapshot: PlannerSnapshot
+
+    var body: some View {
+        let card = payment.creditCardId.flatMap { id in snapshot.creditCards.first { $0.id == id } }
+        let pot = payment.potId.flatMap { id in snapshot.pots.first { $0.id == id } }
+
+        HStack(spacing: 6) {
+            if let card {
+                Pill(text: card.name, systemImage: "creditcard", color: AppTheme.Colors.warning)
+            }
+
+            if let pot {
+                Pill(text: pot.name, systemImage: "wallet.pass", color: AppTheme.Colors.success)
+            }
+
+            if card == nil && pot == nil {
+                Pill(text: "No link", systemImage: "link", color: AppTheme.Colors.tertiaryText)
+            }
+        }
+        .lineLimit(1)
+    }
+}
+
+private func billsDueTemplateLabel(_ payment: RecurringPayment) -> String {
+    if let dueDate = payment.dueDate {
+        return "Due \(billsFriendlyDate(dueDate))"
+    }
+
+    if let dueDay = payment.dueDay {
+        return "Due \(billsOrdinalDayLabel(dueDay))"
+    }
+
+    return "No due date"
+}
+
+private func billsFriendlyDate(_ isoDate: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    let date = FinanceEngine.parseDate(isoDate)
+    let day = calendar.component(.day, from: date)
+    let month = calendar.component(.month, from: date)
+    return "\(billsOrdinalDayLabel(day)) \(billsShortMonthLabel(month))"
+}
+
+private func billsDayNumber(_ isoDate: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    return "\(calendar.component(.day, from: FinanceEngine.parseDate(isoDate)))"
+}
+
+private func billsMonthText(_ isoDate: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    return billsShortMonthLabel(calendar.component(.month, from: FinanceEngine.parseDate(isoDate))).uppercased()
+}
+
+private func billsOrdinalDayLabel(_ day: Int) -> String {
+    let suffix: String
+    switch day {
+    case 11, 12, 13:
+        suffix = "th"
+    default:
+        switch day % 10 {
+        case 1: suffix = "st"
+        case 2: suffix = "nd"
+        case 3: suffix = "rd"
+        default: suffix = "th"
+        }
+    }
+    return "\(day)\(suffix)"
+}
+
+private func billsShortMonthLabel(_ month: Int) -> String {
+    let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    guard months.indices.contains(month - 1) else { return "Jan" }
+    return months[month - 1]
 }
 
 struct AddDebtSheetView: View {
@@ -797,7 +1548,6 @@ struct AddDebtSheetView: View {
             .premiumScreenBackground()
             .navigationTitle("Add debt")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-            .appPlaceholderToolbar(.modalSingle)
         }
     }
 
@@ -867,12 +1617,12 @@ struct AddDebtSheetView: View {
 
 enum DebtsSection: String, Equatable {
     case summary
-    case addDebt
     case activeDebts
 }
 
 struct DebtsLayoutPolicy {
     static let toolbarActionId = "add"
+    static let addFlowPlacement = "debtsSectionToolbar"
     static let sections: [DebtsSection] = [
         .summary,
         .activeDebts
@@ -914,8 +1664,6 @@ struct DebtsView: View {
         switch section {
         case .summary:
             debtSummary
-        case .addDebt:
-            addDebtCard
         case .activeDebts:
             activeDebtsSection
         }
@@ -944,23 +1692,6 @@ struct DebtsView: View {
                         debtRow(debt)
                     }
                     .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var addDebtCard: some View {
-        AppCard {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    SectionTitle("Add debt")
-                    Text("Create a balance-based repayment plan.")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-                Spacer()
-                PrimaryButton(title: "Add", systemImage: "plus") {
-                    isAddDebtPresented = true
                 }
             }
         }
@@ -1343,7 +2074,7 @@ struct CalendarPlannerView: View {
     private func dayTextColor(_ day: CalendarDay) -> Color {
         guard let isoDate = day.isoDate else { return AppTheme.Colors.tertiaryText }
         if isoDate == selectedDate || day.isToday {
-            return .white
+            return AppTheme.Colors.controlText
         }
         return AppTheme.Colors.primaryText
     }
@@ -1548,6 +2279,23 @@ enum SettingsRoute: String, CaseIterable, Equatable {
     }
 }
 
+struct AppearanceSettingsView: View {
+    var navigationMode: ScreenNavigationMode = .inline
+    var toolbarMode: AppToolbarMode = .none
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Appearance",
+            subtitle: "Choose the colour theme used on this iPhone.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode
+        ) {
+            AppearanceThemeCustomizerCard(selectedThemeRawValue: $selectedThemeRawValue)
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
@@ -1638,29 +2386,7 @@ struct SettingsView: View {
     }
 
     private var appearanceCard: some View {
-        AppCard(glow: true) {
-            SectionTitle("Appearance")
-            Text("Choose the colour theme used on this iPhone.")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-
-            VStack(spacing: AppTheme.Spacing.sm) {
-                ForEach(AppThemePreset.allCases) { preset in
-                    Button {
-                        withAnimation(AppTheme.Animation.standard) {
-                            selectedThemeRawValue = preset.rawValue
-                        }
-                    } label: {
-                        SettingsThemePresetRow(
-                            preset: preset,
-                            isSelected: selectedThemeRawValue == preset.rawValue
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings-theme-\(preset.rawValue)")
-                }
-            }
-        }
+        AppearanceThemeCustomizerCard(selectedThemeRawValue: $selectedThemeRawValue)
     }
 
     private var settingsRoutes: some View {
@@ -1750,7 +2476,6 @@ struct SettingsView: View {
         switch authSession.state {
         case .emailVerificationRequired(let user),
              .syncing(let user, _),
-             .conflict(let user, _),
              .ready(let user):
             return user
         case .loading, .signedOut, .failed:
@@ -1813,6 +2538,36 @@ struct SettingsView: View {
     }
 }
 
+private struct AppearanceThemeCustomizerCard: View {
+    @Binding var selectedThemeRawValue: String
+
+    var body: some View {
+        AppCard(glow: true) {
+            SectionTitle("Appearance")
+            Text("Choose the colour theme used on this iPhone.")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+
+            VStack(spacing: AppTheme.Spacing.sm) {
+                ForEach(AppThemePreset.allCases) { preset in
+                    Button {
+                        withAnimation(AppTheme.Animation.standard) {
+                            selectedThemeRawValue = preset.rawValue
+                        }
+                    } label: {
+                        SettingsThemePresetRow(
+                            preset: preset,
+                            isSelected: selectedThemeRawValue == preset.rawValue
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings-theme-\(preset.rawValue)")
+                }
+            }
+        }
+    }
+}
+
 private struct SettingsThemePresetRow: View {
     var preset: AppThemePreset
     var isSelected: Bool
@@ -1871,19 +2626,7 @@ private struct SettingsThemeSwatches: View {
                 Circle()
                     .stroke(AppTheme.Colors.border, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
-    }
-}
-
-struct SettingsSheetView: View {
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var store: PlannerStore
-
-    var body: some View {
-        NavigationStack {
-            SettingsView(store: store, navigationMode: .inline, toolbarMode: .none)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-        }
+            .shadow(color: AppTheme.Colors.shadow, radius: 6, y: 3)
     }
 }
 
@@ -2007,7 +2750,7 @@ struct AssistantView: View {
                 sendLocalReply()
             } label: {
                 Image(systemName: "paperplane.fill")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppTheme.Colors.controlText)
                     .frame(width: 48, height: 48)
                     .background(AppTheme.Gradients.primary)
                     .clipShape(Circle())

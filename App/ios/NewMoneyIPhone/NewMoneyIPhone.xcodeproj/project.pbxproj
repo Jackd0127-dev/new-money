@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		100000000000000000000101 /* NewMoneyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000201 /* NewMoneyApp.swift */; };
 		100000000000000000000102 /* AppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000202 /* AppView.swift */; };
+		34B1E3F62FF8B111007D21AC /* AccountsSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3F52FF8B111007D21AC /* AccountsSheetView.swift */; };
 		100000000000000000000103 /* FinanceEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000203 /* FinanceEngineTests.swift */; };
 		100000000000000000000104 /* PlannerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000206 /* PlannerModels.swift */; };
 		100000000000000000000105 /* MoneyParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000207 /* MoneyParser.swift */; };
@@ -27,6 +28,9 @@
 		100000000000000000000118 /* PotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000220 /* PotsView.swift */; };
 		100000000000000000000119 /* CardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000221 /* CardsView.swift */; };
 		34B1E3F02FF884FB007D21AC /* PremiumCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3F12FF884FB007D21AC /* PremiumCardView.swift */; };
+		34B1E3F42FF88A0007D21AC /* DemoCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3F32FF88A0007D21AC /* DemoCardsView.swift */; };
+		34B1E4002FF9000007D21AC /* CreditCardDesigns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E4012FF9000007D21AC /* CreditCardDesigns.swift */; };
+		34B1E4022FF9000007D21AC /* CardDesignPreviewBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E4032FF9000007D21AC /* CardDesignPreviewBrowserView.swift */; };
 		100000000000000000000120 /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* MoreView.swift */; };
 		100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* SecondaryFeatureViews.swift */; };
 		100000000000000000000122 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* Assets.xcassets */; };
@@ -60,6 +64,7 @@
 /* Begin PBXFileReference section */
 		100000000000000000000201 /* NewMoneyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMoneyApp.swift; sourceTree = "<group>"; };
 		100000000000000000000202 /* AppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppView.swift; sourceTree = "<group>"; };
+		34B1E3F52FF8B111007D21AC /* AccountsSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsSheetView.swift; sourceTree = "<group>"; };
 		100000000000000000000203 /* FinanceEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceEngineTests.swift; sourceTree = "<group>"; };
 		100000000000000000000204 /* NewMoneyIPhone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NewMoneyIPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000205 /* NewMoneyIPhoneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NewMoneyIPhoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -80,6 +85,9 @@
 		100000000000000000000220 /* PotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PotsView.swift; sourceTree = "<group>"; };
 		100000000000000000000221 /* CardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardsView.swift; sourceTree = "<group>"; };
 		34B1E3F12FF884FB007D21AC /* PremiumCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumCardView.swift; sourceTree = "<group>"; };
+		34B1E3F32FF88A0007D21AC /* DemoCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoCardsView.swift; sourceTree = "<group>"; };
+		34B1E4012FF9000007D21AC /* CreditCardDesigns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditCardDesigns.swift; sourceTree = "<group>"; };
+		34B1E4032FF9000007D21AC /* CardDesignPreviewBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDesignPreviewBrowserView.swift; sourceTree = "<group>"; };
 		100000000000000000000222 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		100000000000000000000223 /* SecondaryFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryFeatureViews.swift; sourceTree = "<group>"; };
 		100000000000000000000224 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -179,6 +187,7 @@
 				100000000000000000000201 /* NewMoneyApp.swift */,
 				100000000000000000000232 /* NewMoneyAppDelegate.swift */,
 				100000000000000000000202 /* AppView.swift */,
+				34B1E3F52FF8B111007D21AC /* AccountsSheetView.swift */,
 				100000000000000000000212 /* PlannerStore.swift */,
 			);
 			path = App;
@@ -289,8 +298,19 @@
 			children = (
 				100000000000000000000221 /* CardsView.swift */,
 				34B1E3F12FF884FB007D21AC /* PremiumCardView.swift */,
+				34B1E4012FF9000007D21AC /* CreditCardDesigns.swift */,
+				34B1E3F22FF88A0007D21AC /* Demo-Cards */,
 			);
 			path = Cards;
+			sourceTree = "<group>";
+		};
+		34B1E3F22FF88A0007D21AC /* Demo-Cards */ = {
+			isa = PBXGroup;
+			children = (
+				34B1E3F32FF88A0007D21AC /* DemoCardsView.swift */,
+				34B1E4032FF9000007D21AC /* CardDesignPreviewBrowserView.swift */,
+			);
+			path = "Demo-Cards";
 			sourceTree = "<group>";
 		};
 		100000000000000000000618 /* More */ = {
@@ -434,6 +454,7 @@
 			files = (
 				100000000000000000000101 /* NewMoneyApp.swift in Sources */,
 				100000000000000000000102 /* AppView.swift in Sources */,
+				34B1E3F62FF8B111007D21AC /* AccountsSheetView.swift in Sources */,
 				100000000000000000000104 /* PlannerModels.swift in Sources */,
 				100000000000000000000105 /* MoneyParser.swift in Sources */,
 				100000000000000000000106 /* FinanceEngine.swift in Sources */,
@@ -452,6 +473,9 @@
 				100000000000000000000118 /* PotsView.swift in Sources */,
 				100000000000000000000119 /* CardsView.swift in Sources */,
 				34B1E3F02FF884FB007D21AC /* PremiumCardView.swift in Sources */,
+				34B1E3F42FF88A0007D21AC /* DemoCardsView.swift in Sources */,
+				34B1E4002FF9000007D21AC /* CreditCardDesigns.swift in Sources */,
+				34B1E4022FF9000007D21AC /* CardDesignPreviewBrowserView.swift in Sources */,
 				100000000000000000000120 /* MoreView.swift in Sources */,
 				100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */,
 				100000000000000000000125 /* CloudPlannerSync.swift in Sources */,

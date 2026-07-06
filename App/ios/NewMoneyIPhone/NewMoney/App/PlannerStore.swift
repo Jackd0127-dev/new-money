@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import UIKit
 
 private struct LinkedPotContribution {
     var amountPence: Int
@@ -13,6 +14,7 @@ final class PlannerStore: ObservableObject {
     @Published private(set) var snapshot: PlannerSnapshot = DefaultData.emptySnapshot
     @Published private(set) var plannerAccounts: [PlannerAccount] = []
     @Published private(set) var activePlannerAccountId: String?
+    @Published private(set) var cloudSyncRevision = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -41,6 +43,10 @@ final class PlannerStore: ObservableObject {
 
     var snapshotPublisher: Published<PlannerSnapshot>.Publisher {
         $snapshot
+    }
+
+    var cloudSyncPublisher: Published<Int>.Publisher {
+        $cloudSyncRevision
     }
 
     var activePlannerAccount: PlannerAccount? {
@@ -73,6 +79,17 @@ final class PlannerStore: ObservableObject {
 
     var activeCards: [CreditCard] {
         snapshot.creditCards.filter { !$0.archived }
+    }
+
+    var activeBillGroups: [BillGroup] {
+        snapshot.billGroups
+            .filter { $0.deletedAt == nil }
+            .sorted {
+                if $0.name == $1.name {
+                    return $0.id < $1.id
+                }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
     }
 
     var activeDebts: [Debt] {
@@ -138,11 +155,30 @@ final class PlannerStore: ObservableObject {
         }
     }
 
-    func saveCurrentSnapshot() async throws {
-        if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
+    @discardableResult
+    func replaceAccountCollection(_ replacement: PlannerAccountCollection) async throws -> PlannerAccountCollection {
+        applyAccountCollection(replacement)
+        var collection = accountCollection ?? PlannerAccountCollection.singleAccount(snapshot: snapshot)
+        if prepareLoadedSnapshot(), let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+            collection = updatedCollection
+        }
+
+        if let accountRepository {
             try await accountRepository.saveAccountCollection(collection)
         } else {
             try await repository.saveSnapshot(snapshot)
+        }
+
+        return collection
+    }
+
+    func saveCurrentSnapshot() async throws {
+        if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
+            try await accountRepository.saveAccountCollection(collection)
+            markCloudSyncNeeded()
+        } else {
+            try await repository.saveSnapshot(snapshot)
+            markCloudSyncNeeded()
         }
     }
 
@@ -152,6 +188,9 @@ final class PlannerStore: ObservableObject {
             Task {
                 do {
                     try await accountRepository.saveAccountCollection(collection)
+                    await MainActor.run {
+                        markCloudSyncNeeded()
+                    }
                 } catch {
                     await MainActor.run {
                         errorMessage = "Unable to reset local planner data."
@@ -163,6 +202,9 @@ final class PlannerStore: ObservableObject {
         Task {
             do {
                 try await repository.resetSnapshot()
+                await MainActor.run {
+                    markCloudSyncNeeded()
+                }
             } catch {
                 await MainActor.run {
                     errorMessage = "Unable to reset local planner data."
@@ -199,6 +241,7 @@ final class PlannerStore: ObservableObject {
             collection = updatedCollection
         }
         try await accountRepository.saveAccountCollection(collection)
+        markCloudSyncNeeded()
     }
 
     func switchPlannerAccount(id: String) async throws {
@@ -223,6 +266,7 @@ final class PlannerStore: ObservableObject {
             collection = updatedCollection
         }
         try await accountRepository.saveAccountCollection(collection)
+        markCloudSyncNeeded()
     }
 
     func renamePlannerAccount(id: String, name: String) async throws {
@@ -239,6 +283,7 @@ final class PlannerStore: ObservableObject {
         collection.updatedAt = collection.accounts[index].updatedAt
         applyAccountCollection(collection)
         try await accountRepository.saveAccountCollection(collection)
+        markCloudSyncNeeded()
     }
 
     func deletePlannerAccount(id: String) async throws {
@@ -253,6 +298,7 @@ final class PlannerStore: ObservableObject {
             throw PlannerAccountError.cannotDeleteLastAccount
         }
 
+        let removedAvatarImageName = collection.accounts[index].avatarImageName
         collection.accounts.remove(at: index)
         if collection.activeAccountId == id {
             collection.activeAccountId = collection.accounts[0].id
@@ -265,6 +311,71 @@ final class PlannerStore: ObservableObject {
             collection = updatedCollection
         }
         try await accountRepository.saveAccountCollection(collection)
+        if let removedAvatarImageName {
+            try? PlannerAccountAvatarFileStore.removeImage(named: removedAvatarImageName)
+        }
+        markCloudSyncNeeded()
+    }
+
+    func plannerAccountAvatarImage(for account: PlannerAccount) -> UIImage? {
+        if let avatarImageDataBase64 = account.avatarImageDataBase64,
+           let data = Data(base64Encoded: avatarImageDataBase64),
+           let image = UIImage(data: data) {
+            return image
+        }
+        guard let avatarImageName = account.avatarImageName else { return nil }
+        return PlannerAccountAvatarFileStore.image(named: avatarImageName)
+    }
+
+    func preparedPlannerAccountAvatarImage(from image: UIImage) -> UIImage {
+        PlannerAccountAvatarFileStore.preparedImage(from: image)
+    }
+
+    func savePlannerAccountAvatar(accountId: String, image: UIImage) async throws {
+        guard let accountRepository else { return }
+        guard var collection = accountCollection,
+              let index = collection.accounts.firstIndex(where: { $0.id == accountId })
+        else {
+            throw PlannerAccountError.missingAccount
+        }
+
+        let previousImageName = collection.accounts[index].avatarImageName
+        let imageName = previousImageName ?? "\(accountId)-avatar.jpg"
+        let preparedImage = PlannerAccountAvatarFileStore.preparedImage(from: image)
+        try PlannerAccountAvatarFileStore.save(image: preparedImage, named: imageName)
+        let avatarImageDataBase64 = try PlannerAccountAvatarFileStore.encodedImageDataBase64(for: preparedImage)
+
+        let now = DateUtilities.nowIsoString()
+        collection.accounts[index].avatarImageName = imageName
+        collection.accounts[index].avatarImageDataBase64 = avatarImageDataBase64
+        collection.accounts[index].updatedAt = now
+        collection.updatedAt = now
+        applyAccountCollection(collection)
+        try await accountRepository.saveAccountCollection(collection)
+        markCloudSyncNeeded()
+    }
+
+    func removePlannerAccountAvatar(accountId: String) async throws {
+        guard let accountRepository else { return }
+        guard var collection = accountCollection,
+              let index = collection.accounts.firstIndex(where: { $0.id == accountId })
+        else {
+            throw PlannerAccountError.missingAccount
+        }
+
+        let imageName = collection.accounts[index].avatarImageName
+        let now = DateUtilities.nowIsoString()
+        collection.accounts[index].avatarImageName = nil
+        collection.accounts[index].avatarImageDataBase64 = nil
+        collection.accounts[index].updatedAt = now
+        collection.updatedAt = now
+        applyAccountCollection(collection)
+        try await accountRepository.saveAccountCollection(collection)
+
+        if let imageName {
+            try? PlannerAccountAvatarFileStore.removeImage(named: imageName)
+        }
+        markCloudSyncNeeded()
     }
 
     func updateSettings(_ settings: Settings) {
@@ -509,10 +620,11 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    func addRecurringPayment(name: String, amountPence: Int, dueDay: Int?, frequency: RecurringFrequency, potId: String?, creditCardId: String?, priority: RecurringPriority) {
+    func addRecurringPayment(name: String, amountPence: Int, dueDay: Int?, frequency: RecurringFrequency, potId: String?, creditCardId: String?, priority: RecurringPriority, billGroupId: String? = nil) {
         let now = DateUtilities.nowIsoString()
         let cleanCardId = creditCardId?.nilIfBlank
         let cleanPotId = normalizedRecurringPaymentPotId(potId: potId, creditCardId: cleanCardId)
+        let cleanGroupId = normalizedBillGroupId(billGroupId)
         let payment = RecurringPayment(
             id: DateUtilities.newId(prefix: "recurring"),
             name: name,
@@ -522,6 +634,7 @@ final class PlannerStore: ObservableObject {
             frequency: frequency,
             potId: cleanPotId,
             creditCardId: cleanCardId,
+            billGroupId: cleanGroupId,
             priority: priority,
             active: true,
             createdAt: now,
@@ -536,8 +649,65 @@ final class PlannerStore: ObservableObject {
         var updated = payment.stamped()
         updated.creditCardId = payment.creditCardId?.nilIfBlank
         updated.potId = normalizedRecurringPaymentPotId(potId: payment.potId, creditCardId: updated.creditCardId)
+        updated.billGroupId = normalizedBillGroupId(payment.billGroupId)
         replace(&snapshot.recurringPayments, with: updated)
         persist()
+    }
+
+    @discardableResult
+    func addBillGroup(named name: String) -> BillGroup? {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return nil }
+
+        if let existing = activeBillGroups.first(where: { $0.name.localizedCaseInsensitiveCompare(cleanName) == .orderedSame }) {
+            return existing
+        }
+
+        let now = DateUtilities.nowIsoString()
+        let colors = AppTheme.selectableColorHexes()
+        let color = colors.isEmpty ? AppThemePreset.classic.palette.accentHex : colors[snapshot.billGroups.count % colors.count]
+        let group = BillGroup(
+            id: DateUtilities.newId(prefix: "bill-group"),
+            name: cleanName,
+            color: color,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: nil
+        )
+        snapshot.billGroups.append(group)
+        persist()
+        return group
+    }
+
+    func assignRecurringPayment(id: String, toBillGroup groupId: String?) {
+        guard let index = snapshot.recurringPayments.firstIndex(where: { $0.id == id }) else { return }
+        snapshot.recurringPayments[index].billGroupId = normalizedBillGroupId(groupId)
+        snapshot.recurringPayments[index].updatedAt = DateUtilities.nowIsoString()
+        persist()
+    }
+
+    func deleteBillGroup(id: String) {
+        guard let index = snapshot.billGroups.firstIndex(where: { $0.id == id }) else { return }
+        let now = DateUtilities.nowIsoString()
+        snapshot.billGroups[index].deletedAt = now
+        snapshot.billGroups[index].updatedAt = now
+
+        for paymentIndex in snapshot.recurringPayments.indices where snapshot.recurringPayments[paymentIndex].billGroupId == id {
+            snapshot.recurringPayments[paymentIndex].billGroupId = nil
+            snapshot.recurringPayments[paymentIndex].updatedAt = now
+        }
+
+        persist()
+    }
+
+    private func normalizedBillGroupId(_ groupId: String?) -> String? {
+        guard let cleanGroupId = groupId?.nilIfBlank,
+              snapshot.billGroups.contains(where: { $0.id == cleanGroupId && $0.deletedAt == nil })
+        else {
+            return nil
+        }
+
+        return cleanGroupId
     }
 
     private func normalizedRecurringPaymentPotId(potId: String?, creditCardId: String?) -> String? {
@@ -2140,10 +2310,43 @@ final class PlannerStore: ObservableObject {
 
     private func applyAccountCollection(_ collection: PlannerAccountCollection) {
         let sanitizedCollection = sanitizedAccountCollection(collection)
+        applySelectedThemeIfNeeded(from: sanitizedCollection)
         accountCollection = sanitizedCollection
         plannerAccounts = sanitizedCollection.accounts
         activePlannerAccountId = sanitizedCollection.activeAccountId
         snapshot = sanitizedCollection.activeAccount?.snapshot ?? DefaultData.emptySnapshot
+    }
+
+    func accountCollectionForCloudUpload() -> PlannerAccountCollection {
+        var collection = updateActiveAccountSnapshot(snapshot)
+            ?? accountCollection
+            ?? PlannerAccountCollection.singleAccount(snapshot: snapshot)
+        collection = sanitizedAccountCollection(collection)
+        collection.selectedThemePresetId = AppTheme.selectedPreset.rawValue
+
+        for index in collection.accounts.indices {
+            guard collection.accounts[index].avatarImageDataBase64 == nil,
+                  let avatarImageName = collection.accounts[index].avatarImageName,
+                  let encodedImageData = PlannerAccountAvatarFileStore.encodedImageDataBase64(named: avatarImageName)
+            else { continue }
+
+            collection.accounts[index].avatarImageDataBase64 = encodedImageData
+        }
+
+        accountCollection = collection
+        plannerAccounts = collection.accounts
+        activePlannerAccountId = collection.activeAccountId
+        return collection
+    }
+
+    private func applySelectedThemeIfNeeded(from collection: PlannerAccountCollection) {
+        guard let presetId = collection.selectedThemePresetId,
+              AppThemePreset(rawValue: presetId) != nil,
+              UserDefaults.standard.string(forKey: AppTheme.selectedPresetStorageKey) != presetId else {
+            return
+        }
+
+        UserDefaults.standard.set(presetId, forKey: AppTheme.selectedPresetStorageKey)
     }
 
     private func sanitizedAccountCollection(_ collection: PlannerAccountCollection) -> PlannerAccountCollection {
@@ -2202,7 +2405,7 @@ final class PlannerStore: ObservableObject {
     }
 
     private func plannerAccountColor(at index: Int) -> String {
-        let colors = ["#F97316", "#14B8A6", "#8B5CF6"]
+        let colors = AppTheme.selectableColorHexes()
         return colors[min(max(index, 0), colors.count - 1)]
     }
 
@@ -2215,6 +2418,7 @@ final class PlannerStore: ObservableObject {
         _ = catchUpDueObligations(to: todayIso)
 #endif
         let snapshot = snapshot
+        markCloudSyncNeeded()
         if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
             Task {
                 do {
@@ -2236,6 +2440,10 @@ final class PlannerStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func markCloudSyncNeeded() {
+        cloudSyncRevision += 1
     }
 
     @discardableResult
@@ -2527,6 +2735,86 @@ final class PlannerStore: ObservableObject {
             snapshot.debts[debtIndex].status = .active
         }
         snapshot.debts[debtIndex].updatedAt = now
+    }
+}
+
+private enum PlannerAccountAvatarFileStore {
+    private static let avatarPixelSize = CGSize(width: 512, height: 512)
+
+    private static var directoryURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("NewMoneyIPhone", isDirectory: true)
+            .appendingPathComponent("AccountAvatars", isDirectory: true)
+    }
+
+    static func image(named imageName: String) -> UIImage? {
+        UIImage(contentsOfFile: fileURL(for: imageName).path)
+    }
+
+    static func save(image: UIImage, named imageName: String) throws {
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let data = try jpegData(for: image)
+        try data.write(to: fileURL(for: imageName), options: [.atomic])
+    }
+
+    static func encodedImageDataBase64(for image: UIImage) throws -> String {
+        try jpegData(for: image).base64EncodedString()
+    }
+
+    static func encodedImageDataBase64(named imageName: String) -> String? {
+        try? Data(contentsOf: fileURL(for: imageName)).base64EncodedString()
+    }
+
+    static func removeImage(named imageName: String) throws {
+        let url = fileURL(for: imageName)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    static func preparedImage(from image: UIImage) -> UIImage {
+        let source = image.normalizedForPlannerAccountAvatar
+        let sourceSize = source.size
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return image }
+
+        let scale = max(avatarPixelSize.width / sourceSize.width, avatarPixelSize.height / sourceSize.height)
+        let drawSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+        let drawOrigin = CGPoint(
+            x: (avatarPixelSize.width - drawSize.width) / 2,
+            y: (avatarPixelSize.height - drawSize.height) / 2
+        )
+
+        return UIGraphicsImageRenderer(size: avatarPixelSize).image { _ in
+            source.draw(in: CGRect(origin: drawOrigin, size: drawSize))
+        }
+    }
+
+    private static func jpegData(for image: UIImage) throws -> Data {
+        guard let data = image.jpegData(compressionQuality: 0.78) else {
+            throw PlannerAccountAvatarError.encodingFailed
+        }
+        return data
+    }
+
+    private static func fileURL(for imageName: String) -> URL {
+        directoryURL.appendingPathComponent(URL(fileURLWithPath: imageName).lastPathComponent)
+    }
+}
+
+private enum PlannerAccountAvatarError: LocalizedError {
+    case encodingFailed
+
+    var errorDescription: String? {
+        "Unable to prepare that account photo."
+    }
+}
+
+private extension UIImage {
+    var normalizedForPlannerAccountAvatar: UIImage {
+        guard imageOrientation != .up else { return self }
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 }
 

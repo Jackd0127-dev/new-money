@@ -19,14 +19,8 @@ enum FirebaseAuthGateState: Equatable {
     case signedOut
     case emailVerificationRequired(AuthUser)
     case syncing(AuthUser, String)
-    case conflict(AuthUser, CloudPlannerSnapshotRecord)
     case ready(AuthUser)
     case failed(String)
-}
-
-enum CloudConflictChoice {
-    case useLocal
-    case useCloud
 }
 
 @MainActor
@@ -131,32 +125,15 @@ final class FirebaseAuthSession: ObservableObject {
         }
     }
 
-    func resolveConflict(_ choice: CloudConflictChoice, store: PlannerStore) async {
-        guard case let .conflict(user, cloud) = state else { return }
-
-        await performWorkingAction {
-            state = .syncing(user, "Applying sync choice")
-            switch choice {
-            case .useLocal:
-                try await cloudSyncService.pushSnapshot(store.snapshot, for: user)
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: store.snapshot)
-            case .useCloud:
-                try await store.replaceSnapshot(cloud.snapshot)
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: cloud.snapshot)
-            }
-            cloudStatus = "Synced"
-            state = .ready(user)
-        }
-    }
-
-    func uploadLatestSnapshot(_ snapshot: PlannerSnapshot) async {
+    func uploadLatestPlannerData(from store: PlannerStore) async {
         guard case let .ready(user) = state else { return }
-        guard let signature = try? PlannerCloudPayload.signature(for: snapshot),
+        let collection = store.accountCollectionForCloudUpload()
+        guard let signature = try? PlannerCloudPayload.signature(for: collection),
               signature != lastUploadedSignature else { return }
 
         do {
             cloudStatus = "Uploading"
-            try await cloudSyncService.pushSnapshot(snapshot, for: user)
+            try await cloudSyncService.pushAccountCollection(collection, for: user)
             lastUploadedSignature = signature
             cloudStatus = "Synced"
         } catch {
@@ -216,14 +193,15 @@ final class FirebaseAuthSession: ObservableObject {
         await store.load()
 
         do {
-            let cloud = try await cloudSyncService.pullSnapshot(for: user)
-            let decision = PlannerCloudSyncResolver.decision(local: store.snapshot, cloud: cloud)
+            let cloud = try await cloudSyncService.pullAccountCollection(for: user)
+            let local = store.accountCollectionForCloudUpload()
+            let decision = PlannerCloudSyncResolver.decision(local: local, cloud: cloud)
 
             switch decision {
             case .uploadLocal:
                 cloudStatus = "Uploading iPhone data"
-                try await cloudSyncService.pushSnapshot(store.snapshot, for: user)
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: store.snapshot)
+                try await cloudSyncService.pushAccountCollection(local, for: user)
+                lastUploadedSignature = try? PlannerCloudPayload.signature(for: local)
                 cloudStatus = "Synced"
                 state = .ready(user)
             case .downloadCloud:
@@ -233,22 +211,14 @@ final class FirebaseAuthSession: ObservableObject {
                     return
                 }
                 cloudStatus = "Downloading cloud data"
-                try await store.replaceSnapshot(cloud.snapshot)
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: cloud.snapshot)
+                let savedCollection = try await store.replaceAccountCollection(cloud.collection)
+                lastUploadedSignature = try? PlannerCloudPayload.signature(for: savedCollection)
                 cloudStatus = "Synced"
                 state = .ready(user)
             case .alreadySynced, .keepEmptyLocal:
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: store.snapshot)
+                lastUploadedSignature = try? PlannerCloudPayload.signature(for: local)
                 cloudStatus = "Synced"
                 state = .ready(user)
-            case .needsUserChoice:
-                guard let cloud else {
-                    cloudStatus = "Synced"
-                    state = .ready(user)
-                    return
-                }
-                cloudStatus = "Needs review"
-                state = .conflict(user, cloud)
             }
         } catch {
             cloudStatus = "Sync failed"

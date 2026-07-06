@@ -4,6 +4,11 @@ import CryptoKit
 import Security
 import SwiftUI
 
+enum AuthLaunchPresentationPolicy {
+    static let showsLoadingScreens = false
+    static let promptsForCloudDataChoice = false
+}
+
 struct AuthenticatedRootView: View {
     @StateObject private var store = PlannerStore()
     @StateObject private var session = FirebaseAuthSession()
@@ -13,16 +18,14 @@ struct AuthenticatedRootView: View {
     var body: some View {
         Group {
             switch session.state {
-            case .loading(let message):
-                AuthProgressView(message: message)
+            case .loading:
+                AuthSilentLaunchView()
             case .signedOut:
                 AuthEntryView(session: session, store: store)
             case .emailVerificationRequired(let user):
                 EmailVerificationView(session: session, store: store, user: user)
-            case .syncing(_, let message):
-                AuthProgressView(message: message)
-            case .conflict(_, let cloud):
-                CloudConflictView(session: session, store: store, cloud: cloud)
+            case .syncing:
+                AuthSilentLaunchView()
             case .ready:
                 AppView(store: store)
             case .failed(let message):
@@ -36,9 +39,14 @@ struct AuthenticatedRootView: View {
             didStart = true
             await session.start(store: store)
         }
-        .onReceive(store.snapshotPublisher.debounce(for: .milliseconds(900), scheduler: RunLoop.main)) { snapshot in
+        .onReceive(store.cloudSyncPublisher.debounce(for: .milliseconds(900), scheduler: RunLoop.main)) { _ in
             Task {
-                await session.uploadLatestSnapshot(snapshot)
+                await session.uploadLatestPlannerData(from: store)
+            }
+        }
+        .onChange(of: selectedThemeRawValue) { _, _ in
+            Task {
+                await session.uploadLatestPlannerData(from: store)
             }
         }
     }
@@ -227,13 +235,13 @@ private struct AuthEntryView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             Text(mode.heroTitle)
                 .font(.system(size: 38, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppTheme.Colors.primaryText)
                 .lineLimit(2)
                 .minimumScaleFactor(0.76)
 
             Text(mode.heroSubtitle)
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -296,7 +304,7 @@ private struct AuthEntryView: View {
             if !confirmPassword.isEmpty && password != confirmPassword {
                 Text("Passwords need to match.")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppTheme.Colors.danger)
             }
         }
     }
@@ -311,7 +319,7 @@ private struct AuthEntryView: View {
                 Spacer()
                 Text("Forgot password?")
                     .font(.footnote.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppTheme.Colors.accent)
             }
         }
     }
@@ -461,10 +469,15 @@ private struct PhoneAuthDiagnosticsBanner: View {
 }
 
 private enum AuthEntryPalette {
-    static let deepRed = Color(hex: "#8F120A")
-    static let fieldFill = Color.white.opacity(0.15)
-    static let fieldBorder = Color.white.opacity(0.24)
-    static let softText = Color.white.opacity(0.76)
+    static var primaryActionText: Color { AppTheme.Colors.controlText }
+    static var fieldFill: Color { AppTheme.Colors.elevatedSurface.opacity(AppTheme.selectedColorScheme == .dark ? 0.86 : 1) }
+    static var fieldBorder: Color { AppTheme.Colors.border }
+    static var softText: Color { AppTheme.Colors.secondaryText }
+    static var linkText: Color { AppTheme.Colors.accent }
+    static var socialFill: Color { AppTheme.Colors.elevatedSurface }
+    static var socialSelectedFill: Color { AppTheme.Colors.selectedFill }
+    static var socialStroke: Color { AppTheme.Colors.selectedStroke }
+    static var bannerFill: Color { AppTheme.Colors.danger.opacity(AppTheme.selectedColorScheme == .dark ? 0.18 : 0.10) }
 }
 
 private struct AuthPrimaryButton: View {
@@ -478,18 +491,18 @@ private struct AuthPrimaryButton: View {
             HStack(spacing: AppTheme.Spacing.sm) {
                 if isLoading {
                     ProgressView()
-                        .tint(AuthEntryPalette.deepRed)
+                        .tint(AuthEntryPalette.primaryActionText)
                 }
 
                 Text(title)
                     .font(.headline.weight(.bold))
             }
-            .foregroundStyle(isDisabled ? AuthEntryPalette.deepRed.opacity(0.42) : AuthEntryPalette.deepRed)
+            .foregroundStyle(AuthEntryPalette.primaryActionText.opacity(isDisabled ? 0.48 : 1))
             .frame(maxWidth: .infinity)
             .frame(minHeight: 54)
-            .background(Color.white.opacity(isDisabled ? 0.54 : 0.96))
+            .background(isDisabled ? AnyShapeStyle(AppTheme.Colors.border.opacity(0.72)) : AnyShapeStyle(AppTheme.Gradients.primary))
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-            .shadow(color: Color.black.opacity(isDisabled ? 0 : 0.16), radius: 16, y: 8)
+            .shadow(color: isDisabled ? .clear : AppTheme.Colors.accentGlow, radius: 16, y: 8)
         }
         .buttonStyle(ScaleButtonStyle())
         .disabled(isDisabled || isLoading)
@@ -504,19 +517,19 @@ private struct AuthErrorBanner: View {
     var body: some View {
         HStack(spacing: AppTheme.Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.white)
+                .foregroundStyle(AppTheme.Colors.danger)
             Text(message)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppTheme.Colors.primaryText)
             Spacer()
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
             }
         }
         .padding(AppTheme.Spacing.md)
-        .background(Color.white.opacity(0.13))
+        .background(AuthEntryPalette.bannerFill)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
@@ -528,7 +541,7 @@ private struct AuthErrorBanner: View {
 private struct AuthTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
-            .foregroundStyle(.white)
+            .foregroundStyle(AppTheme.Colors.primaryText)
             .padding(.horizontal, AppTheme.Spacing.md)
             .frame(minHeight: 50)
             .background(AuthEntryPalette.fieldFill)
@@ -569,18 +582,18 @@ private struct AuthTermsCheckboxRow: View {
             HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
                 Image(systemName: isChecked ? "checkmark.square.fill" : "square")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppTheme.Colors.accent)
 
                 (
                     Text("I accept the ")
                         .foregroundColor(AuthEntryPalette.softText)
                     + Text("terms of use")
-                        .foregroundColor(.white)
+                        .foregroundColor(AuthEntryPalette.linkText)
                         .fontWeight(.bold)
                     + Text(" and ")
                         .foregroundColor(AuthEntryPalette.softText)
                     + Text("privacy policy")
-                        .foregroundColor(.white)
+                        .foregroundColor(AuthEntryPalette.linkText)
                         .fontWeight(.bold)
                 )
                 .font(.caption)
@@ -628,15 +641,15 @@ private struct SocialCircleButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.title3.weight(.bold))
-                .foregroundStyle(AuthEntryPalette.deepRed)
+                .foregroundStyle(AppTheme.Colors.accent)
                 .frame(width: 52, height: 52)
-                .background(Color.white.opacity(isSelected ? 1 : 0.92))
+                .background(isSelected ? AuthEntryPalette.socialSelectedFill : AuthEntryPalette.socialFill)
                 .clipShape(Circle())
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(isSelected ? 0.95 : 0.42), lineWidth: isSelected ? 2 : 1)
+                        .stroke(isSelected ? AuthEntryPalette.socialStroke : AppTheme.Colors.border, lineWidth: isSelected ? 2 : 1)
                 )
-                .shadow(color: Color.black.opacity(0.15), radius: 10, y: 5)
+                .shadow(color: AppTheme.Colors.shadow, radius: 10, y: 5)
         }
         .buttonStyle(ScaleButtonStyle())
         .accessibilityLabel(accessibilityLabel)
@@ -649,24 +662,24 @@ private struct AppleCircleSignInButton: View {
 
     var body: some View {
         SignInWithAppleButton(.continue, onRequest: onRequest, onCompletion: onCompletion)
-            .signInWithAppleButtonStyle(.white)
+            .signInWithAppleButtonStyle(AppTheme.selectedColorScheme == .dark ? .white : .black)
             .frame(width: 52, height: 52)
             .clipShape(Circle())
             .overlay {
                 ZStack {
                     Circle()
-                        .fill(Color.white)
+                        .fill(AppTheme.Colors.surface)
                     Image(systemName: "apple.logo")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(Color.black)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
                 }
                 .allowsHitTesting(false)
             }
             .overlay(
                 Circle()
-                    .stroke(Color.white.opacity(0.42), lineWidth: 1)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
+            .shadow(color: AppTheme.Colors.shadow, radius: 10, y: 5)
             .accessibilityLabel("Continue with Apple")
     }
 }
@@ -682,7 +695,7 @@ private struct AuthModeFooter: View {
                 Text("\(prompt) ")
                     .foregroundColor(AuthEntryPalette.softText)
                 + Text(actionTitle)
-                    .foregroundColor(.white)
+                    .foregroundColor(AuthEntryPalette.linkText)
                     .fontWeight(.bold)
             )
             .font(.footnote)
@@ -742,58 +755,6 @@ private struct EmailVerificationView: View {
     }
 }
 
-private struct CloudConflictView: View {
-    @ObservedObject var session: FirebaseAuthSession
-    @ObservedObject var store: PlannerStore
-    var cloud: CloudPlannerSnapshotRecord
-
-    var body: some View {
-        AuthScaffold {
-            AppCard(glow: true) {
-                SectionTitle("Choose Planner Data")
-                Text("Cloud and iPhone planner data are both populated and different.")
-                    .font(.subheadline)
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
-
-                MetricRow(label: "This iPhone", value: localSummary)
-                MetricRow(label: "Cloud backup", value: cloud.updatedAtIso ?? "Saved")
-
-                if let message = session.errorMessage {
-                    ErrorBanner(message: message) {
-                        session.errorMessage = nil
-                    }
-                }
-
-                PrimaryButton(
-                    title: "Use This iPhone Data",
-                    systemImage: "iphone",
-                    isLoading: session.isWorking
-                ) {
-                    Task {
-                        await session.resolveConflict(.useLocal, store: store)
-                    }
-                }
-
-                SecondaryButton(title: "Use Cloud Data", systemImage: "icloud.and.arrow.down") {
-                    Task {
-                        await session.resolveConflict(.useCloud, store: store)
-                    }
-                }
-
-                SecondaryButton(title: "Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
-                    Task {
-                        await session.signOut()
-                    }
-                }
-            }
-        }
-    }
-
-    private var localSummary: String {
-        "\(store.snapshot.pots.count) pots, \(store.snapshot.transactions.count) spends"
-    }
-}
-
 private struct AuthFailureView: View {
     @ObservedObject var session: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
@@ -821,13 +782,11 @@ private struct AuthFailureView: View {
     }
 }
 
-private struct AuthProgressView: View {
-    var message: String
-
+private struct AuthSilentLaunchView: View {
     var body: some View {
-        AuthScaffold {
-            LoadingView(title: message)
-        }
+        AppTheme.Colors.appBackground
+            .ignoresSafeArea()
+            .premiumScreenBackground()
     }
 }
 

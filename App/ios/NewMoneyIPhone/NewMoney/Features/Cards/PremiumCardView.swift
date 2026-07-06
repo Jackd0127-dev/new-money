@@ -1,116 +1,253 @@
 import SwiftUI
 
+enum CreditCardLinkBadge: String, CaseIterable, Identifiable {
+    case pot
+    case bill
+    case debt
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pot: "Pot"
+        case .bill: "Bill"
+        case .debt: "Debt"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .pot: "wallet.pass"
+        case .bill: "doc.text"
+        case .debt: "exclamationmark.shield"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .pot: AppTheme.Colors.success
+        case .bill: AppTheme.Colors.warning
+        case .debt: AppTheme.Colors.danger
+        }
+    }
+}
+
+private enum CardFlipAxis {
+    case horizontal
+    case vertical
+
+    var rotationAxis: (x: CGFloat, y: CGFloat, z: CGFloat) {
+        switch self {
+        case .horizontal:
+            return (x: 0, y: 1, z: 0)
+        case .vertical:
+            return (x: 1, y: 0, z: 0)
+        }
+    }
+}
+
+private struct CardFlip {
+    var axis: CardFlipAxis
+    var direction: Double
+}
+
 struct PremiumCardView: View {
+    var badges: [CreditCardLinkBadge] = []
+    var cardNumber = "••••  ••••  ••••  2847"
+    var cardHolder = "JACK"
+    var expiryDate = "09/29"
+    var provider = "VISA"
+    var horizontalPadding: CGFloat = 16
+    var designId: String? = nil
+
     @State private var dragOffset: CGSize = .zero
+    @State private var isShowingBack = false
+    @State private var flipProgressDegrees = 0.0
+    @State private var activeFlip = CardFlip(axis: .horizontal, direction: 1)
+    private let cardAspectRatio: CGFloat = 1.96
+    private let cornerRadius: CGFloat = 24
+    private let contentInset: CGFloat = 18
+    private let flipDragThreshold: CGFloat = 72
+
+    private var resolvedDesign: CreditCardDesign {
+        CreditCardDesignCatalog.design(forStoredValue: designId)
+    }
+
+    private var providerLabel: String {
+        let trimmedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedProvider.isEmpty ? resolvedDesign.providerFallback : trimmedProvider.uppercased()
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
-            let height = width * 0.63
+            let height = width / cardAspectRatio
+            let horizontalTiltAngle = Double(dragOffset.width / 22)
+            let verticalTiltAngle = Double(dragOffset.height / -18)
+            let xFlipAngle = activeFlip.axis == .vertical ? flipProgressDegrees * activeFlip.direction : 0
+            let yFlipAngle = activeFlip.axis == .horizontal ? flipProgressDegrees * activeFlip.direction : 0
 
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.05, green: 0.06, blue: 0.10),
-                                Color(red: 0.18, green: 0.11, blue: 0.38),
-                                Color(red: 0.02, green: 0.02, blue: 0.04)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+            ZStack {
+                cardShell(width: width, height: height) {
+                    currentFaceContent
+                }
+                .flipFace(angle: flipProgressDegrees, isFront: true)
 
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                .purple.opacity(0.75),
-                                .blue.opacity(0.25),
-                                .clear
-                            ],
-                            center: .center,
-                            startRadius: 5,
-                            endRadius: 180
-                        )
-                    )
-                    .frame(width: 260, height: 260)
-                    .offset(x: width * 0.45, y: -70)
-                    .blur(radius: 12)
-
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.35),
-                                .white.opacity(0.05),
-                                .clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .blendMode(.screen)
-                    .opacity(0.55)
-
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.55),
-                                .white.opacity(0.12),
-                                .white.opacity(0.25)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-
-                cardContent
-                    .padding(24)
+                cardShell(width: width, height: height) {
+                    nextFaceContent
+                }
+                .rotation3DEffect(
+                    .degrees(-180 * activeFlip.direction),
+                    axis: activeFlip.axis.rotationAxis,
+                    perspective: 0.7
+                )
+                .flipFace(angle: flipProgressDegrees, isFront: false)
             }
             .frame(width: width, height: height)
-            .shadow(color: .black.opacity(0.35), radius: 24, x: 0, y: 18)
+            .shadow(color: AppTheme.Colors.strongShadow, radius: 18, x: 0, y: 12)
             .rotation3DEffect(
-                .degrees(Double(dragOffset.height / -18)),
+                .degrees(xFlipAngle + verticalTiltAngle),
                 axis: (x: 1, y: 0, z: 0),
                 perspective: 0.7
             )
             .rotation3DEffect(
-                .degrees(Double(dragOffset.width / 18)),
+                .degrees(yFlipAngle + horizontalTiltAngle),
                 axis: (x: 0, y: 1, z: 0),
                 perspective: 0.7
             )
-            .gesture(
-                DragGesture(minimumDistance: 0)
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        commitFlip(tapFlip(for: value.location, width: width, height: height))
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
                     .onChanged { value in
                         dragOffset = value.translation
                     }
-                    .onEnded { _ in
-                        withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
-                            dragOffset = .zero
+                    .onEnded { value in
+                        let horizontalDistance = value.translation.width
+                        let verticalDistance = value.translation.height
+                        let predictedHorizontalDistance = value.predictedEndTranslation.width
+                        let predictedVerticalDistance = value.predictedEndTranslation.height
+                        let horizontalCommitDistance = abs(predictedHorizontalDistance) > abs(horizontalDistance)
+                            ? predictedHorizontalDistance
+                            : horizontalDistance
+                        let verticalCommitDistance = abs(predictedVerticalDistance) > abs(verticalDistance)
+                            ? predictedVerticalDistance
+                            : verticalDistance
+                        let isHorizontalIntent = abs(horizontalDistance) > abs(verticalDistance) * 1.15
+                        let isVerticalIntent = abs(verticalDistance) > abs(horizontalDistance) * 1.15
+                        let shouldFlipHorizontally = isHorizontalIntent && (
+                            abs(horizontalDistance) >= flipDragThreshold ||
+                            abs(predictedHorizontalDistance) >= flipDragThreshold * 1.35
+                        )
+                        let shouldFlipVertically = isVerticalIntent && (
+                            abs(verticalDistance) >= flipDragThreshold ||
+                            abs(predictedVerticalDistance) >= flipDragThreshold * 1.35
+                        )
+
+                        if shouldFlipHorizontally {
+                            commitFlip(CardFlip(axis: .horizontal, direction: horizontalCommitDistance < 0 ? -1 : 1))
+                        } else if shouldFlipVertically {
+                            commitFlip(CardFlip(axis: .vertical, direction: verticalCommitDistance < 0 ? 1 : -1))
+                        } else {
+                            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
+                                dragOffset = .zero
+                            }
                         }
                     }
             )
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(isShowingBack ? "Shows the front of the card" : "Shows the back of the card")
         }
-        .aspectRatio(1.586, contentMode: .fit)
-        .padding()
+        .aspectRatio(cardAspectRatio, contentMode: .fit)
+        .padding(.horizontal, horizontalPadding)
     }
 
-    private var cardContent: some View {
+    @ViewBuilder
+    private var currentFaceContent: some View {
+        if isShowingBack {
+            backCardContent
+        } else {
+            frontCardContent
+        }
+    }
+
+    @ViewBuilder
+    private var nextFaceContent: some View {
+        if isShowingBack {
+            frontCardContent
+        } else {
+            backCardContent
+        }
+    }
+
+    private func tapFlip(for location: CGPoint, width: CGFloat, height: CGFloat) -> CardFlip {
+        let isMiddleColumn = location.x >= width * 0.32 && location.x <= width * 0.68
+
+        if isMiddleColumn && location.y <= height * 0.44 {
+            return CardFlip(axis: .vertical, direction: 1)
+        }
+
+        if isMiddleColumn && location.y >= height * 0.56 {
+            return CardFlip(axis: .vertical, direction: -1)
+        }
+
+        return CardFlip(axis: .horizontal, direction: location.x < width / 2 ? -1 : 1)
+    }
+
+    private func commitFlip(_ flip: CardFlip) {
+        guard flipProgressDegrees == 0 else { return }
+
+        activeFlip = flip
+        withAnimation(.easeInOut(duration: 0.42)) {
+            dragOffset = .zero
+            flipProgressDegrees = 180
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+            var transaction = SwiftUI.Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isShowingBack.toggle()
+                flipProgressDegrees = 0
+            }
+        }
+    }
+
+    private func cardShell<Content: View>(
+        width: CGFloat,
+        height: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let innerWidth = max(0, width - contentInset * 2)
+        let innerHeight = max(0, height - contentInset * 2)
+
+        return ZStack(alignment: .topLeading) {
+            CreditCardArtworkBackground(design: resolvedDesign, cornerRadius: cornerRadius)
+
+            content()
+                .frame(width: innerWidth, height: innerHeight, alignment: .topLeading)
+                .padding(contentInset)
+        }
+        .frame(width: width, height: height)
+    }
+
+    private var frontCardContent: some View {
         VStack(alignment: .leading) {
-            HStack {
-                Text("JACK")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+            HStack(alignment: .top) {
+                Text(providerLabel)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(resolvedDesign.foregroundColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
 
                 Spacer()
 
-                Text("VISA")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                cardBadgeStrip
             }
 
             Spacer()
@@ -119,33 +256,128 @@ struct PremiumCardView: View {
 
             Spacer()
 
-            Text("••••  ••••  ••••  2847")
-                .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
-
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("CARD HOLDER")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-
-                    Text("JACK")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                }
+            HStack(alignment: .bottom) {
+                Text("CREDIT")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .tracking(1.4)
+                    .foregroundStyle(resolvedDesign.mutedForegroundColor.opacity(0.74))
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("EXPIRES")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
+                Image(systemName: "wave.3.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(resolvedDesign.foregroundColor.opacity(0.76))
+            }
+        }
+    }
 
-                    Text("09/29")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
+    private var backCardContent: some View {
+        GeometryReader { proxy in
+            let height = proxy.size.height
+            let spacing = min(8, max(5, height * 0.045))
+            let topHeight = min(20, max(14, height * 0.12))
+            let stripeHeight = min(34, max(24, height * 0.22))
+            let signatureHeight = min(30, max(22, height * 0.19))
+            let numberSize = min(15, max(11, height * 0.085))
+            let labelSize = min(8, max(6, height * 0.048))
+            let valueSize = min(10, max(8, height * 0.064))
+
+            VStack(alignment: .leading, spacing: spacing) {
+                HStack {
+                    Text(cardHolder)
+                        .font(.system(size: min(15, max(11, height * 0.09)), weight: .semibold, design: .rounded))
+                        .foregroundStyle(resolvedDesign.foregroundColor.opacity(0.84))
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Image(systemName: "wave.3.right")
+                        .font(.system(size: min(18, max(14, height * 0.10)), weight: .semibold))
+                        .foregroundStyle(resolvedDesign.foregroundColor.opacity(0.82))
+                }
+                .frame(height: topHeight)
+
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.92), Color.black.opacity(0.72)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: stripeHeight)
+                    .overlay(alignment: .trailing) {
+                        Text(providerLabel)
+                            .font(.system(size: min(14, max(10, height * 0.08)), weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.white.opacity(0.78))
+                            .padding(.trailing, 18)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, -contentInset)
+
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.86))
+                        .frame(height: signatureHeight)
+                        .overlay(alignment: .leading) {
+                            Text(cardHolder)
+                                .font(.system(size: min(11, max(8, height * 0.06)), weight: .semibold, design: .rounded))
+                                .foregroundStyle(Color.black.opacity(0.70))
+                                .padding(.leading, 12)
+                                .lineLimit(1)
+                        }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("CVV")
+                            .font(.system(size: min(8, max(6, height * 0.044)), weight: .bold, design: .rounded))
+                            .foregroundStyle(resolvedDesign.mutedForegroundColor.opacity(0.62))
+                        Text("921")
+                            .font(.system(size: min(10, max(8, height * 0.06)), weight: .bold, design: .rounded))
+                            .foregroundStyle(resolvedDesign.foregroundColor)
+                    }
+                    .frame(width: 40, alignment: .leading)
+                }
+
+                Text(cardNumber)
+                    .font(.system(size: numberSize, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(resolvedDesign.foregroundColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Spacer(minLength: 0)
+
+                HStack(alignment: .bottom, spacing: 26) {
+                    cardDetailBlock(title: "CARD HOLDER", value: cardHolder, labelSize: labelSize, valueSize: valueSize)
+                    cardDetailBlock(title: "EXPIRES", value: expiryDate, labelSize: labelSize, valueSize: valueSize)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+        }
+    }
+
+    private func cardDetailBlock(title: String, value: String, labelSize: CGFloat, valueSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: labelSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(resolvedDesign.mutedForegroundColor.opacity(0.66))
+
+            Text(value)
+                .font(.system(size: valueSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(resolvedDesign.foregroundColor)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var cardBadgeStrip: some View {
+        if !badges.isEmpty {
+            HStack(spacing: 5) {
+                ForEach(badges.prefix(3)) { badge in
+                    CreditCardLinkBadgePill(
+                        badge: badge,
+                        isCompact: true,
+                        foregroundColor: resolvedDesign.foregroundColor
+                    )
                 }
             }
         }
@@ -155,23 +387,20 @@ struct PremiumCardView: View {
         RoundedRectangle(cornerRadius: 6, style: .continuous)
             .fill(
                 LinearGradient(
-                    colors: [
-                        Color(red: 0.95, green: 0.78, blue: 0.38),
-                        Color(red: 0.58, green: 0.42, blue: 0.12)
-                    ],
+                    colors: resolvedDesign.chipGradientColors,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             )
-            .frame(width: 48, height: 36)
+            .frame(width: 42, height: 30)
             .overlay {
                 VStack(spacing: 6) {
                     Rectangle()
-                        .fill(.black.opacity(0.28))
+                        .fill(Color.black.opacity(0.28))
                         .frame(height: 1)
 
                     Rectangle()
-                        .fill(.black.opacity(0.28))
+                        .fill(Color.black.opacity(0.28))
                         .frame(height: 1)
                 }
                 .padding(.horizontal, 6)
@@ -179,11 +408,67 @@ struct PremiumCardView: View {
     }
 }
 
+struct CreditCardLinkBadgePill: View {
+    var badge: CreditCardLinkBadge
+    var isCompact = false
+    var foregroundColor: Color = AppTheme.Colors.controlText
+
+    var body: some View {
+        HStack(spacing: isCompact ? 3 : 5) {
+            Image(systemName: badge.systemImage)
+                .font(.system(size: isCompact ? 8 : 10, weight: .bold))
+            Text(badge.title)
+                .font(.system(size: isCompact ? 9 : 11, weight: .bold, design: .rounded))
+        }
+        .foregroundStyle(foregroundColor)
+        .padding(.horizontal, isCompact ? 7 : 9)
+        .padding(.vertical, isCompact ? 5 : 6)
+        .background(foregroundColor.opacity(0.18))
+        .overlay {
+            Capsule()
+                .stroke(foregroundColor.opacity(0.32), lineWidth: 1)
+        }
+        .clipShape(Capsule())
+    }
+}
+
+private func isBackVisible(for angle: Double) -> Bool {
+    let normalizedAngle = ((angle.truncatingRemainder(dividingBy: 360)) + 360)
+        .truncatingRemainder(dividingBy: 360)
+    return normalizedAngle >= 90 && normalizedAngle <= 270
+}
+
+private struct CardFlipFaceVisibility: AnimatableModifier {
+    var angle: Double
+    var isFront: Bool
+
+    nonisolated var animatableData: Double {
+        get { angle }
+        set { angle = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let isVisible = isFront ? !isBackVisible(for: angle) : isBackVisible(for: angle)
+
+        content
+            .opacity(isVisible ? 1 : 0)
+    }
+}
+
+private extension View {
+    func flipFace(angle: Double, isFront: Bool) -> some View {
+        modifier(CardFlipFaceVisibility(angle: angle, isFront: isFront))
+    }
+}
+
 #Preview {
     ZStack {
         AppTheme.Colors.appBackground.ignoresSafeArea()
 
-        PremiumCardView()
-            .frame(maxWidth: 380)
+        PremiumCardView(
+            badges: [.pot, .bill, .debt],
+            designId: CreditCardDesignCatalog.defaultDesign.storageHex
+        )
+        .frame(maxWidth: 380)
     }
 }

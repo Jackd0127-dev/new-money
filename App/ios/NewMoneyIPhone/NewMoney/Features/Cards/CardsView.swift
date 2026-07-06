@@ -8,6 +8,9 @@ enum CardsSection: String, Equatable {
 
 struct CardsLayoutPolicy {
     static let toolbarActionId = "add"
+    static let detailToolbarActionId = "card-detail-add-payment"
+    static let detailToolbarSymbol = "plus"
+    static let repaymentFlowPlacement = "cardDetailToolbar"
     static let sections: [CardsSection] = [
         .summary,
         .activeCards
@@ -16,6 +19,17 @@ struct CardsLayoutPolicy {
     static func toolbarMode(addAction: @escaping () -> Void) -> AppToolbarMode {
         .add(action: addAction)
     }
+}
+
+enum CardFormLayoutPolicy {
+    static let dayFieldOrder = ["directDebitDay", "statementDay"]
+    static let colorSwatchAlignment = "center"
+    static let showsPlaceholderToolbar = false
+    static let hidesNavigationDivider = true
+    static let usesBillsStyleCard = true
+    static let designSelectionPresentation = "navigationPushGroupedDesignBrowser"
+    static let designGridColumnCount = 2
+    static let preservesDesignAspectRatio = true
 }
 
 struct CardsView: View {
@@ -46,7 +60,7 @@ struct CardsView: View {
 
     private var resolvedToolbarMode: AppToolbarMode {
         switch toolbarMode {
-        case .none, .add(_), .actions(_):
+        case .none, .add(_), .editDone(_, _), .actions(_):
             toolbarMode
         case .primaryDouble, .secondarySingle, .modalSingle:
             CardsLayoutPolicy.toolbarMode {
@@ -82,7 +96,8 @@ struct CardsView: View {
                         CreditCardRow(
                             card: card,
                             balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot),
-                            availability: availabilitySummary(for: card)
+                            availability: availabilitySummary(for: card),
+                            linkBadges: creditCardLinkBadges(card: card, snapshot: store.snapshot)
                         )
                     }
                     .buttonStyle(.plain)
@@ -129,33 +144,59 @@ private struct CreditCardRow: View {
     var card: CreditCard
     var balancePence: Int
     var availability: CreditCardAvailabilitySummary? = nil
+    var linkBadges: [CreditCardLinkBadge] = []
+
+    private var design: CreditCardDesign {
+        CreditCardDesignCatalog.design(forStoredValue: card.color)
+    }
 
     var body: some View {
         AppCard(glow: balancePence > card.limitPence) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                HStack {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+                    CreditCardDesignMiniPreview(
+                        design: design,
+                        provider: card.provider,
+                        badges: linkBadges
+                    )
+                    .frame(width: 82, height: 42)
+
                     VStack(alignment: .leading, spacing: 5) {
                         Text(card.name)
                             .font(.headline)
                             .foregroundStyle(AppTheme.Colors.primaryText)
+                            .lineLimit(1)
+
                         Text(card.provider)
                             .font(.caption)
                             .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
                     }
-                    Spacer()
-                    Text(MoneyParser.formatPence(balancePence))
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    VStack(alignment: .trailing, spacing: 7) {
+                        Text(MoneyParser.formatPence(balancePence))
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+
+                        linkBadgeStrip
+                    }
                 }
+
                 ProgressView(value: min(1, Double(balancePence) / Double(max(1, card.limitPence))))
                     .tint(balancePence > card.limitPence ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
                     .background(AppTheme.Colors.divider)
+
                 HStack {
                     Pill(text: "Limit \(MoneyParser.formatPence(card.limitPence))", systemImage: "gauge")
                     if let dueDay = card.dueDay {
                         Pill(text: "Due day \(dueDay)", systemImage: "calendar")
                     }
                 }
+
                 HStack {
                     Text(cardAvailabilityLabel(actualAvailablePence))
                         .font(.caption.weight(.semibold))
@@ -178,6 +219,17 @@ private struct CreditCardRow: View {
     private var forecastAvailablePence: Int {
         availability?.forecastAvailablePence ?? actualAvailablePence
     }
+
+    @ViewBuilder
+    private var linkBadgeStrip: some View {
+        if !linkBadges.isEmpty {
+            HStack(spacing: 5) {
+                ForEach(linkBadges.prefix(3)) { badge in
+                    CreditCardLinkBadgePill(badge: badge, isCompact: true)
+                }
+            }
+        }
+    }
 }
 
 struct CardFormView: View {
@@ -190,37 +242,22 @@ struct CardFormView: View {
     @State private var openingStatement = ""
     @State private var statementDay = 1
     @State private var directDebitDay = 1
-    @State private var color = "#E85002"
-
-    private let cardColors = ["#E85002", "#2563EB", "#16A34A", "#7C3AED", "#0F766E", "#4338CA", "#475569"]
+    @State private var color = CreditCardDesignCatalog.defaultDesign.storageHex
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: AppTheme.Spacing.md) {
+                AppCard(glow: true) {
+                    SectionTitle("Add card")
                     TextField("Card name", text: $name).textFieldStyle(AppTextFieldStyle())
                     TextField("Provider", text: $provider).textFieldStyle(AppTextFieldStyle())
                     MoneyField(title: "Credit limit", text: $limit)
                     MoneyField(title: "Opening balance", text: $opening)
                     MoneyField(title: "Existing statement due", text: $openingStatement)
 
-                    SelectionField(title: "Statement day", value: creditCardDaySelectionValue(statementDay), systemImage: "calendar") {
-                        ForEach(1...31, id: \.self) { day in
-                            Button(creditCardDaySelectionValue(day)) {
-                                statementDay = day
-                            }
-                        }
-                    }
+                    dayFields
 
-                    SelectionField(title: "Direct debit day", value: creditCardDaySelectionValue(directDebitDay), systemImage: "calendar.badge.clock") {
-                        ForEach(1...31, id: \.self) { day in
-                            Button(creditCardDaySelectionValue(day)) {
-                                directDebitDay = day
-                            }
-                        }
-                    }
-
-                    colorSwatches
+                    CreditCardDesignSelectionLink(selectedValue: $color, provider: provider)
 
                     PrimaryButton(title: "Add card", systemImage: "plus", isDisabled: name.isBlank || limit.isBlank) {
                         store.addCreditCard(
@@ -238,40 +275,39 @@ struct CardFormView: View {
                     }
                 }
                 .padding(AppTheme.Spacing.lg)
+                .onAppear {
+                    if color.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        color = CreditCardDesignCatalog.defaultDesign.storageHex
+                    }
+                }
             }
             .premiumScreenBackground()
             .navigationTitle("Add card")
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-            .appPlaceholderToolbar(.modalSingle)
         }
     }
 
-    private var colorSwatches: some View {
-        HStack(spacing: AppTheme.Spacing.md) {
-            ForEach(cardColors, id: \.self) { swatch in
-                Button {
-                    color = swatch
-                } label: {
-                    Circle()
-                        .fill(Color(hex: swatch))
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Circle()
-                                .stroke(color == swatch ? AppTheme.Colors.primaryText : .clear, lineWidth: 2)
-                        )
-                        .overlay {
-                            if color == swatch {
-                                Image(systemName: "checkmark")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
+    private var dayFields: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            SelectionField(title: "Direct debit day", value: creditCardDaySelectionValue(directDebitDay), systemImage: "calendar.badge.clock") {
+                ForEach(1...31, id: \.self) { day in
+                    Button(creditCardDaySelectionValue(day)) {
+                        directDebitDay = day
+                    }
                 }
-                .buttonStyle(ScaleButtonStyle())
-                .accessibilityLabel("Card color")
             }
+            .frame(maxWidth: .infinity)
+
+            SelectionField(title: "Statement day", value: creditCardDaySelectionValue(statementDay), systemImage: "calendar") {
+                ForEach(1...31, id: \.self) { day in
+                    Button(creditCardDaySelectionValue(day)) {
+                        statementDay = day
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -284,6 +320,7 @@ private struct CardDetailView: View {
     @ObservedObject var store: PlannerStore
     var card: CreditCard
     @State private var isHistoryExpanded = true
+    @State private var isCardPaymentPresented = false
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
@@ -305,7 +342,8 @@ private struct CardDetailView: View {
                     CreditCardRow(
                         card: currentCard,
                         balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot),
-                        availability: cardAvailability
+                        availability: cardAvailability,
+                        linkBadges: creditCardLinkBadges(card: currentCard, snapshot: store.snapshot)
                     )
                     statementSummaryCard
                     linkedSection
@@ -319,8 +357,22 @@ private struct CardDetailView: View {
             }
             .premiumScreenBackground()
             .navigationTitle(card.name)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-            .appPlaceholderToolbar(.modalSingle)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(id: CardsLayoutPolicy.detailToolbarActionId, placement: .topBarTrailing) {
+                    Button {
+                        isCardPaymentPresented = true
+                    } label: {
+                        Image(systemName: CardsLayoutPolicy.detailToolbarSymbol)
+                    }
+                    .accessibilityLabel("Add Card Payment")
+                }
+            }
+            .sheet(isPresented: $isCardPaymentPresented) {
+                CardPaymentFlowSheetView(store: store, initialCardId: currentCard.id)
+            }
         }
     }
 
@@ -613,6 +665,7 @@ private struct CardDetailView: View {
 struct CardPaymentFlowSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
+    var initialCardId: String? = nil
     @State private var repaymentCardId = ""
     @State private var repaymentAmount = ""
     @State private var repaymentDate = Date()
@@ -633,9 +686,13 @@ struct CardPaymentFlowSheetView: View {
                     Button("Close") { dismiss() }
                 }
             }
-            .appPlaceholderToolbar(.modalSingle)
             .onAppear {
-                repaymentCardId = repaymentCardId.isEmpty ? store.activeCards.first?.id ?? "" : repaymentCardId
+                if let initialCardId,
+                   store.activeCards.contains(where: { $0.id == initialCardId }) {
+                    repaymentCardId = initialCardId
+                } else if repaymentCardId.isEmpty {
+                    repaymentCardId = store.activeCards.first?.id ?? ""
+                }
             }
         }
     }
@@ -716,6 +773,47 @@ private func forecastAvailabilityLabel(_ availablePence: Int) -> String {
     availablePence < 0
         ? "Forecast over limit by \(MoneyParser.formatPence(abs(availablePence)))"
         : "Forecast available \(MoneyParser.formatPence(availablePence))"
+}
+
+private func creditCardLinkBadges(card: CreditCard, snapshot: PlannerSnapshot) -> [CreditCardLinkBadge] {
+    let linkedPots = snapshot.pots.filter {
+        $0.deletedAt == nil &&
+        !$0.archived &&
+        $0.linkedCreditCardId == card.id
+    }
+    let linkedPotIds = Set(linkedPots.map(\.id))
+
+    let hasPotLink = !linkedPots.isEmpty || snapshot.creditCardPots.contains {
+        $0.deletedAt == nil &&
+        $0.status == .active &&
+        $0.creditCardId == card.id
+    }
+
+    let hasBillLink = snapshot.recurringPayments.contains { payment in
+        guard payment.deletedAt == nil, payment.active else { return false }
+        if payment.creditCardId == card.id { return true }
+        guard let potId = payment.potId else { return false }
+        return linkedPotIds.contains(potId)
+    } || snapshot.customPayments.contains {
+        $0.deletedAt == nil &&
+        $0.status != .archived &&
+        $0.creditCardId == card.id
+    }
+
+    let hasDebtLink = linkedPots.contains { pot in
+        guard let debtId = pot.linkedDebtId else { return false }
+        return snapshot.debts.contains {
+            $0.id == debtId &&
+            $0.deletedAt == nil &&
+            $0.status.isActiveLike
+        }
+    }
+
+    var badges: [CreditCardLinkBadge] = []
+    if hasPotLink { badges.append(.pot) }
+    if hasBillLink { badges.append(.bill) }
+    if hasDebtLink { badges.append(.debt) }
+    return badges
 }
 
 private extension String {

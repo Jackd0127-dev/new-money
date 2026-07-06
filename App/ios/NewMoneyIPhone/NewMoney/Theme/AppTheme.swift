@@ -20,6 +20,27 @@ struct AppThemePalette: Equatable, Sendable {
     var warningHex: String
     var dangerHex: String
     var preferredColorScheme: ColorScheme
+
+    var accentReadableTextHex: String {
+        Self.readableTextHex(on: accentHex)
+    }
+
+    var cardEyebrowHex: String {
+        preferredColorScheme == .dark ? warmHex : secondaryTextHex
+    }
+
+    private static func readableTextHex(on hex: String) -> String {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard cleaned.count == 6, let value = UInt64(cleaned, radix: 16) else {
+            return "#FFFFFF"
+        }
+
+        let red = Double((value & 0xFF0000) >> 16) / 255
+        let green = Double((value & 0x00FF00) >> 8) / 255
+        let blue = Double(value & 0x0000FF) / 255
+        let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        return luminance > 0.58 ? "#111111" : "#FFFFFF"
+    }
 }
 
 enum AppThemePreset: String, CaseIterable, Identifiable, Sendable {
@@ -251,6 +272,12 @@ enum AppThemePreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum AppThemeRefreshPolicy {
+    static let rebuildsTabContentOnThemeChange = true
+    static let sharedSurfacesObserveThemeStorage = true
+    static let screenBackgroundAvoidsGlobalAccentOverlay = true
+}
+
 enum AppTheme {
     static let selectedPresetStorageKey = "newMoney.themePresetId"
 
@@ -266,15 +293,37 @@ enum AppTheme {
         selectedPalette.preferredColorScheme
     }
 
+    static func selectableColorHexes(includeWhite: Bool = false) -> [String] {
+        let palette = selectedPalette
+        let candidates = [
+            palette.accentHex,
+            palette.accentHighlightHex,
+            palette.accentMutedHex,
+            palette.successHex,
+            palette.warningHex,
+            palette.dangerHex,
+            palette.warmHex,
+            palette.textHex
+        ] + (includeWhite ? ["#FFFFFF"] : [])
+
+        return candidates.reduce(into: [String]()) { result, hex in
+            let normalized = hex.uppercased()
+            if !result.contains(normalized) {
+                result.append(normalized)
+            }
+        }
+    }
+
     enum Colors {
         static var appBackground: Color { Color(hex: AppTheme.selectedPalette.backgroundHex) }
         static var surface: Color { Color(hex: AppTheme.selectedPalette.surfaceHex) }
         static var elevatedSurface: Color { Color(hex: AppTheme.selectedPalette.elevatedSurfaceHex) }
         static var cardBackground: Color { Color(hex: AppTheme.selectedPalette.cardBackgroundHex) }
-        static var primaryOrange: Color { Color(hex: AppTheme.selectedPalette.accentHex) }
-        static var orangeHighlight: Color { Color(hex: AppTheme.selectedPalette.accentHighlightHex) }
-        static var orangeMuted: Color { Color(hex: AppTheme.selectedPalette.accentMutedHex) }
-        static var warmSand: Color { Color(hex: AppTheme.selectedPalette.warmHex) }
+        static var accent: Color { Color(hex: AppTheme.selectedPalette.accentHex) }
+        static var accentHighlight: Color { Color(hex: AppTheme.selectedPalette.accentHighlightHex) }
+        static var accentMuted: Color { Color(hex: AppTheme.selectedPalette.accentMutedHex) }
+        static var accentSoft: Color { accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.16 : 0.11) }
+        static var warmAccent: Color { Color(hex: AppTheme.selectedPalette.warmHex) }
         static var primaryText: Color { Color(hex: AppTheme.selectedPalette.textHex) }
         static var secondaryText: Color { Color(hex: AppTheme.selectedPalette.secondaryTextHex) }
         static var tertiaryText: Color { Color(hex: AppTheme.selectedPalette.tertiaryTextHex) }
@@ -283,31 +332,77 @@ enum AppTheme {
         static var success: Color { Color(hex: AppTheme.selectedPalette.successHex) }
         static var warning: Color { Color(hex: AppTheme.selectedPalette.warningHex) }
         static var danger: Color { Color(hex: AppTheme.selectedPalette.dangerHex) }
-        static var glowOrange: Color { orangeHighlight.opacity(0.45) }
+        static var neonMoneyUp: Color { Color(hex: "#39FF14") }
+        static var neonMoneyDown: Color { Color(hex: "#FF1744") }
+        static var controlText: Color { Color(hex: AppTheme.selectedPalette.accentReadableTextHex) }
+        static var inverseText: Color { AppTheme.selectedColorScheme == .dark ? Color(hex: "#111111") : Color(hex: "#FFFFFF") }
+        static var shadow: Color { AppTheme.selectedColorScheme == .dark ? Color(hex: "#000000").opacity(0.24) : primaryText.opacity(0.09) }
+        static var strongShadow: Color { AppTheme.selectedColorScheme == .dark ? Color(hex: "#000000").opacity(0.34) : primaryText.opacity(0.14) }
+        static var accentGlow: Color { accentHighlight.opacity(AppTheme.selectedColorScheme == .dark ? 0.45 : 0.26) }
+        static var selectedFill: Color { accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.18 : 0.12) }
+        static var selectedStroke: Color { accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.52 : 0.36) }
+        static var cardEyebrow: Color { Color(hex: AppTheme.selectedPalette.cardEyebrowHex) }
+
+        // Legacy names kept as aliases so older screens still resolve through the selected preset.
+        static var primaryOrange: Color { accent }
+        static var orangeHighlight: Color { accentHighlight }
+        static var orangeMuted: Color { accentMuted }
+        static var warmSand: Color { cardEyebrow }
+        static var glowOrange: Color { accentGlow }
     }
 
     enum Gradients {
+        static var screenBackground: LinearGradient {
+            LinearGradient(
+                colors: [
+                    Colors.appBackground,
+                    Colors.surface.opacity(AppTheme.selectedColorScheme == .dark ? 0.72 : 0.70),
+                    Colors.elevatedSurface.opacity(AppTheme.selectedColorScheme == .dark ? 0.46 : 0.56),
+                    Colors.appBackground
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
         static var primary: LinearGradient {
             LinearGradient(
-            colors: [Colors.orangeMuted, Colors.primaryOrange, Colors.orangeHighlight],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
+                colors: [Colors.accentMuted, Colors.accent, Colors.accentHighlight],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
         }
 
         static var card: LinearGradient {
             LinearGradient(
-            colors: [Colors.elevatedSurface, Colors.cardBackground],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
+                colors: AppTheme.selectedColorScheme == .dark
+                    ? [Colors.elevatedSurface, Colors.cardBackground]
+                    : [Colors.cardBackground, Colors.surface],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
         }
 
         static var hero: LinearGradient {
             LinearGradient(
-            colors: [Colors.primaryOrange.opacity(0.55), Colors.orangeMuted.opacity(0.28), .clear],
-            startPoint: .topTrailing,
-            endPoint: .bottomLeading
+                colors: [
+                    Colors.accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.46 : 0.13),
+                    Colors.accentMuted.opacity(AppTheme.selectedColorScheme == .dark ? 0.24 : 0.08),
+                    Colors.appBackground.opacity(0.0)
+                ],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
+            )
+        }
+
+        static var softAccentSurface: LinearGradient {
+            LinearGradient(
+                colors: [
+                    Colors.elevatedSurface,
+                    Colors.accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.18 : 0.08)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
         }
     }

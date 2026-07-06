@@ -40,6 +40,10 @@
 	<string>public.app-category.finance</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>New Money uses the camera to set your account photo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>New Money lets you choose photos for account avatars.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

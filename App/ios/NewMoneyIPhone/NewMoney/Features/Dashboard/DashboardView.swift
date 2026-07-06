@@ -23,8 +23,7 @@ struct DashboardHomeLayoutPolicy {
         .monthlySpendChart,
         .upcomingBeforePayday,
         .alerts,
-        .fundingChecklist,
-        .recentActivity
+        .fundingChecklist
     ]
 
     static let moneyLeftDetailSections: [DashboardHomeSection] = [
@@ -60,7 +59,7 @@ struct DashboardView: View {
     var body: some View {
         ScreenScaffold(
             title: "Home",
-            subtitle: "Money left, upcoming pressure, and recent activity.",
+            subtitle: "Money left and upcoming pressure.",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
@@ -125,16 +124,7 @@ struct DashboardView: View {
                 .foregroundStyle(AppTheme.Colors.primaryText)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 8)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            AppTheme.Colors.elevatedSurface,
-                            AppTheme.Colors.primaryOrange.opacity(0.16)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .background(AppTheme.Gradients.softAccentSurface)
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
@@ -714,7 +704,7 @@ private struct DashboardMoneyLeftHeroContent: View {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                     Text("Money left")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.warmSand)
+                        .foregroundStyle(AppTheme.Colors.cardEyebrow)
                     Text(MoneyParser.formatPence(summary.currentMoneyLeftPence))
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
                         .foregroundStyle(summary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
@@ -885,7 +875,7 @@ private struct DashboardMonthlySpendChartView: View {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("Spent this month")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.warmSand)
+                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
                             .textCase(.uppercase)
                         Text(MoneyParser.formatPence(data.totalPence))
                             .font(.system(.title, design: .rounded, weight: .bold))
@@ -1268,9 +1258,9 @@ private struct DashboardBreakdownScaffold<Content: View>: View {
 struct IncomeBreakdownView: View {
     @ObservedObject var store: PlannerStore
     @State private var isAddIncomePresented = false
-    @State private var selectedPaycheck: Paycheck?
     @State private var isPaycheckInputsExpanded = true
     @State private var isPayPeriodsExpanded = false
+    @State private var editMode: EditMode = .inactive
 
     private var snapshot: PlannerSnapshot { store.snapshot }
     private var costSummary: PayPeriodCostSummary {
@@ -1281,7 +1271,9 @@ struct IncomeBreakdownView: View {
         DashboardBreakdownScaffold(
             title: "Income",
             subtitle: "Paycheck inputs, pay periods, and period money left.",
-            toolbarMode: .actions([AppToolbarAction.edit()])
+            toolbarMode: .editDone(isEditing: editMode.isEditing) {
+                toggleEditMode()
+            }
         ) {
             AppCard(glow: true) {
                 MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod?.incomePence ?? 0), valueColor: AppTheme.Colors.success)
@@ -1298,37 +1290,35 @@ struct IncomeBreakdownView: View {
         .sheet(isPresented: $isAddIncomePresented) {
             AddPaycheckSheetView(store: store)
         }
-        .sheet(item: $selectedPaycheck) { paycheck in
-            PaycheckDetailView(store: store, paycheck: paycheck)
-        }
+        .environment(\.editMode, $editMode)
     }
 
     private var paycheckInputsSection: some View {
-        DisclosureGroup(isExpanded: $isPaycheckInputsExpanded) {
+        IncomeExpandableSection(title: "Paycheck inputs", isExpanded: $isPaycheckInputsExpanded) {
             if snapshot.paychecks.isEmpty {
                 AppCard { EmptyStateView(title: "No paycheck inputs", message: "Saved paycheck plans will appear here.", systemImage: "sterlingsign.circle") }
             } else {
                 VStack(spacing: AppTheme.Spacing.md) {
-                    ForEach(snapshot.paychecks.sorted { $0.createdAt > $1.createdAt }) { paycheck in
+                    ForEach(snapshot.paychecks.sorted { $0.createdAt > $1.createdAt }, id: \.id) { paycheck in
                         let paydayLabel = period(for: paycheck).map { FinanceEngine.formatPaydayLabel($0.payday) } ?? "No linked period"
-                        Button {
-                            selectedPaycheck = paycheck
+                        NavigationLink {
+                            PaycheckDetailView(store: store, paycheck: paycheck, presentation: .push)
                         } label: {
-                            PaycheckInputRow(paydayLabel: paydayLabel)
+                            PaycheckInputRow(
+                                paydayLabel: paydayLabel,
+                                amountLabel: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Open paycheck \(paydayLabel)")
                     }
                 }
             }
-        } label: {
-            SectionTitle("Paycheck inputs")
         }
-        .tint(AppTheme.Colors.primaryOrange)
     }
 
     private var payPeriodsSection: some View {
-        DisclosureGroup(isExpanded: $isPayPeriodsExpanded) {
+        IncomeExpandableSection(title: "Pay periods", isExpanded: $isPayPeriodsExpanded) {
             if snapshot.payPeriods.isEmpty {
                 AppCard { EmptyStateView(title: "No pay periods", message: "Create a paycheck plan to start tracking periods.", systemImage: "calendar") }
             } else {
@@ -1346,10 +1336,7 @@ struct IncomeBreakdownView: View {
                     }
                 }
             }
-        } label: {
-            SectionTitle("Pay periods")
         }
-        .tint(AppTheme.Colors.primaryOrange)
     }
 
     private func period(for paycheck: Paycheck) -> PayPeriod? {
@@ -1363,28 +1350,72 @@ struct IncomeBreakdownView: View {
     private func potName(for id: String) -> String {
         snapshot.pots.first { $0.id == id }?.name ?? "Pot"
     }
+
+    private func toggleEditMode() {
+        withAnimation(appToolbarMorphAnimation) {
+            editMode = editMode.isEditing ? .inactive : .active
+        }
+    }
+}
+
+private struct IncomeExpandableSection<Content: View>: View {
+    var title: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            Button {
+                withAnimation(AppTheme.Animation.standard) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    SectionTitle(title)
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                content
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
 }
 
 private struct PaycheckInputRow: View {
     var paydayLabel: String
+    var amountLabel: String
 
     var body: some View {
         AppCard {
             HStack(spacing: AppTheme.Spacing.md) {
-                Image(systemName: "calendar")
-                    .foregroundStyle(AppTheme.Colors.success)
-                    .frame(width: 32, height: 32)
-                    .background(AppTheme.Colors.success.opacity(0.12))
-                    .clipShape(Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Payday")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                     Text(paydayLabel)
-                        .font(.headline)
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(AppTheme.Colors.primaryText)
                 }
+
                 Spacer()
+
+                Text(amountLabel)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.tertiaryText)
@@ -2596,19 +2627,26 @@ private func shortMonthLabel(_ month: Int) -> String {
     return months[month - 1]
 }
 
+private enum PaycheckDetailPresentation: Equatable {
+    case sheet
+    case push
+}
+
 private struct PaycheckDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var paycheck: Paycheck
+    var presentation: PaycheckDetailPresentation = .sheet
     @State private var payday: Date
     @State private var hoursWorked: String
     @State private var hourlyRate: String
     @State private var payFrequency: PayFrequency
     @State private var showDeleteAlert = false
 
-    init(store: PlannerStore, paycheck: Paycheck) {
+    init(store: PlannerStore, paycheck: Paycheck, presentation: PaycheckDetailPresentation = .sheet) {
         self.store = store
         self.paycheck = paycheck
+        self.presentation = presentation
         let period = store.snapshot.payPeriods.first(where: { $0.id == paycheck.payPeriodId })
         _payday = State(initialValue: period?.payday.isoDate ?? Date())
         _hoursWorked = State(initialValue: Self.formatHours(paycheck.hoursWorked))
@@ -2617,34 +2655,46 @@ private struct PaycheckDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: AppTheme.Spacing.lg) {
-                    summaryCard
-                    editCard
-                    SecondaryButton(title: "Delete paycheck", systemImage: "trash", role: .destructive) {
-                        showDeleteAlert = true
-                    }
-                }
-                .padding(AppTheme.Spacing.lg)
+        switch presentation {
+        case .sheet:
+            NavigationStack {
+                detailContent
             }
-            .premiumScreenBackground()
-            .navigationTitle("Paycheck")
-            .toolbar {
+        case .push:
+            detailContent
+        }
+    }
+
+    private var detailContent: some View {
+        ScrollView {
+            VStack(spacing: AppTheme.Spacing.lg) {
+                summaryCard
+                editCard
+                SecondaryButton(title: "Delete paycheck", systemImage: "trash", role: .destructive) {
+                    showDeleteAlert = true
+                }
+            }
+            .padding(AppTheme.Spacing.lg)
+        }
+        .premiumScreenBackground()
+        .navigationTitle("Paycheck")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
+        .toolbar {
+            if presentation == .sheet {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
             }
-            .appPlaceholderToolbar(.modalSingle)
-            .alert("Delete paycheck?", isPresented: $showDeleteAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    store.deletePaycheck(id: paycheck.id)
-                    dismiss()
-                }
-            } message: {
-                Text("This removes the linked pay period and its pot allocations.")
+        }
+        .alert("Delete paycheck?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                store.deletePaycheck(id: paycheck.id)
+                dismiss()
             }
+        } message: {
+            Text("This removes the linked pay period and its pot allocations.")
         }
     }
 

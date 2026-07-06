@@ -328,8 +328,18 @@ struct RecurringPayment: Codable, Equatable, Identifiable, Sendable {
     var frequency: RecurringFrequency
     var potId: String?
     var creditCardId: String?
+    var billGroupId: String? = nil
     var priority: RecurringPriority
     var active: Bool
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
+struct BillGroup: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var color: String
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -769,6 +779,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var settings: Settings
     var pots: [Pot]
     var recurringPayments: [RecurringPayment]
+    var billGroups: [BillGroup]
     var payPeriods: [PayPeriod]
     var paychecks: [Paycheck]
     var potAllocations: [PotAllocation]
@@ -788,6 +799,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         settings: Settings,
         pots: [Pot],
         recurringPayments: [RecurringPayment],
+        billGroups: [BillGroup] = [],
         payPeriods: [PayPeriod],
         paychecks: [Paycheck],
         potAllocations: [PotAllocation],
@@ -806,6 +818,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.settings = settings
         self.pots = pots
         self.recurringPayments = recurringPayments
+        self.billGroups = billGroups
         self.payPeriods = payPeriods
         self.paychecks = paychecks
         self.potAllocations = potAllocations
@@ -823,7 +836,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, dailyBriefs
+        case settings, pots, recurringPayments, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, dailyBriefs
     }
 
     init(from decoder: Decoder) throws {
@@ -832,6 +845,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             settings: try container.decode(Settings.self, forKey: .settings),
             pots: try container.decodeIfPresent([Pot].self, forKey: .pots) ?? [],
             recurringPayments: try container.decodeIfPresent([RecurringPayment].self, forKey: .recurringPayments) ?? [],
+            billGroups: try container.decodeIfPresent([BillGroup].self, forKey: .billGroups) ?? [],
             payPeriods: try container.decodeIfPresent([PayPeriod].self, forKey: .payPeriods) ?? [],
             paychecks: try container.decodeIfPresent([Paycheck].self, forKey: .paychecks) ?? [],
             potAllocations: try container.decodeIfPresent([PotAllocation].self, forKey: .potAllocations) ?? [],

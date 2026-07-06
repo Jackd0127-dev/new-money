@@ -190,26 +190,22 @@ struct FirebaseCloudSyncService: CloudSyncService {
         self.firestore = firestore
     }
 
-    func pullSnapshot(for user: AuthUser) async throws -> CloudPlannerSnapshotRecord? {
+    func pullAccountCollection(for user: AuthUser) async throws -> CloudPlannerAccountCollectionRecord? {
         let document = try await snapshotDocument(for: user).getDocument()
         guard document.exists,
-              let data = document.data(),
-              let snapshotData = data["snapshot"] as? [String: Any] else {
+              let data = document.data() else {
             return nil
         }
 
-        return try CloudPlannerSnapshotRecord(
-            snapshot: PlannerCloudPayload.decodeSnapshot(from: snapshotData),
-            updatedAtIso: data["updatedAtIso"] as? String
-        )
+        return try PlannerCloudPayload.decodeAccountCollectionRecord(from: data)
     }
 
-    func pushSnapshot(_ snapshot: PlannerSnapshot, for user: AuthUser) async throws {
+    func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
         let updatedAtIso = DateUtilities.nowIsoString()
-        var currentData = try PlannerCloudPayload.current(snapshot: snapshot, updatedAtIso: updatedAtIso).firestoreData()
+        var currentData = try PlannerCloudPayload.currentAccounts(collection: collection, updatedAtIso: updatedAtIso).firestoreData()
         currentData["updatedAt"] = FieldValue.serverTimestamp()
 
-        var backupData = try PlannerCloudPayload.backup(snapshot: snapshot, updatedAtIso: updatedAtIso).firestoreData()
+        var backupData = try PlannerCloudPayload.backupAccounts(collection: collection, updatedAtIso: updatedAtIso).firestoreData()
         backupData["updatedAt"] = FieldValue.serverTimestamp()
 
         let batch = firestore.batch()

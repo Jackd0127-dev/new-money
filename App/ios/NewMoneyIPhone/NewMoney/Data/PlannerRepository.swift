@@ -10,6 +10,8 @@ struct PlannerAccount: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
     var color: String
+    var avatarImageName: String? = nil
+    var avatarImageDataBase64: String? = nil
     var snapshot: PlannerSnapshot
     var createdAt: String
     var updatedAt: String
@@ -19,6 +21,7 @@ struct PlannerAccountCollection: Codable, Equatable, Sendable {
     static let maxAccounts = 3
 
     var activeAccountId: String
+    var selectedThemePresetId: String? = nil
     var accounts: [PlannerAccount]
     var updatedAt: String
 

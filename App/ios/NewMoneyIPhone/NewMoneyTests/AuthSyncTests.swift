@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import UIKit
 import XCTest
 @testable import NewMoneyIPhone
 
@@ -216,7 +217,24 @@ final class AuthSyncTests: XCTestCase {
         XCTAssertEqual(decision, .downloadCloud)
     }
 
-    func testSyncDecisionRequiresChoiceWhenBothSnapshotsHaveDifferentUserData() {
+    func testSyncDecisionDownloadsExistingCloudSnapshotEvenWhenCloudIsEmpty() {
+        let cloud = CloudPlannerSnapshotRecord(
+            snapshot: DefaultData.emptySnapshot,
+            updatedAtIso: "2026-06-28T12:00:00.000Z"
+        )
+
+        let decision = PlannerCloudSyncResolver.decision(
+            local: DefaultData.basicDataSnapshot,
+            cloud: cloud
+        )
+
+        XCTAssertEqual(decision, .downloadCloud)
+        XCTAssertTrue(PlannerCloudSyncPolicy.treatsExistingCloudSnapshotAsAuthoritative)
+        XCTAssertFalse(PlannerCloudSyncPolicy.promptsForConflicts)
+        XCTAssertFalse(AuthLaunchPresentationPolicy.promptsForCloudDataChoice)
+    }
+
+    func testSyncDecisionDownloadsCloudWhenBothSnapshotsHaveDifferentUserData() {
         let local = DefaultData.basicDataSnapshot
         var cloudSnapshot = DefaultData.basicDataSnapshot
         cloudSnapshot.settings.assistantName = "Cloud"
@@ -228,7 +246,12 @@ final class AuthSyncTests: XCTestCase {
 
         let decision = PlannerCloudSyncResolver.decision(local: local, cloud: cloud)
 
-        XCTAssertEqual(decision, .needsUserChoice)
+        XCTAssertEqual(decision, .downloadCloud)
+        XCTAssertTrue(PlannerCloudSyncPolicy.prefersMeaningfulCloudByDefault)
+        XCTAssertTrue(PlannerCloudSyncPolicy.treatsExistingCloudSnapshotAsAuthoritative)
+        XCTAssertFalse(PlannerCloudSyncPolicy.promptsForConflicts)
+        XCTAssertFalse(AuthLaunchPresentationPolicy.showsLoadingScreens)
+        XCTAssertFalse(AuthLaunchPresentationPolicy.promptsForCloudDataChoice)
     }
 
     func testCloudPayloadRoundTripsSnapshotAndMarksBackups() throws {
@@ -251,6 +274,138 @@ final class AuthSyncTests: XCTestCase {
         ).firestoreData()
         XCTAssertEqual(backupPayload["backupVersion"] as? Int, 1)
     }
+
+    func testCloudPayloadRoundTripsFullPlannerAccountCollectionAndMarksBackups() throws {
+        var personalSnapshot = DefaultData.emptySnapshot
+        personalSnapshot.pots = [
+            Pot(
+                id: "personal-pot",
+                name: "Personal Pot",
+                type: .saving,
+                category: nil,
+                icon: nil,
+                balancePence: 1_500,
+                targetPence: nil,
+                color: "#F97316",
+                linkedCreditCardId: nil,
+                linkedDebtId: nil,
+                archived: false,
+                createdAt: "2026-07-01T10:00:00.000Z",
+                updatedAt: "2026-07-01T10:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+
+        var sideSnapshot = DefaultData.emptySnapshot
+        sideSnapshot.transactions = [
+            Transaction(
+                id: "side-spend",
+                potId: nil,
+                payPeriodId: nil,
+                amountPence: 725,
+                type: .spending,
+                paymentMethod: nil,
+                creditCardId: nil,
+                recurringPaymentId: nil,
+                date: "2026-07-02",
+                note: "Side coffee",
+                createdAt: "2026-07-02T10:00:00.000Z",
+                updatedAt: "2026-07-02T10:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+
+        let collection = PlannerAccountCollection(
+            activeAccountId: "side-account",
+            selectedThemePresetId: AppThemePreset.warmLight.rawValue,
+            accounts: [
+                PlannerAccount(
+                    id: "personal-account",
+                    name: "Personal",
+                    color: "#F97316",
+                    avatarImageName: "personal-avatar.jpg",
+                    avatarImageDataBase64: "encoded-personal-avatar",
+                    snapshot: personalSnapshot,
+                    createdAt: "2026-07-01T09:00:00.000Z",
+                    updatedAt: "2026-07-01T10:00:00.000Z"
+                ),
+                PlannerAccount(
+                    id: "side-account",
+                    name: "Side",
+                    color: "#14B8A6",
+                    avatarImageName: nil,
+                    avatarImageDataBase64: nil,
+                    snapshot: sideSnapshot,
+                    createdAt: "2026-07-02T09:00:00.000Z",
+                    updatedAt: "2026-07-02T10:00:00.000Z"
+                )
+            ],
+            updatedAt: "2026-07-02T10:00:00.000Z"
+        )
+
+        let payload = try PlannerCloudPayload.currentAccounts(
+            collection: collection,
+            updatedAtIso: "2026-07-03T12:00:00.000Z"
+        ).firestoreData()
+
+        XCTAssertEqual(payload["version"] as? Int, 2)
+        XCTAssertEqual(payload["schema"] as? String, "plannerAccountCollection")
+        XCTAssertEqual(payload["updatedAtIso"] as? String, "2026-07-03T12:00:00.000Z")
+
+        let accountCollectionData = try XCTUnwrap(payload["accountCollection"] as? [String: Any])
+        let decoded = try PlannerCloudPayload.decodeAccountCollection(from: accountCollectionData)
+
+        XCTAssertEqual(decoded.activeAccountId, "side-account")
+        XCTAssertEqual(decoded.selectedThemePresetId, AppThemePreset.warmLight.rawValue)
+        XCTAssertEqual(decoded.accounts.map(\.name), ["Personal", "Side"])
+        XCTAssertEqual(decoded.accounts[0].avatarImageDataBase64, "encoded-personal-avatar")
+        XCTAssertEqual(decoded.accounts[0].snapshot.pots.map(\.name), ["Personal Pot"])
+        XCTAssertEqual(decoded.accounts[1].snapshot.transactions.map(\.note), ["Side coffee"])
+
+        let backupPayload = try PlannerCloudPayload.backupAccounts(
+            collection: collection,
+            updatedAtIso: "2026-07-03T12:00:00.000Z"
+        ).firestoreData()
+        XCTAssertEqual(backupPayload["backupVersion"] as? Int, 2)
+    }
+
+    func testCloudPayloadDecodesLegacySnapshotDocumentAsSingleAccountCollection() throws {
+        let snapshot = DefaultData.basicDataSnapshot
+        let legacyPayload = try PlannerCloudPayload.current(
+            snapshot: snapshot,
+            updatedAtIso: "2026-06-28T12:00:00.000Z"
+        ).firestoreData()
+
+        let record = try XCTUnwrap(PlannerCloudPayload.decodeAccountCollectionRecord(from: legacyPayload))
+
+        XCTAssertEqual(record.updatedAtIso, "2026-06-28T12:00:00.000Z")
+        XCTAssertEqual(record.collection.accounts.count, 1)
+        XCTAssertEqual(record.collection.activeAccount?.name, "Personal")
+        XCTAssertEqual(record.collection.activeAccount?.snapshot, snapshot)
+    }
+
+    func testAccountCollectionSyncDecisionUsesFullCloudCollection() {
+        let local = PlannerAccountCollection.singleAccount(snapshot: DefaultData.emptySnapshot)
+        let cloud = CloudPlannerAccountCollectionRecord(
+            collection: PlannerAccountCollection.singleAccount(snapshot: DefaultData.basicDataSnapshot),
+            updatedAtIso: "2026-07-03T12:00:00.000Z"
+        )
+
+        XCTAssertEqual(PlannerCloudSyncResolver.decision(local: local, cloud: cloud), .downloadCloud)
+        XCTAssertEqual(PlannerCloudSyncResolver.decision(local: cloud.collection, cloud: cloud), .alreadySynced)
+
+        let multiAccountLocal = PlannerAccountCollection(
+            activeAccountId: "two",
+            selectedThemePresetId: nil,
+            accounts: [
+                PlannerAccount(id: "one", name: "One", color: "#F97316", snapshot: DefaultData.emptySnapshot, createdAt: "2026-07-01T10:00:00.000Z", updatedAt: "2026-07-01T10:00:00.000Z"),
+                PlannerAccount(id: "two", name: "Two", color: "#14B8A6", snapshot: DefaultData.emptySnapshot, createdAt: "2026-07-02T10:00:00.000Z", updatedAt: "2026-07-02T10:00:00.000Z")
+            ],
+            updatedAt: "2026-07-02T10:00:00.000Z"
+        )
+
+        XCTAssertEqual(PlannerCloudSyncResolver.decision(local: multiAccountLocal, cloud: nil), .uploadLocal)
+    }
 }
 
 @MainActor
@@ -267,7 +422,10 @@ final class PlannerAccountsTests: XCTestCase {
         XCTAssertTrue(store.canCreatePlannerAccount)
 
         try await store.createPlannerAccount(named: "Work")
+        XCTAssertEqual(store.activePlannerAccount?.name, "Work")
+
         try await store.createPlannerAccount(named: "Bills")
+        XCTAssertEqual(store.activePlannerAccount?.name, "Bills")
 
         XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal", "Work", "Bills"])
         XCTAssertFalse(store.canCreatePlannerAccount)
@@ -278,6 +436,49 @@ final class PlannerAccountsTests: XCTestCase {
         } catch PlannerAccountError.limitReached {
             XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal", "Work", "Bills"])
         }
+    }
+
+    func testPlannerAccountCollectionDecodesLegacyAccountsWithoutAvatarMetadata() throws {
+        let collection = PlannerAccountCollection.singleAccount(snapshot: DefaultData.emptySnapshot)
+        let data = try JSONEncoder().encode(collection)
+        let encoded = String(decoding: data, as: UTF8.self)
+
+        XCTAssertFalse(encoded.contains("avatarImageName"))
+
+        let decoded = try JSONDecoder().decode(PlannerAccountCollection.self, from: data)
+
+        XCTAssertNil(decoded.selectedThemePresetId)
+        XCTAssertNil(decoded.accounts.first?.avatarImageName)
+        XCTAssertNil(decoded.accounts.first?.avatarImageDataBase64)
+    }
+
+    func testPlannerAccountAvatarMetadataPersistsAndCanBeRemoved() async throws {
+        let store = PlannerStore(
+            repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.emptySnapshot),
+            accountRepository: InMemoryPlannerAccountRepository()
+        )
+
+        await store.load()
+
+        let accountId = try XCTUnwrap(store.activePlannerAccount?.id)
+        let avatar = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40)).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 20, y: 0, width: 40, height: 40))
+        }
+
+        try await store.savePlannerAccountAvatar(accountId: accountId, image: avatar)
+
+        let accountWithAvatar = try XCTUnwrap(store.activePlannerAccount)
+        XCTAssertNotNil(accountWithAvatar.avatarImageName)
+        XCTAssertNotNil(accountWithAvatar.avatarImageDataBase64)
+        XCTAssertNotNil(store.plannerAccountAvatarImage(for: accountWithAvatar))
+
+        try await store.removePlannerAccountAvatar(accountId: accountId)
+
+        XCTAssertNil(store.activePlannerAccount?.avatarImageName)
+        XCTAssertNil(store.activePlannerAccount?.avatarImageDataBase64)
     }
 
     func testPlannerAccountsKeepSnapshotsIsolatedWhenSwitching() async throws {

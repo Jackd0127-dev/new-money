@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct AppCard<Content: View>: View {
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
     var glow: Bool = false
     @ViewBuilder var content: Content
 
@@ -15,9 +16,10 @@ struct AppCard<Content: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
-                .stroke(glow ? AppTheme.Colors.primaryOrange.opacity(0.5) : AppTheme.Colors.border, lineWidth: 1)
+                .stroke(glow ? AppTheme.Colors.selectedStroke : AppTheme.Colors.border, lineWidth: 1)
         )
-        .shadow(color: glow ? AppTheme.Colors.glowOrange : .black.opacity(0.25), radius: glow ? 18 : 10, y: glow ? 8 : 4)
+        .shadow(color: glow ? AppTheme.Colors.accentGlow : AppTheme.Colors.shadow, radius: glow ? 18 : 10, y: glow ? 8 : 4)
+        .id("card-\(selectedThemeRawValue)-\(glow)")
     }
 }
 
@@ -33,14 +35,14 @@ struct PrimaryButton: View {
             HStack(spacing: AppTheme.Spacing.sm) {
                 if isLoading {
                     ProgressView()
-                        .tint(.white)
+                        .tint(AppTheme.Colors.controlText)
                 } else if let systemImage {
                     Image(systemName: systemImage)
                 }
                 Text(title)
                     .font(.headline)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(AppTheme.Colors.controlText)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 52)
             .background(isDisabled ? AnyShapeStyle(AppTheme.Colors.darkDisabled) : AnyShapeStyle(AppTheme.Gradients.primary))
@@ -301,12 +303,21 @@ extension View {
 
     func premiumScreenBackground() -> some View {
         background {
-            AppTheme.Colors.appBackground
-                .ignoresSafeArea()
-            AppTheme.Gradients.hero
-                .blur(radius: 28)
-                .ignoresSafeArea()
+            PremiumScreenBackground()
         }
+    }
+}
+
+private struct PremiumScreenBackground: View {
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+
+    var body: some View {
+        ZStack {
+            AppTheme.Colors.appBackground
+            AppTheme.Gradients.screenBackground
+        }
+        .id("screen-background-\(selectedThemeRawValue)")
+        .ignoresSafeArea()
     }
 }
 

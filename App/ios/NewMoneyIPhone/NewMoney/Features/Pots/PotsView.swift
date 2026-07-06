@@ -1,6 +1,57 @@
 import Foundation
 import SwiftUI
 
+enum PotsSection: Equatable {
+    case summary
+    case controls
+    case potList
+}
+
+enum PotsOverviewDetailSection: Equatable {
+    case graph
+    case timeline
+}
+
+enum PotsDetailPresentation: Equatable {
+    case navigationPush
+}
+
+enum PotsLayoutPolicy {
+    static let sections: [PotsSection] = [.summary, .controls, .potList]
+    static let summaryPresentation: PotsDetailPresentation = .navigationPush
+    static let summaryShowsTopCardSymbol = false
+    static let overviewDetailSections: [PotsOverviewDetailSection] = [.graph, .timeline]
+    static let graphStyle = "animatedNeonLine"
+    static let timelineStyle = "branchedPotTimeline"
+    static let overviewDetailSubtitle = ""
+    static let overviewDetailUsesInlineTitle = true
+}
+
+enum PotHistoryLayoutPolicy {
+    static let toolbarActionId = AppEditDoneToolbarPolicy.editToolbarActionId
+    static let editTitle = AppEditDoneToolbarPolicy.editTitle
+    static let doneTitle = AppEditDoneToolbarPolicy.doneTitle
+    static let usesNativeToolbarContentSwap = true
+    static let showsPlaceholderOptions = false
+    static let showsTopDividerAboveModePicker = false
+}
+
+enum PotFormLayoutPolicy {
+    static let usesBillsStyleCard = true
+    static let hidesNavigationDivider = true
+    static let linkedPickerStyle = "selectionFieldBox"
+    static let colorHexes = [
+        "#FF7A1A",
+        "#22C55E",
+        "#38BDF8",
+        "#A855F7",
+        "#F43F5E",
+        "#FACC15",
+        "#14B8A6",
+        "#64748B"
+    ]
+}
+
 struct PotsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
@@ -42,14 +93,16 @@ struct PotsView: View {
     }
 
     private var summaryCard: some View {
-        AppCard(glow: true) {
-            MetricRow(
-                label: "Total saved",
-                value: MoneyParser.formatPence(store.activePots.reduce(0) { $0 + $1.balancePence }),
-                valueColor: AppTheme.Colors.primaryOrange
+        NavigationLink {
+            PotOverviewDetailView(store: store)
+        } label: {
+            PotsSummaryCardContent(
+                totalSavedPence: store.activePots.reduce(0) { $0 + $1.balancePence },
+                activePotCount: store.activePots.count
             )
-            MetricRow(label: "Active pots", value: "\(store.activePots.count)")
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open pots graph")
     }
 
     private var controls: some View {
@@ -110,13 +163,648 @@ private struct FilterChip: View {
         Button(action: action) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(isSelected ? .white : AppTheme.Colors.secondaryText)
+                .foregroundStyle(isSelected ? AppTheme.Colors.controlText : AppTheme.Colors.secondaryText)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(isSelected ? AnyShapeStyle(AppTheme.Gradients.primary) : AnyShapeStyle(AppTheme.Colors.elevatedSurface))
                 .clipShape(Capsule())
         }
         .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+private struct PotsSummaryCardContent: View {
+    var totalSavedPence: Int
+    var activePotCount: Int
+
+    var body: some View {
+        AppCard(glow: true) {
+            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    MetricRow(
+                        label: "Total saved",
+                        value: MoneyParser.formatPence(totalSavedPence),
+                        valueColor: AppTheme.Colors.primaryOrange
+                    )
+                    MetricRow(label: "Active pots", value: "\(activePotCount)")
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("View pot growth")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+            }
+            .padding(.top, 2)
+        }
+    }
+}
+
+private struct PotOverviewDetailView: View {
+    @ObservedObject var store: PlannerStore
+
+    private var graphData: PotBalanceTrendData {
+        PotBalanceTrendData.make(snapshot: store.snapshot, todayIso: store.todayIso)
+    }
+
+    private var timelineEvents: [PotTimelineEvent] {
+        PotTimelineEvent.make(snapshot: store.snapshot)
+    }
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Pot value",
+            subtitle: PotsLayoutPolicy.overviewDetailSubtitle,
+            navigationMode: .inline,
+            toolbarMode: .none,
+            titleDisplayMode: .inline
+        ) {
+            ForEach(PotsLayoutPolicy.overviewDetailSections, id: \.self) { section in
+                switch section {
+                case .graph:
+                    PotBalanceTrendCard(data: graphData)
+                case .timeline:
+                    PotTimelineCard(events: timelineEvents)
+                }
+            }
+        }
+    }
+}
+
+private struct PotBalanceTrendData: Equatable {
+    var startDate: String
+    var endDate: String
+    var startPence: Int
+    var currentPence: Int
+    var movementPence: Int
+    var points: [PotBalanceTrendPoint]
+
+    var id: String {
+        "\(startDate)-\(endDate)-\(startPence)-\(currentPence)-\(movementPence)-\(points.count)"
+    }
+
+    var hasMovement: Bool {
+        movementPence != 0 || points.contains { $0.balancePence != startPence }
+    }
+
+    var graphMinPence: Int {
+        min(0, points.map(\.balancePence).min() ?? 0)
+    }
+
+    var graphMaxPence: Int {
+        let maxValue = max(0, points.map(\.balancePence).max() ?? 0)
+        return maxValue == graphMinPence ? maxValue + 1 : maxValue
+    }
+
+    var changePence: Int {
+        currentPence - startPence
+    }
+
+    var trendColor: Color {
+        changePence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp
+    }
+
+    static func make(snapshot: PlannerSnapshot, todayIso: String) -> PotBalanceTrendData {
+        let activePots = snapshot.pots.filter { !$0.archived && $0.deletedAt == nil }
+        let currentPence = activePots.reduce(0) { $0 + $1.balancePence }
+        let moneyEvents = PotTimelineEvent.moneyEvents(snapshot: snapshot).sorted(by: potTimelineAscending)
+        let movementPence = moneyEvents.reduce(0) { $0 + ($1.amountPence ?? 0) }
+        let startPence = currentPence - movementPence
+        let firstKnownDate = (
+            moneyEvents.map(\.date) + activePots.map { potDatePrefix($0.createdAt) } + [todayIso]
+        )
+        .filter { !$0.isEmpty }
+        .min() ?? todayIso
+
+        var runningBalance = startPence
+        var points = [
+            PotBalanceTrendPoint(
+                index: 0,
+                date: firstKnownDate,
+                balancePence: startPence,
+                label: "Start"
+            )
+        ]
+
+        for (index, event) in moneyEvents.enumerated() {
+            runningBalance += event.amountPence ?? 0
+            points.append(
+                PotBalanceTrendPoint(
+                    index: index + 1,
+                    date: event.date,
+                    balancePence: runningBalance,
+                    label: event.title
+                )
+            )
+        }
+
+        if points.count == 1 || points.last?.balancePence != currentPence {
+            points.append(
+                PotBalanceTrendPoint(
+                    index: points.count,
+                    date: todayIso,
+                    balancePence: currentPence,
+                    label: "Current value"
+                )
+            )
+        }
+
+        return PotBalanceTrendData(
+            startDate: firstKnownDate,
+            endDate: todayIso,
+            startPence: startPence,
+            currentPence: currentPence,
+            movementPence: movementPence,
+            points: points
+        )
+    }
+}
+
+private struct PotBalanceTrendPoint: Identifiable, Equatable {
+    var index: Int
+    var date: String
+    var balancePence: Int
+    var label: String
+
+    var id: Int { index }
+}
+
+private struct PotBalanceTrendCard: View {
+    var data: PotBalanceTrendData
+
+    var body: some View {
+        AppCard(glow: data.hasMovement) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Pot value")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                            .textCase(.uppercase)
+                        Text(MoneyParser.formatPence(data.currentPence))
+                            .font(.system(.title, design: .rounded, weight: .bold))
+                            .foregroundStyle(data.trendColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(data.hasMovement ? "Tracked from \(shortDayMonth(data.startDate))" : "No pot movement recorded yet")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text(data.changePence >= 0 ? "Up" : "Down")
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(AppTheme.Colors.controlText)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(data.trendColor, in: Capsule())
+                        Text(signedMoney(data.changePence))
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(data.trendColor)
+                    }
+                }
+
+                PotBalanceLineGraph(data: data)
+                    .frame(height: 170)
+
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    PotOverviewMetricPill(label: "Started", value: MoneyParser.formatPence(data.startPence), color: AppTheme.Colors.primaryOrange)
+                    PotOverviewMetricPill(label: "Moved", value: signedMoney(data.movementPence), color: data.trendColor)
+                    PotOverviewMetricPill(label: "Now", value: MoneyParser.formatPence(data.currentPence), color: AppTheme.Colors.success)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Pot value \(MoneyParser.formatPence(data.currentPence))")
+    }
+
+    private func signedMoney(_ amountPence: Int) -> String {
+        amountPence < 0
+            ? "-\(MoneyParser.formatPence(abs(amountPence)))"
+            : "+\(MoneyParser.formatPence(amountPence))"
+    }
+}
+
+private struct PotBalanceLineGraph: View {
+    var data: PotBalanceTrendData
+    @State private var drawProgress = 0.0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let minValue = data.graphMinPence
+            let maxValue = data.graphMaxPence
+            let lineColor = data.trendColor
+
+            ZStack(alignment: .topLeading) {
+                graphGrid
+
+                PotBalanceAreaShape(points: data.points, minValue: minValue, maxValue: maxValue)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                lineColor.opacity(data.hasMovement ? 0.24 : 0.08),
+                                lineColor.opacity(data.hasMovement ? 0.09 : 0.03),
+                                .clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .opacity(drawProgress)
+
+                PotBalanceLineShape(points: data.points, minValue: minValue, maxValue: maxValue)
+                    .trim(from: 0, to: drawProgress)
+                    .stroke(
+                        lineColor,
+                        style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
+                    )
+                    .shadow(color: lineColor.opacity(data.hasMovement ? 0.48 : 0.24), radius: 13, y: 7)
+
+                if let finalPoint = data.points.last {
+                    PotBalancePulseMarker(color: lineColor)
+                        .position(pointPosition(index: data.points.count - 1, balancePence: finalPoint.balancePence, size: proxy.size, minValue: minValue, maxValue: maxValue))
+                        .opacity(drawProgress > 0.92 ? 1 : 0)
+                }
+
+                HStack {
+                    Text(shortDayMonth(data.startDate))
+                    Spacer()
+                    Text(shortDayMonth(data.endDate))
+                }
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .offset(y: 18)
+            }
+            .onAppear {
+                startAnimation()
+            }
+            .onChange(of: data.id) { _, _ in
+                startAnimation()
+            }
+        }
+    }
+
+    private var graphGrid: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<3, id: \.self) { _ in
+                AppTheme.Colors.border.opacity(0.32)
+                    .frame(height: 1)
+                Spacer()
+            }
+            AppTheme.Colors.border.opacity(0.42)
+                .frame(height: 1)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func pointPosition(index: Int, balancePence: Int, size: CGSize, minValue: Int, maxValue: Int) -> CGPoint {
+        let drawingHeight = max(size.height - 26, 1)
+        let x = CGFloat(index) / CGFloat(max(data.points.count - 1, 1)) * max(size.width, 1)
+        let range = CGFloat(max(maxValue - minValue, 1))
+        let normalized = CGFloat(balancePence - minValue) / range
+        let y = drawingHeight - (normalized * drawingHeight)
+        return CGPoint(x: x, y: max(8, min(drawingHeight, y)))
+    }
+
+    private func startAnimation() {
+        drawProgress = 0
+        withAnimation(.easeOut(duration: 1.1)) {
+            drawProgress = 1
+        }
+    }
+}
+
+private struct PotBalanceLineShape: Shape {
+    var points: [PotBalanceTrendPoint]
+    var minValue: Int
+    var maxValue: Int
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard !points.isEmpty else { return path }
+
+        for (index, point) in points.enumerated() {
+            let position = pointPosition(index: index, balancePence: point.balancePence, rect: rect)
+            if index == 0 {
+                path.move(to: position)
+            } else {
+                path.addLine(to: position)
+            }
+        }
+
+        if points.count == 1 {
+            let position = pointPosition(index: 0, balancePence: points[0].balancePence, rect: rect)
+            path.addLine(to: CGPoint(x: min(rect.maxX, position.x + 0.5), y: position.y))
+        }
+
+        return path
+    }
+
+    private func pointPosition(index: Int, balancePence: Int, rect: CGRect) -> CGPoint {
+        let drawingHeight = max(rect.height - 26, 1)
+        let x = rect.minX + CGFloat(index) / CGFloat(max(points.count - 1, 1)) * rect.width
+        let range = CGFloat(max(maxValue - minValue, 1))
+        let normalized = CGFloat(balancePence - minValue) / range
+        let y = rect.minY + drawingHeight - (normalized * drawingHeight)
+        return CGPoint(x: x, y: max(rect.minY + 8, min(rect.minY + drawingHeight, y)))
+    }
+}
+
+private struct PotBalanceAreaShape: Shape {
+    var points: [PotBalanceTrendPoint]
+    var minValue: Int
+    var maxValue: Int
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard !points.isEmpty else { return path }
+
+        for (index, point) in points.enumerated() {
+            let position = pointPosition(index: index, balancePence: point.balancePence, rect: rect)
+            if index == 0 {
+                path.move(to: position)
+            } else {
+                path.addLine(to: position)
+            }
+        }
+
+        let lastX = pointPosition(index: points.count - 1, balancePence: points.last?.balancePence ?? 0, rect: rect).x
+        let firstX = pointPosition(index: 0, balancePence: points[0].balancePence, rect: rect).x
+        path.addLine(to: CGPoint(x: lastX, y: rect.maxY - 18))
+        path.addLine(to: CGPoint(x: firstX, y: rect.maxY - 18))
+        path.closeSubpath()
+        return path
+    }
+
+    private func pointPosition(index: Int, balancePence: Int, rect: CGRect) -> CGPoint {
+        let drawingHeight = max(rect.height - 26, 1)
+        let x = rect.minX + CGFloat(index) / CGFloat(max(points.count - 1, 1)) * rect.width
+        let range = CGFloat(max(maxValue - minValue, 1))
+        let normalized = CGFloat(balancePence - minValue) / range
+        let y = rect.minY + drawingHeight - (normalized * drawingHeight)
+        return CGPoint(x: x, y: max(rect.minY + 8, min(rect.minY + drawingHeight, y)))
+    }
+}
+
+private struct PotBalancePulseMarker: View {
+    var color: Color
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color.opacity(0.16))
+                .frame(width: pulse ? 38 : 22, height: pulse ? 38 : 22)
+                .opacity(pulse ? 0.15 : 0.8)
+
+            Circle()
+                .fill(color)
+                .frame(width: 12, height: 12)
+                .overlay(Circle().stroke(AppTheme.Colors.primaryText.opacity(0.72), lineWidth: 2))
+                .shadow(color: color.opacity(0.72), radius: 10, y: 4)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+private struct PotOverviewMetricPill: View {
+    var label: String
+    var value: String
+    var color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                .stroke(color.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct PotTimelineEvent: Identifiable, Equatable {
+    var id: String
+    var date: String
+    var title: String
+    var detail: String
+    var amountPence: Int?
+    var kind: PotTimelineEventKind
+    var potColor: String
+    var sortIndex: Int
+
+    static func make(snapshot: PlannerSnapshot) -> [PotTimelineEvent] {
+        let creationEvents = snapshot.pots
+            .filter { $0.deletedAt == nil }
+            .enumerated()
+            .map { index, pot in
+                PotTimelineEvent(
+                    id: "created-\(pot.id)",
+                    date: potDatePrefix(pot.createdAt),
+                    title: "Created \(pot.name)",
+                    detail: "\(pot.type.rawValue.capitalized) pot",
+                    amountPence: nil,
+                    kind: .created,
+                    potColor: pot.color,
+                    sortIndex: index
+                )
+            }
+
+        return (creationEvents + moneyEvents(snapshot: snapshot))
+            .sorted(by: potTimelineAscending)
+    }
+
+    static func moneyEvents(snapshot: PlannerSnapshot) -> [PotTimelineEvent] {
+        let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
+        let periodsById = Dictionary(uniqueKeysWithValues: snapshot.payPeriods.map { ($0.id, $0) })
+        let recurringById = Dictionary(uniqueKeysWithValues: snapshot.recurringPayments.map { ($0.id, $0) })
+
+        let allocationEvents = snapshot.potAllocations
+            .filter { $0.deletedAt == nil }
+            .enumerated()
+            .compactMap { index, allocation -> PotTimelineEvent? in
+                guard let pot = potsById[allocation.potId] else { return nil }
+                let date = periodsById[allocation.payPeriodId]?.payday ?? potDatePrefix(allocation.createdAt)
+                return PotTimelineEvent(
+                    id: "allocation-\(allocation.id)",
+                    date: date,
+                    title: "Added to \(pot.name)",
+                    detail: allocationSourceLabel(allocation.source),
+                    amountPence: allocation.amountPence,
+                    kind: .topUp,
+                    potColor: pot.color,
+                    sortIndex: 10_000 + index
+                )
+            }
+
+        let transactionEvents = snapshot.transactions
+            .filter { $0.deletedAt == nil && $0.potId != nil }
+            .enumerated()
+            .compactMap { index, transaction -> PotTimelineEvent? in
+                guard let potId = transaction.potId,
+                      let pot = potsById[potId],
+                      transaction.type == .allocation || transaction.type == .spending
+                else {
+                    return nil
+                }
+
+                let signedAmount = transaction.type == .spending ? -transaction.amountPence : transaction.amountPence
+                let recurringName = transaction.recurringPaymentId.flatMap { recurringById[$0]?.name }
+                let title = transaction.type == .spending ? "Paid from \(pot.name)" : "Added to \(pot.name)"
+                let fallbackDetail = transaction.type == .spending ? "Recorded payment" : "Pot top-up"
+                let detail = recurringName ?? (transaction.note.potTrimmed.isEmpty ? fallbackDetail : transaction.note)
+
+                return PotTimelineEvent(
+                    id: "transaction-\(transaction.id)",
+                    date: transaction.date,
+                    title: title,
+                    detail: detail,
+                    amountPence: signedAmount,
+                    kind: transaction.type == .spending ? .payment : .topUp,
+                    potColor: pot.color,
+                    sortIndex: 20_000 + index
+                )
+            }
+
+        return allocationEvents + transactionEvents
+    }
+}
+
+private enum PotTimelineEventKind: Equatable {
+    case created
+    case topUp
+    case payment
+
+    var color: Color {
+        switch self {
+        case .created:
+            return AppTheme.Colors.primaryOrange
+        case .topUp:
+            return AppTheme.Colors.neonMoneyUp
+        case .payment:
+            return AppTheme.Colors.neonMoneyDown
+        }
+    }
+}
+
+private struct PotTimelineCard: View {
+    var events: [PotTimelineEvent]
+
+    var body: some View {
+        AppCard {
+            SectionTitle("Timeline")
+
+            if events.isEmpty {
+                EmptyStateView(
+                    title: "No pot timeline yet",
+                    message: "Pot creation, top ups, and pot payments will appear here.",
+                    systemImage: "point.topleft.down.curvedto.point.bottomright.up"
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                        PotTimelineRow(
+                            event: event,
+                            isFirst: index == 0,
+                            isLast: index == events.count - 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PotTimelineRow: View {
+    var event: PotTimelineEvent
+    var isFirst: Bool
+    var isLast: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            timelineBranch
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
+                    Text(event.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(2)
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    if let amountPence = event.amountPence {
+                        Text(signedMoney(amountPence))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(amountPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp)
+                            .lineLimit(1)
+                    }
+                }
+
+                Text(event.detail)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+
+                Text(friendlyDate(event.date))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+            .padding(.vertical, AppTheme.Spacing.sm)
+        }
+    }
+
+    private var timelineBranch: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(isFirst ? .clear : AppTheme.Colors.border.opacity(0.68))
+                .frame(width: 2, height: 11)
+
+            Circle()
+                .fill(event.kind.color)
+                .frame(width: 12, height: 12)
+                .overlay(
+                    Circle()
+                        .stroke(Color(hex: event.potColor).opacity(0.45), lineWidth: 4)
+                )
+                .shadow(color: event.kind.color.opacity(0.35), radius: 8, y: 4)
+
+            Rectangle()
+                .fill(isLast ? .clear : AppTheme.Colors.border.opacity(0.68))
+                .frame(width: 2)
+        }
+        .frame(width: 24)
+    }
+
+    private func signedMoney(_ amountPence: Int) -> String {
+        amountPence < 0
+            ? "-\(MoneyParser.formatPence(abs(amountPence)))"
+            : "+\(MoneyParser.formatPence(amountPence))"
+    }
+
+    private func friendlyDate(_ value: String) -> String {
+        FinanceEngine.parseDate(value).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }
 
@@ -334,14 +1022,15 @@ struct PotFormView: View {
     @State private var type: PotType = .spending
     @State private var balance = ""
     @State private var target = ""
-    @State private var color = "#E85002"
+    @State private var color = AppTheme.selectedPalette.accentHex.uppercased()
     @State private var linkType: PotLinkType = .none
     @State private var linkedEntityId = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: AppTheme.Spacing.md) {
+                AppCard(glow: true) {
+                    SectionTitle("Add pot")
                     PotSetupFields(
                         store: store,
                         name: $name,
@@ -371,8 +1060,8 @@ struct PotFormView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add pot")
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-            .appPlaceholderToolbar(.modalSingle)
         }
     }
 
@@ -385,6 +1074,7 @@ struct PotHistorySheetView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     @State private var selectedMode: PotHistoryMode = .allHistory
+    @State private var editMode: EditMode = .inactive
 
     var body: some View {
         NavigationStack {
@@ -422,9 +1112,15 @@ struct PotHistorySheetView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    AppEditDoneToolbarButton(isEditing: editMode.isEditing) {
+                        toggleEditMode()
+                    }
+                }
             }
-            .appPlaceholderToolbar(.modalSingle)
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
+        .environment(\.editMode, $editMode)
     }
 
     private var rows: [PotHistoryRow] {
@@ -435,6 +1131,12 @@ struct PotHistorySheetView: View {
             paymentRows
         case .allHistory:
             (topUpRows + paymentRows).sorted(by: sortRows)
+        }
+    }
+
+    private func toggleEditMode() {
+        withAnimation(appToolbarMorphAnimation) {
+            editMode = editMode.isEditing ? .inactive : .active
         }
     }
 
@@ -809,7 +1511,9 @@ private struct PotSetupFields: View {
     @Binding var linkType: PotLinkType
     @Binding var linkedEntityId: String
 
-    private let potColors = ["#E85002", "#2563EB", "#16A34A", "#7C3AED", "#0F766E", "#4338CA", "#475569", "#FFFFFF"]
+    private var potColors: [String] {
+        PotFormLayoutPolicy.colorHexes
+    }
 
     var body: some View {
         VStack(spacing: AppTheme.Spacing.md) {
@@ -827,6 +1531,9 @@ private struct PotSetupFields: View {
             colorSwatches
         }
         .onAppear {
+            if !potColors.contains(color.uppercased()) {
+                color = potColors.first ?? color
+            }
             normalizeLinkedSelection()
         }
     }
@@ -851,23 +1558,21 @@ private struct PotSetupFields: View {
                 if selectableCards.isEmpty {
                     linkEmptyState("No active credit cards")
                 } else {
-                    Picker("Credit card", selection: $linkedEntityId) {
+                    SelectionField(title: "Credit card", value: selectedCreditCardName, placeholder: "No card", systemImage: "creditcard") {
                         ForEach(selectableCards) { card in
-                            Text(card.name).tag(card.id)
+                            Button(card.name) { linkedEntityId = card.id }
                         }
                     }
-                    .pickerStyle(.menu)
                 }
             case .debt:
                 if selectableDebts.isEmpty {
                     linkEmptyState("No active debts")
                 } else {
-                    Picker("Debt", selection: $linkedEntityId) {
+                    SelectionField(title: "Debt", value: selectedDebtName, placeholder: "No debt", systemImage: "exclamationmark.shield") {
                         ForEach(selectableDebts) { debt in
-                            Text(debt.name).tag(debt.id)
+                            Button(debt.name) { linkedEntityId = debt.id }
                         }
                     }
-                    .pickerStyle(.menu)
                 }
             }
         }
@@ -890,7 +1595,7 @@ private struct PotSetupFields: View {
                             if color == swatch {
                                 Image(systemName: "checkmark")
                                     .font(.caption.weight(.bold))
-                                    .foregroundStyle(swatch.uppercased() == "#FFFFFF" ? AppTheme.Colors.appBackground : .white)
+                                    .foregroundStyle(swatch.uppercased() == "#FFFFFF" ? AppTheme.Colors.primaryText : AppTheme.Colors.controlText)
                             }
                         }
                 }
@@ -916,6 +1621,14 @@ private struct PotSetupFields: View {
 
     private var selectableDebts: [Debt] {
         linkableDebts(in: store.snapshot, currentId: linkedEntityId)
+    }
+
+    private var selectedCreditCardName: String {
+        selectableCards.first { $0.id == linkedEntityId }?.name ?? ""
+    }
+
+    private var selectedDebtName: String {
+        selectableDebts.first { $0.id == linkedEntityId }?.name ?? ""
     }
 
     private func normalizeLinkedSelection() {
@@ -1055,6 +1768,39 @@ private func daysUntil(_ dueIso: String, from today: String) -> Int {
 
 private func shortDayMonth(_ isoDate: String) -> String {
     FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated))
+}
+
+private func potDatePrefix(_ value: String) -> String {
+    String(value.prefix(10))
+}
+
+private func potTimelineAscending(_ lhs: PotTimelineEvent, _ rhs: PotTimelineEvent) -> Bool {
+    if lhs.date == rhs.date {
+        return lhs.sortIndex < rhs.sortIndex
+    }
+
+    return lhs.date < rhs.date
+}
+
+private func allocationSourceLabel(_ source: PotAllocationSource?) -> String {
+    switch source ?? .manual {
+    case .manual:
+        return "Manual top-up"
+    case .recurring:
+        return "Recurring top-up"
+    case .recurringBillFunding:
+        return "Bill funding"
+    case .cardBillFunding:
+        return "Card bill funding"
+    case .cardSpendFunding:
+        return "Card spend funding"
+    case .cardOpeningBalanceFunding:
+        return "Card opening balance funding"
+    case .debtFunding:
+        return "Debt funding"
+    case .potAuto:
+        return "Auto top-up"
+    }
 }
 
 private func linkableCreditCards(in snapshot: PlannerSnapshot, currentId: String) -> [CreditCard] {

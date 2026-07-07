@@ -109,6 +109,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(ProfileMenuPresentationPolicy.syncsActiveAccountAvatar)
         XCTAssertTrue(ProfileMenuPresentationPolicy.showsSignOutAction)
         XCTAssertTrue(ProfileMenuPresentationPolicy.signOutUsesAuthGateSession)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.logOutActionTitle, "Log Out")
+        XCTAssertTrue(ProfileMenuPresentationPolicy.confirmsLogOut)
         XCTAssertTrue(ProfileMenuPresentationPolicy.opensAppearanceDirectly)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesSystemFullScreenSafeArea)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesInlineNavigationTitle)
@@ -191,7 +193,8 @@ final class AppShellNavigationTests: XCTestCase {
     func testCreditSecondaryScreenToolbarActionsMatchRequestedButtons() {
         XCTAssertEqual(CardsLayoutPolicy.toolbarActionId, "add")
         XCTAssertEqual(CardsLayoutPolicy.detailToolbarActionId, "card-detail-add-payment")
-        XCTAssertEqual(CardsLayoutPolicy.detailToolbarSymbol, "plus")
+        XCTAssertEqual(CardsLayoutPolicy.detailToolbarTitle, "Payment")
+        XCTAssertEqual(CardsLayoutPolicy.detailToolbarStyle, "textButton")
         XCTAssertEqual(CardsLayoutPolicy.repaymentFlowPlacement, "cardDetailToolbar")
         XCTAssertEqual(DebtsLayoutPolicy.toolbarActionId, "add")
         XCTAssertEqual(DebtsLayoutPolicy.addFlowPlacement, "debtsSectionToolbar")
@@ -236,11 +239,22 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(PotFormLayoutPolicy.linkedPickerStyle, "selectionFieldBox")
         XCTAssertEqual(PotFormLayoutPolicy.colorHexes.count, 8)
         XCTAssertEqual(Set(PotFormLayoutPolicy.colorHexes).count, 8)
+        XCTAssertEqual(CardFormLayoutPolicy.directDebitDayTitle, "Direct debit")
+        XCTAssertEqual(CardFormLayoutPolicy.statementDayTitle, "Statement")
+        XCTAssertLessThanOrEqual(CardFormLayoutPolicy.dayFieldTitleMinimumScaleFactor, CGFloat(0.55))
     }
 
     func testCreditSecondaryScreensHideInlineAddAndAllocationCards() {
         XCTAssertEqual(CardsLayoutPolicy.sections, [.summary, .activeCards])
         XCTAssertFalse(CardsLayoutPolicy.sections.contains(.paymentAllocation))
+        XCTAssertEqual(CardsLayoutPolicy.detailTopPresentation, "floatingNoOuterCard")
+        XCTAssertEqual(CardsLayoutPolicy.rowPresentation, "floatingNoOuterCard")
+        XCTAssertEqual(CardsLayoutPolicy.activeCardCollapsedPresentation, "overlappedStack")
+        XCTAssertEqual(CardsLayoutPolicy.activeCardExpandedPresentation, "floatingTwoColumnGrid")
+        XCTAssertEqual(CardsLayoutPolicy.activeCardExpandedColumnCount, 2)
+        XCTAssertTrue(CardsLayoutPolicy.activeCardExpandedUsesLazyGrid)
+        XCTAssertTrue(CardsLayoutPolicy.activeCardViewAllPillEnabled)
+        XCTAssertEqual(CardsLayoutPolicy.activeCardStackAnimation, "matchedGeometrySpring")
         XCTAssertEqual(DebtsLayoutPolicy.sections, [.summary, .activeDebts])
         XCTAssertFalse(DebtsLayoutPolicy.sections.map(\.rawValue).contains("addDebt"))
     }
@@ -264,8 +278,16 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(PotsLayoutPolicy.overviewDetailSections, [.graph, .timeline])
         XCTAssertEqual(PotsLayoutPolicy.graphStyle, "animatedNeonLine")
         XCTAssertEqual(PotsLayoutPolicy.timelineStyle, "branchedPotTimeline")
+        XCTAssertEqual(PotsLayoutPolicy.timelinePresentation, "collapsibleDropdown")
+        XCTAssertTrue(PotsLayoutPolicy.timelineDefaultsExpandedWhenEmpty)
         XCTAssertEqual(PotsLayoutPolicy.overviewDetailSubtitle, "")
         XCTAssertTrue(PotsLayoutPolicy.overviewDetailUsesInlineTitle)
+    }
+
+    func testActivityMonthlyChartUsesProjectedAndDayAnchoredLines() {
+        XCTAssertEqual(ActivityMonthlyBalanceChartLayoutPolicy.estimatedLineStyle, "fullMonthProjectedLine")
+        XCTAssertEqual(ActivityMonthlyBalanceChartLayoutPolicy.actualLineStyle, "dayAnchoredNeonLine")
+        XCTAssertTrue(ActivityMonthlyBalanceChartLayoutPolicy.todayMarkerFollowsActualLine)
     }
 
     func testCreditSummaryOpensInlineOverviewDetail() {
@@ -300,8 +322,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertGreaterThan(CreditCardVisualLayoutPolicy.rowPreviewWidth, 200)
         XCTAssertGreaterThan(CreditCardVisualLayoutPolicy.rowPreviewHeight, 120)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.designSelectionPreviewWidth, 112, accuracy: 0.001)
-        XCTAssertEqual(CreditCardVisualLayoutPolicy.previewArtworkDetail, .full)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.previewArtworkDetail, .preview)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.fullArtworkDetail, .full)
+        XCTAssertNotEqual(CreditCardVisualLayoutPolicy.previewArtworkDetail, CreditCardVisualLayoutPolicy.fullArtworkDetail)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.contentInset(for: 240), 18, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.contentInset(for: 50), 5, accuracy: 0.001)
     }
@@ -342,6 +365,11 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(PotHistoryLayoutPolicy.showsTopDividerAboveModePicker)
     }
 
+    func testProfileHistoryScreenHasNoPlaceholderToolbar() {
+        XCTAssertEqual(HistoryLayoutPolicy.toolbarMode, "none")
+        XCTAssertFalse(HistoryLayoutPolicy.showsPlaceholderOptions)
+    }
+
     func testActivityRecentRowsUseCleanDotMarkersAndReadableDates() {
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityMarkerStyle, "coloredDot")
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDateFormat, "EEE, d MMM yyyy")
@@ -357,28 +385,12 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(ActivityLayoutPolicy.spendingDetailUsesNativeToolbarMorph)
     }
 
-    func testActivityInfinityOpensAnimatedAccountTimeline() {
+    func testActivityInfinityButtonIsPlaceholderOnly() {
         XCTAssertEqual(ActivityTimelineLayoutPolicy.toolbarActionId, "activity-infinity-toolbar-action")
         XCTAssertEqual(ActivityTimelineLayoutPolicy.toolbarSymbol, "infinity")
-        XCTAssertEqual(ActivityTimelineLayoutPolicy.presentation, "navigationPush")
-        XCTAssertEqual(ActivityTimelineLayoutPolicy.branchStyle, "slowVariableStoryWalkthrough")
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.autoScrollsWhileRevealing)
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.includesAccountCreation)
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.usesVariableNaturalBranches)
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.revealsCardBeforeDrawingNextBranch)
-        XCTAssertEqual(ActivityTimelineBranchLayoutPolicy.connectorEndpointPolicy, "eventAnchorToEventAnchor")
-        XCTAssertTrue(ActivityTimelineBranchLayoutPolicy.avoidsFixedLeftRail)
-        XCTAssertTrue(ActivityTimelineBranchLayoutPolicy.nodeOverlapsEventCard)
-        XCTAssertEqual(Array(ActivityTimelineBranchLayoutPolicy.lanePattern.prefix(3)), [.right, .left, .center])
-        XCTAssertGreaterThan(ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: 3), ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: 2))
-        XCTAssertGreaterThanOrEqual(ActivityTimelineLayoutPolicy.branchRevealDelaySeconds, 0.9)
-        XCTAssertGreaterThanOrEqual(ActivityTimelineLayoutPolicy.branchDrawDurationSeconds, 1.0)
-        XCTAssertGreaterThanOrEqual(ActivityTimelineLayoutPolicy.cardReadDelaySeconds, 0.7)
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.eventSources.contains("spending"))
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.eventSources.contains("income"))
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.eventSources.contains("bills"))
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.eventSources.contains("cards"))
-        XCTAssertTrue(ActivityTimelineLayoutPolicy.eventSources.contains("debts"))
+        XCTAssertEqual(ActivityTimelineLayoutPolicy.presentation, "placeholder")
+        XCTAssertTrue(ActivityTimelineLayoutPolicy.isPlaceholderOnly)
+        XCTAssertFalse(ActivityTimelineLayoutPolicy.opensTimeline)
     }
 }
 

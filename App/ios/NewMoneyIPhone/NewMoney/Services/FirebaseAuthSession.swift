@@ -234,6 +234,7 @@ final class FirebaseAuthSession: ObservableObject {
         do {
             try await action()
         } catch {
+            guard !AuthProviderCancellationPolicy.shouldSuppress(error) else { return }
             errorMessage = userFacingMessage(for: error)
         }
     }

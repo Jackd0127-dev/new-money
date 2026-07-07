@@ -69,6 +69,35 @@ enum AuthEmailFormValidation {
     }
 }
 
+enum AuthEntryPresentationPolicy {
+    static let brandTitle = "MUNO MONEY"
+    static let hidesModeHeroCopy = true
+    static let usesInlinePhoneMode = true
+    static let showsBottomPolicyLinks = true
+}
+
+enum AuthProviderCancellationPolicy {
+    static let suppressesProviderCancellationErrors = true
+    static let googleSignInErrorDomain = "com.google.GIDSignIn"
+    static let googleSignInCanceledCode = -5
+
+    static func shouldSuppress(_ error: Error) -> Bool {
+        isAppleAuthorizationCancellation(error) || isGoogleSignInCancellation(error)
+    }
+
+    private static func isAppleAuthorizationCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == ASAuthorizationError.errorDomain &&
+            nsError.code == ASAuthorizationError.Code.canceled.rawValue
+    }
+
+    private static func isGoogleSignInCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == googleSignInErrorDomain &&
+            nsError.code == googleSignInCanceledCode
+    }
+}
+
 enum AuthScreenMode {
     case signUp
     case signIn
@@ -92,16 +121,11 @@ enum AuthScreenMode {
     }
 
     var heroTitle: String {
-        switch self {
-        case .signUp:
-            "Create your account"
-        case .signIn:
-            "Sign in"
-        }
+        AuthEntryPresentationPolicy.brandTitle
     }
 
     var heroSubtitle: String {
-        "Manage your money the way YOU want to."
+        ""
     }
 
     var emailLabel: String {
@@ -149,6 +173,11 @@ enum AuthScreenMode {
     }
 }
 
+private enum AuthCredentialMethod {
+    case email
+    case phone
+}
+
 private enum AuthFocusField: Hashable {
     case name
     case email
@@ -167,7 +196,7 @@ private struct AuthEntryView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var acceptsTerms = false
-    @State private var isPhoneFormVisible = false
+    @State private var credentialMethod: AuthCredentialMethod = .email
     @State private var phoneNumber = ""
     @State private var smsCode = ""
     @State private var phoneVerificationID: String?
@@ -185,18 +214,7 @@ private struct AuthEntryView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                    emailFields
-                    modeSupportRow
-
-                    AuthPrimaryButton(
-                        title: mode.primaryTitle,
-                        isLoading: session.isWorking,
-                        isDisabled: isPrimaryActionDisabled
-                    ) {
-                        submitEmailForm()
-                    }
-                }
+                credentialForm
 
                 AuthSocialActions(
                     googleAction: {
@@ -205,19 +223,12 @@ private struct AuthEntryView: View {
                         }
                     },
                     phoneAction: {
-                        withAnimation(AppTheme.Animation.standard) {
-                            isPhoneFormVisible.toggle()
-                        }
+                        togglePhoneMode()
                     },
-                    isPhoneSelected: isPhoneFormVisible,
+                    isPhoneSelected: credentialMethod == .phone,
                     appleRequest: configureAppleRequest,
                     appleCompletion: handleAppleResult
                 )
-
-                if isPhoneFormVisible {
-                    phoneForm
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
 
                 AuthModeFooter(
                     prompt: mode.footerPrompt,
@@ -225,6 +236,8 @@ private struct AuthEntryView: View {
                 ) {
                     switchMode()
                 }
+
+                AuthLegalLinks()
             }
             .padding(.vertical, AppTheme.Spacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,19 +245,44 @@ private struct AuthEntryView: View {
     }
 
     private var authHeader: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            Text(mode.heroTitle)
-                .font(.system(size: 38, weight: .bold, design: .rounded))
-                .foregroundStyle(AppTheme.Colors.primaryText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.76)
+        Text(AuthEntryPresentationPolicy.brandTitle)
+            .font(.system(size: 28, weight: .black, design: .rounded))
+            .foregroundStyle(AppTheme.Colors.primaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .multilineTextAlignment(.center)
+    }
 
-            Text(mode.heroSubtitle)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+    private var credentialForm: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Group {
+                switch credentialMethod {
+                case .email:
+                    emailCredentialForm
+                case .phone:
+                    phoneForm
+                }
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .center)))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(AppTheme.Animation.standard, value: credentialMethod)
+        .animation(AppTheme.Animation.standard, value: phoneVerificationID)
+    }
+
+    private var emailCredentialForm: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            emailFields
+            modeSupportRow
+
+            AuthPrimaryButton(
+                title: mode.primaryTitle,
+                isLoading: session.isWorking,
+                isDisabled: isPrimaryActionDisabled
+            ) {
+                submitEmailForm()
+            }
+        }
     }
 
     @ViewBuilder
@@ -400,10 +438,18 @@ private struct AuthEntryView: View {
     private func switchMode() {
         withAnimation(AppTheme.Animation.standard) {
             mode = mode == .signUp ? .signIn : .signUp
-            isPhoneFormVisible = false
+            credentialMethod = .email
             phoneVerificationID = nil
             smsCode = ""
             focusedField = nil
+        }
+    }
+
+    private func togglePhoneMode() {
+        withAnimation(AppTheme.Animation.standard) {
+            session.errorMessage = nil
+            credentialMethod = credentialMethod == .phone ? .email : .phone
+            focusedField = credentialMethod == .phone ? .phoneNumber : nil
         }
     }
 
@@ -419,6 +465,10 @@ private struct AuthEntryView: View {
         case .success(let authorization):
             handleAppleAuthorization(authorization)
         case .failure(let error):
+            guard !AuthProviderCancellationPolicy.shouldSuppress(error) else {
+                currentAppleNonce = nil
+                return
+            }
             session.errorMessage = error.localizedDescription
         }
     }
@@ -579,10 +629,11 @@ private struct AuthTermsCheckboxRow: View {
         Button {
             isChecked.toggle()
         } label: {
-            HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+            HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
                 Image(systemName: isChecked ? "checkmark.square.fill" : "square")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(AppTheme.Colors.accent)
+                    .frame(width: 28, alignment: .center)
 
                 (
                     Text("I accept the ")
@@ -598,12 +649,30 @@ private struct AuthTermsCheckboxRow: View {
                 )
                 .font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
 
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct AuthLegalLinks: View {
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Button("Terms of Service") {}
+            Text("|")
+                .foregroundStyle(AuthEntryPalette.softText.opacity(0.72))
+            Button("Privacy Policy") {}
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(AuthEntryPalette.linkText)
+        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Terms of Service and Privacy Policy")
     }
 }
 
@@ -711,6 +780,7 @@ private struct EmailVerificationView: View {
     @ObservedObject var session: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     var user: AuthUser
+    @State private var showLogOutConfirmation = false
 
     var body: some View {
         AuthScaffold {
@@ -745,12 +815,20 @@ private struct EmailVerificationView: View {
                     }
                 }
 
-                SecondaryButton(title: "Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
-                    Task {
-                        await session.signOut()
-                    }
+                SecondaryButton(title: ProfileMenuPresentationPolicy.logOutActionTitle, systemImage: "rectangle.portrait.and.arrow.right") {
+                    showLogOutConfirmation = true
                 }
             }
+        }
+        .alert("Log out?", isPresented: $showLogOutConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button(ProfileMenuPresentationPolicy.logOutActionTitle, role: .destructive) {
+                Task {
+                    await session.signOut()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to log out of this account?")
         }
     }
 }
@@ -759,6 +837,7 @@ private struct AuthFailureView: View {
     @ObservedObject var session: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     var message: String
+    @State private var showLogOutConfirmation = false
 
     var body: some View {
         AuthScaffold {
@@ -772,12 +851,20 @@ private struct AuthFailureView: View {
                         await session.start(store: store)
                     }
                 }
-                SecondaryButton(title: "Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
-                    Task {
-                        await session.signOut()
-                    }
+                SecondaryButton(title: ProfileMenuPresentationPolicy.logOutActionTitle, systemImage: "rectangle.portrait.and.arrow.right") {
+                    showLogOutConfirmation = true
                 }
             }
+        }
+        .alert("Log out?", isPresented: $showLogOutConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button(ProfileMenuPresentationPolicy.logOutActionTitle, role: .destructive) {
+                Task {
+                    await session.signOut()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to log out of this account?")
         }
     }
 }

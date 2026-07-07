@@ -9,8 +9,17 @@ enum CardsSection: String, Equatable {
 struct CardsLayoutPolicy {
     static let toolbarActionId = "add"
     static let detailToolbarActionId = "card-detail-add-payment"
-    static let detailToolbarSymbol = "plus"
+    static let detailToolbarTitle = "Payment"
+    static let detailToolbarStyle = "textButton"
     static let repaymentFlowPlacement = "cardDetailToolbar"
+    static let detailTopPresentation = "floatingNoOuterCard"
+    static let rowPresentation = "floatingNoOuterCard"
+    static let activeCardCollapsedPresentation = "overlappedStack"
+    static let activeCardExpandedPresentation = "floatingTwoColumnGrid"
+    static let activeCardExpandedColumnCount = 2
+    static let activeCardExpandedUsesLazyGrid = true
+    static let activeCardViewAllPillEnabled = true
+    static let activeCardStackAnimation = "matchedGeometrySpring"
     static let sections: [CardsSection] = [
         .summary,
         .activeCards
@@ -24,7 +33,10 @@ struct CardsLayoutPolicy {
 enum CardFormLayoutPolicy {
     static let dayFieldOrder = ["directDebitDay", "statementDay"]
     static let dayFieldPresentation = "compactSideBySideMenuBoxes"
+    static let directDebitDayTitle = "Direct debit"
+    static let statementDayTitle = "Statement"
     static let dayFieldTitleLineLimit = 1
+    static let dayFieldTitleMinimumScaleFactor: CGFloat = 0.55
     static let dayFieldMinimumHeight: CGFloat = 64
     static let colorSwatchAlignment = "center"
     static let showsPlaceholderToolbar = false
@@ -35,14 +47,76 @@ enum CardFormLayoutPolicy {
     static let preservesDesignAspectRatio = true
 }
 
+struct CreditCardPreviewModel: Identifiable, Equatable {
+    var card: CreditCard
+    var balancePence: Int
+    var availability: CreditCardAvailabilitySummary
+    var design: CreditCardDesign
+    var spentLabel: String
+    var limitPillTitle: String
+    var duePillTitle: String
+    var availablePillTitle: String
+    var accessibilityLabel: String
+
+    var id: String { card.id }
+
+    init(card: CreditCard, balancePence: Int, availability: CreditCardAvailabilitySummary) {
+        let design = CreditCardDesignCatalog.design(forStoredValue: card.designId ?? card.color)
+        let spentLabel = creditCardSpentAmountLabel(balancePence)
+        let availablePence = availability.actualAvailablePence
+
+        self.card = card
+        self.balancePence = balancePence
+        self.availability = availability
+        self.design = design
+        self.spentLabel = spentLabel
+        self.limitPillTitle = "Limit \(creditCardCompactMoney(card.limitPence))"
+        self.duePillTitle = card.dueDay.map { "Due \($0)" } ?? "Due --"
+        self.availablePillTitle = "Avail \(creditCardCompactMoney(availablePence))"
+        self.accessibilityLabel = "\(card.name), \(spentLabel) spent"
+    }
+}
+
+func creditCardPreviewModels(
+    cards: [CreditCard],
+    snapshot: PlannerSnapshot,
+    payPeriod: PayPeriod?,
+    asOfDate: String
+) -> [CreditCardPreviewModel] {
+    cards.map { card in
+        let balancePence = PlannerDerivedData.cardBalance(card: card, snapshot: snapshot)
+        let availability = PlannerDerivedData.creditCardAvailabilitySummary(
+            card: card,
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: asOfDate
+        )
+
+        return CreditCardPreviewModel(
+            card: card,
+            balancePence: balancePence,
+            availability: availability
+        )
+    }
+}
+
 struct CardsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
     @State private var selectedCard: CreditCard?
     @State private var isAddCardPresented = false
+    @State private var areCardsExpanded = false
+    @Namespace private var cardStackNamespace
 
     var body: some View {
+        let cardModels = creditCardPreviewModels(
+            cards: store.activeCards,
+            snapshot: store.snapshot,
+            payPeriod: store.selectedPayPeriod,
+            asOfDate: store.todayIso
+        )
+
         ScreenScaffold(
             title: "Cards",
             subtitle: "Track card balances, repayments, saved payments, and cover pots.",
@@ -50,7 +124,7 @@ struct CardsView: View {
             toolbarMode: resolvedToolbarMode
         ) {
             ForEach(CardsLayoutPolicy.sections, id: \.rawValue) { section in
-                cardsSection(section)
+                cardsSection(section, cardModels: cardModels)
             }
         }
         .navigationTopDividerHidden()
@@ -74,48 +148,134 @@ struct CardsView: View {
     }
 
     @ViewBuilder
-    private func cardsSection(_ section: CardsSection) -> some View {
+    private func cardsSection(_ section: CardsSection, cardModels: [CreditCardPreviewModel]) -> some View {
         switch section {
         case .summary:
-            summary
+            summary(cardModels: cardModels)
         case .paymentAllocation:
             EmptyView()
         case .activeCards:
-            activeCardsSection
+            activeCardsSection(cardModels: cardModels)
         }
     }
 
-    private var activeCardsSection: some View {
+    private func activeCardsSection(cardModels: [CreditCardPreviewModel]) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            SectionTitle("Active cards")
-            if store.activeCards.isEmpty {
+            if cardModels.isEmpty {
+                SectionTitle("Active cards")
                 AppCard {
                     EmptyStateView(title: "Add your first card", message: "Use Add in the toolbar to start tracking card balances and repayments.", systemImage: "creditcard")
                 }
             } else {
-                ForEach(store.activeCards) { card in
-                    Button {
-                        selectedCard = card
-                    } label: {
-                        CreditCardRow(
-                            card: card,
-                            balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot),
-                            availability: availabilitySummary(for: card),
-                            linkBadges: creditCardLinkBadges(card: card, snapshot: store.snapshot)
-                        )
+                activeCardsHeader
+
+                if areCardsExpanded {
+                    LazyVGrid(columns: activeCardGridColumns, alignment: .center, spacing: AppTheme.Spacing.xl) {
+                        ForEach(cardModels) { model in
+                            cardButton(card: model.card) {
+                                CreditCardGridTile(
+                                    model: model,
+                                    matchedNamespace: cardStackNamespace,
+                                    matchedID: matchedCardID(for: model.card)
+                                )
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)), removal: .opacity))
+                } else {
+                    collapsedCardStack(cardModels: cardModels)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
             }
         }
     }
 
-    private var summary: some View {
-        let summaries = store.activeCards.map { availabilitySummary(for: $0) }
-        let owed = summaries.reduce(0) { $0 + $1.actualOwedPence }
-        let forecastOwed = summaries.reduce(0) { $0 + $1.forecastOwedPence }
-        let available = summaries.reduce(0) { $0 + $1.actualAvailablePence }
-        let forecastAvailable = summaries.reduce(0) { $0 + $1.forecastAvailablePence }
+    private var activeCardGridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: AppTheme.Spacing.md, alignment: .top),
+            count: CardsLayoutPolicy.activeCardExpandedColumnCount
+        )
+    }
+
+    private var activeCardsHeader: some View {
+        HStack(alignment: .center) {
+            Text("Active cards")
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+
+            Spacer()
+
+            Button {
+                withAnimation(.spring(response: 0.62, dampingFraction: 0.82)) {
+                    areCardsExpanded.toggle()
+                }
+            } label: {
+                Text(areCardsExpanded ? "Stack" : "View all")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(AppTheme.Colors.primaryOrange.opacity(0.13), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(AppTheme.Colors.primaryOrange.opacity(0.24), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(areCardsExpanded ? "Stack cards" : "View all cards")
+        }
+    }
+
+    private func collapsedCardStack(cardModels: [CreditCardPreviewModel]) -> some View {
+        ZStack {
+            ForEach(Array(cardModels.enumerated()).reversed(), id: \.element.id) { index, model in
+                cardButton(card: model.card) {
+                    FloatingCreditCardPreview(model: model)
+                    .equatable()
+                    .matchedGeometryEffect(id: matchedCardID(for: model.card), in: cardStackNamespace)
+                    .scaleEffect(stackScale(for: index))
+                    .offset(x: stackOffset(for: index).width, y: stackOffset(for: index).height)
+                    .opacity(stackOpacity(for: index))
+                    .zIndex(Double(cardModels.count - index))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: CreditCardVisualLayoutPolicy.rowPreviewHeight + 54)
+    }
+
+    private func cardButton<Content: View>(card: CreditCard, @ViewBuilder content: () -> Content) -> some View {
+        Button {
+            selectedCard = card
+        } label: {
+            content()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(card.name)")
+    }
+
+    private func matchedCardID(for card: CreditCard) -> String {
+        "card-\(card.id)"
+    }
+
+    private func stackOffset(for index: Int) -> CGSize {
+        let visibleIndex = CGFloat(min(index, 4))
+        return CGSize(width: visibleIndex * 13, height: visibleIndex * -8)
+    }
+
+    private func stackScale(for index: Int) -> CGFloat {
+        max(0.82, 1 - CGFloat(min(index, 4)) * 0.045)
+    }
+
+    private func stackOpacity(for index: Int) -> Double {
+        index > 4 ? 0 : max(0.32, 1 - Double(index) * 0.14)
+    }
+
+    private func summary(cardModels: [CreditCardPreviewModel]) -> some View {
+        let owed = cardModels.reduce(0) { $0 + $1.availability.actualOwedPence }
+        let forecastOwed = cardModels.reduce(0) { $0 + $1.availability.forecastOwedPence }
+        let available = cardModels.reduce(0) { $0 + $1.availability.actualAvailablePence }
+        let forecastAvailable = cardModels.reduce(0) { $0 + $1.availability.forecastAvailablePence }
         return AppCard(glow: true) {
             MetricRow(label: "Owed", value: MoneyParser.formatPence(owed), valueColor: AppTheme.Colors.orangeHighlight)
             MetricRow(
@@ -133,40 +293,22 @@ struct CardsView: View {
         }
     }
 
-    private func availabilitySummary(for card: CreditCard) -> CreditCardAvailabilitySummary {
-        PlannerDerivedData.creditCardAvailabilitySummary(
-            card: card,
-            snapshot: store.snapshot,
-            payPeriod: store.selectedPayPeriod,
-            asOfDate: store.todayIso
-        )
-    }
-
 }
 
 struct CreditCardRow: View {
     var card: CreditCard
     var balancePence: Int
     var availability: CreditCardAvailabilitySummary? = nil
-    var linkBadges: [CreditCardLinkBadge] = []
-    var containerRadius: CGFloat = AppTheme.Radius.lg
-
-    private var design: CreditCardDesign {
-        CreditCardDesignCatalog.design(forStoredValue: card.designId ?? card.color)
-    }
+    var showsTitle = true
+    var matchedNamespace: Namespace.ID?
+    var matchedID: String?
 
     var body: some View {
-        AppCard(glow: balancePence > card.limitPence, cornerRadius: containerRadius) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
-                CreditCardDesignMiniPreview(
-                    design: design,
-                    provider: card.provider,
-                    badges: linkBadges
-                )
-                .frame(maxWidth: CreditCardVisualLayoutPolicy.rowCardMaxWidth)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            cardPreview
                 .frame(maxWidth: .infinity, alignment: .center)
-                .shadow(color: design.glowColor.opacity(0.16), radius: 12, y: 7)
 
+            if showsTitle {
                 HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(card.name)
@@ -183,37 +325,72 @@ struct CreditCardRow: View {
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
-                    Text(MoneyParser.formatPence(balancePence))
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
+                    balanceAmount
                 }
-
-                ProgressView(value: min(1, Double(balancePence) / Double(max(1, card.limitPence))))
-                    .tint(balancePence > card.limitPence ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
-                    .background(AppTheme.Colors.divider)
-
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    Pill(text: "Limit \(MoneyParser.formatPence(card.limitPence))", systemImage: "gauge")
-                    if let dueDay = card.dueDay {
-                        Pill(text: "Due day \(dueDay)", systemImage: "calendar")
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Spent")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                        balanceAmount
                     }
-                }
-
-                HStack {
-                    Text(cardAvailabilityLabel(actualAvailablePence))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                     Spacer()
-                    if forecastAvailablePence != actualAvailablePence {
-                        Text(forecastAvailabilityLabel(forecastAvailablePence))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning)
-                    }
+                    Text(card.provider.isEmpty ? "Card" : card.provider)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+
+            ProgressView(value: min(1, Double(max(0, balancePence)) / Double(max(1, card.limitPence))))
+                .tint(balancePence > card.limitPence ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+                .background(AppTheme.Colors.divider)
+
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Pill(text: "Limit \(MoneyParser.formatPence(card.limitPence))", systemImage: "gauge")
+                if let dueDay = card.dueDay {
+                    Pill(text: "Due day \(dueDay)", systemImage: "calendar")
+                }
+            }
+
+            HStack {
+                Text(cardAvailabilityLabel(actualAvailablePence))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                Spacer()
+                if forecastAvailablePence != actualAvailablePence {
+                    Text(forecastAvailabilityLabel(forecastAvailablePence))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning)
                 }
             }
         }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var cardPreview: some View {
+        let preview = FloatingCreditCardPreview(
+            card: card,
+            balancePence: balancePence,
+            availability: availability
+        )
+        if let matchedNamespace, let matchedID {
+            preview
+                .equatable()
+                .matchedGeometryEffect(id: matchedID, in: matchedNamespace)
+        } else {
+            preview.equatable()
+        }
+    }
+
+    private var balanceAmount: some View {
+        Text(MoneyParser.formatPence(balancePence))
+            .font(.title3.weight(.bold))
+            .foregroundStyle(AppTheme.Colors.primaryOrange)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
     }
 
     private var actualAvailablePence: Int {
@@ -226,45 +403,144 @@ struct CreditCardRow: View {
 
 }
 
-struct FloatingCreditCardPreview: View {
-    var card: CreditCard
-    var balancePence: Int
-    var availability: CreditCardAvailabilitySummary? = nil
+struct FloatingCreditCardPreview: View, Equatable {
+    var model: CreditCardPreviewModel
+    var maxWidth: CGFloat? = CreditCardVisualLayoutPolicy.rowCardMaxWidth
 
-    private var design: CreditCardDesign {
-        CreditCardDesignCatalog.design(forStoredValue: card.designId ?? card.color)
+    init(model: CreditCardPreviewModel, maxWidth: CGFloat? = CreditCardVisualLayoutPolicy.rowCardMaxWidth) {
+        self.model = model
+        self.maxWidth = maxWidth
+    }
+
+    init(
+        card: CreditCard,
+        balancePence: Int,
+        availability: CreditCardAvailabilitySummary? = nil,
+        maxWidth: CGFloat? = CreditCardVisualLayoutPolicy.rowCardMaxWidth
+    ) {
+        let fallbackAvailability = CreditCardAvailabilitySummary(
+            actualOwedPence: balancePence,
+            forecastOwedPence: balancePence,
+            actualAvailablePence: card.limitPence - balancePence,
+            forecastAvailablePence: card.limitPence - balancePence
+        )
+        self.model = CreditCardPreviewModel(
+            card: card,
+            balancePence: balancePence,
+            availability: availability ?? fallbackAvailability
+        )
+        self.maxWidth = maxWidth
     }
 
     var body: some View {
-        PremiumCardView(
-            provider: design.providerFallback,
-            networkLabel: design.providerFallback,
-            leadingTitle: creditCardSpentAmountLabel(balancePence),
-            leadingSubtitle: "spent",
-            facePills: [
-                CreditCardFacePill(id: "limit", title: "Limit \(creditCardCompactMoney(card.limitPence))"),
-                CreditCardFacePill(id: "due", title: dueDayPillTitle),
-                CreditCardFacePill(id: "available", title: "Avail \(creditCardCompactMoney(actualAvailablePence))")
-            ],
-            horizontalPadding: 0,
-            designId: design.storageHex,
-            isInteractive: false,
-            shadowRadius: 0
-        )
-        .frame(width: CreditCardVisualLayoutPolicy.rowCardMaxWidth)
-        .accessibilityLabel("\(card.name), \(creditCardSpentAmountLabel(balancePence)) spent")
+        StaticCreditCardPreviewFace(model: model)
+        .frame(maxWidth: maxWidth ?? .infinity)
+        .accessibilityLabel(model.accessibilityLabel)
+    }
+}
+
+private struct StaticCreditCardPreviewFace: View, Equatable {
+    var model: CreditCardPreviewModel
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let height = max(1, size.height)
+            let inset = CreditCardVisualLayoutPolicy.contentInset(for: height)
+            let cornerRadius = CreditCardVisualLayoutPolicy.cardCornerRadius
+            let cardShape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            let innerWidth = max(0, size.width - inset * 2)
+            let innerHeight = max(0, size.height - inset * 2)
+
+            ZStack(alignment: .topLeading) {
+                CreditCardArtworkBackground(
+                    design: model.design,
+                    cornerRadius: cornerRadius,
+                    detail: CreditCardVisualLayoutPolicy.previewArtworkDetail
+                )
+
+                CreditCardFrontFaceContent(
+                    design: model.design,
+                    leadingTitle: cardProviderLabel,
+                    leadingSubtitle: nil,
+                    networkLabel: cardProviderLabel,
+                    facePills: cardFacePills
+                )
+                    .frame(width: innerWidth, height: innerHeight, alignment: .topLeading)
+                    .padding(inset)
+            }
+            .frame(width: size.width, height: size.height)
+            .clipShape(cardShape)
+            .contentShape(cardShape)
+        }
+        .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
     }
 
-    private var dueDayPillTitle: String {
-        if let dueDay = card.dueDay {
-            return "Due \(dueDay)"
-        }
+    private var cardProviderLabel: String {
+        model.design.providerFallback.uppercased()
+    }
 
-        return "Due --"
+    private var cardFacePills: [CreditCardFacePill] {
+        [
+            CreditCardFacePill(id: "limit", title: model.limitPillTitle, systemImage: "gauge"),
+            CreditCardFacePill(id: "due", title: model.duePillTitle, systemImage: "calendar"),
+            CreditCardFacePill(id: "available", title: model.availablePillTitle, systemImage: "creditcard")
+        ]
+    }
+}
+
+private struct CreditCardGridTile: View {
+    var model: CreditCardPreviewModel
+    var matchedNamespace: Namespace.ID?
+    var matchedID: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            preview
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(model.card.name)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Text(MoneyParser.formatPence(model.balancePence))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .lineLimit(1)
+
+                ProgressView(value: min(1, Double(max(0, model.balancePence)) / Double(max(1, model.card.limitPence))))
+                    .tint(model.balancePence > model.card.limitPence ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+                    .background(AppTheme.Colors.divider)
+
+                Text(cardAvailabilityLabel(actualAvailablePence))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        let cardPreview = FloatingCreditCardPreview(model: model, maxWidth: nil)
+
+        if let matchedNamespace, let matchedID {
+            cardPreview
+                .equatable()
+                .matchedGeometryEffect(id: matchedID, in: matchedNamespace)
+        } else {
+            cardPreview.equatable()
+        }
     }
 
     private var actualAvailablePence: Int {
-        availability?.actualAvailablePence ?? card.limitPence - balancePence
+        model.availability.actualAvailablePence
     }
 }
 
@@ -327,7 +603,7 @@ struct CardFormView: View {
     private var dayFields: some View {
         HStack(spacing: AppTheme.Spacing.sm) {
             CreditCardDayMenuField(
-                title: "Direct debit",
+                title: CardFormLayoutPolicy.directDebitDayTitle,
                 value: directDebitDay,
                 systemImage: "calendar.badge.clock",
                 accessibilityLabel: "Direct debit day"
@@ -337,7 +613,7 @@ struct CardFormView: View {
             .frame(maxWidth: .infinity)
 
             CreditCardDayMenuField(
-                title: "Statement",
+                title: CardFormLayoutPolicy.statementDayTitle,
                 value: statementDay,
                 systemImage: "calendar",
                 accessibilityLabel: "Statement day"
@@ -358,42 +634,50 @@ private struct CreditCardDayMenuField: View {
 
     var body: some View {
         Menu {
-            Picker(accessibilityLabel, selection: Binding(get: { value }, set: onSelect)) {
-                ForEach(1...31, id: \.self) { day in
-                    Text(creditCardDaySelectionValue(day)).tag(day)
+            ForEach(1...31, id: \.self) { day in
+                Button {
+                    onSelect(day)
+                } label: {
+                    if day == value {
+                        Label(creditCardDaySelectionValue(day), systemImage: "checkmark")
+                    } else {
+                        Text(creditCardDaySelectionValue(day))
+                    }
                 }
             }
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 7) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(AppTheme.Colors.primaryOrange.opacity(0.14))
                     Image(systemName: systemImage)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(AppTheme.Colors.primaryOrange)
                 }
-                .frame(width: 34, height: 34)
+                .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                         .lineLimit(CardFormLayoutPolicy.dayFieldTitleLineLimit)
-                        .minimumScaleFactor(0.72)
+                        .minimumScaleFactor(CardFormLayoutPolicy.dayFieldTitleMinimumScaleFactor)
+                        .allowsTightening(true)
                     Text(creditCardDaySelectionValue(value))
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(AppTheme.Colors.primaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                 }
+                .layoutPriority(1)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 2)
 
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 11, weight: .black))
+                    .font(.system(size: 10, weight: .black))
                     .foregroundStyle(AppTheme.Colors.tertiaryText)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 9)
             .frame(maxWidth: .infinity, minHeight: CardFormLayoutPolicy.dayFieldMinimumHeight, alignment: .leading)
             .background(AppTheme.Colors.elevatedSurface)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
@@ -440,7 +724,7 @@ struct CardDetailView: View {
                         card: currentCard,
                         balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot),
                         availability: cardAvailability,
-                        linkBadges: creditCardLinkBadges(card: currentCard, snapshot: store.snapshot)
+                        showsTitle: false
                     )
                     statementSummaryCard
                     linkedSection
@@ -453,7 +737,7 @@ struct CardDetailView: View {
                 .padding(AppTheme.Spacing.lg)
             }
             .premiumScreenBackground()
-            .navigationTitle(card.name)
+            .navigationTitle(currentCard.name)
             .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -463,7 +747,8 @@ struct CardDetailView: View {
                     Button {
                         isCardPaymentPresented = true
                     } label: {
-                        Image(systemName: CardsLayoutPolicy.detailToolbarSymbol)
+                        Text(CardsLayoutPolicy.detailToolbarTitle)
+                            .font(.subheadline.weight(.semibold))
                     }
                     .accessibilityLabel("Add Card Payment")
                 }

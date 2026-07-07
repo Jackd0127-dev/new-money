@@ -63,10 +63,12 @@ struct MUNOSplashWebView: UIViewRepresentable {
 }
 
 struct MUNOSplashHost<Content: View>: View {
+    var replayRevision = 0
     @State private var isShowingSplash = true
     private let content: () -> Content
 
-    init(@ViewBuilder content: @escaping () -> Content) {
+    init(replayRevision: Int = 0, @ViewBuilder content: @escaping () -> Content) {
+        self.replayRevision = replayRevision
         self.content = content
     }
 
@@ -81,12 +83,20 @@ struct MUNOSplashHost<Content: View>: View {
                         isShowingSplash = false
                     }
                 }
+                .id(replayRevision)
                 .ignoresSafeArea()
                 .background(Color.black)
                 .transition(.opacity)
             }
         }
         .background(Color.black)
+        .onChange(of: replayRevision) { _, _ in
+            var transaction = SwiftUI.Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isShowingSplash = true
+            }
+        }
     }
 }
 

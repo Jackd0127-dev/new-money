@@ -913,12 +913,17 @@ struct ActivityLayoutPolicy {
 enum ActivityTimelineLayoutPolicy {
     static let toolbarActionId = "activity-infinity-toolbar-action"
     static let toolbarSymbol = "infinity"
-    static let presentation = "navigationPush"
+    static let presentation = "placeholder"
+    static let isPlaceholderOnly = true
+    static let opensTimeline = false
     static let branchStyle = "slowVariableStoryWalkthrough"
     static let autoScrollsWhileRevealing = true
     static let includesAccountCreation = true
     static let usesVariableNaturalBranches = true
     static let revealsCardBeforeDrawingNextBranch = true
+    static let scrollFollowMode = "branchMidpointThenEventCard"
+    static let scrollsToBranchBeforeNextCard = true
+    static let scrollUsesCardFocusAnchors = true
     static let eventSources = [
         "account",
         "income",
@@ -964,6 +969,9 @@ enum ActivityTimelineBranchLayoutPolicy {
     static let connectorEndpointPolicy = "eventAnchorToEventAnchor"
     static let avoidsFixedLeftRail = true
     static let nodeOverlapsEventCard = true
+    static let nodeAnchorPolicy = "cardEdgeOverlap"
+    static let nodeRevealFollowsCardOffset = true
+    static let branchFocusUsesConnectorMidpoint = true
     static let rowHeight: CGFloat = 258
     static let cardTopInset: CGFloat = 34
     static let minimumCardWidth: CGFloat = 238
@@ -1017,22 +1025,37 @@ enum ActivityTimelineBranchLayoutPolicy {
         )
     }
 
+    static func cardFocusPoint(for layout: ActivityTimelineEventLayout) -> CGPoint {
+        CGPoint(
+            x: layout.cardLeading + layout.cardWidth / 2,
+            y: layout.cardTop + 96
+        )
+    }
+
+    static func branchFocusPoint(from start: CGPoint, to end: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (start.x + end.x) / 2,
+            y: (start.y + end.y) / 2
+        )
+    }
+
     private static func verticalOffset(for index: Int) -> CGFloat {
         [0, 18, 4, 24, 10, 28][abs(index % 6)]
     }
 
     private static func anchorX(for lane: ActivityTimelineLane, cardLeading: CGFloat, cardWidth: CGFloat, index: Int) -> CGFloat {
+        let edgeInset: CGFloat = 14
         switch lane {
         case .right:
-            cardLeading + 12
+            return cardLeading + edgeInset
         case .left:
-            cardLeading + cardWidth - 12
+            return cardLeading + cardWidth - edgeInset
         case .center:
-            cardLeading + cardWidth * (index.isMultiple(of: 2) ? 0.38 : 0.62)
+            return cardLeading + (index.isMultiple(of: 2) ? edgeInset : cardWidth - edgeInset)
         case .innerRight:
-            cardLeading + cardWidth * 0.18
+            return cardLeading + edgeInset
         case .innerLeft:
-            cardLeading + cardWidth * 0.82
+            return cardLeading + cardWidth - edgeInset
         }
     }
 }
@@ -1462,7 +1485,7 @@ struct ActivityAccountTimelineView: View {
             }
 
             withAnimation(.easeInOut(duration: ActivityTimelineLayoutPolicy.autoScrollDurationSeconds)) {
-                proxy.scrollTo(events[index].id, anchor: .center)
+                proxy.scrollTo(events[index].cardScrollID, anchor: .center)
             }
 
             guard index < events.count - 1 else { continue }
@@ -1473,9 +1496,16 @@ struct ActivityAccountTimelineView: View {
 
             withAnimation(.easeInOut(duration: ActivityTimelineLayoutPolicy.branchDrawDurationSeconds)) {
                 storyProgress = Double(index * 2 + 2)
+                proxy.scrollTo(events[index].branchScrollID, anchor: .center)
             }
 
             await sleep(seconds: ActivityTimelineLayoutPolicy.branchSettleDelaySeconds)
+
+            if Task.isCancelled { return }
+
+            withAnimation(.easeInOut(duration: ActivityTimelineLayoutPolicy.autoScrollDurationSeconds * 0.72)) {
+                proxy.scrollTo(events[index + 1].cardScrollID, anchor: .center)
+            }
         }
     }
 
@@ -1518,8 +1548,21 @@ private struct ActivityTimelineCanvas: View {
                 ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
                     Color.clear
                         .frame(width: 1, height: 1)
-                        .position(layouts[index].anchorPoint)
-                        .id(event.id)
+                        .position(ActivityTimelineBranchLayoutPolicy.cardFocusPoint(for: layouts[index]))
+                        .id(event.cardScrollID)
+                        .accessibilityHidden(true)
+                }
+
+                ForEach(Array(events.indices.dropLast()), id: \.self) { index in
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .position(
+                            ActivityTimelineBranchLayoutPolicy.branchFocusPoint(
+                                from: layouts[index].anchorPoint,
+                                to: layouts[index + 1].anchorPoint
+                            )
+                        )
+                        .id(events[index].branchScrollID)
                         .accessibilityHidden(true)
                 }
 
@@ -1542,17 +1585,18 @@ private struct ActivityTimelineCanvas: View {
                 ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
                     let layout = layouts[index]
                     let progress = cardProgress(index)
+                    let revealOffset = cardRevealOffset(for: layout, progress: progress, containerWidth: proxy.size.width)
 
                     ActivityTimelineEventCard(event: event, isActive: index == activeCardIndex)
                         .frame(width: layout.cardWidth, alignment: .topLeading)
-                        .offset(x: layout.cardLeading + cardRevealOffset(for: layout, progress: progress, containerWidth: proxy.size.width), y: layout.cardTop)
+                        .offset(x: layout.cardLeading + revealOffset, y: layout.cardTop)
                         .opacity(progress)
                         .scaleEffect(CGFloat(0.93 + (0.07 * progress)), anchor: cardScaleAnchor(for: layout.lane))
                         .zIndex(2)
 
                     ActivityTimelineNode(event: event, isActive: index == activeCardIndex, isRevealed: progress > 0.08)
                         .frame(width: 44, height: 44)
-                        .position(layout.anchorPoint)
+                        .position(x: layout.anchorPoint.x + revealOffset, y: layout.anchorPoint.y)
                         .opacity(progress > 0 ? 1 : 0.25)
                         .zIndex(3)
                 }
@@ -2088,6 +2132,14 @@ private struct ActivityTimelineEvent: Identifiable {
         timelineDateLabel(sortKey)
     }
 
+    var cardScrollID: String {
+        "timeline-card-\(id)"
+    }
+
+    var branchScrollID: String {
+        "timeline-branch-\(id)"
+    }
+
     var amountLabel: String? {
         guard let amountPence else { return nil }
         switch amountStyle {
@@ -2512,6 +2564,12 @@ private struct ActivityDailyAmount {
     var amountPence: Int
 }
 
+enum ActivityMonthlyBalanceChartLayoutPolicy {
+    static let estimatedLineStyle = "fullMonthProjectedLine"
+    static let actualLineStyle = "dayAnchoredNeonLine"
+    static let todayMarkerFollowsActualLine = true
+}
+
 private func signedMoney(_ amountPence: Int) -> String {
     if amountPence < 0 {
         return "-\(MoneyParser.formatPence(abs(amountPence)))"
@@ -2702,13 +2760,23 @@ private struct ActivityBalanceLineGraph: View {
             ZStack(alignment: .topLeading) {
                 graphGrid
 
-                ActivityBalanceLineShape(points: data.points, minValue: minValue, maxValue: maxValue)
+                ActivityBalanceLineShape(
+                    points: data.points,
+                    daysInMonth: data.daysInMonth,
+                    minValue: minValue,
+                    maxValue: maxValue
+                )
                     .stroke(
-                        AppTheme.Colors.border.opacity(0.58),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: [5, 7])
+                        AppTheme.Colors.border.opacity(0.62),
+                        style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
                     )
 
-                ActivityBalanceAreaShape(points: activePoints, minValue: minValue, maxValue: maxValue)
+                ActivityBalanceAreaShape(
+                    points: activePoints,
+                    daysInMonth: data.daysInMonth,
+                    minValue: minValue,
+                    maxValue: maxValue
+                )
                     .fill(
                         LinearGradient(
                             colors: [
@@ -2722,7 +2790,12 @@ private struct ActivityBalanceLineGraph: View {
                     )
                     .opacity(drawProgress)
 
-                ActivityBalanceLineShape(points: activePoints, minValue: minValue, maxValue: maxValue)
+                ActivityBalanceLineShape(
+                    points: activePoints,
+                    daysInMonth: data.daysInMonth,
+                    minValue: minValue,
+                    maxValue: maxValue
+                )
                     .trim(from: 0, to: drawProgress)
                     .stroke(
                         lineColor,
@@ -2730,9 +2803,8 @@ private struct ActivityBalanceLineGraph: View {
                     )
                     .shadow(color: data.hasData ? lineColor.opacity(0.44) : .clear, radius: 12, y: 6)
 
-                if let currentPoint = activePoints.last,
-                   let currentIndex = data.points.firstIndex(where: { $0.id == currentPoint.id }) {
-                    todayMarker(point: currentPoint, index: currentIndex, size: proxy.size, minValue: minValue, maxValue: maxValue, color: lineColor)
+                if let currentPoint = activePoints.last {
+                    todayMarker(point: currentPoint, size: proxy.size, minValue: minValue, maxValue: maxValue, color: lineColor)
                 }
 
                 HStack {
@@ -2767,8 +2839,15 @@ private struct ActivityBalanceLineGraph: View {
         .padding(.bottom, 8)
     }
 
-    private func todayMarker(point: ActivityMonthlyBalanceChartPoint, index: Int, size: CGSize, minValue: Int, maxValue: Int, color: Color) -> some View {
-        let position = pointPosition(index: index, balancePence: point.balancePence, size: size, pointCount: data.points.count, minValue: minValue, maxValue: maxValue)
+    private func todayMarker(point: ActivityMonthlyBalanceChartPoint, size: CGSize, minValue: Int, maxValue: Int, color: Color) -> some View {
+        let position = pointPosition(
+            day: point.day,
+            balancePence: point.balancePence,
+            size: size,
+            daysInMonth: data.daysInMonth,
+            minValue: minValue,
+            maxValue: maxValue
+        )
 
         return ZStack {
             Text("Now")
@@ -2793,9 +2872,10 @@ private struct ActivityBalanceLineGraph: View {
         .position(position)
     }
 
-    private func pointPosition(index: Int, balancePence: Int, size: CGSize, pointCount: Int, minValue: Int, maxValue: Int) -> CGPoint {
+    private func pointPosition(day: Int, balancePence: Int, size: CGSize, daysInMonth: Int, minValue: Int, maxValue: Int) -> CGPoint {
         let drawingHeight = max(size.height - 26, 1)
-        let x = CGFloat(index) / CGFloat(max(pointCount - 1, 1)) * max(size.width, 1)
+        let clampedDay = min(max(day, 1), max(daysInMonth, 1))
+        let x = CGFloat(clampedDay - 1) / CGFloat(max(daysInMonth - 1, 1)) * max(size.width, 1)
         let range = CGFloat(max(maxValue - minValue, 1))
         let normalized = CGFloat(balancePence - minValue) / range
         let y = drawingHeight - (normalized * drawingHeight)
@@ -2812,6 +2892,7 @@ private struct ActivityBalanceLineGraph: View {
 
 private struct ActivityBalanceLineShape: Shape {
     var points: [ActivityMonthlyBalanceChartPoint]
+    var daysInMonth: Int
     var minValue: Int
     var maxValue: Int
 
@@ -2820,7 +2901,7 @@ private struct ActivityBalanceLineShape: Shape {
         guard !points.isEmpty else { return path }
 
         for (index, point) in points.enumerated() {
-            let position = pointPosition(index: index, balancePence: point.balancePence, rect: rect)
+            let position = pointPosition(day: point.day, balancePence: point.balancePence, rect: rect)
             if index == 0 {
                 path.move(to: position)
             } else {
@@ -2829,16 +2910,17 @@ private struct ActivityBalanceLineShape: Shape {
         }
 
         if points.count == 1 {
-            let position = pointPosition(index: 0, balancePence: points[0].balancePence, rect: rect)
+            let position = pointPosition(day: points[0].day, balancePence: points[0].balancePence, rect: rect)
             path.addLine(to: CGPoint(x: min(rect.maxX, position.x + 0.5), y: position.y))
         }
 
         return path
     }
 
-    private func pointPosition(index: Int, balancePence: Int, rect: CGRect) -> CGPoint {
+    private func pointPosition(day: Int, balancePence: Int, rect: CGRect) -> CGPoint {
         let drawingHeight = max(rect.height - 26, 1)
-        let x = rect.minX + CGFloat(index) / CGFloat(max(points.count - 1, 1)) * rect.width
+        let clampedDay = min(max(day, 1), max(daysInMonth, 1))
+        let x = rect.minX + CGFloat(clampedDay - 1) / CGFloat(max(daysInMonth - 1, 1)) * rect.width
         let range = CGFloat(max(maxValue - minValue, 1))
         let normalized = CGFloat(balancePence - minValue) / range
         let y = rect.minY + drawingHeight - (normalized * drawingHeight)
@@ -2848,6 +2930,7 @@ private struct ActivityBalanceLineShape: Shape {
 
 private struct ActivityBalanceAreaShape: Shape {
     var points: [ActivityMonthlyBalanceChartPoint]
+    var daysInMonth: Int
     var minValue: Int
     var maxValue: Int
 
@@ -2856,7 +2939,7 @@ private struct ActivityBalanceAreaShape: Shape {
         guard !points.isEmpty else { return path }
 
         for (index, point) in points.enumerated() {
-            let position = pointPosition(index: index, balancePence: point.balancePence, rect: rect)
+            let position = pointPosition(day: point.day, balancePence: point.balancePence, rect: rect)
             if index == 0 {
                 path.move(to: position)
             } else {
@@ -2864,17 +2947,18 @@ private struct ActivityBalanceAreaShape: Shape {
             }
         }
 
-        let lastX = pointPosition(index: points.count - 1, balancePence: points.last?.balancePence ?? 0, rect: rect).x
-        let firstX = pointPosition(index: 0, balancePence: points[0].balancePence, rect: rect).x
+        let lastX = pointPosition(day: points.last?.day ?? 1, balancePence: points.last?.balancePence ?? 0, rect: rect).x
+        let firstX = pointPosition(day: points[0].day, balancePence: points[0].balancePence, rect: rect).x
         path.addLine(to: CGPoint(x: lastX, y: rect.maxY - 18))
         path.addLine(to: CGPoint(x: firstX, y: rect.maxY - 18))
         path.closeSubpath()
         return path
     }
 
-    private func pointPosition(index: Int, balancePence: Int, rect: CGRect) -> CGPoint {
+    private func pointPosition(day: Int, balancePence: Int, rect: CGRect) -> CGPoint {
         let drawingHeight = max(rect.height - 26, 1)
-        let x = rect.minX + CGFloat(index) / CGFloat(max(points.count - 1, 1)) * rect.width
+        let clampedDay = min(max(day, 1), max(daysInMonth, 1))
+        let x = rect.minX + CGFloat(clampedDay - 1) / CGFloat(max(daysInMonth - 1, 1)) * rect.width
         let range = CGFloat(max(maxValue - minValue, 1))
         let normalized = CGFloat(balancePence - minValue) / range
         let y = rect.minY + drawingHeight - (normalized * drawingHeight)
@@ -2943,15 +3027,17 @@ struct CreditView: View {
     @State private var selectedCard: CreditCard?
 
     var body: some View {
+        let displayData = creditDisplayData
+
         ScreenScaffold(
             title: "Credit",
             subtitle: "Cards, debts, and payments due.",
             navigationMode: .tabRoot,
             toolbarMode: .none
         ) {
-            creditSummary
-            activeCardRows
-            paymentDueSummary
+            creditSummary(summary: displayData.summary, dueItems: displayData.dueItems)
+            activeCardRows(cardModels: displayData.cardModels)
+            paymentDueSummary(dueItems: displayData.dueItems)
             creditRoutes
         }
         .sheet(item: $selectedCard) { card in
@@ -2959,10 +3045,8 @@ struct CreditView: View {
         }
     }
 
-    private var creditSummary: some View {
-        let summary = creditSummaryData
-
-        return NavigationLink {
+    private func creditSummary(summary: CreditSummaryData, dueItems: [CreditDueItem]) -> some View {
+        NavigationLink {
             CreditOverviewDetailView(summary: summary, dueItems: dueItems)
         } label: {
             CreditSummaryCard(summary: summary, showsDisclosure: true)
@@ -2971,10 +3055,15 @@ struct CreditView: View {
         .accessibilityLabel("Open credit overview")
     }
 
-    private var creditSummaryData: CreditSummaryData {
-        let cardOwed = store.activeCards.reduce(0) { total, card in
-            total + PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot)
-        }
+    private var creditDisplayData: CreditDisplayData {
+        let activeCards = store.activeCards
+        let cardModels = creditCardPreviewModels(
+            cards: activeCards,
+            snapshot: store.snapshot,
+            payPeriod: store.selectedPayPeriod,
+            asOfDate: store.todayIso
+        )
+        let cardOwed = cardModels.reduce(0) { $0 + $1.balancePence }
         let debtSummary = FinanceEngine.getDebtSummary(
             debts: store.snapshot.debts,
             payments: store.snapshot.debtPayments,
@@ -2984,20 +3073,46 @@ struct CreditView: View {
         )
         let statements = PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: store.todayIso)
         let unpaidStatements = statements.reduce(0) { $0 + $1.unpaidAmountPence }
+        let statementDueItems = statements
+            .filter { $0.status != .paid }
+            .map {
+                CreditDueItem(
+                    id: "statement-\($0.id)",
+                    title: "\($0.cardName) statement",
+                    date: $0.directDebitDate,
+                    amountPence: $0.unpaidAmountPence,
+                    isOverdue: $0.status == .overdue
+                )
+            }
+        let debtDueItems = PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
+            .filter { $0.status != .paid && $0.status != .cancelled }
+            .map { item in
+                CreditDueItem(
+                    id: "debt-\(item.id)",
+                    title: store.snapshot.debts.first { debt in debt.id == item.debtId }?.name ?? "Debt payment",
+                    date: item.dueDate,
+                    amountPence: item.plannedAmountPence,
+                    isOverdue: item.dueDate < store.todayIso
+                )
+            }
 
-        return CreditSummaryData(
-            cardOwedPence: cardOwed,
-            debtBalancePence: debtSummary.totalCurrentBalancePence,
-            debtPaidPence: debtSummary.totalPaidPence,
-            overdueDebtCount: debtSummary.overdueDebtCount,
-            unpaidStatementsPence: unpaidStatements,
-            unpaidStatementCount: statements.filter { $0.status != .paid }.count,
-            activeCardCount: store.activeCards.count,
-            activeDebtCount: store.snapshot.debts.filter { $0.deletedAt == nil && $0.status.isActiveLike }.count
+        return CreditDisplayData(
+            summary: CreditSummaryData(
+                cardOwedPence: cardOwed,
+                debtBalancePence: debtSummary.totalCurrentBalancePence,
+                debtPaidPence: debtSummary.totalPaidPence,
+                overdueDebtCount: debtSummary.overdueDebtCount,
+                unpaidStatementsPence: unpaidStatements,
+                unpaidStatementCount: statements.filter { $0.status != .paid }.count,
+                activeCardCount: activeCards.count,
+                activeDebtCount: store.snapshot.debts.filter { $0.deletedAt == nil && $0.status.isActiveLike }.count
+            ),
+            dueItems: (statementDueItems + debtDueItems).sorted { $0.date < $1.date },
+            cardModels: cardModels
         )
     }
 
-    private var paymentDueSummary: some View {
+    private func paymentDueSummary(dueItems: [CreditDueItem]) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Due soon")
             AppCard {
@@ -3013,27 +3128,19 @@ struct CreditView: View {
     }
 
     @ViewBuilder
-    private var activeCardRows: some View {
-        if !store.activeCards.isEmpty {
+    private func activeCardRows(cardModels: [CreditCardPreviewModel]) -> some View {
+        if !cardModels.isEmpty {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 SectionTitle("Cards")
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                        ForEach(store.activeCards) { card in
+                        ForEach(cardModels) { model in
                             Button {
-                                selectedCard = card
+                                selectedCard = model.card
                             } label: {
-                                FloatingCreditCardPreview(
-                                    card: card,
-                                    balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot),
-                                    availability: PlannerDerivedData.creditCardAvailabilitySummary(
-                                        card: card,
-                                        snapshot: store.snapshot,
-                                        payPeriod: store.selectedPayPeriod,
-                                        asOfDate: store.todayIso
-                                    )
-                                )
+                                FloatingCreditCardPreview(model: model)
+                                .equatable()
                                 .frame(width: CreditLayoutPolicy.cardRowWidth)
                             }
                             .buttonStyle(.plain)
@@ -3074,34 +3181,6 @@ struct CreditView: View {
         }
     }
 
-    private var dueItems: [CreditDueItem] {
-        let statements = PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: store.todayIso)
-            .filter { $0.status != .paid }
-            .map {
-                CreditDueItem(
-                    id: "statement-\($0.id)",
-                    title: "\($0.cardName) statement",
-                    date: $0.directDebitDate,
-                    amountPence: $0.unpaidAmountPence,
-                    isOverdue: $0.status == .overdue
-                )
-            }
-
-        let debts = PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
-            .filter { $0.status != .paid && $0.status != .cancelled }
-            .map { item in
-                CreditDueItem(
-                    id: "debt-\(item.id)",
-                    title: store.snapshot.debts.first { debt in debt.id == item.debtId }?.name ?? "Debt payment",
-                    date: item.dueDate,
-                    amountPence: item.plannedAmountPence,
-                    isOverdue: item.dueDate < store.todayIso
-                )
-            }
-
-        return (statements + debts).sorted { $0.date < $1.date }
-    }
-
     private func creditRouteCard(_ route: CreditRoute) -> some View {
         AppCard {
             HStack(spacing: AppTheme.Spacing.md) {
@@ -3125,6 +3204,12 @@ struct CreditView: View {
             }
         }
     }
+}
+
+private struct CreditDisplayData {
+    var summary: CreditSummaryData
+    var dueItems: [CreditDueItem]
+    var cardModels: [CreditCardPreviewModel]
 }
 
 private struct CreditSummaryData {

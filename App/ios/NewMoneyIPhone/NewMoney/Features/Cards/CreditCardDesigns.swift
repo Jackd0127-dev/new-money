@@ -16,7 +16,7 @@ enum CreditCardVisualLayoutPolicy {
     static var rowPreviewWidth: CGFloat { rowCardMaxWidth }
     static var rowPreviewHeight: CGFloat { rowCardMaxWidth / cardAspectRatio }
     static var designSelectionPreviewWidth: CGFloat { 112 }
-    static let previewArtworkDetail = CreditCardArtworkDetail.full
+    static let previewArtworkDetail = CreditCardArtworkDetail.preview
     static let fullArtworkDetail = CreditCardArtworkDetail.full
 
     static func previewCornerRadius(for height: CGFloat) -> CGFloat {
@@ -30,6 +30,7 @@ enum CreditCardVisualLayoutPolicy {
 
 enum CreditCardArtworkDetail: String {
     case compact
+    case preview
     case full
 }
 
@@ -1222,7 +1223,8 @@ struct CreditCardDesignMiniPreview: View {
             networkLabel: resolvedNetworkLabel,
             horizontalPadding: 0,
             designId: design.storageHex,
-            isInteractive: false
+            isInteractive: false,
+            artworkDetail: CreditCardVisualLayoutPolicy.previewArtworkDetail
         )
         .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
     }
@@ -1244,15 +1246,15 @@ struct CreditCardArtworkBackground: View {
                     )
                 )
 
-            if detail == .full {
-                CreditCardSurfaceArtwork(design: design)
+            if detail == .full || detail == .preview {
+                CreditCardSurfaceArtwork(design: design, detail: detail)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
 
                 if let symbolName = design.symbolName {
                     GeometryReader { proxy in
                         Image(systemName: symbolName)
                             .font(.system(size: proxy.size.height * 0.62, weight: .bold))
-                            .foregroundStyle(design.foregroundColor.opacity(0.055))
+                            .foregroundStyle(design.foregroundColor.opacity(detail == .full ? 0.055 : 0.045))
                             .offset(x: proxy.size.width * 0.56, y: proxy.size.height * 0.04)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -1273,8 +1275,8 @@ struct CreditCardArtworkBackground: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .blendMode(detail == .full ? .screen : .normal)
-                .opacity(detail == .full ? 0.58 : 0.18)
+                .blendMode(detail == .compact ? .normal : .screen)
+                .opacity(highlightOpacity)
 
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(
@@ -1310,10 +1312,22 @@ struct CreditCardArtworkBackground: View {
             .clipped()
         }
     }
+
+    private var highlightOpacity: Double {
+        switch detail {
+        case .full:
+            0.58
+        case .preview:
+            0.34
+        case .compact:
+            0.18
+        }
+    }
 }
 
 private struct CreditCardSurfaceArtwork: View {
     var design: CreditCardDesign
+    var detail: CreditCardArtworkDetail = CreditCardVisualLayoutPolicy.fullArtworkDetail
 
     var body: some View {
         GeometryReader { proxy in
@@ -1323,46 +1337,235 @@ private struct CreditCardSurfaceArtwork: View {
 
     @ViewBuilder
     private func patternContent(size: CGSize) -> some View {
-        switch design.pattern {
-        case .softGlow:
-            softGlow(size: size)
-        case .orbit:
-            orbit(size: size)
-        case .waves:
-            waves(size: size)
-        case .grid:
-            grid(size: size)
-        case .circuit:
-            circuit(size: size)
-        case .topographic:
-            topographic(size: size)
-        case .prism:
-            prism(size: size)
-        case .carbon:
-            carbon(size: size)
-        case .liquid:
-            liquid(size: size)
-        case .diagonal:
-            diagonal(size: size)
-        case .starfield:
-            starfield(size: size)
-        case .terrazzo:
-            terrazzo(size: size)
-        case .skyline:
-            skyline(size: size)
-        case .brush:
-            brush(size: size)
-        case .rings:
-            rings(size: size)
-        case .crosshatch:
-            crosshatch(size: size)
-        case .marble:
-            marble(size: size)
-        case .dots:
-            dots(size: size)
-        case .shards:
-            shards(size: size)
+        if detail == .preview {
+            previewPatternContent(size: size)
+        } else {
+            switch design.pattern {
+            case .softGlow:
+                softGlow(size: size)
+            case .orbit:
+                orbit(size: size)
+            case .waves:
+                waves(size: size)
+            case .grid:
+                grid(size: size)
+            case .circuit:
+                circuit(size: size)
+            case .topographic:
+                topographic(size: size)
+            case .prism:
+                prism(size: size)
+            case .carbon:
+                carbon(size: size)
+            case .liquid:
+                liquid(size: size)
+            case .diagonal:
+                diagonal(size: size)
+            case .starfield:
+                starfield(size: size)
+            case .terrazzo:
+                terrazzo(size: size)
+            case .skyline:
+                skyline(size: size)
+            case .brush:
+                brush(size: size)
+            case .rings:
+                rings(size: size)
+            case .crosshatch:
+                crosshatch(size: size)
+            case .marble:
+                marble(size: size)
+            case .dots:
+                dots(size: size)
+            case .shards:
+                shards(size: size)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func previewPatternContent(size: CGSize) -> some View {
+        switch design.pattern {
+        case .softGlow, .liquid:
+            previewGlow(size: size)
+        case .orbit, .rings, .topographic:
+            previewRings(size: size)
+        case .waves, .marble, .brush:
+            previewWaves(size: size)
+        case .grid, .crosshatch, .carbon:
+            previewGrid(size: size)
+        case .circuit:
+            previewCircuit(size: size)
+        case .prism, .shards, .terrazzo:
+            previewFacets(size: size)
+        case .diagonal:
+            previewDiagonal(size: size)
+        case .starfield, .dots:
+            previewDots(size: size)
+        case .skyline:
+            previewSkyline(size: size)
+        }
+    }
+
+    private func previewGlow(size: CGSize) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [design.glowColor.opacity(0.46), Color.clear],
+                        center: .center,
+                        startRadius: 4,
+                        endRadius: size.width * 0.42
+                    )
+                )
+                .frame(width: size.width * 0.72, height: size.width * 0.72)
+                .offset(x: size.width * 0.30, y: -size.height * 0.48)
+
+            Circle()
+                .fill(design.foregroundColor.opacity(design.artworkOpacity * 0.30))
+                .frame(width: size.width * 0.34, height: size.width * 0.34)
+                .offset(x: -size.width * 0.34, y: size.height * 0.40)
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewRings(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<4, id: \.self) { index in
+                Circle()
+                    .stroke(
+                        index.isMultiple(of: 2)
+                            ? design.foregroundColor.opacity(design.artworkOpacity * 0.46)
+                            : design.glowColor.opacity(0.13),
+                        lineWidth: 1
+                    )
+                    .frame(
+                        width: size.height * (0.42 + CGFloat(index) * 0.28),
+                        height: size.height * (0.42 + CGFloat(index) * 0.28)
+                    )
+                    .offset(x: size.width * 0.34, y: size.height * 0.02)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewWaves(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { index in
+                CreditCardWaveShape(
+                    amplitude: size.height * (0.045 + CGFloat(index) * 0.012),
+                    frequency: 1.15 + CGFloat(index) * 0.22,
+                    phase: CGFloat(index) * 0.48
+                )
+                .stroke(
+                    index.isMultiple(of: 2)
+                        ? design.foregroundColor.opacity(design.artworkOpacity * 0.62)
+                        : design.glowColor.opacity(0.17),
+                    lineWidth: index.isMultiple(of: 2) ? 1.1 : 1.8
+                )
+                .frame(width: size.width * 1.16, height: size.height * 0.55)
+                .offset(x: -size.width * 0.10, y: -size.height * 0.10 + CGFloat(index) * size.height * 0.15)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewGrid(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<5, id: \.self) { index in
+                Rectangle()
+                    .fill(design.foregroundColor.opacity(design.artworkOpacity * 0.22))
+                    .frame(width: 1, height: size.height * 1.35)
+                    .offset(x: -size.width * 0.40 + CGFloat(index) * size.width * 0.20)
+
+                Rectangle()
+                    .fill(design.glowColor.opacity(0.10))
+                    .frame(width: size.width * 1.25, height: 1)
+                    .offset(y: -size.height * 0.38 + CGFloat(index) * size.height * 0.20)
+            }
+        }
+        .rotationEffect(.degrees(18))
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewCircuit(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<5, id: \.self) { index in
+                Path { path in
+                    let startX = size.width * (0.10 + CGFloat(index) * 0.14)
+                    let startY = size.height * (0.18 + CGFloat(index % 3) * 0.20)
+                    path.move(to: CGPoint(x: startX, y: startY))
+                    path.addLine(to: CGPoint(x: startX + size.width * 0.12, y: startY))
+                    path.addLine(to: CGPoint(x: startX + size.width * 0.12, y: startY + size.height * 0.14))
+                    path.addLine(to: CGPoint(x: startX + size.width * 0.25, y: startY + size.height * 0.14))
+                }
+                .stroke(design.foregroundColor.opacity(design.artworkOpacity * 0.44), lineWidth: 1.2)
+
+                Circle()
+                    .fill(design.glowColor.opacity(0.26))
+                    .frame(width: size.height * 0.040, height: size.height * 0.040)
+                    .offset(x: -size.width * 0.38 + CGFloat(index) * size.width * 0.17, y: -size.height * 0.22 + CGFloat(index % 3) * size.height * 0.20)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewFacets(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<5, id: \.self) { index in
+                CreditCardTriangleShape(direction: index.isMultiple(of: 2) ? .up : .down)
+                    .fill(index.isMultiple(of: 2) ? design.foregroundColor.opacity(design.artworkOpacity * 0.34) : design.glowColor.opacity(0.16))
+                    .frame(width: size.width * (0.20 + CGFloat(index % 2) * 0.07), height: size.height * (0.30 + CGFloat(index % 3) * 0.04))
+                    .rotationEffect(.degrees(Double(index) * 19))
+                    .offset(
+                        x: -size.width * 0.34 + CGFloat(index) * size.width * 0.18,
+                        y: -size.height * 0.18 + CGFloat(index % 3) * size.height * 0.17
+                    )
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewDiagonal(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<5, id: \.self) { index in
+                RoundedRectangle(cornerRadius: size.height * 0.018, style: .continuous)
+                    .fill(index.isMultiple(of: 2) ? design.foregroundColor.opacity(design.artworkOpacity * 0.38) : design.glowColor.opacity(0.13))
+                    .frame(width: size.width * 0.72, height: size.height * 0.065)
+                    .rotationEffect(.degrees(-18))
+                    .offset(x: size.width * 0.08, y: -size.height * 0.34 + CGFloat(index) * size.height * 0.18)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewDots(size: CGSize) -> some View {
+        ZStack {
+            ForEach(0..<4, id: \.self) { row in
+                ForEach(0..<6, id: \.self) { column in
+                    Circle()
+                        .fill((row + column).isMultiple(of: 2) ? design.foregroundColor.opacity(design.artworkOpacity * 0.45) : design.glowColor.opacity(0.24))
+                        .frame(width: size.height * 0.028, height: size.height * 0.028)
+                        .offset(
+                            x: -size.width * 0.40 + CGFloat(column) * size.width * 0.16,
+                            y: -size.height * 0.28 + CGFloat(row) * size.height * 0.18
+                        )
+                }
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func previewSkyline(size: CGSize) -> some View {
+        ZStack(alignment: .bottom) {
+            ForEach(0..<6, id: \.self) { index in
+                RoundedRectangle(cornerRadius: size.height * 0.018, style: .continuous)
+                    .fill(index.isMultiple(of: 2) ? design.foregroundColor.opacity(design.artworkOpacity * 0.42) : design.glowColor.opacity(0.14))
+                    .frame(width: size.width * 0.075, height: size.height * skylineHeightFactor(index))
+                    .offset(x: -size.width * 0.30 + CGFloat(index) * size.width * 0.12)
+            }
+        }
+        .frame(width: size.width, height: size.height)
     }
 
     private func softGlow(size: CGSize) -> some View {

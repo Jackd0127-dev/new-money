@@ -2216,6 +2216,11 @@ struct CalendarSheetView: View {
     }
 }
 
+enum HistoryLayoutPolicy {
+    static let toolbarMode = "none"
+    static let showsPlaceholderOptions = false
+}
+
 struct HistoryView: View {
     @ObservedObject var store: PlannerStore
 
@@ -2224,7 +2229,7 @@ struct HistoryView: View {
             title: "History",
             subtitle: "Closed and active paycheck plans with allocations.",
             navigationMode: .inline,
-            toolbarMode: .secondarySingle
+            toolbarMode: .none
         ) {
             AppCard(glow: true) {
                 MetricRow(label: "Paychecks", value: "\(store.snapshot.paychecks.count)")
@@ -2307,6 +2312,7 @@ struct SettingsView: View {
     @State private var hours = ""
     @State private var showResetAlert = false
     @State private var showDeleteAccountAlert = false
+    @State private var showLogOutConfirmation = false
     @State private var resetDataToggle = false
 
     var body: some View {
@@ -2384,6 +2390,16 @@ struct SettingsView: View {
         } message: {
             Text("This deletes your account through the backend account endpoint. Local data on this iPhone is not reset by this action.")
         }
+        .alert("Log out?", isPresented: $showLogOutConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button(ProfileMenuPresentationPolicy.logOutActionTitle, role: .destructive) {
+                Task {
+                    await authSession.signOut()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to log out of this account?")
+        }
     }
 
     private var appearanceCard: some View {
@@ -2458,10 +2474,8 @@ struct SettingsView: View {
                 }
                 MetricRow(label: "Cloud sync", value: authSession.cloudStatus)
 
-                SecondaryButton(title: "Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
-                    Task {
-                        await authSession.signOut()
-                    }
+                SecondaryButton(title: ProfileMenuPresentationPolicy.logOutActionTitle, systemImage: "rectangle.portrait.and.arrow.right") {
+                    showLogOutConfirmation = true
                 }
 
                 SecondaryButton(title: "Delete Account", systemImage: "trash", role: .destructive) {

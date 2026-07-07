@@ -102,15 +102,10 @@ struct PremiumCardView: View {
             cardStack(width: width, height: height)
             .frame(width: width, height: height)
             .shadow(color: AppTheme.Colors.strongShadow, radius: shadowRadius, x: 0, y: shadowRadius > 0 ? 12 : 0)
-            .rotation3DEffect(
-                .degrees(isInteractive ? xFlipAngle + verticalTiltAngle : 0),
-                axis: (x: 1, y: 0, z: 0),
-                perspective: 0.7
-            )
-            .rotation3DEffect(
-                .degrees(isInteractive ? yFlipAngle + horizontalTiltAngle : 0),
-                axis: (x: 0, y: 1, z: 0),
-                perspective: 0.7
+            .premiumCardTransform(
+                isEnabled: isInteractive,
+                xAngle: xFlipAngle + verticalTiltAngle,
+                yAngle: yFlipAngle + horizontalTiltAngle
             )
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .premiumCardInteraction(isEnabled: isInteractive) { value in
@@ -564,6 +559,25 @@ private struct CardFlipFaceVisibility: AnimatableModifier {
 private extension View {
     func flipFace(angle: Double, isFront: Bool) -> some View {
         modifier(CardFlipFaceVisibility(angle: angle, isFront: isFront))
+    }
+
+    @ViewBuilder
+    func premiumCardTransform(isEnabled: Bool, xAngle: Double, yAngle: Double) -> some View {
+        if isEnabled {
+            self
+                .rotation3DEffect(
+                    .degrees(xAngle),
+                    axis: (x: 1, y: 0, z: 0),
+                    perspective: 0.7
+                )
+                .rotation3DEffect(
+                    .degrees(yAngle),
+                    axis: (x: 0, y: 1, z: 0),
+                    perspective: 0.7
+                )
+        } else {
+            self
+        }
     }
 
     @ViewBuilder

@@ -40,12 +40,20 @@
         background:
           radial-gradient(circle at center, rgba(255, 0, 0, 0.24) 0%, rgba(255, 0, 0, 0.08) 25%, rgba(255, 0, 0, 0) 58%),
           #000;
+        opacity: 0;
+        transform: translateZ(0);
+        will-change: opacity;
+      }
+
+      .page.is-ready {
+        opacity: 1;
+        transition: opacity 0.16s ease-out;
       }
 
       .page::before {
         content: "";
         position: absolute;
-        width: min(640px, 82vw);
+        width: min(340px, 48vw);
         aspect-ratio: 1;
         border-radius: 50%;
         background:
@@ -57,7 +65,7 @@
       }
 
       .poster {
-        width: min(350px, 78vw, 52vh);
+        width: min(190px, 44vw, 30vh);
         aspect-ratio: 1 / 1;
         display: grid;
         place-items: center;
@@ -71,7 +79,7 @@
 
       .logo-shell {
         width: 100%;
-        max-width: 280px;
+        max-width: 145px;
         perspective: 1000px;
         overflow: visible;
         position: relative;
@@ -85,10 +93,11 @@
         height: auto;
         overflow: visible;
         transform-style: preserve-3d;
+        transform: rotate3d(0, 1, 0.42, 0deg);
         backface-visibility: visible;
         filter:
-          drop-shadow(0 18px 42px rgba(255, 0, 0, 0.14))
-          drop-shadow(0 32px 80px rgba(0, 0, 0, 0.34));
+          drop-shadow(0 8px 22px rgba(255, 0, 0, 0.12))
+          drop-shadow(0 16px 42px rgba(0, 0, 0, 0.28));
         will-change: transform;
       }
 
@@ -108,22 +117,22 @@
       }
 
       .depth-1 {
-        transform: translate(8px, 9px);
+        transform: translate(4px, 4px);
         opacity: 0.28;
       }
 
       .depth-2 {
-        transform: translate(15px, 17px);
+        transform: translate(7px, 8px);
         opacity: 0.2;
       }
 
       .depth-3 {
-        transform: translate(22px, 25px);
+        transform: translate(11px, 12px);
         opacity: 0.13;
       }
 
       .depth-4 {
-        transform: translate(29px, 33px);
+        transform: translate(14px, 16px);
         opacity: 0.08;
       }
 
@@ -142,7 +151,7 @@
         align-items: center;
         justify-content: center;
         flex-direction: column;
-        gap: 15px;
+        gap: 9px;
         opacity: 0;
         pointer-events: none;
         transform: translateY(26px) scale(0.42);
@@ -160,21 +169,21 @@
       .brand-name {
         margin: 0;
         font-family: "Bodoni 72", "Didot", "Times New Roman", serif;
-        font-size: clamp(4.4rem, 20vw, 7.6rem);
+        font-size: clamp(2.35rem, 10vw, 3.9rem);
         font-weight: 900;
         line-height: 0.78;
         letter-spacing: 0.08em;
         text-indent: 0.08em;
         color: #fff;
         text-shadow:
-          0 0 18px rgba(255, 255, 255, 0.18),
-          0 22px 80px rgba(255, 20, 20, 0.22);
+          0 0 9px rgba(255, 255, 255, 0.14),
+          0 12px 40px rgba(255, 20, 20, 0.16);
       }
 
       .brand-subtitle {
         margin: 0;
         font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", sans-serif;
-        font-size: clamp(0.88rem, 3.6vw, 1.08rem);
+        font-size: clamp(0.62rem, 2.2vw, 0.76rem);
         font-weight: 500;
         line-height: 1.25;
         letter-spacing: 0.26em;
@@ -187,9 +196,9 @@
       .brand-subtitle::before {
         content: "";
         display: block;
-        width: min(150px, 42vw);
+        width: min(88px, 24vw);
         height: 1px;
-        margin: 0 auto 18px;
+        margin: 0 auto 10px;
         background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), rgba(255, 36, 36, 0.72), transparent);
       }
     </style>
@@ -249,6 +258,7 @@
     </main>
     <script>
       const logo = document.getElementById("logo");
+      const page = document.querySelector(".page");
       const white = document.getElementById("white-mark");
       const swoosh = document.getElementById("red-swoosh");
       const dot = document.getElementById("red-dot-1");
@@ -614,6 +624,7 @@
         if (isAnimating) return;
         isAnimating = true;
         reset();
+        page.classList.add("is-ready");
 
         logo.animate(
           [
@@ -669,9 +680,9 @@
 
       document.getElementById("replay").addEventListener("click", playAnimation);
 
-      setTimeout(() => {
-        playAnimation();
-      }, 600);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(playAnimation);
+      });
     </script>
   </body>
 </html>

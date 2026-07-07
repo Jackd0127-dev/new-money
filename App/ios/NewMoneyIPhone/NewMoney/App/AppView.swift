@@ -209,6 +209,8 @@ enum ProfileMenuPresentationPolicy {
     static let syncsActiveAccountAvatar = true
     static let showsSignOutAction = true
     static let signOutUsesAuthGateSession = true
+    static let logOutActionTitle = "Log Out"
+    static let confirmsLogOut = true
     static let includesAddIncomeAction = true
     static let opensAppearanceDirectly = true
     static let usesSystemFullScreenSafeArea = true
@@ -236,7 +238,6 @@ private enum AppSheetDestination: String, Identifiable {
 
 private enum AppNavigationDestination: String, Identifiable {
     case plan
-    case accountTimeline
 
     var id: String { rawValue }
 }
@@ -436,10 +437,8 @@ struct AppView: View {
             AppToolbarAction(
                 id: id,
                 symbol: ActivityTimelineLayoutPolicy.toolbarSymbol,
-                accessibilityLabel: "Open Account Timeline"
-            ) {
-                activeNavigationDestination = .accountTimeline
-            }
+                accessibilityLabel: "Timeline placeholder"
+            ) {}
         case "pot-history-toolbar-action":
             AppToolbarAction(id: id, symbol: "clock.arrow.circlepath", accessibilityLabel: "Pots History") {
                 activeSheet = .potHistory
@@ -467,8 +466,6 @@ struct AppView: View {
         switch destination {
         case .plan:
             PlanView(store: store, navigationMode: .inline, toolbarMode: .none)
-        case .accountTimeline:
-            ActivityAccountTimelineView(store: store)
         }
     }
 
@@ -688,6 +685,7 @@ private struct ProfileMenuScreenView: View {
     @ObservedObject var store: PlannerStore
     @State private var isAddIncomePresented = false
     @State private var isAccountsPresented = false
+    @State private var isLogOutConfirmationPresented = false
 
     var body: some View {
         ScreenScaffold(
@@ -712,6 +710,16 @@ private struct ProfileMenuScreenView: View {
         }
         .sheet(isPresented: $isAccountsPresented) {
             AccountsSheetView(store: store)
+        }
+        .alert("Log out?", isPresented: $isLogOutConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button(ProfileMenuPresentationPolicy.logOutActionTitle, role: .destructive) {
+                Task {
+                    await authSession.signOut()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to log out of this account?")
         }
     }
 
@@ -778,13 +786,11 @@ private struct ProfileMenuScreenView: View {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 SectionTitle("Account")
                 SecondaryButton(
-                    title: authSession.isWorking ? "Signing Out..." : "Sign Out",
+                    title: authSession.isWorking ? "Logging Out..." : ProfileMenuPresentationPolicy.logOutActionTitle,
                     systemImage: "rectangle.portrait.and.arrow.right",
                     role: .destructive
                 ) {
-                    Task {
-                        await authSession.signOut()
-                    }
+                    isLogOutConfirmationPresented = true
                 }
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-sign-out")

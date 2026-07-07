@@ -23,6 +23,8 @@ enum PotsLayoutPolicy {
     static let overviewDetailSections: [PotsOverviewDetailSection] = [.graph, .timeline]
     static let graphStyle = "animatedNeonLine"
     static let timelineStyle = "branchedPotTimeline"
+    static let timelinePresentation = "collapsibleDropdown"
+    static let timelineDefaultsExpandedWhenEmpty = true
     static let overviewDetailSubtitle = ""
     static let overviewDetailUsesInlineTitle = true
 }
@@ -710,29 +712,65 @@ private enum PotTimelineEventKind: Equatable {
 
 private struct PotTimelineCard: View {
     var events: [PotTimelineEvent]
+    @State private var isExpanded: Bool
+
+    init(events: [PotTimelineEvent]) {
+        self.events = events
+        _isExpanded = State(initialValue: events.isEmpty)
+    }
 
     var body: some View {
         AppCard {
-            SectionTitle("Timeline")
+            Button {
+                withAnimation(AppTheme.Animation.standard) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Timeline")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
 
-            if events.isEmpty {
-                EmptyStateView(
-                    title: "No pot timeline yet",
-                    message: "Pot creation, top ups, and pot payments will appear here.",
-                    systemImage: "point.topleft.down.curvedto.point.bottomright.up"
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
-                        PotTimelineRow(
-                            event: event,
-                            isFirst: index == 0,
-                            isLast: index == events.count - 1
-                        )
+                        Text(events.isEmpty ? "No events yet" : "\(events.count) events")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.black))
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 32, height: 32)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                if events.isEmpty {
+                    EmptyStateView(
+                        title: "No pot timeline yet",
+                        message: "Pot creation, top ups, and pot payments will appear here.",
+                        systemImage: "point.topleft.down.curvedto.point.bottomright.up"
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                            PotTimelineRow(
+                                event: event,
+                                isFirst: index == 0,
+                                isLast: index == events.count - 1
+                            )
+                        }
                     }
                 }
             }
         }
+        .animation(AppTheme.Animation.standard, value: isExpanded)
     }
 }
 

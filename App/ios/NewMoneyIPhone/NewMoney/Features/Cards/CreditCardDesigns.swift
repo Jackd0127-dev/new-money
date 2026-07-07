@@ -1,5 +1,38 @@
 import SwiftUI
 
+enum CreditCardVisualLayoutPolicy {
+    static let cardAspectRatio: CGFloat = 1.58
+    static let cardCornerRadius: CGFloat = 12
+    static var canonicalRenderer: String { "PremiumCardView" }
+    static var usesSingleCardRenderer: Bool { true }
+    static var miniPreviewWrapsCanonicalRenderer: Bool { true }
+    static var designGridUsesCanonicalRenderer: Bool { true }
+    static var creditTabUsesStaticFloatingCards: Bool { true }
+    static var designSelectionShowsThumbnail: Bool { false }
+    static var designBrowserLayout: String { "lazyVStackTwoColumnRows" }
+    static var designBrowserShowsOuterTiles: Bool { false }
+    static var designBrowserShowsNames: Bool { false }
+    static var rowCardMaxWidth: CGFloat { 260 }
+    static var rowPreviewWidth: CGFloat { rowCardMaxWidth }
+    static var rowPreviewHeight: CGFloat { rowCardMaxWidth / cardAspectRatio }
+    static var designSelectionPreviewWidth: CGFloat { 112 }
+    static let previewArtworkDetail = CreditCardArtworkDetail.full
+    static let fullArtworkDetail = CreditCardArtworkDetail.full
+
+    static func previewCornerRadius(for height: CGFloat) -> CGFloat {
+        cardCornerRadius
+    }
+
+    static func contentInset(for height: CGFloat) -> CGFloat {
+        min(18, max(5, height * 0.075))
+    }
+}
+
+enum CreditCardArtworkDetail: String {
+    case compact
+    case full
+}
+
 enum CreditCardDesignCategory: String, CaseIterable, Identifiable {
     case premium = "Premium"
     case neon = "Neon"
@@ -73,9 +106,38 @@ struct CreditCardDesign: Identifiable, Hashable {
 
 enum CreditCardDesignCatalog {
     static let fallbackStorageHex = "#FF7A1A"
+    static let displayCategories: [CreditCardDesignCategory] = [
+        .minimal,
+        .calm,
+        .metal,
+        .bold,
+        .premium,
+        .artwork,
+        .neon
+    ]
+    static let legacyHiddenDesignIds: Set<String> = [
+        "royal-plum",
+        "neon-night",
+        "forest-matte",
+        "skyline-blue",
+        "deep-space",
+        "clean-navy",
+        "petrol-shift",
+        "emerald-circuit",
+        "blueprint",
+        "solar-flare"
+    ]
 
     static var defaultDesign: CreditCardDesign {
-        designs.first ?? customColorDesign(hex: fallbackStorageHex)
+        selectableDesigns.first ?? designs.first ?? customColorDesign(hex: fallbackStorageHex)
+    }
+
+    static var selectableDesigns: [CreditCardDesign] {
+        designs.filter { !legacyHiddenDesignIds.contains($0.id) }
+    }
+
+    static func selectableDesigns(in category: CreditCardDesignCategory) -> [CreditCardDesign] {
+        selectableDesigns.filter { $0.category == category }
     }
 
     static let designs: [CreditCardDesign] = [
@@ -897,7 +959,7 @@ enum CreditCardDesignCatalog {
     }
 
     static func selectableStorageValues() -> [String] {
-        designs.map(\.storageHex)
+        selectableDesigns.map(\.storageHex)
     }
 
     static func isKnownStoredValue(_ value: String) -> Bool {
@@ -970,7 +1032,7 @@ struct CreditCardDesignPicker: View {
             }
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                ForEach(CreditCardDesignCatalog.designs) { design in
+                ForEach(CreditCardDesignCatalog.selectableDesigns) { design in
                     CreditCardDesignOptionCard(
                         design: design,
                         isSelected: selectedValue.caseInsensitiveCompare(design.storageHex) == .orderedSame
@@ -996,9 +1058,6 @@ struct CreditCardDesignSelectionLink: View {
             CreditCardDesignBrowserView(selectedValue: $selectedValue, provider: provider)
         } label: {
             HStack(spacing: AppTheme.Spacing.md) {
-                CreditCardDesignMiniPreview(design: selectedDesign, provider: provider)
-                    .frame(width: 84)
-
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Choose design")
                         .font(.caption.weight(.semibold))
@@ -1016,8 +1075,8 @@ struct CreditCardDesignSelectionLink: View {
                     .foregroundStyle(AppTheme.Colors.tertiaryText)
             }
             .padding(.horizontal, AppTheme.Spacing.md)
-            .padding(.vertical, AppTheme.Spacing.sm)
-            .frame(minHeight: 76)
+            .padding(.vertical, AppTheme.Spacing.md)
+            .frame(minHeight: 64)
             .background(AppTheme.Colors.elevatedSurface)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
             .overlay(
@@ -1034,29 +1093,35 @@ private struct CreditCardDesignBrowserView: View {
     @Binding var selectedValue: String
     var provider: String
 
-    private let columns = Array(
-        repeating: GridItem(.flexible(), spacing: AppTheme.Spacing.md),
-        count: CardFormLayoutPolicy.designGridColumnCount
-    )
-
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
-                ForEach(CreditCardDesignCategory.allCases) { category in
-                    let designs = CreditCardDesignCatalog.designs.filter { $0.category == category }
+            LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
+                ForEach(CreditCardDesignCatalog.displayCategories) { category in
+                    let designs = CreditCardDesignCatalog.selectableDesigns(in: category)
 
                     if !designs.isEmpty {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                             SectionTitle(category.rawValue)
 
-                            LazyVGrid(columns: columns, spacing: AppTheme.Spacing.md) {
-                                ForEach(designs) { design in
-                                    CreditCardDesignBrowserOption(
-                                        design: design,
-                                        provider: provider,
-                                        isSelected: isSelected(design)
-                                    ) {
-                                        selectedValue = design.storageHex
+                            LazyVStack(spacing: AppTheme.Spacing.md) {
+                                ForEach(Array(stride(from: 0, to: designs.count, by: 2)), id: \.self) { index in
+                                    HStack(spacing: AppTheme.Spacing.md) {
+                                        ForEach(Array(designs[index..<min(index + 2, designs.count)])) { design in
+                                            CreditCardDesignBrowserOption(
+                                                design: design,
+                                                provider: provider,
+                                                isSelected: isSelected(design)
+                                            ) {
+                                                selectedValue = design.storageHex
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                        }
+
+                                        if index + 1 >= designs.count {
+                                            Color.clear
+                                                .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
+                                                .frame(maxWidth: .infinity)
+                                        }
                                     }
                                 }
                             }
@@ -1085,36 +1150,20 @@ private struct CreditCardDesignBrowserOption: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                CreditCardDesignMiniPreview(design: design, provider: provider)
-                    .aspectRatio(1.96, contentMode: .fit)
-                    .overlay(alignment: .topTrailing) {
-                        if isSelected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(design.foregroundColor)
-                                .padding(7)
-                        }
-                    }
-
-                Text(design.name)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(8)
-            .background(AppTheme.Colors.surface.opacity(0.78))
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
-                    .stroke(
-                        isSelected ? AppTheme.Colors.primaryOrange : AppTheme.Colors.divider.opacity(0.7),
-                        lineWidth: isSelected ? 2 : 1
-                    )
-            )
+            CreditCardDesignMiniPreview(design: design, provider: provider)
+                .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
+                .overlay(
+                    RoundedRectangle(cornerRadius: CreditCardVisualLayoutPolicy.cardCornerRadius, style: .continuous)
+                        .stroke(
+                            isSelected ? AppTheme.Colors.primaryOrange : Color.clear,
+                            lineWidth: isSelected ? 2 : 0
+                        )
+                )
+                .contentShape(
+                    RoundedRectangle(cornerRadius: CreditCardVisualLayoutPolicy.cardCornerRadius, style: .continuous)
+                )
         }
-        .buttonStyle(ScaleButtonStyle())
+        .buttonStyle(.plain)
         .accessibilityLabel("Select \(design.name)")
     }
 }
@@ -1126,40 +1175,24 @@ private struct CreditCardDesignOptionCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
-                CreditCardDesignMiniPreview(design: design)
-                    .frame(height: 48)
-                    .overlay(alignment: .topTrailing) {
-                        if isSelected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(design.foregroundColor)
-                                .padding(6)
-                        }
+            CreditCardDesignMiniPreview(design: design)
+                .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(design.foregroundColor)
+                            .padding(6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(design.name)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                        .lineLimit(1)
-
-                    Text(design.category.rawValue)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(1)
                 }
-            }
-            .padding(8)
-            .background(AppTheme.Colors.surface.opacity(0.78))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        isSelected ? AppTheme.Colors.primaryOrange : AppTheme.Colors.divider.opacity(0.7),
-                        lineWidth: isSelected ? 2 : 1
-                    )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CreditCardVisualLayoutPolicy.cardCornerRadius, style: .continuous)
+                        .stroke(
+                            isSelected ? AppTheme.Colors.primaryOrange : AppTheme.Colors.divider.opacity(0.7),
+                            lineWidth: isSelected ? 2 : 1
+                        )
+                )
         }
         .buttonStyle(ScaleButtonStyle())
         .accessibilityLabel("Select \(design.name) card design")
@@ -1169,6 +1202,7 @@ private struct CreditCardDesignOptionCard: View {
 struct CreditCardDesignMiniPreview: View {
     var design: CreditCardDesign
     var provider: String = ""
+    var networkLabel = "VISA"
     var badges: [CreditCardLinkBadge] = []
 
     private var providerLabel: String {
@@ -1176,65 +1210,28 @@ struct CreditCardDesignMiniPreview: View {
         return trimmed.isEmpty ? design.providerFallback : trimmed.uppercased()
     }
 
+    private var resolvedNetworkLabel: String {
+        let trimmed = networkLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "VISA" : trimmed.uppercased()
+    }
+
     var body: some View {
-        GeometryReader { proxy in
-            let height = proxy.size.height
-            let cornerRadius = max(9, height * 0.18)
-
-            ZStack(alignment: .topLeading) {
-                CreditCardArtworkBackground(design: design, cornerRadius: cornerRadius)
-
-                VStack(alignment: .leading) {
-                    HStack(alignment: .top) {
-                        Text(providerLabel)
-                            .font(.system(size: max(8, height * 0.20), weight: .bold, design: .rounded))
-                            .foregroundStyle(design.foregroundColor)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 4)
-
-                        Image(systemName: "wave.3.right")
-                            .font(.system(size: max(8, height * 0.18), weight: .semibold))
-                            .foregroundStyle(design.foregroundColor.opacity(0.78))
-                    }
-
-                    Spacer()
-
-                    HStack(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: max(2, height * 0.05), style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: design.chipGradientColors,
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: max(16, height * 0.38), height: max(11, height * 0.27))
-
-                        Spacer()
-
-                        if !badges.isEmpty {
-                            HStack(spacing: 3) {
-                                ForEach(badges.prefix(3)) { badge in
-                                    Circle()
-                                        .fill(badge.color)
-                                        .frame(width: max(5, height * 0.10), height: max(5, height * 0.10))
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(max(7, height * 0.16))
-            }
-        }
-        .aspectRatio(1.96, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        PremiumCardView(
+            badges: badges,
+            provider: providerLabel,
+            networkLabel: resolvedNetworkLabel,
+            horizontalPadding: 0,
+            designId: design.storageHex,
+            isInteractive: false
+        )
+        .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
     }
 }
 
 struct CreditCardArtworkBackground: View {
     var design: CreditCardDesign
-    var cornerRadius: CGFloat = 24
+    var cornerRadius: CGFloat = CreditCardVisualLayoutPolicy.cardCornerRadius
+    var detail: CreditCardArtworkDetail = CreditCardVisualLayoutPolicy.fullArtworkDetail
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1247,17 +1244,21 @@ struct CreditCardArtworkBackground: View {
                     )
                 )
 
-            CreditCardSurfaceArtwork(design: design)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            if detail == .full {
+                CreditCardSurfaceArtwork(design: design)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
 
-            if let symbolName = design.symbolName {
-                GeometryReader { proxy in
-                    Image(systemName: symbolName)
-                        .font(.system(size: proxy.size.height * 0.62, weight: .bold))
-                        .foregroundStyle(design.foregroundColor.opacity(0.055))
-                        .offset(x: proxy.size.width * 0.56, y: proxy.size.height * 0.04)
+                if let symbolName = design.symbolName {
+                    GeometryReader { proxy in
+                        Image(systemName: symbolName)
+                            .font(.system(size: proxy.size.height * 0.62, weight: .bold))
+                            .foregroundStyle(design.foregroundColor.opacity(0.055))
+                            .offset(x: proxy.size.width * 0.56, y: proxy.size.height * 0.04)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 }
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            } else {
+                compactArtwork
             }
 
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -1272,8 +1273,8 @@ struct CreditCardArtworkBackground: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .blendMode(.screen)
-                .opacity(0.58)
+                .blendMode(detail == .full ? .screen : .normal)
+                .opacity(detail == .full ? 0.58 : 0.18)
 
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(
@@ -1288,6 +1289,25 @@ struct CreditCardArtworkBackground: View {
                     ),
                     lineWidth: 1
                 )
+        }
+    }
+
+    private var compactArtwork: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Circle()
+                    .fill(design.glowColor.opacity(0.24))
+                    .frame(width: proxy.size.width * 0.62, height: proxy.size.width * 0.62)
+                    .offset(x: proxy.size.width * 0.46, y: -proxy.size.height * 0.36)
+
+                RoundedRectangle(cornerRadius: cornerRadius * 0.8, style: .continuous)
+                    .fill(design.foregroundColor.opacity(design.artworkOpacity * 0.34))
+                    .frame(width: proxy.size.width * 0.46, height: proxy.size.height * 0.46)
+                    .rotationEffect(.degrees(-16))
+                    .offset(x: proxy.size.width * 0.46, y: proxy.size.height * 0.18)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
         }
     }
 }

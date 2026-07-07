@@ -4,6 +4,7 @@ import UIKit
 struct AppCard<Content: View>: View {
     @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
     var glow: Bool = false
+    var cornerRadius: CGFloat = AppTheme.Radius.lg
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -13,13 +14,13 @@ struct AppCard<Content: View>: View {
         .padding(AppTheme.Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppTheme.Gradients.card)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(glow ? AppTheme.Colors.selectedStroke : AppTheme.Colors.border, lineWidth: 1)
         )
         .shadow(color: glow ? AppTheme.Colors.accentGlow : AppTheme.Colors.shadow, radius: glow ? 18 : 10, y: glow ? 8 : 4)
-        .id("card-\(selectedThemeRawValue)-\(glow)")
+        .id("card-\(selectedThemeRawValue)-\(glow)-\(Int(cornerRadius.rounded()))")
     }
 }
 
@@ -306,6 +307,28 @@ extension View {
             PremiumScreenBackground()
         }
     }
+
+    func navigationTopDividerHidden() -> some View {
+        toolbarBackground(.hidden, for: .navigationBar)
+            .background {
+                NavigationTopDividerHiddenInstaller()
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+enum ScreenTopDividerPolicy {
+    static let hiddenScreens = [
+        "Add card",
+        "Create paycheck plan",
+        "Assistant",
+        "Card",
+        "Card payments",
+        "Add debt"
+    ]
+    static let keepsToolbarBackgroundHidden = true
+    static let usesNavigationBarAppearanceInstaller = true
 }
 
 private struct PremiumScreenBackground: View {
@@ -327,6 +350,45 @@ private struct KeyboardDismissTapInstaller: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: KeyboardDismissInstallerView, context: Context) {}
+}
+
+private struct NavigationTopDividerHiddenInstaller: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> NavigationTopDividerHiddenController {
+        NavigationTopDividerHiddenController()
+    }
+
+    func updateUIViewController(_ uiViewController: NavigationTopDividerHiddenController, context: Context) {
+        uiViewController.apply()
+    }
+}
+
+private final class NavigationTopDividerHiddenController: UIViewController {
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        apply()
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        DispatchQueue.main.async { [weak self] in
+            self?.apply()
+        }
+    }
+
+    func apply() {
+        guard let navigationBar = navigationController?.navigationBar else { return }
+        navigationBar.standardAppearance = dividerHiddenAppearance(from: navigationBar.standardAppearance)
+        navigationBar.scrollEdgeAppearance = dividerHiddenAppearance(from: navigationBar.scrollEdgeAppearance ?? navigationBar.standardAppearance)
+        navigationBar.compactAppearance = dividerHiddenAppearance(from: navigationBar.compactAppearance ?? navigationBar.standardAppearance)
+        navigationBar.compactScrollEdgeAppearance = dividerHiddenAppearance(from: navigationBar.compactScrollEdgeAppearance ?? navigationBar.standardAppearance)
+    }
+
+    private func dividerHiddenAppearance(from appearance: UINavigationBarAppearance) -> UINavigationBarAppearance {
+        let copy = appearance.copy()
+        copy.shadowColor = .clear
+        copy.shadowImage = UIImage()
+        return copy
+    }
 }
 
 private final class KeyboardDismissInstallerView: UIView, UIGestureRecognizerDelegate {

@@ -57,15 +57,22 @@ struct PremiumCardView: View {
     var cardHolder = "JACK"
     var expiryDate = "09/29"
     var provider = "VISA"
+    var networkLabel = "VISA"
+    var leadingTitle: String? = nil
+    var leadingSubtitle: String? = nil
+    var facePills: [CreditCardFacePill] = []
     var horizontalPadding: CGFloat = 16
     var designId: String? = nil
+    var isInteractive = true
+    var shadowRadius: CGFloat = 18
+    var artworkDetail: CreditCardArtworkDetail = CreditCardVisualLayoutPolicy.fullArtworkDetail
 
     @State private var dragOffset: CGSize = .zero
     @State private var isShowingBack = false
     @State private var flipProgressDegrees = 0.0
     @State private var activeFlip = CardFlip(axis: .horizontal, direction: 1)
-    private let cardAspectRatio: CGFloat = 1.96
-    private let cornerRadius: CGFloat = 24
+    private let cardAspectRatio = CreditCardVisualLayoutPolicy.cardAspectRatio
+    private let cornerRadius = CreditCardVisualLayoutPolicy.cardCornerRadius
     private let contentInset: CGFloat = 18
     private let flipDragThreshold: CGFloat = 72
 
@@ -78,6 +85,11 @@ struct PremiumCardView: View {
         return trimmedProvider.isEmpty ? resolvedDesign.providerFallback : trimmedProvider.uppercased()
     }
 
+    private var resolvedNetworkLabel: String {
+        let trimmedNetwork = networkLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedNetwork.isEmpty ? "VISA" : trimmedNetwork.uppercased()
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
@@ -87,6 +99,37 @@ struct PremiumCardView: View {
             let xFlipAngle = activeFlip.axis == .vertical ? flipProgressDegrees * activeFlip.direction : 0
             let yFlipAngle = activeFlip.axis == .horizontal ? flipProgressDegrees * activeFlip.direction : 0
 
+            cardStack(width: width, height: height)
+            .frame(width: width, height: height)
+            .shadow(color: AppTheme.Colors.strongShadow, radius: shadowRadius, x: 0, y: shadowRadius > 0 ? 12 : 0)
+            .rotation3DEffect(
+                .degrees(isInteractive ? xFlipAngle + verticalTiltAngle : 0),
+                axis: (x: 1, y: 0, z: 0),
+                perspective: 0.7
+            )
+            .rotation3DEffect(
+                .degrees(isInteractive ? yFlipAngle + horizontalTiltAngle : 0),
+                axis: (x: 0, y: 1, z: 0),
+                perspective: 0.7
+            )
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .premiumCardInteraction(isEnabled: isInteractive) { value in
+                commitFlip(tapFlip(for: value.location, width: width, height: height))
+            } onDragChanged: { value in
+                dragOffset = value.translation
+            } onDragEnded: { value in
+                endDrag(value)
+            }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(isShowingBack ? "Shows the front of the card" : "Shows the back of the card")
+        }
+        .aspectRatio(cardAspectRatio, contentMode: .fit)
+        .padding(.horizontal, horizontalPadding)
+    }
+
+    @ViewBuilder
+    private func cardStack(width: CGFloat, height: CGFloat) -> some View {
+        if isInteractive {
             ZStack {
                 cardShell(width: width, height: height) {
                     currentFaceContent
@@ -103,68 +146,11 @@ struct PremiumCardView: View {
                 )
                 .flipFace(angle: flipProgressDegrees, isFront: false)
             }
-            .frame(width: width, height: height)
-            .shadow(color: AppTheme.Colors.strongShadow, radius: 18, x: 0, y: 12)
-            .rotation3DEffect(
-                .degrees(xFlipAngle + verticalTiltAngle),
-                axis: (x: 1, y: 0, z: 0),
-                perspective: 0.7
-            )
-            .rotation3DEffect(
-                .degrees(yFlipAngle + horizontalTiltAngle),
-                axis: (x: 0, y: 1, z: 0),
-                perspective: 0.7
-            )
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .simultaneousGesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        commitFlip(tapFlip(for: value.location, width: width, height: height))
-                    }
-            )
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        dragOffset = value.translation
-                    }
-                    .onEnded { value in
-                        let horizontalDistance = value.translation.width
-                        let verticalDistance = value.translation.height
-                        let predictedHorizontalDistance = value.predictedEndTranslation.width
-                        let predictedVerticalDistance = value.predictedEndTranslation.height
-                        let horizontalCommitDistance = abs(predictedHorizontalDistance) > abs(horizontalDistance)
-                            ? predictedHorizontalDistance
-                            : horizontalDistance
-                        let verticalCommitDistance = abs(predictedVerticalDistance) > abs(verticalDistance)
-                            ? predictedVerticalDistance
-                            : verticalDistance
-                        let isHorizontalIntent = abs(horizontalDistance) > abs(verticalDistance) * 1.15
-                        let isVerticalIntent = abs(verticalDistance) > abs(horizontalDistance) * 1.15
-                        let shouldFlipHorizontally = isHorizontalIntent && (
-                            abs(horizontalDistance) >= flipDragThreshold ||
-                            abs(predictedHorizontalDistance) >= flipDragThreshold * 1.35
-                        )
-                        let shouldFlipVertically = isVerticalIntent && (
-                            abs(verticalDistance) >= flipDragThreshold ||
-                            abs(predictedVerticalDistance) >= flipDragThreshold * 1.35
-                        )
-
-                        if shouldFlipHorizontally {
-                            commitFlip(CardFlip(axis: .horizontal, direction: horizontalCommitDistance < 0 ? -1 : 1))
-                        } else if shouldFlipVertically {
-                            commitFlip(CardFlip(axis: .vertical, direction: verticalCommitDistance < 0 ? 1 : -1))
-                        } else {
-                            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
-                                dragOffset = .zero
-                            }
-                        }
-                    }
-            )
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHint(isShowingBack ? "Shows the front of the card" : "Shows the back of the card")
+        } else {
+            cardShell(width: width, height: height) {
+                frontCardContent
+            }
         }
-        .aspectRatio(cardAspectRatio, contentMode: .fit)
-        .padding(.horizontal, horizontalPadding)
     }
 
     @ViewBuilder
@@ -218,57 +204,71 @@ struct PremiumCardView: View {
         }
     }
 
+    private func endDrag(_ value: DragGesture.Value) {
+        let horizontalDistance = value.translation.width
+        let verticalDistance = value.translation.height
+        let predictedHorizontalDistance = value.predictedEndTranslation.width
+        let predictedVerticalDistance = value.predictedEndTranslation.height
+        let horizontalCommitDistance = abs(predictedHorizontalDistance) > abs(horizontalDistance)
+            ? predictedHorizontalDistance
+            : horizontalDistance
+        let verticalCommitDistance = abs(predictedVerticalDistance) > abs(verticalDistance)
+            ? predictedVerticalDistance
+            : verticalDistance
+        let isHorizontalIntent = abs(horizontalDistance) > abs(verticalDistance) * 1.15
+        let isVerticalIntent = abs(verticalDistance) > abs(horizontalDistance) * 1.15
+        let shouldFlipHorizontally = isHorizontalIntent && (
+            abs(horizontalDistance) >= flipDragThreshold ||
+            abs(predictedHorizontalDistance) >= flipDragThreshold * 1.35
+        )
+        let shouldFlipVertically = isVerticalIntent && (
+            abs(verticalDistance) >= flipDragThreshold ||
+            abs(predictedVerticalDistance) >= flipDragThreshold * 1.35
+        )
+
+        if shouldFlipHorizontally {
+            commitFlip(CardFlip(axis: .horizontal, direction: horizontalCommitDistance < 0 ? -1 : 1))
+        } else if shouldFlipVertically {
+            commitFlip(CardFlip(axis: .vertical, direction: verticalCommitDistance < 0 ? 1 : -1))
+        } else {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
+                dragOffset = .zero
+            }
+        }
+    }
+
     private func cardShell<Content: View>(
         width: CGFloat,
         height: CGFloat,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let innerWidth = max(0, width - contentInset * 2)
-        let innerHeight = max(0, height - contentInset * 2)
+        let scaledContentInset = min(contentInset, CreditCardVisualLayoutPolicy.contentInset(for: height))
+        let innerWidth = max(0, width - scaledContentInset * 2)
+        let innerHeight = max(0, height - scaledContentInset * 2)
 
         return ZStack(alignment: .topLeading) {
-            CreditCardArtworkBackground(design: resolvedDesign, cornerRadius: cornerRadius)
+            CreditCardArtworkBackground(
+                design: resolvedDesign,
+                cornerRadius: cornerRadius,
+                detail: artworkDetail
+            )
 
             content()
                 .frame(width: innerWidth, height: innerHeight, alignment: .topLeading)
-                .padding(contentInset)
+                .padding(scaledContentInset)
         }
         .frame(width: width, height: height)
     }
 
     private var frontCardContent: some View {
-        VStack(alignment: .leading) {
-            HStack(alignment: .top) {
-                Text(providerLabel)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(resolvedDesign.foregroundColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-
-                Spacer()
-
-                cardBadgeStrip
-            }
-
-            Spacer()
-
-            chipView
-
-            Spacer()
-
-            HStack(alignment: .bottom) {
-                Text("CREDIT")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .tracking(1.4)
-                    .foregroundStyle(resolvedDesign.mutedForegroundColor.opacity(0.74))
-
-                Spacer()
-
-                Image(systemName: "wave.3.right")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(resolvedDesign.foregroundColor.opacity(0.76))
-            }
-        }
+        CreditCardFrontFaceContent(
+            design: resolvedDesign,
+            leadingTitle: leadingTitle ?? providerLabel,
+            leadingSubtitle: leadingSubtitle,
+            networkLabel: resolvedNetworkLabel,
+            badges: badges,
+            facePills: facePills
+        )
     }
 
     private var backCardContent: some View {
@@ -368,43 +368,149 @@ struct PremiumCardView: View {
         }
     }
 
-    @ViewBuilder
-    private var cardBadgeStrip: some View {
-        if !badges.isEmpty {
-            HStack(spacing: 5) {
-                ForEach(badges.prefix(3)) { badge in
-                    CreditCardLinkBadgePill(
-                        badge: badge,
-                        isCompact: true,
-                        foregroundColor: resolvedDesign.foregroundColor
+}
+
+struct CreditCardFacePill: Identifiable, Hashable {
+    var id: String
+    var title: String
+    var systemImage: String?
+
+    init(id: String, title: String, systemImage: String? = nil) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+    }
+
+    init(badge: CreditCardLinkBadge) {
+        self.id = badge.id
+        self.title = badge.title
+        self.systemImage = badge.systemImage
+    }
+}
+
+struct CreditCardFrontFaceContent: View {
+    var design: CreditCardDesign
+    var leadingTitle: String
+    var leadingSubtitle: String?
+    var networkLabel: String
+    var badges: [CreditCardLinkBadge] = []
+    var facePills: [CreditCardFacePill] = []
+
+    private var resolvedFacePills: [CreditCardFacePill] {
+        if !facePills.isEmpty {
+            return Array(facePills.prefix(3))
+        }
+
+        return badges.prefix(3).map { CreditCardFacePill(badge: $0) }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let height = max(1, proxy.size.height)
+            let providerSize = min(22, max(7, height * 0.108))
+            let providerSubtitleSize = min(9, max(4.8, height * 0.044))
+            let creditSize = min(12, max(5, height * 0.059))
+            let networkSize = min(13, max(5.5, height * 0.064))
+            let creditTracking = min(1.4, max(0.45, height * 0.0068))
+            let networkTracking = min(1.2, max(0.40, height * 0.0059))
+
+            VStack(alignment: .leading) {
+                HStack(alignment: .top, spacing: max(4, height * 0.025)) {
+                    VStack(alignment: .leading, spacing: max(1, height * 0.008)) {
+                        Text(leadingTitle)
+                            .font(.system(size: providerSize, weight: .bold, design: .rounded))
+                            .foregroundStyle(design.foregroundColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.62)
+
+                        if let leadingSubtitle {
+                            Text(leadingSubtitle)
+                                .font(.system(size: providerSubtitleSize, weight: .semibold, design: .rounded))
+                                .foregroundStyle(design.mutedForegroundColor.opacity(0.76))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.62)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+
+                    CreditCardFaceBadgeStrip(
+                        pills: resolvedFacePills,
+                        foregroundColor: design.foregroundColor,
+                        contentHeight: height
+                    )
+                }
+
+                Spacer(minLength: 0)
+
+                HStack(alignment: .bottom, spacing: max(4, height * 0.025)) {
+                    Text("CREDIT")
+                        .font(.system(size: creditSize, weight: .semibold, design: .rounded))
+                        .tracking(creditTracking)
+                        .foregroundStyle(design.mutedForegroundColor.opacity(0.74))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+
+                    Spacer(minLength: 0)
+
+                    Text(networkLabel)
+                        .font(.system(size: networkSize, weight: .black, design: .rounded))
+                        .tracking(networkTracking)
+                        .foregroundStyle(design.foregroundColor.opacity(0.82))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+        }
+    }
+}
+
+private struct CreditCardFaceBadgeStrip: View {
+    var pills: [CreditCardFacePill]
+    var foregroundColor: Color
+    var contentHeight: CGFloat
+
+    var body: some View {
+        if !pills.isEmpty {
+            HStack(spacing: max(2, contentHeight * 0.012)) {
+                ForEach(pills) { pill in
+                    CreditCardFaceBadgePill(
+                        pill: pill,
+                        foregroundColor: foregroundColor,
+                        contentHeight: contentHeight
                     )
                 }
             }
         }
     }
+}
 
-    private var chipView: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: resolvedDesign.chipGradientColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .frame(width: 42, height: 30)
-            .overlay {
-                VStack(spacing: 6) {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.28))
-                        .frame(height: 1)
+private struct CreditCardFaceBadgePill: View {
+    var pill: CreditCardFacePill
+    var foregroundColor: Color
+    var contentHeight: CGFloat
 
-                    Rectangle()
-                        .fill(Color.black.opacity(0.28))
-                        .frame(height: 1)
-                }
-                .padding(.horizontal, 6)
+    var body: some View {
+        HStack(spacing: max(1, contentHeight * 0.010)) {
+            if let systemImage = pill.systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: min(8, max(4, contentHeight * 0.039)), weight: .bold))
             }
+            Text(pill.title)
+                .font(.system(size: min(9, max(4.5, contentHeight * 0.042)), weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+        }
+        .foregroundStyle(foregroundColor)
+        .padding(.horizontal, min(7, max(2.5, contentHeight * 0.030)))
+        .padding(.vertical, min(5, max(2, contentHeight * 0.024)))
+        .background(foregroundColor.opacity(0.18))
+        .overlay {
+            Capsule()
+                .stroke(foregroundColor.opacity(0.32), lineWidth: 1)
+        }
+        .clipShape(Capsule())
     }
 }
 
@@ -458,6 +564,29 @@ private struct CardFlipFaceVisibility: AnimatableModifier {
 private extension View {
     func flipFace(angle: Double, isFront: Bool) -> some View {
         modifier(CardFlipFaceVisibility(angle: angle, isFront: isFront))
+    }
+
+    @ViewBuilder
+    func premiumCardInteraction(
+        isEnabled: Bool,
+        onTap: @escaping (SpatialTapGesture.Value) -> Void,
+        onDragChanged: @escaping (DragGesture.Value) -> Void,
+        onDragEnded: @escaping (DragGesture.Value) -> Void
+    ) -> some View {
+        if isEnabled {
+            self
+                .simultaneousGesture(
+                    SpatialTapGesture()
+                        .onEnded(onTap)
+                )
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 8)
+                        .onChanged(onDragChanged)
+                        .onEnded(onDragEnded)
+                )
+        } else {
+            self
+        }
     }
 }
 

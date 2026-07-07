@@ -74,6 +74,7 @@ struct PlanLayoutPolicy {
     static let dayDetailPreviousSymbol = "arrow.left"
     static let dayDetailNextSymbol = "arrow.right"
     static let dayDetailLeadingUsesLiquidGlassMorph = true
+    static let dayDetailTrailingUsesAccentColor = true
     static let repeatedSelectedDayTapOpensDayDetail = true
     static let dayDetailShowsNavigationDivider = false
     static let dayDetailIncludesMoneyFlowGraph = true
@@ -112,10 +113,15 @@ enum CreditDetailPresentation: Equatable {
 struct CreditLayoutPolicy {
     static let summaryPresentation: CreditDetailPresentation = .navigationPush
     static let summaryDetailUsesInlineTitle = true
-    static let physicalCardsPlacement = "belowSummaryAboveDueSoon"
-    static let physicalCardsStack = "LazyHStack"
-    static let physicalCardsFlipInteraction = "tapAndDirectionalDrag"
-    static let physicalCardsUseActiveCards = true
+    static let cardsPlacement = "belowSummaryAboveDueSoon"
+    static let cardsPresentation = "lazyHStack"
+    static let cardsUseCardsViewRow = false
+    static let cardsUseFloatingPreview = true
+    static let cardsShowOuterRowBox = false
+    static let removesPhysicalCardStrip = true
+    static let cardRowWidth: CGFloat = CreditCardVisualLayoutPolicy.rowCardMaxWidth
+    static let cardRowCornerRadius: CGFloat = AppTheme.Radius.md
+    static let cardRowsUseHorizontalScroll = true
 }
 
 struct PlanView: View {
@@ -563,13 +569,9 @@ private struct PlanDayDetailSheet: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    PlanDayTrailingToolbarButton {
                         moveDay(by: 1)
-                    } label: {
-                        Image(systemName: PlanLayoutPolicy.dayDetailNextSymbol)
-                            .font(.headline.weight(.bold))
                     }
-                    .accessibilityLabel("Next day")
                 }
             }
         }
@@ -863,6 +865,19 @@ private struct PlanDayLeadingToolbarButton: View {
     }
 }
 
+private struct PlanDayTrailingToolbarButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: PlanLayoutPolicy.dayDetailNextSymbol)
+                .font(.headline.weight(.bold))
+        }
+        .foregroundStyle(AppTheme.Colors.accent)
+        .accessibilityLabel("Next day")
+    }
+}
+
 enum ActivitySection: String, Equatable {
     case recentActivity
     case monthBalance
@@ -925,6 +940,101 @@ enum ActivityTimelineLayoutPolicy {
     static let branchDrawDurationSeconds = 1.08
     static let branchSettleDelaySeconds = 0.24
     static let autoScrollDurationSeconds = 0.82
+}
+
+enum ActivityTimelineLane: String, CaseIterable {
+    case right
+    case left
+    case center
+    case innerRight
+    case innerLeft
+}
+
+struct ActivityTimelineEventLayout {
+    var index: Int
+    var lane: ActivityTimelineLane
+    var cardLeading: CGFloat
+    var cardTop: CGFloat
+    var cardWidth: CGFloat
+    var anchorPoint: CGPoint
+}
+
+enum ActivityTimelineBranchLayoutPolicy {
+    static let lanePattern: [ActivityTimelineLane] = [.right, .left, .center, .innerRight, .innerLeft, .center]
+    static let connectorEndpointPolicy = "eventAnchorToEventAnchor"
+    static let avoidsFixedLeftRail = true
+    static let nodeOverlapsEventCard = true
+    static let rowHeight: CGFloat = 258
+    static let cardTopInset: CGFloat = 34
+    static let minimumCardWidth: CGFloat = 238
+    static let maximumCardWidth: CGFloat = 314
+    static let preferredCardWidthFraction: CGFloat = 0.72
+    static let bottomPadding: CGFloat = 84
+
+    static func lane(for index: Int) -> ActivityTimelineLane {
+        lanePattern[abs(index % lanePattern.count)]
+    }
+
+    static func totalHeight(eventCount: Int) -> CGFloat {
+        guard eventCount > 0 else { return 0 }
+        return CGFloat(eventCount) * rowHeight + bottomPadding
+    }
+
+    static func layout(for index: Int, containerWidth: CGFloat) -> ActivityTimelineEventLayout {
+        let lane = lane(for: index)
+        let width = max(1, containerWidth)
+        let cardWidth = min(maximumCardWidth, min(width, max(minimumCardWidth, width * preferredCardWidthFraction)))
+        let maxLeading = max(0, width - cardWidth)
+        let verticalNudge = verticalOffset(for: index)
+        let cardTop = CGFloat(index) * rowHeight + cardTopInset + verticalNudge
+        let cardLeading: CGFloat
+
+        switch lane {
+        case .left:
+            cardLeading = 0
+        case .innerLeft:
+            cardLeading = maxLeading * 0.22
+        case .center:
+            cardLeading = maxLeading * 0.5
+        case .innerRight:
+            cardLeading = maxLeading * 0.78
+        case .right:
+            cardLeading = maxLeading
+        }
+
+        let anchorPoint = CGPoint(
+            x: anchorX(for: lane, cardLeading: cardLeading, cardWidth: cardWidth, index: index),
+            y: cardTop + 42
+        )
+
+        return ActivityTimelineEventLayout(
+            index: index,
+            lane: lane,
+            cardLeading: cardLeading,
+            cardTop: cardTop,
+            cardWidth: cardWidth,
+            anchorPoint: anchorPoint
+        )
+    }
+
+    private static func verticalOffset(for index: Int) -> CGFloat {
+        [0, 18, 4, 24, 10, 28][abs(index % 6)]
+    }
+
+    private static func anchorX(for lane: ActivityTimelineLane, cardLeading: CGFloat, cardWidth: CGFloat, index: Int) -> CGFloat {
+        switch lane {
+        case .right:
+            cardLeading + 12
+        case .left:
+            cardLeading + cardWidth - 12
+        case .center:
+            cardLeading + cardWidth * (index.isMultiple(of: 2) ? 0.38 : 0.62)
+        case .innerRight:
+            cardLeading + cardWidth * 0.18
+        case .innerLeft:
+            cardLeading + cardWidth * 0.82
+        }
+    }
 }
 
 struct ActivityView: View {
@@ -1327,19 +1437,12 @@ struct ActivityAccountTimelineView: View {
     }
 
     private var timelineRows: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
-                ActivityTimelineBranchRow(
-                    event: event,
-                    index: index,
-                    cardProgress: phaseProgress(index: index, phase: 0),
-                    branchProgress: phaseProgress(index: index, phase: 1),
-                    isActive: index == activeCardIndex,
-                    isLast: index == events.count - 1
-                )
-                .id(event.id)
-            }
-        }
+        ActivityTimelineCanvas(
+            events: events,
+            activeCardIndex: activeCardIndex,
+            cardProgress: { phaseProgress(index: $0, phase: 0) },
+            branchProgress: { phaseProgress(index: $0, phase: 1) }
+        )
     }
 
     @MainActor
@@ -1398,65 +1501,83 @@ struct ActivityAccountTimelineView: View {
     }
 }
 
-private struct ActivityTimelineBranchRow: View {
-    var event: ActivityTimelineEvent
-    var index: Int
-    var cardProgress: Double
-    var branchProgress: Double
-    var isActive: Bool
-    var isLast: Bool
+private struct ActivityTimelineCanvas: View {
+    var events: [ActivityTimelineEvent]
+    var activeCardIndex: Int
+    var cardProgress: (Int) -> Double
+    var branchProgress: (Int) -> Double
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
-            timelineRail
-
-            ActivityTimelineEventCard(event: event, isActive: isActive)
-                .padding(.leading, cardInset)
-                .offset(x: cardProgress >= 1 ? 0 : cardHiddenOffset)
-                .opacity(cardProgress)
-                .scaleEffect(CGFloat(0.94 + (0.06 * cardProgress)), anchor: .leading)
-                .padding(.bottom, AppTheme.Spacing.lg)
-        }
-        .animation(.spring(response: 0.62, dampingFraction: 0.88), value: cardProgress)
-    }
-
-    private var timelineRail: some View {
-        ZStack(alignment: .topLeading) {
-            if !isLast {
-                ActivityTimelineBranchConnector(color: event.color, variant: branchVariant)
-                    .trim(from: 0, to: CGFloat(branchProgress))
-                    .stroke(
-                        event.color.opacity(isActive ? 0.95 : 0.62),
-                        style: StrokeStyle(lineWidth: isActive ? 2.6 : 2, lineCap: .round, lineJoin: .round)
-                    )
-                    .frame(width: 76)
-                    .padding(.top, 31)
-                    .shadow(color: event.color.opacity(isActive ? 0.32 : 0.12), radius: isActive ? 10 : 5)
+        GeometryReader { proxy in
+            let layouts = events.indices.map {
+                ActivityTimelineBranchLayoutPolicy.layout(for: $0, containerWidth: proxy.size.width)
             }
+            let totalHeight = ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: events.count)
 
-            ActivityTimelineNode(event: event, isActive: isActive, isRevealed: cardProgress > 0.08)
-                .offset(x: nodeOffset)
-                .frame(width: 44, height: 44)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .position(layouts[index].anchorPoint)
+                        .id(event.id)
+                        .accessibilityHidden(true)
+                }
+
+                ForEach(Array(events.indices.dropLast()), id: \.self) { index in
+                    ActivityTimelineBranchConnector(
+                        start: layouts[index].anchorPoint,
+                        end: layouts[index + 1].anchorPoint,
+                        variant: index
+                    )
+                    .trim(from: 0, to: CGFloat(branchProgress(index)))
+                    .stroke(
+                        events[index].color.opacity(index == activeCardIndex ? 0.95 : 0.66),
+                        style: StrokeStyle(lineWidth: index == activeCardIndex ? 2.9 : 2.2, lineCap: .round, lineJoin: .round)
+                    )
+                    .shadow(color: events[index].color.opacity(index == activeCardIndex ? 0.34 : 0.16), radius: index == activeCardIndex ? 12 : 6)
+                    .frame(width: proxy.size.width, height: totalHeight, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                }
+
+                ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                    let layout = layouts[index]
+                    let progress = cardProgress(index)
+
+                    ActivityTimelineEventCard(event: event, isActive: index == activeCardIndex)
+                        .frame(width: layout.cardWidth, alignment: .topLeading)
+                        .offset(x: layout.cardLeading + cardRevealOffset(for: layout, progress: progress, containerWidth: proxy.size.width), y: layout.cardTop)
+                        .opacity(progress)
+                        .scaleEffect(CGFloat(0.93 + (0.07 * progress)), anchor: cardScaleAnchor(for: layout.lane))
+                        .zIndex(2)
+
+                    ActivityTimelineNode(event: event, isActive: index == activeCardIndex, isRevealed: progress > 0.08)
+                        .frame(width: 44, height: 44)
+                        .position(layout.anchorPoint)
+                        .opacity(progress > 0 ? 1 : 0.25)
+                        .zIndex(3)
+                }
+            }
+            .frame(width: proxy.size.width, height: totalHeight, alignment: .topLeading)
         }
-        .frame(width: 78)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .opacity(cardProgress > 0 ? 1 : 0.35)
+        .frame(height: ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: events.count))
     }
 
-    private var branchVariant: Int {
-        abs(index % 6)
+    private func cardRevealOffset(for layout: ActivityTimelineEventLayout, progress: Double, containerWidth: CGFloat) -> CGFloat {
+        guard progress < 1 else { return 0 }
+        let centerX = layout.cardLeading + layout.cardWidth / 2
+        let direction: CGFloat = centerX > containerWidth / 2 ? 1 : -1
+        return direction * CGFloat(1 - progress) * 28
     }
 
-    private var nodeOffset: CGFloat {
-        [-4, 12, 2, 18, -1, 9][branchVariant]
-    }
-
-    private var cardInset: CGFloat {
-        [0, 14, 6, 22, 4, 16][branchVariant]
-    }
-
-    private var cardHiddenOffset: CGFloat {
-        branchVariant.isMultiple(of: 2) ? 24 : -12
+    private func cardScaleAnchor(for lane: ActivityTimelineLane) -> UnitPoint {
+        switch lane {
+        case .left, .innerLeft:
+            .trailing
+        case .right, .innerRight:
+            .leading
+        case .center:
+            .center
+        }
     }
 }
 
@@ -1491,36 +1612,57 @@ private struct ActivityTimelineNode: View {
 }
 
 private struct ActivityTimelineBranchConnector: Shape {
-    var color: Color
+    var start: CGPoint
+    var end: CGPoint
     var variant: Int
 
     func path(in rect: CGRect) -> Path {
-        let profile = branchProfile
         var path = Path()
-        path.move(to: CGPoint(x: rect.width * profile.startX, y: rect.minY))
+        let controls = branchControls(in: rect)
+
+        path.move(to: start)
         path.addCurve(
-            to: CGPoint(x: rect.width * profile.endX, y: rect.maxY),
-            control1: CGPoint(x: rect.width * profile.control1X, y: rect.height * profile.control1Y),
-            control2: CGPoint(x: rect.width * profile.control2X, y: rect.height * profile.control2Y)
+            to: end,
+            control1: controls.first,
+            control2: controls.second
         )
         return path
     }
 
-    private var branchProfile: (startX: CGFloat, control1X: CGFloat, control1Y: CGFloat, control2X: CGFloat, control2Y: CGFloat, endX: CGFloat) {
+    private func branchControls(in rect: CGRect) -> (first: CGPoint, second: CGPoint) {
+        let deltaX = end.x - start.x
+        let deltaY = max(1, end.y - start.y)
+        let profile = branchProfile
+        let direction: CGFloat = deltaX >= 0 ? 1 : -1
+        let wave = min(max(abs(deltaX) * 0.42 + profile.wave, 28), 112) * direction
+        let firstX = clamp(start.x + deltaX * profile.firstX + wave, min: rect.minX + 20, max: rect.maxX - 20)
+        let secondX = clamp(end.x - deltaX * profile.secondX - wave * profile.returnStrength, min: rect.minX + 20, max: rect.maxX - 20)
+
+        return (
+            CGPoint(x: firstX, y: start.y + deltaY * profile.firstY),
+            CGPoint(x: secondX, y: start.y + deltaY * profile.secondY)
+        )
+    }
+
+    private var branchProfile: (firstX: CGFloat, firstY: CGFloat, secondX: CGFloat, secondY: CGFloat, wave: CGFloat, returnStrength: CGFloat) {
         switch abs(variant % 6) {
         case 0:
-            return (0.42, 0.16, 0.18, 0.72, 0.64, 0.52)
+            return (0.12, 0.24, 0.16, 0.72, 38, 0.52)
         case 1:
-            return (0.62, 0.88, 0.24, 0.20, 0.72, 0.46)
+            return (0.22, 0.18, 0.22, 0.76, 58, 0.72)
         case 2:
-            return (0.50, 0.26, 0.30, 0.84, 0.58, 0.66)
+            return (0.14, 0.34, 0.12, 0.64, 30, 0.48)
         case 3:
-            return (0.70, 0.42, 0.18, 0.24, 0.82, 0.38)
+            return (0.30, 0.22, 0.18, 0.82, 68, 0.58)
         case 4:
-            return (0.46, 0.76, 0.22, 0.36, 0.66, 0.58)
+            return (0.18, 0.28, 0.28, 0.70, 44, 0.66)
         default:
-            return (0.58, 0.22, 0.16, 0.80, 0.74, 0.44)
+            return (0.26, 0.16, 0.16, 0.78, 52, 0.44)
         }
+    }
+
+    private func clamp(_ value: CGFloat, min minValue: CGFloat, max maxValue: CGFloat) -> CGFloat {
+        min(max(value, minValue), maxValue)
     }
 }
 
@@ -2798,6 +2940,7 @@ private struct ActivityChartMetricPill: View {
 
 struct CreditView: View {
     @ObservedObject var store: PlannerStore
+    @State private var selectedCard: CreditCard?
 
     var body: some View {
         ScreenScaffold(
@@ -2807,9 +2950,12 @@ struct CreditView: View {
             toolbarMode: .none
         ) {
             creditSummary
-            physicalCards
+            activeCardRows
             paymentDueSummary
             creditRoutes
+        }
+        .sheet(item: $selectedCard) { card in
+            CardDetailView(store: store, card: card)
         }
     }
 
@@ -2867,13 +3013,37 @@ struct CreditView: View {
     }
 
     @ViewBuilder
-    private var physicalCards: some View {
-        CreditPhysicalCardsSection(
-            cards: store.activeCards,
-            snapshot: store.snapshot,
-            payPeriod: store.selectedPayPeriod,
-            todayIso: store.todayIso
-        )
+    private var activeCardRows: some View {
+        if !store.activeCards.isEmpty {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                SectionTitle("Cards")
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                        ForEach(store.activeCards) { card in
+                            Button {
+                                selectedCard = card
+                            } label: {
+                                FloatingCreditCardPreview(
+                                    card: card,
+                                    balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot),
+                                    availability: PlannerDerivedData.creditCardAvailabilitySummary(
+                                        card: card,
+                                        snapshot: store.snapshot,
+                                        payPeriod: store.selectedPayPeriod,
+                                        asOfDate: store.todayIso
+                                    )
+                                )
+                                .frame(width: CreditLayoutPolicy.cardRowWidth)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, AppTheme.Spacing.lg)
+                }
+                .padding(.horizontal, -AppTheme.Spacing.lg)
+            }
+        }
     }
 
     private var creditRoutes: some View {
@@ -3057,162 +3227,6 @@ private struct CreditOverviewDetailView: View {
             }
         }
     }
-}
-
-private struct CreditPhysicalCardsSection: View {
-    var cards: [CreditCard]
-    var snapshot: PlannerSnapshot
-    var payPeriod: PayPeriod?
-    var todayIso: String
-
-    var body: some View {
-        if !cards.isEmpty {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                SectionTitle("Cards")
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: AppTheme.Spacing.md) {
-                        ForEach(cards) { card in
-                            CreditPhysicalCardPreview(
-                                card: card,
-                                balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: snapshot),
-                                availability: PlannerDerivedData.creditCardAvailabilitySummary(
-                                    card: card,
-                                    snapshot: snapshot,
-                                    payPeriod: payPeriod,
-                                    asOfDate: todayIso
-                                ),
-                                badges: creditPreviewLinkBadges(card: card, snapshot: snapshot)
-                            )
-                            .frame(width: 302)
-                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                                content
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.94)
-                                    .opacity(phase.isIdentity ? 1 : 0.72)
-                            }
-                        }
-                    }
-                    .scrollTargetLayout()
-                    .padding(.vertical, AppTheme.Spacing.xs)
-                }
-                .scrollTargetBehavior(.viewAligned)
-            }
-        }
-    }
-}
-
-private struct CreditPhysicalCardPreview: View {
-    var card: CreditCard
-    var balancePence: Int
-    var availability: CreditCardAvailabilitySummary
-    var badges: [CreditCardLinkBadge]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            PremiumCardView(
-                badges: badges,
-                cardNumber: "••••  ••••  ••••  ••••",
-                cardHolder: card.name.uppercased(),
-                expiryDate: dueLabel,
-                provider: card.provider,
-                horizontalPadding: 0,
-                designId: card.designId ?? card.color
-            )
-
-            HStack(spacing: AppTheme.Spacing.sm) {
-                CreditPhysicalCardMetric(
-                    label: "Owed",
-                    value: MoneyParser.formatPence(balancePence),
-                    color: balancePence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText
-                )
-                CreditPhysicalCardMetric(
-                    label: availability.actualAvailablePence < 0 ? "Over" : "Available",
-                    value: MoneyParser.formatPence(abs(availability.actualAvailablePence)),
-                    color: availability.actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
-                )
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(card.name) card. Owed \(MoneyParser.formatPence(balancePence)).")
-    }
-
-    private var dueLabel: String {
-        if let dueDay = card.dueDay {
-            return "D\(dueDay)"
-        }
-        if let dueDate = card.dueDate {
-            return shortDate(dueDate)
-        }
-        return "--"
-    }
-}
-
-private struct CreditPhysicalCardMetric: View {
-    var label: String
-    var value: String
-    var color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.tertiaryText)
-            Text(value)
-                .font(.caption.weight(.black))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-        }
-        .padding(.horizontal, AppTheme.Spacing.sm)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
-                .stroke(color.opacity(0.18), lineWidth: 1)
-        )
-    }
-}
-
-private func creditPreviewLinkBadges(card: CreditCard, snapshot: PlannerSnapshot) -> [CreditCardLinkBadge] {
-    let linkedPots = snapshot.pots.filter {
-        $0.deletedAt == nil &&
-        !$0.archived &&
-        $0.linkedCreditCardId == card.id
-    }
-    let linkedPotIds = Set(linkedPots.map(\.id))
-
-    let hasPotLink = !linkedPots.isEmpty || snapshot.creditCardPots.contains {
-        $0.deletedAt == nil &&
-        $0.status == .active &&
-        $0.creditCardId == card.id
-    }
-
-    let hasBillLink = snapshot.recurringPayments.contains { payment in
-        guard payment.deletedAt == nil, payment.active else { return false }
-        if payment.creditCardId == card.id { return true }
-        guard let potId = payment.potId else { return false }
-        return linkedPotIds.contains(potId)
-    } || snapshot.customPayments.contains {
-        $0.deletedAt == nil &&
-        $0.status != .archived &&
-        $0.creditCardId == card.id
-    }
-
-    let hasDebtLink = linkedPots.contains { pot in
-        guard let debtId = pot.linkedDebtId else { return false }
-        return snapshot.debts.contains {
-            $0.id == debtId &&
-            $0.deletedAt == nil &&
-            $0.status.isActiveLike
-        }
-    }
-
-    var badges: [CreditCardLinkBadge] = []
-    if hasPotLink { badges.append(.pot) }
-    if hasBillLink { badges.append(.bill) }
-    if hasDebtLink { badges.append(.debt) }
-    return badges
 }
 
 private struct CreditDueItem: Identifiable {

@@ -31,6 +31,8 @@ struct AccountsLayoutPolicy {
     static let avatarSourcePresentation = "nativeSwiftUIMenu"
     static let carouselInteraction = "directionalSwipeAutoAdvance"
     static let profileGraphMetric = "savedSpentTotals"
+    static let profileGraphShowsMetricPills = false
+    static var profilePulseCardCornerRadius: CGFloat { AppTheme.Radius.md }
 }
 
 struct AccountsSheetView: View {
@@ -626,7 +628,7 @@ private struct AccountProfilePulseCard: View {
             AccountProfileMiniTimeline(profile: profile)
         }
         .padding(AppTheme.Spacing.md)
-        .background(AppTheme.Colors.cardBackground, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(AppTheme.Colors.cardBackground, in: RoundedRectangle(cornerRadius: AccountsLayoutPolicy.profilePulseCardCornerRadius, style: .continuous))
         .background(
             LinearGradient(
                 colors: [
@@ -636,10 +638,10 @@ private struct AccountProfilePulseCard: View {
                 startPoint: .topTrailing,
                 endPoint: .center
             ),
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AccountsLayoutPolicy.profilePulseCardCornerRadius, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: AccountsLayoutPolicy.profilePulseCardCornerRadius, style: .continuous)
                 .stroke(AppTheme.Colors.border.opacity(0.75), lineWidth: 1)
         )
         .shadow(color: AppTheme.Colors.shadow.opacity(0.8), radius: 18, y: 12)
@@ -722,11 +724,6 @@ private struct AccountProfileLineGraph: View {
                         }
                     }
                 }
-            }
-
-            HStack(spacing: AppTheme.Spacing.sm) {
-                AccountProfileGraphMetric(label: "Saved", value: MoneyParser.formatPence(profile.savedTotalPence), color: AppTheme.Colors.neonMoneyUp)
-                AccountProfileGraphMetric(label: "Spent", value: MoneyParser.formatPence(profile.spentTotalPence), color: AppTheme.Colors.neonMoneyDown)
             }
         }
         .onAppear {

@@ -14,7 +14,7 @@ struct CardDesignPreviewBrowserView: View {
             VStack(alignment: .leading, spacing: 34) {
                 featuredSection
 
-                ForEach(CreditCardDesignCategory.allCases) { category in
+                ForEach(CreditCardDesignCatalog.displayCategories) { category in
                     categorySection(category)
                 }
             }
@@ -35,7 +35,7 @@ struct CardDesignPreviewBrowserView: View {
 
             VStack(spacing: AppTheme.Spacing.lg) {
                 ForEach(featuredDesignIds, id: \.self) { designId in
-                    if let design = CreditCardDesignCatalog.designs.first(where: { $0.id == designId }) {
+                    if let design = CreditCardDesignCatalog.selectableDesigns.first(where: { $0.id == designId }) {
                         Button {
                             selectedDesign = design
                         } label: {
@@ -46,7 +46,8 @@ struct CardDesignPreviewBrowserView: View {
                                 expiryDate: "09/29",
                                 provider: design.providerFallback,
                                 horizontalPadding: 0,
-                                designId: design.storageHex
+                                designId: design.storageHex,
+                                isInteractive: false
                             )
                             .frame(maxWidth: 380)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -60,7 +61,7 @@ struct CardDesignPreviewBrowserView: View {
     }
 
     private func categorySection(_ category: CreditCardDesignCategory) -> some View {
-        let designs = CreditCardDesignCatalog.designs.filter { $0.category == category }
+        let designs = CreditCardDesignCatalog.selectableDesigns(in: category)
 
         return VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             HStack(alignment: .lastTextBaseline) {
@@ -97,7 +98,7 @@ private struct CardDesignPreviewTile: View {
                 provider: design.providerFallback,
                 badges: badges
             )
-            .frame(height: 82)
+            .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
             .shadow(color: design.glowColor.opacity(0.16), radius: 10, y: 5)
 
             Text(design.name)

@@ -1547,6 +1547,7 @@ struct AddDebtSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add debt")
+            .navigationTopDividerHidden()
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
     }
@@ -2635,12 +2636,22 @@ enum AssistantPresentationMode: Equatable {
     case pushed
 }
 
+enum AssistantMenuPresentationPolicy {
+    static let toolbarTitle = "Edit"
+    static let presentation = "nativeSwiftUIMenu"
+    static let actions = ["Customise assistant", "Rename"]
+    static let customiseAssistantRoute = "instructionsScreen"
+    static let renamePresentation = "textFieldAlert"
+    static let instructionsUsesPlaceholderToolbar = false
+}
+
 struct AssistantView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var presentationMode: AssistantPresentationMode = .modal
     @State private var prompt = ""
-    @State private var isAssistantOptionsPresented = false
+    @State private var isRenameAssistantPresented = false
+    @State private var assistantNameDraft = ""
     @State private var activeAssistantSheet: AssistantSettingsSheet?
     @State private var messages: [AssistantMessage] = [
         AssistantMessage(role: "Assistant", text: "I can summarise your local planner. Authenticated AI chat needs the native Firebase/backend TODOs in Settings.")
@@ -2709,26 +2720,38 @@ struct AssistantView: View {
                 .coordinateSpace(name: assistantCoordinateSpace)
                 .premiumScreenBackground()
                 .navigationTitle("Assistant")
+                .navigationTopDividerHidden()
                 .toolbar {
                     if presentationMode == .modal {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") { dismiss() }
                         }
                     }
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu(AssistantMenuPresentationPolicy.toolbarTitle) {
+                            Button(AssistantMenuPresentationPolicy.actions[0]) {
+                                activeAssistantSheet = .instructions
+                            }
+
+                            Button(AssistantMenuPresentationPolicy.actions[1]) {
+                                assistantNameDraft = store.snapshot.settings.assistantName?.nilIfBlank ?? "Assistant"
+                                isRenameAssistantPresented = true
+                            }
+                        }
+                    }
                 }
-                .appPlaceholderToolbar(.actions([
-                    AppToolbarAction(id: "assistant-options", symbol: "ellipsis.circle", accessibilityLabel: "Assistant Options") {
-                        isAssistantOptionsPresented = true
-                    }
-                ]))
-                .confirmationDialog("Assistant options", isPresented: $isAssistantOptionsPresented, titleVisibility: .visible) {
-                    Button("Add custom instructions") {
-                        activeAssistantSheet = .instructions
-                    }
-                    Button("Customise assistant") {
-                        activeAssistantSheet = .customise
-                    }
+                .alert("Rename assistant", isPresented: $isRenameAssistantPresented) {
+                    TextField("Assistant name", text: $assistantNameDraft)
+
                     Button("Cancel", role: .cancel) {}
+                    Button("Save") {
+                        var settings = store.snapshot.settings
+                        settings.assistantName = assistantNameDraft.nilIfBlank ?? "Assistant"
+                        store.updateSettings(settings)
+                    }
+                } message: {
+                    Text("Choose the name shown in assistant replies.")
                 }
                 .sheet(item: $activeAssistantSheet) { sheet in
                     switch sheet {
@@ -2855,12 +2878,12 @@ private struct AssistantCustomInstructionsView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Instructions")
+            .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
             }
-            .appPlaceholderToolbar(.modalSingle)
             .onAppear {
                 instructions = store.snapshot.settings.aiInstructions
             }
@@ -2921,6 +2944,7 @@ private struct AssistantCustomiseView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Customise")
+            .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

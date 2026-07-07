@@ -111,6 +111,8 @@ struct RootTabScrollState: Equatable {
 enum RootTabScrollPolicy {
     static let topAnchorID = "root-tab-scroll-top"
     static let resetsTabRootOnSelection = true
+    static let resetsOnlyWhenSelectionRevisionChanges = true
+    static let preservesPositionAfterNavigationPop = true
     static let disablesSelectionScrollAnimation = true
     static let rebuildsSelectedTabScrollViewOnSelection = false
     static let keepsInactiveTabIdentityStableDuringSwitch = true
@@ -133,6 +135,7 @@ extension EnvironmentValues {
 struct ScreenScaffold<Content: View>: View {
     @Environment(\.rootTabScrollState) private var rootTabScrollState
     @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @State private var handledRootTabScrollRevision = RootTabScrollState.inactive.revision
     var title: String
     var subtitle: String
     var navigationMode: ScreenNavigationMode = .root
@@ -173,11 +176,8 @@ struct ScreenScaffold<Content: View>: View {
             }
             .premiumScreenBackground()
             .id(screenContentIdentity)
-            .onAppear {
-                resetTabRootScrollIfNeeded(proxy)
-            }
-            .onChange(of: rootTabScrollState) { _, _ in
-                resetTabRootScrollIfNeeded(proxy)
+            .onChange(of: rootTabScrollState) { _, newState in
+                resetTabRootScrollIfNeeded(proxy, state: newState)
             }
         }
     }
@@ -205,11 +205,17 @@ struct ScreenScaffold<Content: View>: View {
         return "\(baseIdentity)-selected-\(rootTabScrollState.revision)"
     }
 
-    private func resetTabRootScrollIfNeeded(_ proxy: ScrollViewProxy) {
+    private func resetTabRootScrollIfNeeded(_ proxy: ScrollViewProxy, state: RootTabScrollState) {
         guard RootTabScrollPolicy.resetsTabRootOnSelection,
               navigationMode == .tabRoot,
-              rootTabScrollState.selectedTitle == title else {
+              state.selectedTitle == title else {
             return
+        }
+        if RootTabScrollPolicy.resetsOnlyWhenSelectionRevisionChanges {
+            guard handledRootTabScrollRevision != state.revision else {
+                return
+            }
+            handledRootTabScrollRevision = state.revision
         }
 
         if RootTabScrollPolicy.disablesSelectionScrollAnimation {

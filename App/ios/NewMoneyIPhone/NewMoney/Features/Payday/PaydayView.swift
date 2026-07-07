@@ -217,6 +217,7 @@ struct AddPaycheckSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add income")
+            .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

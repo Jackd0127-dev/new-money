@@ -14,8 +14,10 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AppNavigationTitlePolicy.title(for: .bills, activeAccountName: "Personal"), "Bills")
     }
 
-    func testTabRootScreensResetToTopOnSelection() {
+    func testTabRootScreensResetToTopOnSelectionButPreserveAfterNavigationPop() {
         XCTAssertTrue(RootTabScrollPolicy.resetsTabRootOnSelection)
+        XCTAssertTrue(RootTabScrollPolicy.resetsOnlyWhenSelectionRevisionChanges)
+        XCTAssertTrue(RootTabScrollPolicy.preservesPositionAfterNavigationPop)
         XCTAssertTrue(RootTabScrollPolicy.disablesSelectionScrollAnimation)
         XCTAssertFalse(RootTabScrollPolicy.rebuildsSelectedTabScrollViewOnSelection)
         XCTAssertTrue(RootTabScrollPolicy.keepsInactiveTabIdentityStableDuringSwitch)
@@ -25,9 +27,12 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(RootTabScrollPolicy.topAnchorID, "root-tab-scroll-top")
     }
 
-    func testMainTabsIsolateNavigationStacksToAvoidTitleStateBleed() {
-        XCTAssertTrue(AppTabNavigationStackPolicy.isolatesNavigationStackPerTab)
-        XCTAssertTrue(AppTabNavigationStackPolicy.appliesTitleInsideTabStack)
+    func testMainTabsPushScreensAboveTabBarAndKeepToolbarItems() {
+        XCTAssertFalse(AppTabNavigationStackPolicy.isolatesNavigationStackPerTab)
+        XCTAssertTrue(AppTabNavigationStackPolicy.wrapsTabShellInRootNavigationStack)
+        XCTAssertTrue(AppTabNavigationStackPolicy.pushedScreensCoverAppleTabBar)
+        XCTAssertTrue(AppTabNavigationStackPolicy.appliesTitleInsideRootTabShell)
+        XCTAssertTrue(AppTabNavigationStackPolicy.appliesToolbarInsideRootTabShell)
         XCTAssertTrue(AppTabNavigationStackPolicy.keepsTabRootScrollReset)
     }
 
@@ -107,6 +112,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(ProfileMenuPresentationPolicy.opensAppearanceDirectly)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesSystemFullScreenSafeArea)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesInlineNavigationTitle)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.showsProfileSubtitle)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.editActionTitle, "Edit")
+        XCTAssertTrue(ProfileMenuPresentationPolicy.editActionOpensAccounts)
         XCTAssertFalse(ProfileMenuPresentationPolicy.animatesFromBottom)
         XCTAssertFalse(ProfileMenuPresentationPolicy.avoidsSystemNavigationBar)
     }
@@ -127,7 +135,18 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AccountsLayoutPolicy.avatarSourcePresentation, "nativeSwiftUIMenu")
         XCTAssertEqual(AccountsLayoutPolicy.carouselInteraction, "directionalSwipeAutoAdvance")
         XCTAssertEqual(AccountsLayoutPolicy.profileGraphMetric, "savedSpentTotals")
+        XCTAssertFalse(AccountsLayoutPolicy.profileGraphShowsMetricPills)
+        XCTAssertEqual(AccountsLayoutPolicy.profilePulseCardCornerRadius, AppTheme.Radius.md)
         XCTAssertFalse(AccountsLayoutPolicy.showsBottomAccountList)
+    }
+
+    func testAssistantUsesNativeEditMenuAndInstructionsRoute() {
+        XCTAssertEqual(AssistantMenuPresentationPolicy.toolbarTitle, "Edit")
+        XCTAssertEqual(AssistantMenuPresentationPolicy.presentation, "nativeSwiftUIMenu")
+        XCTAssertEqual(AssistantMenuPresentationPolicy.actions, ["Customise assistant", "Rename"])
+        XCTAssertEqual(AssistantMenuPresentationPolicy.customiseAssistantRoute, "instructionsScreen")
+        XCTAssertEqual(AssistantMenuPresentationPolicy.renamePresentation, "textFieldAlert")
+        XCTAssertFalse(AssistantMenuPresentationPolicy.instructionsUsesPlaceholderToolbar)
     }
 
     func testEditToolbarActionUsesTextButton() {
@@ -181,6 +200,9 @@ final class AppShellNavigationTests: XCTestCase {
 
     func testAddCardFormUsesCompactCenteredLayoutWithoutPlaceholderToolbar() {
         XCTAssertEqual(CardFormLayoutPolicy.dayFieldOrder, ["directDebitDay", "statementDay"])
+        XCTAssertEqual(CardFormLayoutPolicy.dayFieldPresentation, "compactSideBySideMenuBoxes")
+        XCTAssertEqual(CardFormLayoutPolicy.dayFieldTitleLineLimit, 1)
+        XCTAssertEqual(CardFormLayoutPolicy.dayFieldMinimumHeight, 64, accuracy: 0.001)
         XCTAssertEqual(CardFormLayoutPolicy.colorSwatchAlignment, "center")
         XCTAssertFalse(CardFormLayoutPolicy.showsPlaceholderToolbar)
         XCTAssertTrue(CardFormLayoutPolicy.hidesNavigationDivider)
@@ -188,6 +210,19 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(CardFormLayoutPolicy.designSelectionPresentation, "navigationPushGroupedDesignBrowser")
         XCTAssertEqual(CardFormLayoutPolicy.designGridColumnCount, 2)
         XCTAssertTrue(CardFormLayoutPolicy.preservesDesignAspectRatio)
+    }
+
+    func testNamedScreensHideTopNavigationDivider() {
+        XCTAssertEqual(ScreenTopDividerPolicy.hiddenScreens, [
+            "Add card",
+            "Create paycheck plan",
+            "Assistant",
+            "Card",
+            "Card payments",
+            "Add debt"
+        ])
+        XCTAssertTrue(ScreenTopDividerPolicy.keepsToolbarBackgroundHidden)
+        XCTAssertTrue(ScreenTopDividerPolicy.usesNavigationBarAppearanceInstaller)
     }
 
     func testPlusAddFormsUseCleanBoxedLayouts() {
@@ -236,10 +271,66 @@ final class AppShellNavigationTests: XCTestCase {
     func testCreditSummaryOpensInlineOverviewDetail() {
         XCTAssertEqual(CreditLayoutPolicy.summaryPresentation, .navigationPush)
         XCTAssertTrue(CreditLayoutPolicy.summaryDetailUsesInlineTitle)
-        XCTAssertEqual(CreditLayoutPolicy.physicalCardsPlacement, "belowSummaryAboveDueSoon")
-        XCTAssertEqual(CreditLayoutPolicy.physicalCardsStack, "LazyHStack")
-        XCTAssertEqual(CreditLayoutPolicy.physicalCardsFlipInteraction, "tapAndDirectionalDrag")
-        XCTAssertTrue(CreditLayoutPolicy.physicalCardsUseActiveCards)
+        XCTAssertEqual(CreditLayoutPolicy.cardsPlacement, "belowSummaryAboveDueSoon")
+        XCTAssertEqual(CreditLayoutPolicy.cardsPresentation, "lazyHStack")
+        XCTAssertFalse(CreditLayoutPolicy.cardsUseCardsViewRow)
+        XCTAssertTrue(CreditLayoutPolicy.cardsUseFloatingPreview)
+        XCTAssertFalse(CreditLayoutPolicy.cardsShowOuterRowBox)
+        XCTAssertTrue(CreditLayoutPolicy.removesPhysicalCardStrip)
+        XCTAssertTrue(CreditLayoutPolicy.cardRowsUseHorizontalScroll)
+        XCTAssertEqual(CreditLayoutPolicy.cardRowWidth, CreditCardVisualLayoutPolicy.rowCardMaxWidth, accuracy: 0.001)
+        XCTAssertEqual(CreditLayoutPolicy.cardRowCornerRadius, AppTheme.Radius.md, accuracy: 0.001)
+        XCTAssertLessThan(CreditLayoutPolicy.cardRowCornerRadius, AppTheme.Radius.lg)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.cardAspectRatio, 1.58, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.cardCornerRadius, 12, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.canonicalRenderer, "PremiumCardView")
+        XCTAssertTrue(CreditCardVisualLayoutPolicy.usesSingleCardRenderer)
+        XCTAssertTrue(CreditCardVisualLayoutPolicy.miniPreviewWrapsCanonicalRenderer)
+        XCTAssertTrue(CreditCardVisualLayoutPolicy.designGridUsesCanonicalRenderer)
+        XCTAssertTrue(CreditCardVisualLayoutPolicy.creditTabUsesStaticFloatingCards)
+        XCTAssertFalse(CreditCardVisualLayoutPolicy.designSelectionShowsThumbnail)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.designBrowserLayout, "lazyVStackTwoColumnRows")
+        XCTAssertFalse(CreditCardVisualLayoutPolicy.designBrowserShowsOuterTiles)
+        XCTAssertFalse(CreditCardVisualLayoutPolicy.designBrowserShowsNames)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.previewCornerRadius(for: 50), CreditCardVisualLayoutPolicy.cardCornerRadius, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.previewCornerRadius(for: 240), CreditCardVisualLayoutPolicy.cardCornerRadius, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.rowCardMaxWidth, 260, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.rowPreviewWidth, CreditCardVisualLayoutPolicy.rowCardMaxWidth, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.rowPreviewHeight, CreditCardVisualLayoutPolicy.rowCardMaxWidth / CreditCardVisualLayoutPolicy.cardAspectRatio, accuracy: 0.001)
+        XCTAssertGreaterThan(CreditCardVisualLayoutPolicy.rowPreviewWidth, 200)
+        XCTAssertGreaterThan(CreditCardVisualLayoutPolicy.rowPreviewHeight, 120)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.designSelectionPreviewWidth, 112, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.previewArtworkDetail, .full)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.fullArtworkDetail, .full)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.contentInset(for: 240), 18, accuracy: 0.001)
+        XCTAssertEqual(CreditCardVisualLayoutPolicy.contentInset(for: 50), 5, accuracy: 0.001)
+    }
+
+    func testCardDesignBrowserUsesSelectableLazyOrderAndKeepsLegacyResolution() {
+        XCTAssertEqual(CreditCardDesignCatalog.displayCategories.map(\.rawValue), ["Minimal", "Calm", "Metal", "Bold", "Premium", "Artwork", "Neon"])
+
+        let hiddenNames = Set([
+            "Royal Plum",
+            "Neon Night",
+            "Forest Matte",
+            "Skyline Blue",
+            "Deep Space",
+            "Clean Navy",
+            "Petrol Shift",
+            "Emerald Circuit",
+            "Blueprint",
+            "Solar Flare"
+        ])
+        let selectableNames = Set(CreditCardDesignCatalog.selectableDesigns.map(\.name))
+
+        XCTAssertTrue(hiddenNames.isDisjoint(with: selectableNames))
+        XCTAssertTrue(CreditCardDesignCatalog.selectableStorageValues().allSatisfy { value in
+            CreditCardDesignCatalog.selectableDesigns.contains {
+                $0.storageHex.caseInsensitiveCompare(value) == .orderedSame
+            }
+        })
+        XCTAssertEqual(CreditCardDesignCatalog.design(forStoredValue: "royal-plum").name, "Royal Plum")
+        XCTAssertEqual(CreditCardDesignCatalog.design(forStoredValue: "#7C3AED").name, "Royal Plum")
     }
 
     func testPotsHistoryUsesEditToolbarWithoutTopDivider() {
@@ -275,6 +366,11 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(ActivityTimelineLayoutPolicy.includesAccountCreation)
         XCTAssertTrue(ActivityTimelineLayoutPolicy.usesVariableNaturalBranches)
         XCTAssertTrue(ActivityTimelineLayoutPolicy.revealsCardBeforeDrawingNextBranch)
+        XCTAssertEqual(ActivityTimelineBranchLayoutPolicy.connectorEndpointPolicy, "eventAnchorToEventAnchor")
+        XCTAssertTrue(ActivityTimelineBranchLayoutPolicy.avoidsFixedLeftRail)
+        XCTAssertTrue(ActivityTimelineBranchLayoutPolicy.nodeOverlapsEventCard)
+        XCTAssertEqual(Array(ActivityTimelineBranchLayoutPolicy.lanePattern.prefix(3)), [.right, .left, .center])
+        XCTAssertGreaterThan(ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: 3), ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: 2))
         XCTAssertGreaterThanOrEqual(ActivityTimelineLayoutPolicy.branchRevealDelaySeconds, 0.9)
         XCTAssertGreaterThanOrEqual(ActivityTimelineLayoutPolicy.branchDrawDurationSeconds, 1.0)
         XCTAssertGreaterThanOrEqual(ActivityTimelineLayoutPolicy.cardReadDelaySeconds, 0.7)
@@ -373,6 +469,7 @@ final class PlanLayoutTests: XCTestCase {
         XCTAssertEqual(PlanLayoutPolicy.dayDetailPreviousSymbol, "arrow.left")
         XCTAssertEqual(PlanLayoutPolicy.dayDetailNextSymbol, "arrow.right")
         XCTAssertTrue(PlanLayoutPolicy.dayDetailLeadingUsesLiquidGlassMorph)
+        XCTAssertTrue(PlanLayoutPolicy.dayDetailTrailingUsesAccentColor)
         XCTAssertFalse(PlanLayoutPolicy.dayDetailUsesPlaceholderOptions)
         XCTAssertFalse(PlanLayoutPolicy.dayDetailShowsNavigationDivider)
         XCTAssertTrue(PlanLayoutPolicy.dayDetailIncludesMoneyFlowGraph)

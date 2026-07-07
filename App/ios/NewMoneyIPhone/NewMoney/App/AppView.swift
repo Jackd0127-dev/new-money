@@ -149,8 +149,11 @@ enum AppNavigationTitleDisplayPolicy {
 }
 
 enum AppTabNavigationStackPolicy {
-    static let isolatesNavigationStackPerTab = true
-    static let appliesTitleInsideTabStack = true
+    static let isolatesNavigationStackPerTab = false
+    static let wrapsTabShellInRootNavigationStack = true
+    static let pushedScreensCoverAppleTabBar = true
+    static let appliesTitleInsideRootTabShell = true
+    static let appliesToolbarInsideRootTabShell = true
     static let keepsTabRootScrollReset = true
 }
 
@@ -210,6 +213,9 @@ enum ProfileMenuPresentationPolicy {
     static let opensAppearanceDirectly = true
     static let usesSystemFullScreenSafeArea = true
     static let usesInlineNavigationTitle = true
+    static let showsProfileSubtitle = false
+    static let editActionTitle = "Edit"
+    static let editActionOpensAccounts = true
     static let animatesFromBottom = false
     static let avoidsSystemNavigationBar = false
 }
@@ -250,6 +256,54 @@ struct AppView: View {
     }
 
     var body: some View {
+        NavigationStack {
+            appTabShell
+                .navigationDestination(item: $activeNavigationDestination) { destination in
+                    navigationDestination(for: destination)
+                }
+        }
+        .background {
+            PremiumRootBackground()
+        }
+        .dismissKeyboardOnBackgroundTap()
+        .preferredColorScheme(selectedTheme.palette.preferredColorScheme)
+        .sheet(item: $activeSheet, onDismiss: presentPendingSheet) { sheet in
+            switch sheet {
+            case .addMenu:
+                AddMenuSheetView(actions: selectedTabAddActions) { action in
+                    pendingSheetAfterDismiss = sheetDestination(for: action)
+                    activeSheet = nil
+                }
+            case .addSpend:
+                SpendingSheetView(store: store)
+            case .addBill:
+                AddBillSheetView(store: store)
+            case .addPot:
+                PotFormView(store: store)
+            case .addCard:
+                CardFormView(store: store)
+            case .spendingHistory:
+                SpendingHistorySheetView(store: store)
+            case .calendar:
+                CalendarSheetView(store: store)
+            case .accounts:
+                AccountsSheetView(store: store)
+            case .potHistory:
+                PotHistorySheetView(store: store)
+            }
+        }
+        .sheet(isPresented: $isAssistantPresented) {
+            AssistantView(store: store, presentationMode: .modal)
+        }
+        .onAppear {
+            configureSystemChromeAppearance()
+        }
+        .onChange(of: selectedThemeRawValue) { _, _ in
+            configureSystemChromeAppearance()
+        }
+    }
+
+    private var appTabShell: some View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: selectedTabBinding) {
                 tabNavigationRoot(for: .home) {
@@ -313,61 +367,17 @@ struct AppView: View {
             .accessibilityLabel("Open Assistant")
 
         }
-        .background {
-            PremiumRootBackground()
-        }
-        .dismissKeyboardOnBackgroundTap()
-        .preferredColorScheme(selectedTheme.palette.preferredColorScheme)
-        .sheet(item: $activeSheet, onDismiss: presentPendingSheet) { sheet in
-            switch sheet {
-            case .addMenu:
-                AddMenuSheetView(actions: selectedTabAddActions) { action in
-                    pendingSheetAfterDismiss = sheetDestination(for: action)
-                    activeSheet = nil
-                }
-            case .addSpend:
-                SpendingSheetView(store: store)
-            case .addBill:
-                AddBillSheetView(store: store)
-            case .addPot:
-                PotFormView(store: store)
-            case .addCard:
-                CardFormView(store: store)
-            case .spendingHistory:
-                SpendingHistorySheetView(store: store)
-            case .calendar:
-                CalendarSheetView(store: store)
-            case .accounts:
-                AccountsSheetView(store: store)
-            case .potHistory:
-                PotHistorySheetView(store: store)
-            }
-        }
-        .sheet(isPresented: $isAssistantPresented) {
-            AssistantView(store: store, presentationMode: .modal)
-        }
-        .onAppear {
-            configureSystemChromeAppearance()
-        }
-        .onChange(of: selectedThemeRawValue) { _, _ in
-            configureSystemChromeAppearance()
+        .navigationTitle(navigationTitle(for: selectedTab))
+        .navigationBarTitleDisplayMode(AppNavigationTitleDisplayPolicy.mode(for: selectedTab))
+        .toolbarColorScheme(selectedTheme.palette.preferredColorScheme, for: .navigationBar)
+        .toolbar {
+            tabToolbarContent(for: selectedTab)
         }
     }
 
     @ViewBuilder
     private func tabNavigationRoot<Content: View>(for tab: AppTab, @ViewBuilder content: () -> Content) -> some View {
-        NavigationStack {
-            content()
-                .navigationTitle(navigationTitle(for: tab))
-                .navigationBarTitleDisplayMode(AppNavigationTitleDisplayPolicy.mode(for: tab))
-                .toolbarColorScheme(selectedTheme.palette.preferredColorScheme, for: .navigationBar)
-                .toolbar {
-                    tabToolbarContent(for: tab)
-                }
-                .navigationDestination(item: $activeNavigationDestination) { destination in
-                    navigationDestination(for: destination)
-                }
-        }
+        content()
     }
 
     @ToolbarContentBuilder
@@ -677,11 +687,12 @@ private struct ProfileMenuScreenView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     @State private var isAddIncomePresented = false
+    @State private var isAccountsPresented = false
 
     var body: some View {
         ScreenScaffold(
             title: "Profile",
-            subtitle: "Account profile and app preferences.",
+            subtitle: "",
             navigationMode: .inline,
             toolbarMode: .none
         ) {
@@ -689,8 +700,18 @@ private struct ProfileMenuScreenView: View {
             actionsCard
             signOutCard
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(ProfileMenuPresentationPolicy.editActionTitle) {
+                    isAccountsPresented = true
+                }
+            }
+        }
         .sheet(isPresented: $isAddIncomePresented) {
             AddPaycheckSheetView(store: store)
+        }
+        .sheet(isPresented: $isAccountsPresented) {
+            AccountsSheetView(store: store)
         }
     }
 
@@ -703,10 +724,6 @@ private struct ProfileMenuScreenView: View {
                 .foregroundStyle(AppTheme.Colors.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
-
-            Text("\(store.plannerAccounts.count) of \(PlannerAccountCollection.maxAccounts) accounts")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, AppTheme.Spacing.sm)

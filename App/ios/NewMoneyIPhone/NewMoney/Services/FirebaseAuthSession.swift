@@ -161,6 +161,22 @@ final class FirebaseAuthSession: ObservableObject {
         }
     }
 
+    func resetPlannerData(store: PlannerStore) async {
+        await performWorkingAction {
+            guard case let .ready(user) = state else {
+                throw FirebaseNativeServiceError.missingCurrentUser
+            }
+
+            cloudStatus = "Resetting data"
+            let resetCollection = PlannerAccountCollection.singleAccount(snapshot: DefaultData.emptySnapshot)
+            try await cloudSyncService.resetAccountCollection(resetCollection, for: user)
+            let savedCollection = try await store.resetAllPlannerDataKeepingSignedInAccount(to: resetCollection)
+            lastUploadedSignature = try? PlannerCloudPayload.signature(for: savedCollection)
+            cloudStatus = "Data reset"
+            state = .ready(user)
+        }
+    }
+
     private func routeCurrentUser(store: PlannerStore) async {
         let user = await authService.currentUser()
         await route(user: user, store: store)

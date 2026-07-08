@@ -406,6 +406,13 @@ final class AuthSyncTests: XCTestCase {
 
         XCTAssertEqual(PlannerCloudSyncResolver.decision(local: multiAccountLocal, cloud: nil), .uploadLocal)
     }
+
+    func testCloudPlannerResetPolicyClearsPlannerDataWithoutDeletingAuthUser() {
+        XCTAssertTrue(PlannerCloudResetPolicy.deletesCurrentPlannerDocument)
+        XCTAssertTrue(PlannerCloudResetPolicy.deletesPlannerBackups)
+        XCTAssertTrue(PlannerCloudResetPolicy.writesEmptyCurrentPlannerDocument)
+        XCTAssertFalse(PlannerCloudResetPolicy.deletesFirebaseAuthUser)
+    }
 }
 
 @MainActor
@@ -520,5 +527,72 @@ final class PlannerAccountsTests: XCTestCase {
 
         try await store.switchPlannerAccount(id: sideId)
         XCTAssertEqual(store.snapshot.pots.map(\.name), ["Side Pot"])
+    }
+
+    func testResetAllPlannerDataKeepsSignedInAuthAccountButClearsPlannerCollection() async throws {
+        var personalSnapshot = DefaultData.emptySnapshot
+        personalSnapshot.pots = [
+            Pot(
+                id: "personal-pot",
+                name: "Personal Pot",
+                type: .saving,
+                category: nil,
+                icon: nil,
+                balancePence: 1_500,
+                targetPence: 5_000,
+                color: "#F97316",
+                linkedCreditCardId: nil,
+                linkedDebtId: nil,
+                archived: false,
+                createdAt: "2026-07-01T10:00:00.000Z",
+                updatedAt: "2026-07-01T10:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+
+        let collection = PlannerAccountCollection(
+            activeAccountId: "work",
+            selectedThemePresetId: AppThemePreset.warmLight.rawValue,
+            accounts: [
+                PlannerAccount(
+                    id: "personal",
+                    name: "Personal",
+                    color: "#F97316",
+                    avatarImageName: "personal-avatar.jpg",
+                    avatarImageDataBase64: "encoded-avatar",
+                    snapshot: personalSnapshot,
+                    createdAt: "2026-07-01T09:00:00.000Z",
+                    updatedAt: "2026-07-01T10:00:00.000Z"
+                ),
+                PlannerAccount(
+                    id: "work",
+                    name: "Work",
+                    color: "#14B8A6",
+                    snapshot: DefaultData.basicDataSnapshot,
+                    createdAt: "2026-07-02T09:00:00.000Z",
+                    updatedAt: "2026-07-02T10:00:00.000Z"
+                )
+            ],
+            updatedAt: "2026-07-02T10:00:00.000Z"
+        )
+        let store = PlannerStore(
+            repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.basicDataSnapshot),
+            accountRepository: InMemoryPlannerAccountRepository(seedCollection: collection)
+        )
+
+        await store.load()
+        XCTAssertTrue(store.accountCollectionForCloudUpload().hasMeaningfulPlannerData)
+
+        let resetCollection = try await store.resetAllPlannerDataKeepingSignedInAccount()
+
+        XCTAssertEqual(resetCollection.accounts.count, 1)
+        XCTAssertEqual(resetCollection.activeAccount?.name, "Personal")
+        XCTAssertNil(resetCollection.selectedThemePresetId)
+        XCTAssertNil(resetCollection.activeAccount?.avatarImageName)
+        XCTAssertNil(resetCollection.activeAccount?.avatarImageDataBase64)
+        XCTAssertEqual(resetCollection.activeAccount?.snapshot, DefaultData.emptySnapshot)
+        XCTAssertFalse(resetCollection.hasMeaningfulPlannerData)
+        XCTAssertEqual(store.snapshot, DefaultData.emptySnapshot)
+        XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal"])
     }
 }

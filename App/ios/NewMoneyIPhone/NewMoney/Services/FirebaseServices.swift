@@ -215,12 +215,44 @@ struct FirebaseCloudSyncService: CloudSyncService {
         try await batch.commit()
     }
 
+    func resetAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
+        let snapshotDocument = snapshotDocument(for: user)
+        let backupReferences = try await snapshotDocument
+            .collection("backups")
+            .getDocuments()
+            .documents
+            .map(\.reference)
+
+        try await deleteDocuments(backupReferences + [snapshotDocument])
+
+        let updatedAtIso = DateUtilities.nowIsoString()
+        var currentData = try PlannerCloudPayload.currentAccounts(collection: collection, updatedAtIso: updatedAtIso).firestoreData()
+        currentData["updatedAt"] = FieldValue.serverTimestamp()
+        try await snapshotDocument.setData(currentData, merge: false)
+    }
+
     private func snapshotDocument(for user: AuthUser) -> DocumentReference {
         firestore
             .collection("users")
             .document(user.uid)
             .collection("planner")
             .document("snapshot")
+    }
+
+    private func deleteDocuments(_ references: [DocumentReference]) async throws {
+        var remainingReferences = references
+
+        while !remainingReferences.isEmpty {
+            let batch = firestore.batch()
+            let chunk = Array(remainingReferences.prefix(450))
+
+            for reference in chunk {
+                batch.deleteDocument(reference)
+            }
+
+            try await batch.commit()
+            remainingReferences.removeFirst(chunk.count)
+        }
     }
 }
 

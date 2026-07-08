@@ -13,6 +13,13 @@ enum PlannerCloudSyncPolicy {
     static let promptsForConflicts = false
 }
 
+enum PlannerCloudResetPolicy {
+    static let deletesCurrentPlannerDocument = true
+    static let deletesPlannerBackups = true
+    static let writesEmptyCurrentPlannerDocument = true
+    static let deletesFirebaseAuthUser = false
+}
+
 struct CloudPlannerSnapshotRecord: Equatable, Sendable {
     var snapshot: PlannerSnapshot
     var updatedAtIso: String?

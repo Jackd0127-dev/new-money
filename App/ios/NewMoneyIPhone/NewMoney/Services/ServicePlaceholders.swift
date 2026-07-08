@@ -88,6 +88,7 @@ struct PlaceholderAuthService: AuthService {
 protocol CloudSyncService {
     func pullAccountCollection(for user: AuthUser) async throws -> CloudPlannerAccountCollectionRecord?
     func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws
+    func resetAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws
 }
 
 struct PlaceholderCloudSyncService: CloudSyncService {
@@ -97,6 +98,10 @@ struct PlaceholderCloudSyncService: CloudSyncService {
     }
 
     func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
+        throw ServicePlaceholderError.missingFirestoreConfiguration
+    }
+
+    func resetAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
         throw ServicePlaceholderError.missingFirestoreConfiguration
     }
 }

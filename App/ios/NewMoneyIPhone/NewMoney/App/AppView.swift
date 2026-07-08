@@ -211,6 +211,11 @@ enum ProfileMenuPresentationPolicy {
     static let signOutUsesAuthGateSession = true
     static let logOutActionTitle = "Log Out"
     static let confirmsLogOut = true
+    static let showsResetDataAction = true
+    static let resetDataActionTitle = "Reset Data"
+    static let resetDataConfirmationCount = 2
+    static let resetDataKeepsAuthAccount = true
+    static let resetDataDeletesCloudPlannerData = true
     static let includesAddIncomeAction = true
     static let opensAppearanceDirectly = true
     static let usesSystemFullScreenSafeArea = true
@@ -686,6 +691,8 @@ private struct ProfileMenuScreenView: View {
     @State private var isAddIncomePresented = false
     @State private var isAccountsPresented = false
     @State private var isLogOutConfirmationPresented = false
+    @State private var isFirstResetConfirmationPresented = false
+    @State private var isSecondResetConfirmationPresented = false
 
     var body: some View {
         ScreenScaffold(
@@ -720,6 +727,26 @@ private struct ProfileMenuScreenView: View {
             }
         } message: {
             Text("Are you sure you want to log out of this account?")
+        }
+        .alert("Reset all data?", isPresented: $isFirstResetConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Continue", role: .destructive) {
+                DispatchQueue.main.async {
+                    isSecondResetConfirmationPresented = true
+                }
+            }
+        } message: {
+            Text("This keeps your login account, but permanently deletes your money data from this iPhone and Firebase.")
+        }
+        .alert("Delete everything permanently?", isPresented: $isSecondResetConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button(ProfileMenuPresentationPolicy.resetDataActionTitle, role: .destructive) {
+                Task {
+                    await authSession.resetPlannerData(store: store)
+                }
+            }
+        } message: {
+            Text("This cannot be undone. Accounts, bills, pots, cards, debts, statements, activity, and planner history will be reset.")
         }
     }
 
@@ -794,6 +821,18 @@ private struct ProfileMenuScreenView: View {
                 }
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-sign-out")
+
+                AppDivider()
+
+                SecondaryButton(
+                    title: authSession.isWorking ? "Resetting Data..." : ProfileMenuPresentationPolicy.resetDataActionTitle,
+                    systemImage: "trash",
+                    role: .destructive
+                ) {
+                    isFirstResetConfirmationPresented = true
+                }
+                .disabled(authSession.isWorking)
+                .accessibilityIdentifier("profile-reset-data")
             }
         }
     }

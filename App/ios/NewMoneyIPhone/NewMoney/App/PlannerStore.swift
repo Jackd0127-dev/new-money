@@ -213,6 +213,33 @@ final class PlannerStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    func resetAllPlannerDataKeepingSignedInAccount(
+        to resetCollection: PlannerAccountCollection = PlannerAccountCollection.singleAccount(snapshot: DefaultData.emptySnapshot)
+    ) async throws -> PlannerAccountCollection {
+        let avatarImageNames = (accountCollection?.accounts ?? plannerAccounts)
+            .compactMap(\.avatarImageName)
+
+        snapshot = DefaultData.emptySnapshot
+        applyAccountCollection(resetCollection)
+
+        if let accountRepository {
+            try await accountRepository.resetAccountCollection()
+            try await accountRepository.saveAccountCollection(resetCollection)
+        } else {
+            try await repository.saveSnapshot(DefaultData.emptySnapshot)
+        }
+
+        try await repository.saveSnapshot(DefaultData.emptySnapshot)
+
+        for imageName in avatarImageNames {
+            try? PlannerAccountAvatarFileStore.removeImage(named: imageName)
+        }
+
+        markCloudSyncNeeded()
+        return accountCollection ?? resetCollection
+    }
+
     func createPlannerAccount(named name: String) async throws {
         guard let accountRepository else { return }
         let cleanName = try validatedAccountName(name)

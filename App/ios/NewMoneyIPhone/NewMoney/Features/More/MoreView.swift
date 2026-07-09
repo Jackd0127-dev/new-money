@@ -900,6 +900,8 @@ struct ActivityLayoutPolicy {
     static let recentActivityDateFormat = "EEE, d MMM yyyy"
     static let recentActivityDetailPresentation: ActivityDetailPresentation = .navigationPush
     static let recentActivityDetailUsesInlineTitle = true
+    static let recentActivityShowsGeneratedPayPeriodSummaries = false
+    static let recentActivityShowsZeroValuePaychecks = false
     static let monthBalanceChartMetric = "currentMonthIncomeMinusSpending"
     static let monthBalanceDetailPresentation: ActivityDetailPresentation = .navigationPush
     static let monthBalanceDetailUsesInlineTitle = true
@@ -1248,42 +1250,82 @@ struct ActivityView: View {
                 )
             }
 
-        let income = store.snapshot.paychecks.map { paycheck in
-            let period = periodsById[paycheck.payPeriodId]
-            var detailRows = [
-                ActivityDetailRow(label: "Amount", value: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence), valueColor: AppTheme.Colors.success),
-                ActivityDetailRow(label: "Recorded", value: activityDisplayDate(paycheck.createdAt)),
-                ActivityDetailRow(label: "Hours worked", value: String(format: "%.2f", paycheck.hoursWorked)),
-                ActivityDetailRow(label: "Hourly rate", value: MoneyParser.formatPence(paycheck.hourlyRatePence)),
-                ActivityDetailRow(label: "Calculated pay", value: MoneyParser.formatPence(paycheck.calculatedAmountPence))
-            ]
+        let income = store.snapshot.paychecks
+            .filter { $0.deletedAt == nil }
+            .filter { ActivityLayoutPolicy.recentActivityShowsZeroValuePaychecks || paycheckActivityAmount($0) > 0 }
+            .map { paycheck in
+                let period = periodsById[paycheck.payPeriodId]
+                let amountPence = paycheckActivityAmount(paycheck)
+                var detailRows = [
+                    ActivityDetailRow(label: "Amount", value: MoneyParser.formatPence(amountPence), valueColor: AppTheme.Colors.success),
+                    ActivityDetailRow(label: "Recorded", value: activityDisplayDate(paycheck.createdAt)),
+                    ActivityDetailRow(label: "Hours worked", value: String(format: "%.2f", paycheck.hoursWorked)),
+                    ActivityDetailRow(label: "Hourly rate", value: MoneyParser.formatPence(paycheck.hourlyRatePence)),
+                    ActivityDetailRow(label: "Calculated pay", value: MoneyParser.formatPence(paycheck.calculatedAmountPence))
+                ]
 
-            if let actualAmountPence = paycheck.actualAmountPence {
-                detailRows.append(ActivityDetailRow(label: "Actual pay", value: MoneyParser.formatPence(actualAmountPence), valueColor: AppTheme.Colors.success))
+                if let actualAmountPence = paycheck.actualAmountPence {
+                    detailRows.append(ActivityDetailRow(label: "Actual pay", value: MoneyParser.formatPence(actualAmountPence), valueColor: AppTheme.Colors.success))
+                }
+                if let period {
+                    detailRows.append(ActivityDetailRow(label: "Payday", value: activityDisplayDate(period.payday)))
+                    detailRows.append(ActivityDetailRow(label: "Pay period", value: "\(activityDisplayDate(period.startDate)) to \(activityDisplayDate(period.endDate))"))
+                    detailRows.append(ActivityDetailRow(label: "Status", value: formattedActivityLabel(period.status.rawValue)))
+                }
+
+                return ActivityEntry(
+                    id: paycheck.id,
+                    kind: .income,
+                    title: "Paycheck",
+                    detail: activityDisplayDate(paycheck.createdAt),
+                    amount: MoneyParser.formatPence(amountPence),
+                    typeLabel: "Income",
+                    color: AppTheme.Colors.success,
+                    sortDate: paycheck.createdAt.prefixDateLabel,
+                    detailRows: detailRows,
+                    recordRows: activityRecordRows(createdAt: paycheck.createdAt, updatedAt: paycheck.updatedAt)
+                )
             }
-            if let period {
-                detailRows.append(ActivityDetailRow(label: "Payday", value: activityDisplayDate(period.payday)))
-                detailRows.append(ActivityDetailRow(label: "Pay period", value: "\(activityDisplayDate(period.startDate)) to \(activityDisplayDate(period.endDate))"))
-                detailRows.append(ActivityDetailRow(label: "Status", value: formattedActivityLabel(period.status.rawValue)))
+
+        let oneOffIncome = store.snapshot.oneOffIncomes
+            .filter { $0.deletedAt == nil }
+            .map { income in
+                var detailRows = [
+                    ActivityDetailRow(label: "Amount", value: MoneyParser.formatPence(income.amountPence), valueColor: AppTheme.Colors.success),
+                    ActivityDetailRow(label: "Date", value: activityDisplayDate(income.date)),
+                    ActivityDetailRow(label: "Type", value: "One-off income")
+                ]
+
+                if let payPeriodId = income.payPeriodId, let period = periodsById[payPeriodId] {
+                    detailRows.append(ActivityDetailRow(label: "Pay period", value: "\(activityDisplayDate(period.startDate)) to \(activityDisplayDate(period.endDate))"))
+                }
+                if !income.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    detailRows.append(ActivityDetailRow(label: "Note", value: income.note))
+                }
+
+                return ActivityEntry(
+                    id: income.id,
+                    kind: .income,
+                    title: income.name,
+                    detail: activityDisplayDate(income.date),
+                    amount: MoneyParser.formatPence(income.amountPence),
+                    typeLabel: "One-off",
+                    color: AppTheme.Colors.success,
+                    sortDate: income.date,
+                    detailRows: detailRows,
+                    recordRows: activityRecordRows(createdAt: income.createdAt, updatedAt: income.updatedAt)
+                )
             }
 
-            return ActivityEntry(
-                id: paycheck.id,
-                kind: .income,
-                title: "Paycheck",
-                detail: activityDisplayDate(paycheck.createdAt),
-                amount: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence),
-                typeLabel: "Income",
-                color: AppTheme.Colors.success,
-                sortDate: paycheck.createdAt.prefixDateLabel,
-                detailRows: detailRows,
-                recordRows: activityRecordRows(createdAt: paycheck.createdAt, updatedAt: paycheck.updatedAt)
-            )
-        }
+        return (spending + income + oneOffIncome + payPeriodSummaryEntries()).sorted { $0.sortDate > $1.sortDate }
+    }
 
-        let periods = store.snapshot.payPeriods.map { period in
+    private func payPeriodSummaryEntries() -> [ActivityEntry] {
+        guard ActivityLayoutPolicy.recentActivityShowsGeneratedPayPeriodSummaries else { return [] }
+
+        return store.snapshot.payPeriods.map { period in
             var detailRows = [
-                ActivityDetailRow(label: "Income", value: MoneyParser.formatPence(period.incomePence), valueColor: AppTheme.Colors.success),
+                ActivityDetailRow(label: "Income", value: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: store.snapshot, payPeriod: period)), valueColor: AppTheme.Colors.success),
                 ActivityDetailRow(label: "Start", value: activityDisplayDate(period.startDate)),
                 ActivityDetailRow(label: "End", value: activityDisplayDate(period.endDate)),
                 ActivityDetailRow(label: "Payday", value: activityDisplayDate(period.payday)),
@@ -1299,7 +1341,7 @@ struct ActivityView: View {
                 kind: .income,
                 title: "Pay period",
                 detail: "\(activityDisplayDate(period.startDate)) to \(activityDisplayDate(period.endDate))",
-                amount: MoneyParser.formatPence(period.incomePence),
+                amount: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: store.snapshot, payPeriod: period)),
                 typeLabel: "Pay period",
                 color: AppTheme.Colors.primaryOrange,
                 sortDate: period.startDate,
@@ -1307,8 +1349,10 @@ struct ActivityView: View {
                 recordRows: activityRecordRows(createdAt: period.createdAt, updatedAt: period.updatedAt)
             )
         }
+    }
 
-        return (spending + income + periods).sorted { $0.sortDate > $1.sortDate }
+    private func paycheckActivityAmount(_ paycheck: Paycheck) -> Int {
+        paycheck.actualAmountPence ?? paycheck.calculatedAmountPence
     }
 
     private func activityRecordRows(createdAt: String, updatedAt: String) -> [ActivityDetailRow] {
@@ -1935,6 +1979,23 @@ private enum ActivityTimelineData {
             )
         }
 
+        for income in snapshot.oneOffIncomes where income.deletedAt == nil {
+            events.append(
+                ActivityTimelineEvent(
+                    id: "one-off-income-\(income.id)",
+                    sortKey: income.createdAt,
+                    title: "One-off income recorded",
+                    detail: income.note.isEmpty ? income.name : "\(income.name) • \(income.note)",
+                    typeLabel: "Income",
+                    secondaryLabel: timelineDateLabel(income.date),
+                    amountPence: income.amountPence,
+                    amountStyle: .positive,
+                    color: AppTheme.Colors.neonMoneyUp,
+                    symbol: "plus.circle"
+                )
+            )
+        }
+
         for allocation in snapshot.potAllocations {
             let potName = allocation.potId.isEmpty ? "Pot" : (potsById[allocation.potId]?.name ?? "Pot")
             events.append(
@@ -2477,7 +2538,17 @@ private struct ActivityMonthlyBalanceChartData: Equatable {
             return ActivityDailyAmount(day: day, amountPence: period.incomePence)
         }
 
-        let incomeEvents = paycheckIncomeEvents.isEmpty ? periodIncomeEvents : paycheckIncomeEvents
+        let oneOffIncomeEvents = snapshot.oneOffIncomes.compactMap { income -> ActivityDailyAmount? in
+            guard income.deletedAt == nil,
+                  let day = dayInCurrentMonth(income.date, calendar: calendar, todayComponents: todayComponents),
+                  day <= currentDay
+            else {
+                return nil
+            }
+            return ActivityDailyAmount(day: day, amountPence: income.amountPence)
+        }
+
+        let incomeEvents = (paycheckIncomeEvents.isEmpty ? periodIncomeEvents : paycheckIncomeEvents) + oneOffIncomeEvents
         let spendingEvents = snapshot.transactions.compactMap { transaction -> ActivityDailyAmount? in
             guard transaction.deletedAt == nil,
                   transaction.type == .spending,

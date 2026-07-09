@@ -325,7 +325,9 @@ enum ScreenTopDividerPolicy {
         "Assistant",
         "Card",
         "Card payments",
-        "Add debt"
+        "Add debt",
+        "Pot Overview",
+        "Edit Pot"
     ]
     static let keepsToolbarBackgroundHidden = true
     static let usesNavigationBarAppearanceInstaller = true

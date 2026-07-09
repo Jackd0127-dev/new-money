@@ -187,7 +187,7 @@ struct DashboardView: View {
         let activeItems = items.filter { $0.status != .paidCompleted }
         let paidItems = items.filter { $0.status == .paidCompleted }
         let fundedCount = items.filter(\.isCompleted).count
-        let hasPendingFunding = activeItems.contains { !$0.isCompleted }
+        let hasPendingFunding = activeItems.contains { !$0.isCompleted && !$0.isExcluded }
 
         if !items.isEmpty {
             AppCard(glow: items.contains { !$0.isCompleted }) {
@@ -236,6 +236,8 @@ struct DashboardView: View {
             ForEach(items) { item in
                 FundingChecklistRow(item: item, isReadOnly: isReadOnly) {
                     applyFundingChecklistAction(item)
+                } excludeAction: {
+                    applyFundingChecklistExclusion(item)
                 }
                 if item.id != items.last?.id {
                     AppDivider()
@@ -247,42 +249,12 @@ struct DashboardView: View {
     private func applyFundingChecklistAction(_ item: FundingChecklistPresentationItem) {
         guard item.status != .paidCompleted else { return }
 
-        switch item.action {
-        case .recurringBill(let paymentId, let dueDate, let payPeriodId):
-            _ = store.setRecurringBillFundingCompleted(
-                paymentId: paymentId,
-                dueDate: dueDate,
-                payPeriodId: payPeriodId,
-                completed: !item.isCompleted
-            )
-        case .cardBill(let paymentId, let dueDate, let payPeriodId):
-            _ = store.setCardBillFundingCompleted(
-                paymentId: paymentId,
-                dueDate: dueDate,
-                payPeriodId: payPeriodId,
-                completed: !item.isCompleted
-            )
-        case .cardSpend(let transactionId, let payPeriodId):
-            _ = store.setCardSpendFundingCompleted(
-                transactionId: transactionId,
-                payPeriodId: payPeriodId,
-                completed: !item.isCompleted
-            )
-        case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
-            _ = store.setCardOpeningBalanceFundingCompleted(
-                cardId: cardId,
-                directDebitDate: directDebitDate,
-                payPeriodId: payPeriodId,
-                completed: !item.isCompleted
-            )
-        case .debt(let debtId, let dueDate, let payPeriodId):
-            _ = store.setDebtFundingCompleted(
-                debtId: debtId,
-                dueDate: dueDate,
-                payPeriodId: payPeriodId,
-                completed: !item.isCompleted
-            )
-        }
+        _ = store.setFundingChecklistCompleted(action: item.action, completed: item.isExcluded || !item.isCompleted)
+    }
+
+    private func applyFundingChecklistExclusion(_ item: FundingChecklistPresentationItem) {
+        guard item.status != .paidCompleted else { return }
+        _ = store.setFundingChecklistExcluded(action: item.action, excluded: !item.isExcluded)
     }
 
     private var recentActivity: some View {
@@ -1162,32 +1134,48 @@ private struct FundingChecklistRow: View {
     var item: FundingChecklistPresentationItem
     var isReadOnly: Bool
     var action: () -> Void
+    var excludeAction: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: AppTheme.Spacing.md) {
-                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 32, height: 32)
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Button(action: action) {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 32, height: 32)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(item.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(titleColor)
-                        .lineLimit(2)
-                    Text(detailText)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(titleColor)
+                            .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
+                            .lineLimit(2)
+                        Text(detailText)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
                 }
-
-                Spacer(minLength: AppTheme.Spacing.sm)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(isReadOnly)
+
+            if !isReadOnly {
+                Button(action: excludeAction) {
+                    Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(isReadOnly)
         .opacity(isReadOnly ? 0.72 : 1)
         .accessibilityLabel(accessibilityLabel)
     }
@@ -1195,6 +1183,10 @@ private struct FundingChecklistRow: View {
     private var iconColor: Color {
         if isReadOnly {
             return AppTheme.Colors.secondaryText
+        }
+
+        if item.isExcluded {
+            return AppTheme.Colors.warning
         }
 
         return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.secondaryText
@@ -1205,10 +1197,18 @@ private struct FundingChecklistRow: View {
             return AppTheme.Colors.secondaryText
         }
 
+        if item.isExcluded {
+            return AppTheme.Colors.secondaryText
+        }
+
         return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.primaryText
     }
 
     private var detailText: String {
+        if item.isExcluded {
+            return "\(item.detail) · excluded this period"
+        }
+
         guard let paidDate = item.paidDate else {
             return item.detail
         }
@@ -1219,6 +1219,10 @@ private struct FundingChecklistRow: View {
     private var accessibilityLabel: String {
         if isReadOnly {
             return "Paid \(item.name)"
+        }
+
+        if item.isExcluded {
+            return "Fund excluded \(item.name)"
         }
 
         return "\(item.isCompleted ? "Undo" : "Fund") \(item.name)"
@@ -1276,7 +1280,7 @@ struct IncomeBreakdownView: View {
             }
         ) {
             AppCard(glow: true) {
-                MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod?.incomePence ?? 0), valueColor: AppTheme.Colors.success)
+                MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod.map { PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: $0) } ?? 0), valueColor: AppTheme.Colors.success)
                 MetricRow(label: "Money left", value: MoneyParser.formatPence(costSummary.currentMoneyLeftPence), valueColor: costSummary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
                 MetricRow(label: "Projected costs", value: MoneyParser.formatPence(costSummary.projectedCostsPence), valueColor: AppTheme.Colors.warning)
                 if costSummary.unfundedChecklistPence > 0 {
@@ -1327,7 +1331,7 @@ struct IncomeBreakdownView: View {
                         MetricRow(label: "Payday", value: FinanceEngine.formatPaydayLabel(period.payday))
                         MetricRow(label: "Period", value: "\(FinanceEngine.formatPaydayLabel(period.startDate)) to \(FinanceEngine.formatPaydayLabel(period.endDate))")
                         MetricRow(label: "Next payday", value: FinanceEngine.formatPaydayLabel(period.nextPayday))
-                        MetricRow(label: "Income", value: MoneyParser.formatPence(period.incomePence), valueColor: AppTheme.Colors.success)
+                        MetricRow(label: "Income", value: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period)), valueColor: AppTheme.Colors.success)
                         MetricRow(label: "Status", value: period.status.rawValue.capitalized)
                         MetricRow(label: "Allocated", value: MoneyParser.formatPence(allocations(for: period).reduce(0) { $0 + $1.amountPence }), valueColor: AppTheme.Colors.primaryOrange)
                         ForEach(allocations(for: period)) { allocation in

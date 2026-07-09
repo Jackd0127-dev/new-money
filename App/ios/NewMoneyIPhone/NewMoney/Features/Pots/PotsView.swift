@@ -1431,7 +1431,9 @@ private struct PotDetailView: View {
                 .padding(AppTheme.Spacing.lg)
             }
             .premiumScreenBackground()
-            .navigationTitle(latestPot.name)
+            .navigationTitle("Pot Overview")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
             .navigationDestination(isPresented: $isEditingSetup) {
                 PotEditView(store: store, pot: latestPot)
             }
@@ -1443,7 +1445,7 @@ private struct PotDetailView: View {
                     Button {
                         isEditingSetup = true
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Text("Edit")
                     }
                     .accessibilityLabel("Edit pot setup")
                 }
@@ -1517,8 +1519,9 @@ private struct PotEditView: View {
             .padding(AppTheme.Spacing.lg)
         }
         .premiumScreenBackground()
-        .navigationTitle("Edit pot")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle("Edit Pot")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationTopDividerHidden()
     }
 
     private var isSaveDisabled: Bool {

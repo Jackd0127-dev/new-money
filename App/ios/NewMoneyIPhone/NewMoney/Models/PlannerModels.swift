@@ -371,6 +371,37 @@ struct Paycheck: Codable, Equatable, Identifiable, Sendable {
     var deletedAt: String?
 }
 
+struct OneOffIncome: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var payPeriodId: String?
+    var name: String
+    var amountPence: Int
+    var date: String
+    var note: String
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
+enum FundingChecklistExclusionKind: String, Codable, Sendable {
+    case recurringBill = "recurring_bill"
+    case cardBill = "card_bill"
+    case cardSpend = "card_spend"
+    case cardOpeningBalance = "card_opening_balance"
+    case debt
+}
+
+struct FundingChecklistExclusion: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var kind: FundingChecklistExclusionKind
+    var sourceId: String
+    var occurrenceDate: String
+    var payPeriodId: String
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
 struct PotAllocation: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var payPeriodId: String
@@ -794,6 +825,8 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var creditCardRepayments: [CreditCardRepayment]
     var creditCardPots: [CreditCardPot]
     var dailyBriefs: [DailyBrief]
+    var oneOffIncomes: [OneOffIncome]
+    var fundingChecklistExclusions: [FundingChecklistExclusion]
 
     init(
         settings: Settings,
@@ -813,7 +846,9 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         customPayments: [CustomPayment],
         creditCardRepayments: [CreditCardRepayment],
         creditCardPots: [CreditCardPot],
-        dailyBriefs: [DailyBrief]
+        dailyBriefs: [DailyBrief],
+        oneOffIncomes: [OneOffIncome] = [],
+        fundingChecklistExclusions: [FundingChecklistExclusion] = []
     ) {
         self.settings = settings
         self.pots = pots
@@ -833,10 +868,12 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.creditCardRepayments = creditCardRepayments
         self.creditCardPots = creditCardPots
         self.dailyBriefs = dailyBriefs
+        self.oneOffIncomes = oneOffIncomes
+        self.fundingChecklistExclusions = fundingChecklistExclusions
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, dailyBriefs
+        case settings, pots, recurringPayments, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, dailyBriefs, oneOffIncomes, fundingChecklistExclusions
     }
 
     init(from decoder: Decoder) throws {
@@ -859,7 +896,9 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             customPayments: try container.decodeIfPresent([CustomPayment].self, forKey: .customPayments) ?? [],
             creditCardRepayments: try container.decodeIfPresent([CreditCardRepayment].self, forKey: .creditCardRepayments) ?? [],
             creditCardPots: try container.decodeIfPresent([CreditCardPot].self, forKey: .creditCardPots) ?? [],
-            dailyBriefs: try container.decodeIfPresent([DailyBrief].self, forKey: .dailyBriefs) ?? []
+            dailyBriefs: try container.decodeIfPresent([DailyBrief].self, forKey: .dailyBriefs) ?? [],
+            oneOffIncomes: try container.decodeIfPresent([OneOffIncome].self, forKey: .oneOffIncomes) ?? [],
+            fundingChecklistExclusions: try container.decodeIfPresent([FundingChecklistExclusion].self, forKey: .fundingChecklistExclusions) ?? []
         )
     }
 }

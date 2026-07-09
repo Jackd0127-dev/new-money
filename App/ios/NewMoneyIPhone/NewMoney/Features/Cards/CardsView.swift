@@ -461,9 +461,9 @@ private struct StaticCreditCardPreviewFace: View, Equatable {
 
                 CreditCardFrontFaceContent(
                     design: model.design,
-                    leadingTitle: cardProviderLabel,
+                    leadingTitle: cardFaceTitle,
                     leadingSubtitle: nil,
-                    networkLabel: cardProviderLabel,
+                    networkLabel: cardNetworkLabel,
                     facePills: cardFacePills
                 )
                     .frame(width: innerWidth, height: innerHeight, alignment: .topLeading)
@@ -476,7 +476,12 @@ private struct StaticCreditCardPreviewFace: View, Equatable {
         .aspectRatio(CreditCardVisualLayoutPolicy.cardAspectRatio, contentMode: .fit)
     }
 
-    private var cardProviderLabel: String {
+    private var cardFaceTitle: String {
+        let trimmedName = model.card.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedName.isEmpty ? model.design.providerFallback.uppercased() : trimmedName
+    }
+
+    private var cardNetworkLabel: String {
         model.design.providerFallback.uppercased()
     }
 

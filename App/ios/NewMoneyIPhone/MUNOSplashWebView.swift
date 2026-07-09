@@ -1,6 +1,13 @@
 import SwiftUI
 import WebKit
 
+enum MUNOSplashPresentationPolicy {
+    static let playsOncePerProcessLaunch = true
+    static let replaysOnForeground = false
+    static let usesScenePhaseReplayRevision = false
+    static let fadeOutDuration = 0.28
+}
+
 struct MUNOSplashWebView: UIViewRepresentable {
     var resourceName: String = "muno-splash"
     var fileExtension: String = "html"
@@ -63,12 +70,10 @@ struct MUNOSplashWebView: UIViewRepresentable {
 }
 
 struct MUNOSplashHost<Content: View>: View {
-    var replayRevision = 0
     @State private var isShowingSplash = true
     private let content: () -> Content
 
-    init(replayRevision: Int = 0, @ViewBuilder content: @escaping () -> Content) {
-        self.replayRevision = replayRevision
+    init(@ViewBuilder content: @escaping () -> Content) {
         self.content = content
     }
 
@@ -79,24 +84,16 @@ struct MUNOSplashHost<Content: View>: View {
 
             if isShowingSplash {
                 MUNOSplashWebView {
-                    withAnimation(.easeOut(duration: 0.28)) {
+                    withAnimation(.easeOut(duration: MUNOSplashPresentationPolicy.fadeOutDuration)) {
                         isShowingSplash = false
                     }
                 }
-                .id(replayRevision)
                 .ignoresSafeArea()
                 .background(Color.black)
                 .transition(.opacity)
             }
         }
         .background(Color.black)
-        .onChange(of: replayRevision) { _, _ in
-            var transaction = SwiftUI.Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isShowingSplash = true
-            }
-        }
     }
 }
 

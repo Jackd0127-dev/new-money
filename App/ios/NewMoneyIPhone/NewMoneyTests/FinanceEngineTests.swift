@@ -19,6 +19,37 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(FinanceEngine.calculatePaycheckAmount(hoursWorked: 72, hourlyRatePence: 1250, actualAmountPence: 87550), 87550)
     }
 
+    func testPlannerSnapshotDecodesMissingOneOffIncomeAndChecklistExclusions() throws {
+        let encoded = try JSONEncoder().encode(makeSnapshot())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "oneOffIncomes")
+        object.removeValue(forKey: "fundingChecklistExclusions")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(PlannerSnapshot.self, from: legacyData)
+
+        XCTAssertTrue(decoded.oneOffIncomes.isEmpty)
+        XCTAssertTrue(decoded.fundingChecklistExclusions.isEmpty)
+    }
+
+    @MainActor
+    func testOneOffIncomeAddsToCurrentPeriodWithoutCreatingPaycheck() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, payPeriods: [period])))
+
+        await store.load()
+        XCTAssertTrue(store.addOneOffIncome(name: "Birthday gift", amountPence: 25000, date: "2026-06-10", note: "Birthday gift"))
+
+        XCTAssertEqual(store.snapshot.oneOffIncomes.map(\.name), ["Birthday gift"])
+        XCTAssertTrue(store.snapshot.paychecks.isEmpty)
+        XCTAssertEqual(store.snapshot.payPeriods.map(\.id), [period.id])
+
+        let summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-10")
+        XCTAssertEqual(summary.payReceivedPence, 75000)
+        XCTAssertEqual(summary.moneyLeftPence, 75000)
+    }
+
     func testFormatsPaydayLabelWithOrdinalFullMonthAndTwoDigitYear() {
         XCTAssertEqual(FinanceEngine.formatPaydayLabel("2027-06-01"), "1st June 27")
         XCTAssertEqual(FinanceEngine.formatPaydayLabel("2027-06-02"), "2nd June 27")
@@ -3281,6 +3312,66 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testExcludingFundingChecklistItemKeepsItVisibleAndRemovesOnlyThatOccurrenceFromProjectedCosts() async throws {
+        let settings = makeManualSettings(today: "2026-06-01")
+        let junePeriod = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
+        let julyPeriod = makePayPeriod(id: "period-july", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 50000)
+        let pot = makePot(id: "pot-bills", name: "Bills", balancePence: 0, targetPence: nil)
+        let payment = makeRecurringPayment(id: "rec-phone", name: "Phone", amountPence: 2999, dueDay: 10, potId: pot.id)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, pots: [pot], recurringPayments: [payment], payPeriods: [junePeriod, julyPeriod])))
+
+        await store.load()
+        let initialItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: junePeriod, asOfDate: "2026-06-01").first)
+        let initialSummary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: junePeriod, asOfDate: "2026-06-01")
+        XCTAssertEqual(initialSummary.unfundedChecklistPence, 2999)
+        XCTAssertEqual(initialSummary.projectedMoneyLeftPence, 47001)
+
+        XCTAssertTrue(store.setFundingChecklistExcluded(action: initialItem.action, excluded: true))
+
+        let juneItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: junePeriod, asOfDate: "2026-06-01").first)
+        XCTAssertTrue(juneItem.isExcluded)
+        XCTAssertEqual(juneItem.status, .excluded)
+        XCTAssertFalse(juneItem.isCompleted)
+        XCTAssertTrue(store.snapshot.potAllocations.isEmpty)
+
+        let excludedSummary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: junePeriod, asOfDate: "2026-06-01")
+        XCTAssertEqual(excludedSummary.unfundedChecklistPence, 0)
+        XCTAssertEqual(excludedSummary.projectedMoneyLeftPence, 50000)
+
+        let julyItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: julyPeriod, asOfDate: "2026-07-01").first)
+        XCTAssertFalse(julyItem.isExcluded)
+        XCTAssertEqual(julyItem.status, .needsFunding)
+    }
+
+    @MainActor
+    func testExcludingFundedChecklistItemReversesAllocationAndCheckingAgainFundsIt() async throws {
+        let settings = makeManualSettings(today: "2026-06-01")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
+        let card = makeCreditCard(id: "card-main", name: "Main Card", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: nil, dueDay: 1)
+        let pot = makePot(id: "pot-card", name: "Card Pot", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let payment = makeRecurringPayment(id: "rec-chatgpt", name: "ChatGPT", amountPence: 10000, dueDay: 10, potId: pot.id, creditCardId: card.id)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, pots: [pot], recurringPayments: [payment], payPeriods: [period], creditCards: [card])))
+
+        await store.load()
+        XCTAssertTrue(store.setCardBillFundingCompleted(paymentId: payment.id, dueDate: "2026-06-10", payPeriodId: period.id, completed: true))
+        XCTAssertEqual(store.snapshot.potAllocations.count, 1)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
+
+        let fundedItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-01").first)
+        XCTAssertTrue(store.setFundingChecklistExcluded(action: fundedItem.action, excluded: true))
+        XCTAssertTrue(store.snapshot.potAllocations.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+
+        let excludedItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-01").first)
+        XCTAssertTrue(excludedItem.isExcluded)
+
+        XCTAssertTrue(store.setFundingChecklistCompleted(action: excludedItem.action, completed: true))
+        XCTAssertTrue(store.snapshot.fundingChecklistExclusions.isEmpty)
+        XCTAssertEqual(store.snapshot.potAllocations.count, 1)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
+    }
+
+    @MainActor
     func testTickingDebtFundingChecklistTopsUpAndUntickingReversesPotAllocation() async {
         let settings = makeManualSettings(today: "2026-06-01")
         let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
@@ -4153,7 +4244,9 @@ final class FinanceEngineTests: XCTestCase {
         debtPaymentScheduleItems: [DebtPaymentScheduleItem] = [],
         creditCards: [CreditCard] = [],
         customPayments: [CustomPayment] = [],
-        creditCardRepayments: [CreditCardRepayment] = []
+        creditCardRepayments: [CreditCardRepayment] = [],
+        oneOffIncomes: [OneOffIncome] = [],
+        fundingChecklistExclusions: [FundingChecklistExclusion] = []
     ) -> PlannerSnapshot {
         PlannerSnapshot(
             settings: settings,
@@ -4172,7 +4265,9 @@ final class FinanceEngineTests: XCTestCase {
             customPayments: customPayments,
             creditCardRepayments: creditCardRepayments,
             creditCardPots: [],
-            dailyBriefs: []
+            dailyBriefs: [],
+            oneOffIncomes: oneOffIncomes,
+            fundingChecklistExclusions: fundingChecklistExclusions
         )
     }
 

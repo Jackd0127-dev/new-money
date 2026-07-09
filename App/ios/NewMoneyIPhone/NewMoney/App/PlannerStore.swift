@@ -461,6 +461,31 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    @discardableResult
+    func addOneOffIncome(name: String, amountPence: Int, date: String, note: String) -> Bool {
+        let amount = abs(amountPence)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard amount > 0, FinanceEngine.isIsoDate(date) else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        let income = OneOffIncome(
+            id: DateUtilities.newId(prefix: "one-off-income"),
+            payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id,
+            name: trimmedName.isEmpty ? "One-off income" : trimmedName,
+            amountPence: amount,
+            date: date,
+            note: trimmedNote,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: nil
+        )
+
+        snapshot.oneOffIncomes.insert(income, at: 0)
+        persist()
+        return true
+    }
+
     func updatePaycheck(id: String, payday: String, hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?, payFrequency: PayFrequency? = nil) {
         guard let paycheckIndex = snapshot.paychecks.firstIndex(where: { $0.id == id }) else { return }
         let payPeriodId = snapshot.paychecks[paycheckIndex].payPeriodId
@@ -1371,6 +1396,63 @@ final class PlannerStore: ObservableObject {
     }
 
     @discardableResult
+    func setFundingChecklistCompleted(action: FundingChecklistAction, completed: Bool) -> Bool {
+        let succeeded: Bool
+        switch action {
+        case .recurringBill(let paymentId, let dueDate, let payPeriodId):
+            succeeded = setRecurringBillFundingCompleted(paymentId: paymentId, dueDate: dueDate, payPeriodId: payPeriodId, completed: completed)
+        case .cardBill(let paymentId, let dueDate, let payPeriodId):
+            succeeded = setCardBillFundingCompleted(paymentId: paymentId, dueDate: dueDate, payPeriodId: payPeriodId, completed: completed)
+        case .cardSpend(let transactionId, let payPeriodId):
+            succeeded = setCardSpendFundingCompleted(transactionId: transactionId, payPeriodId: payPeriodId, completed: completed)
+        case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
+            succeeded = setCardOpeningBalanceFundingCompleted(cardId: cardId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: completed)
+        case .debt(let debtId, let dueDate, let payPeriodId):
+            succeeded = setDebtFundingCompleted(debtId: debtId, dueDate: dueDate, payPeriodId: payPeriodId, completed: completed)
+        }
+
+        if completed, succeeded {
+            removeFundingChecklistExclusion(for: action, shouldPersist: true)
+        }
+        return succeeded
+    }
+
+    @discardableResult
+    func setFundingChecklistExcluded(action: FundingChecklistAction, excluded: Bool) -> Bool {
+        guard let identity = fundingChecklistExclusionIdentity(for: action) else { return false }
+
+        if !excluded {
+            removeFundingChecklistExclusion(for: action, shouldPersist: true)
+            return true
+        }
+
+        guard setFundingChecklistCompleted(action: action, completed: false) else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        snapshot.fundingChecklistExclusions.removeAll {
+            $0.kind == identity.kind &&
+            $0.sourceId == identity.sourceId &&
+            $0.occurrenceDate == identity.occurrenceDate &&
+            $0.payPeriodId == identity.payPeriodId
+        }
+        snapshot.fundingChecklistExclusions.insert(
+            FundingChecklistExclusion(
+                id: fundingChecklistExclusionId(identity),
+                kind: identity.kind,
+                sourceId: identity.sourceId,
+                occurrenceDate: identity.occurrenceDate,
+                payPeriodId: identity.payPeriodId,
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: nil
+            ),
+            at: 0
+        )
+        persist()
+        return true
+    }
+
+    @discardableResult
     func applyDueLinkedPotObligations(asOf todayIso: String) -> Bool {
         var changed = false
         changed = applyDueRecurringPotPayments(asOf: todayIso) || changed
@@ -1829,6 +1911,49 @@ final class PlannerStore: ObservableObject {
 
     private func recurringBillFundingAllocationId(paymentId: String, dueDate: String, payPeriodId: String) -> String {
         "recurring-bill-funding-allocation-\(paymentId)-\(dueDate)-\(payPeriodId)"
+    }
+
+    private func fundingChecklistExclusionIdentity(
+        for action: FundingChecklistAction
+    ) -> (kind: FundingChecklistExclusionKind, sourceId: String, occurrenceDate: String, payPeriodId: String)? {
+        switch action {
+        case .recurringBill(let paymentId, let dueDate, let payPeriodId):
+            let payment = snapshot.recurringPayments.first { $0.id == paymentId }
+            let kind: FundingChecklistExclusionKind = payment?.creditCardId?.nilIfBlank == nil
+                ? .recurringBill
+                : .cardBill
+            return (kind, paymentId, dueDate, payPeriodId)
+        case .cardBill(let paymentId, let dueDate, let payPeriodId):
+            return (.cardBill, paymentId, dueDate, payPeriodId)
+        case .cardSpend(let transactionId, let payPeriodId):
+            guard let transaction = snapshot.transactions.first(where: { $0.id == transactionId }) else { return nil }
+            return (.cardSpend, transactionId, transaction.date, payPeriodId)
+        case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
+            return (.cardOpeningBalance, cardId, directDebitDate, payPeriodId)
+        case .debt(let debtId, let dueDate, let payPeriodId):
+            return (.debt, debtId, dueDate, payPeriodId)
+        }
+    }
+
+    private func fundingChecklistExclusionId(
+        _ identity: (kind: FundingChecklistExclusionKind, sourceId: String, occurrenceDate: String, payPeriodId: String)
+    ) -> String {
+        "funding-exclusion-\(identity.kind.rawValue)-\(identity.sourceId)-\(identity.occurrenceDate)-\(identity.payPeriodId)"
+    }
+
+    private func removeFundingChecklistExclusion(for action: FundingChecklistAction, shouldPersist: Bool) {
+        guard let identity = fundingChecklistExclusionIdentity(for: action) else { return }
+        let originalCount = snapshot.fundingChecklistExclusions.count
+        snapshot.fundingChecklistExclusions.removeAll {
+            $0.kind == identity.kind &&
+            $0.sourceId == identity.sourceId &&
+            $0.occurrenceDate == identity.occurrenceDate &&
+            $0.payPeriodId == identity.payPeriodId
+        }
+
+        if shouldPersist, snapshot.fundingChecklistExclusions.count != originalCount {
+            persist()
+        }
     }
 
     private func isRecurringBillFundingSource(_ source: PotAllocationSource?) -> Bool {

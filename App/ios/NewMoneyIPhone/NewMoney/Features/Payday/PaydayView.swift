@@ -206,12 +206,21 @@ private struct SpendingPeriodGroup: Identifiable {
 struct AddPaycheckSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
+    @State private var isOneOffIncome = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                PaycheckPlanFormCard(store: store) {
-                    dismiss()
+                Group {
+                    if isOneOffIncome {
+                        OneOffIncomeFormCard(store: store) {
+                            dismiss()
+                        }
+                    } else {
+                        PaycheckPlanFormCard(store: store) {
+                            dismiss()
+                        }
+                    }
                 }
                 .padding(AppTheme.Spacing.lg)
             }
@@ -221,6 +230,13 @@ struct AddPaycheckSheetView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(isOneOffIncome ? "Paycheck" : "One off") {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                            isOneOffIncome.toggle()
+                        }
+                    }
                 }
             }
         }
@@ -318,6 +334,50 @@ struct PaycheckPlanFormCard: View {
             settings.defaultPayPeriodDays = FinanceEngine.frequencyToDays(newValue)
             store.updateSettings(settings)
         }
+    }
+}
+
+struct OneOffIncomeFormCard: View {
+    @ObservedObject var store: PlannerStore
+    var onSaved: (() -> Void)?
+    @State private var incomeDate = Date()
+    @State private var name = ""
+    @State private var amount = ""
+    @State private var note = ""
+
+    var body: some View {
+        AppCard(glow: true) {
+            SectionTitle("Add one-off income")
+            DatePicker("Date", selection: $incomeDate, displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .tint(AppTheme.Colors.primaryOrange)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+
+            TextField("Source", text: $name)
+                .textFieldStyle(AppTextFieldStyle())
+
+            MoneyField(title: "Amount", text: $amount)
+
+            TextField("Note", text: $note)
+                .textFieldStyle(AppTextFieldStyle())
+
+            PrimaryButton(title: "Add income", systemImage: "plus", isDisabled: !canSave) {
+                guard store.addOneOffIncome(
+                    name: name,
+                    amountPence: MoneyParser.parsePoundsToPence(amount),
+                    date: incomeDate.isoDateString,
+                    note: note
+                ) else { return }
+                name = ""
+                amount = ""
+                note = ""
+                onSaved?()
+            }
+        }
+    }
+
+    private var canSave: Bool {
+        MoneyParser.parsePoundsToPence(amount) > 0
     }
 }
 

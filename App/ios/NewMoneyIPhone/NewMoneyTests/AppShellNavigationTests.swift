@@ -2,6 +2,13 @@ import XCTest
 @testable import NewMoneyIPhone
 
 final class AppShellNavigationTests: XCTestCase {
+    func testSplashPlaysOnlyOncePerProcessLaunch() {
+        XCTAssertTrue(MUNOSplashPresentationPolicy.playsOncePerProcessLaunch)
+        XCTAssertFalse(MUNOSplashPresentationPolicy.replaysOnForeground)
+        XCTAssertFalse(MUNOSplashPresentationPolicy.usesScenePhaseReplayRevision)
+        XCTAssertEqual(MUNOSplashPresentationPolicy.fadeOutDuration, 0.28, accuracy: 0.001)
+    }
+
     func testPrimaryTabOrderMatchesMainNavigationRestructure() {
         XCTAssertEqual(AppTab.allCases.map(\.title), ["Home", "Bills", "Activity", "Pots", "Credit"])
         XCTAssertEqual(AppTab.allCases.map(\.symbol), ["house", "calendar.badge.clock", "list.bullet.rectangle.portrait", "wallet.pass", "creditcard.trianglebadge.exclamationmark"])
@@ -227,7 +234,9 @@ final class AppShellNavigationTests: XCTestCase {
             "Assistant",
             "Card",
             "Card payments",
-            "Add debt"
+            "Add debt",
+            "Pot Overview",
+            "Edit Pot"
         ])
         XCTAssertTrue(ScreenTopDividerPolicy.keepsToolbarBackgroundHidden)
         XCTAssertTrue(ScreenTopDividerPolicy.usesNavigationBarAppearanceInstaller)
@@ -265,7 +274,7 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     func testBillsTabSupportsGroupsAndLinkedBillContext() {
-        XCTAssertEqual(BillsLayoutPolicy.sections, [.overview, .groups, .upcoming, .billGroups])
+        XCTAssertEqual(BillsLayoutPolicy.sections, [.overview, .fundingChecklist, .groups, .billGroups, .upcoming])
         XCTAssertEqual(BillsLayoutPolicy.overviewPresentation, .navigationPush)
         XCTAssertEqual(BillsLayoutPolicy.groupCreationPlacement, "groupsHeader")
         XCTAssertTrue(BillsLayoutPolicy.showsCreditCardAndPotLinksOnBills)
@@ -274,6 +283,15 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertGreaterThan(BillsLayoutPolicy.groupFilterHorizontalContentPadding, 0)
         XCTAssertTrue(BillsLayoutPolicy.overviewHeroUsesGlow)
         XCTAssertFalse(BillsLayoutPolicy.detailShowsDuplicateUpcomingEmptyState)
+        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistPlacement, "belowOverview")
+        XCTAssertTrue(BillsLayoutPolicy.fundingChecklistAlwaysVisible)
+        XCTAssertTrue(BillsLayoutPolicy.fundingChecklistUsesExistingDerivedItems)
+        XCTAssertEqual(BillsLayoutPolicy.yourBillsPresentation, "collapsibleDropdown")
+        XCTAssertEqual(BillsLayoutPolicy.takingSoonPresentation, "collapsibleDropdown")
+        XCTAssertTrue(BillsLayoutPolicy.yourBillsAppearsAboveTakingSoon)
+        XCTAssertTrue(BillsLayoutPolicy.billRowsOpenEditScreen)
+        XCTAssertEqual(BillsLayoutPolicy.editBillTitle, "Edit Bill")
+        XCTAssertTrue(BillsLayoutPolicy.editUsesExistingRecurringPaymentUpdate)
     }
 
     func testPotsSummaryOpensGraphTimelineDetail() {
@@ -380,6 +398,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDateFormat, "EEE, d MMM yyyy")
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDetailPresentation, .navigationPush)
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDetailUsesInlineTitle)
+        XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsGeneratedPayPeriodSummaries)
+        XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsZeroValuePaychecks)
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceChartMetric, "currentMonthIncomeMinusSpending")
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceDetailPresentation, .navigationPush)
         XCTAssertTrue(ActivityLayoutPolicy.monthBalanceDetailUsesInlineTitle)

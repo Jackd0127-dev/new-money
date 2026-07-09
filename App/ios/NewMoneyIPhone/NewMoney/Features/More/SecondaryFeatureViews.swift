@@ -382,111 +382,86 @@ enum AddBillFormLayoutPolicy {
     static let allowedFrequencies: [RecurringFrequency] = [.weekly, .biweekly, .monthly, .yearly]
 }
 
-struct AddBillSheetView: View {
-    @Environment(\.dismiss) private var dismiss
+private struct BillEditorFormCard: View {
     @ObservedObject var store: PlannerStore
-    @State private var name = ""
-    @State private var amount = ""
-    @State private var dueDay = ""
-    @State private var frequency: RecurringFrequency = .monthly
-    @State private var priority: RecurringPriority = .essential
-    @State private var potId = ""
-    @State private var cardId = ""
-    @State private var billGroupId = ""
-    @State private var routeToCard = false
+    var title: String
+    @Binding var name: String
+    @Binding var amount: String
+    @Binding var dueDay: String
+    @Binding var frequency: RecurringFrequency
+    @Binding var priority: RecurringPriority
+    @Binding var potId: String
+    @Binding var cardId: String
+    @Binding var billGroupId: String
+    @Binding var routeToCard: Bool
+    @Binding var isActive: Bool
+    var showsActiveToggle = false
+    var primaryTitle: String
+    var primarySystemImage: String
+    var isPrimaryDisabled: Bool
+    var primaryAction: () -> Void
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                AppCard(glow: true) {
-                    SectionTitle("Add recurring payment")
-                    TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
-                    MoneyField(title: "Amount", text: $amount)
-                    TextField("Due day", text: $dueDay).keyboardType(.numberPad).textFieldStyle(AppTextFieldStyle())
-                    Picker("Frequency", selection: $frequency) {
-                        ForEach(AddBillFormLayoutPolicy.allowedFrequencies) { frequency in
-                            Text(frequency.rawValue.capitalized).tag(frequency)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    Picker("Priority", selection: $priority) {
-                        ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    if !store.activeBillGroups.isEmpty {
-                        SelectionField(title: "Group", value: selectedBillGroupName, placeholder: "Ungrouped", systemImage: "folder") {
-                            Button("Ungrouped") { billGroupId = "" }
-                            ForEach(store.activeBillGroups) { group in
-                                Button(group.name) { billGroupId = group.id }
-                            }
-                        }
-                    }
-                    Toggle("Linked to card", isOn: $routeToCard)
-                        .tint(AppTheme.Colors.primaryOrange)
-                    if routeToCard {
-                        SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
-                            Button("No card") { cardId = "" }
-                            ForEach(store.activeCards) { card in
-                                Button(card.name) { cardId = card.id }
-                            }
-                        }
-                        SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
-                            Button("No pot") { potId = "" }
-                            if cardLinkedPots.isEmpty {
-                                Text("No linked card pots")
-                            } else {
-                                ForEach(cardLinkedPots) { pot in
-                                    Button(pot.name) { potId = pot.id }
-                                }
-                            }
-                        }
-                    } else {
-                        SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
-                            Button("No pot") { potId = "" }
-                            ForEach(store.activePots) { pot in
-                                Button(pot.name) { potId = pot.id }
-                            }
-                        }
-                    }
-                    PrimaryButton(title: "Add bill", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(amount) <= 0) {
-                        store.addRecurringPayment(
-                            name: name,
-                            amountPence: MoneyParser.parsePoundsToPence(amount),
-                            dueDay: Int(dueDay),
-                            frequency: frequency,
-                            potId: cleanPotId,
-                            creditCardId: routeToCard ? cardId.nilIfBlank : nil,
-                            priority: priority,
-                            billGroupId: billGroupId.nilIfBlank
-                        )
-                        reset()
-                        dismiss()
+        AppCard(glow: true) {
+            SectionTitle(title)
+            TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
+            MoneyField(title: "Amount", text: $amount)
+            TextField("Due day", text: $dueDay)
+                .keyboardType(.numberPad)
+                .textFieldStyle(AppTextFieldStyle())
+            Picker("Frequency", selection: $frequency) {
+                ForEach(AddBillFormLayoutPolicy.allowedFrequencies) { frequency in
+                    Text(frequency.rawValue.capitalized).tag(frequency)
+                }
+            }
+            .pickerStyle(.segmented)
+            Picker("Priority", selection: $priority) {
+                ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if showsActiveToggle {
+                Toggle("Active", isOn: $isActive)
+                    .tint(AppTheme.Colors.primaryOrange)
+            }
+            if !store.activeBillGroups.isEmpty {
+                SelectionField(title: "Group", value: selectedBillGroupName, placeholder: "Ungrouped", systemImage: "folder") {
+                    Button("Ungrouped") { billGroupId = "" }
+                    ForEach(store.activeBillGroups) { group in
+                        Button(group.name) { billGroupId = group.id }
                     }
                 }
-                .padding(AppTheme.Spacing.lg)
             }
-            .premiumScreenBackground()
-            .navigationTitle("Add bill")
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
-        }
-        .onAppear {
-            potId = store.activePots.first?.id ?? ""
-            cardId = store.activeCards.first?.id ?? ""
-            normalizeSelectedCardPot()
+            Toggle("Linked to card", isOn: $routeToCard)
+                .tint(AppTheme.Colors.primaryOrange)
+            if routeToCard {
+                SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
+                    Button("No card") { cardId = "" }
+                    ForEach(store.activeCards) { card in
+                        Button(card.name) { cardId = card.id }
+                    }
+                }
+                SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                    Button("No pot") { potId = "" }
+                    if cardLinkedPots.isEmpty {
+                        Text("No linked card pots")
+                    } else {
+                        ForEach(cardLinkedPots) { pot in
+                            Button(pot.name) { potId = pot.id }
+                        }
+                    }
+                }
+            } else {
+                SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                    Button("No pot") { potId = "" }
+                    ForEach(store.activePots) { pot in
+                        Button(pot.name) { potId = pot.id }
+                    }
+                }
+            }
+            PrimaryButton(title: primaryTitle, systemImage: primarySystemImage, isDisabled: isPrimaryDisabled, action: primaryAction)
         }
         .onChange(of: cardId) { _, _ in normalizeSelectedCardPot() }
         .onChange(of: routeToCard) { _, _ in normalizeSelectedCardPot() }
-    }
-
-    private func reset() {
-        name = ""
-        amount = ""
-        dueDay = ""
-        frequency = .monthly
-        priority = .essential
-        billGroupId = ""
-        routeToCard = false
     }
 
     private var cardLinkedPots: [Pot] {
@@ -505,6 +480,90 @@ struct AddBillSheetView: View {
         store.activeBillGroups.first { $0.id == billGroupId }?.name ?? ""
     }
 
+    private func normalizeSelectedCardPot() {
+        guard routeToCard else { return }
+        if !cardLinkedPots.contains(where: { $0.id == potId }) {
+            potId = cardLinkedPots.first?.id ?? ""
+        }
+    }
+}
+
+struct AddBillSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var name = ""
+    @State private var amount = ""
+    @State private var dueDay = ""
+    @State private var frequency: RecurringFrequency = .monthly
+    @State private var priority: RecurringPriority = .essential
+    @State private var potId = ""
+    @State private var cardId = ""
+    @State private var billGroupId = ""
+    @State private var routeToCard = false
+    @State private var isActive = true
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                BillEditorFormCard(
+                    store: store,
+                    title: "Add recurring payment",
+                    name: $name,
+                    amount: $amount,
+                    dueDay: $dueDay,
+                    frequency: $frequency,
+                    priority: $priority,
+                    potId: $potId,
+                    cardId: $cardId,
+                    billGroupId: $billGroupId,
+                    routeToCard: $routeToCard,
+                    isActive: $isActive,
+                    primaryTitle: "Add bill",
+                    primarySystemImage: "plus",
+                    isPrimaryDisabled: name.isBlank || MoneyParser.parsePoundsToPence(amount) <= 0
+                ) {
+                        store.addRecurringPayment(
+                            name: name,
+                            amountPence: MoneyParser.parsePoundsToPence(amount),
+                            dueDay: Int(dueDay),
+                            frequency: frequency,
+                            potId: cleanPotId,
+                            creditCardId: routeToCard ? cardId.nilIfBlank : nil,
+                            priority: priority,
+                            billGroupId: billGroupId.nilIfBlank
+                        )
+                        reset()
+                        dismiss()
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Add bill")
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+        .onAppear {
+            potId = store.activePots.first?.id ?? ""
+            cardId = store.activeCards.first?.id ?? ""
+            normalizeSelectedCardPot()
+        }
+    }
+
+    private func reset() {
+        name = ""
+        amount = ""
+        dueDay = ""
+        frequency = .monthly
+        priority = .essential
+        billGroupId = ""
+        routeToCard = false
+        isActive = true
+    }
+
+    private var cardLinkedPots: [Pot] {
+        store.activePots.filter { $0.linkedCreditCardId == cardId }
+    }
+
     private var cleanPotId: String? {
         if routeToCard {
             return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
@@ -521,8 +580,121 @@ struct AddBillSheetView: View {
     }
 }
 
+private struct EditBillView: View {
+    @ObservedObject var store: PlannerStore
+    var payment: RecurringPayment
+    @State private var name: String
+    @State private var amount: String
+    @State private var dueDay: String
+    @State private var frequency: RecurringFrequency
+    @State private var priority: RecurringPriority
+    @State private var potId: String
+    @State private var cardId: String
+    @State private var billGroupId: String
+    @State private var routeToCard: Bool
+    @State private var isActive: Bool
+    @State private var isDeleteConfirmationPresented = false
+
+    init(store: PlannerStore, payment: RecurringPayment) {
+        self.store = store
+        self.payment = payment
+        _name = State(initialValue: payment.name)
+        _amount = State(initialValue: Self.formatMoneyInput(payment.amountPence))
+        _dueDay = State(initialValue: payment.dueDay.map(String.init) ?? "")
+        _frequency = State(initialValue: payment.frequency)
+        _priority = State(initialValue: payment.priority)
+        _potId = State(initialValue: payment.potId ?? "")
+        _cardId = State(initialValue: payment.creditCardId ?? "")
+        _billGroupId = State(initialValue: payment.billGroupId ?? "")
+        _routeToCard = State(initialValue: payment.creditCardId != nil)
+        _isActive = State(initialValue: payment.active)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: AppTheme.Spacing.lg) {
+                BillEditorFormCard(
+                    store: store,
+                    title: "Bill details",
+                    name: $name,
+                    amount: $amount,
+                    dueDay: $dueDay,
+                    frequency: $frequency,
+                    priority: $priority,
+                    potId: $potId,
+                    cardId: $cardId,
+                    billGroupId: $billGroupId,
+                    routeToCard: $routeToCard,
+                    isActive: $isActive,
+                    showsActiveToggle: true,
+                    primaryTitle: "Save changes",
+                    primarySystemImage: "checkmark",
+                    isPrimaryDisabled: !canSave,
+                    primaryAction: saveChanges
+                )
+
+                SecondaryButton(title: "Delete bill", systemImage: "trash", role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                }
+            }
+            .padding(AppTheme.Spacing.lg)
+        }
+        .premiumScreenBackground()
+        .navigationTitle(BillsLayoutPolicy.editBillTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationTopDividerHidden()
+        .alert("Delete bill?", isPresented: $isDeleteConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                store.deleteRecurringPayment(id: payment.id)
+            }
+        } message: {
+            Text("This removes the recurring bill from future bill lists and projected costs.")
+        }
+    }
+
+    private var currentPayment: RecurringPayment {
+        store.snapshot.recurringPayments.first(where: { $0.id == payment.id }) ?? payment
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private var cardLinkedPots: [Pot] {
+        store.activePots.filter { $0.linkedCreditCardId == cardId }
+    }
+
+    private var cleanPotId: String? {
+        if routeToCard {
+            return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
+        }
+
+        return potId.nilIfBlank
+    }
+
+    private func saveChanges() {
+        var updated = currentPayment
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.amountPence = MoneyParser.parsePoundsToPence(amount)
+        updated.dueDay = Int(dueDay)
+        updated.frequency = frequency
+        updated.priority = priority
+        updated.potId = cleanPotId
+        updated.creditCardId = routeToCard ? cardId.nilIfBlank : nil
+        updated.billGroupId = billGroupId.nilIfBlank
+        updated.active = isActive
+        store.updateRecurringPayment(updated)
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        amountPence > 0 ? String(format: "%.2f", Double(amountPence) / 100) : ""
+    }
+}
+
 enum BillsSection: String, Equatable {
     case overview
+    case fundingChecklist
     case groups
     case upcoming
     case billGroups
@@ -533,7 +705,7 @@ enum BillsOverviewPresentation: Equatable {
 }
 
 enum BillsLayoutPolicy {
-    static let sections: [BillsSection] = [.overview, .groups, .upcoming, .billGroups]
+    static let sections: [BillsSection] = [.overview, .fundingChecklist, .groups, .billGroups, .upcoming]
     static let overviewPresentation: BillsOverviewPresentation = .navigationPush
     static let groupCreationPlacement = "groupsHeader"
     static let showsCreditCardAndPotLinksOnBills = true
@@ -542,6 +714,15 @@ enum BillsLayoutPolicy {
     static let groupFilterHorizontalContentPadding: CGFloat = 3
     static let overviewHeroUsesGlow = true
     static let detailShowsDuplicateUpcomingEmptyState = false
+    static let fundingChecklistPlacement = "belowOverview"
+    static let fundingChecklistAlwaysVisible = true
+    static let fundingChecklistUsesExistingDerivedItems = true
+    static let yourBillsPresentation = "collapsibleDropdown"
+    static let takingSoonPresentation = "collapsibleDropdown"
+    static let yourBillsAppearsAboveTakingSoon = true
+    static let billRowsOpenEditScreen = true
+    static let editBillTitle = "Edit Bill"
+    static let editUsesExistingRecurringPaymentUpdate = true
 }
 
 struct BillsView: View {
@@ -549,6 +730,9 @@ struct BillsView: View {
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
     @State private var selectedGroupId: String?
+    @State private var selectedBillIdForEdit: String?
+    @State private var isYourBillsExpanded = true
+    @State private var isTakingSoonExpanded = true
     @State private var isNewGroupPresented = false
     @State private var newGroupName = ""
 
@@ -584,6 +768,11 @@ struct BillsView: View {
                 self.selectedGroupId = nil
             }
         }
+        .navigationDestination(item: $selectedBillIdForEdit) { paymentId in
+            if let payment = store.snapshot.recurringPayments.first(where: { $0.id == paymentId }) {
+                EditBillView(store: store, payment: payment)
+            }
+        }
     }
 
     @ViewBuilder
@@ -591,6 +780,8 @@ struct BillsView: View {
         switch section {
         case .overview:
             overviewCard
+        case .fundingChecklist:
+            fundingChecklistSection
         case .groups:
             groupsSection
         case .upcoming:
@@ -658,6 +849,104 @@ struct BillsView: View {
         .accessibilityHint("Shows bill totals, linked bills, upcoming dates, and groups.")
     }
 
+    private var fundingChecklistSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Funding checklist")
+
+            if fundingChecklistItems.isEmpty {
+                AppCard {
+                    EmptyStateView(
+                        title: "Nothing to tick off",
+                        message: "Linked bills, card payments, and debt funding for this pay period will appear here.",
+                        systemImage: "checklist"
+                    )
+                }
+            } else {
+                let activeItems = fundingChecklistItems.filter { $0.status != .paidCompleted }
+                let paidItems = fundingChecklistItems.filter { $0.status == .paidCompleted }
+                let fundedCount = fundingChecklistItems.filter(\.isCompleted).count
+                let hasPendingFunding = activeItems.contains { !$0.isCompleted && !$0.isExcluded }
+
+                AppCard(glow: hasPendingFunding) {
+                    HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(billsFundingChecklistProgressText(
+                                fundedCount: fundedCount,
+                                totalCount: fundingChecklistItems.count,
+                                hasPendingFunding: hasPendingFunding
+                            ))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.sm)
+
+                        Image(systemName: "checklist.checked")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.success)
+                            .frame(width: 36, height: 36)
+                            .background(AppTheme.Colors.success.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+
+                    AppDivider()
+
+                    billsChecklistSection(title: "Active funding", items: activeItems, isReadOnly: false)
+
+                    if !paidItems.isEmpty {
+                        AppDivider()
+                        billsChecklistSection(title: "Paid / completed", items: paidItems, isReadOnly: true)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func billsChecklistSection(title: String, items: [FundingChecklistPresentationItem], isReadOnly: Bool) -> some View {
+        if !items.isEmpty {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .textCase(.uppercase)
+
+            ForEach(items) { item in
+                BillsFundingChecklistRow(item: item, isReadOnly: isReadOnly) {
+                    applyFundingChecklistAction(item)
+                } excludeAction: {
+                    applyFundingChecklistExclusion(item)
+                }
+
+                if item.id != items.last?.id {
+                    AppDivider()
+                }
+            }
+        }
+    }
+
+    private var fundingChecklistItems: [FundingChecklistPresentationItem] {
+        PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: store.snapshot,
+            payPeriod: store.selectedPayPeriod,
+            asOfDate: store.todayIso
+        )
+    }
+
+    private func applyFundingChecklistAction(_ item: FundingChecklistPresentationItem) {
+        guard item.status != .paidCompleted else { return }
+        _ = store.setFundingChecklistCompleted(action: item.action, completed: item.isExcluded || !item.isCompleted)
+    }
+
+    private func applyFundingChecklistExclusion(_ item: FundingChecklistPresentationItem) {
+        guard item.status != .paidCompleted else { return }
+        _ = store.setFundingChecklistExcluded(action: item.action, excluded: !item.isExcluded)
+    }
+
+    private func billsFundingChecklistProgressText(fundedCount: Int, totalCount: Int, hasPendingFunding: Bool) -> String {
+        let countText = "\(fundedCount)/\(totalCount) funded"
+        return hasPendingFunding ? "Funding pending · \(countText)" : countText
+    }
+
     private var groupsSection: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Groups", actionTitle: "New group") {
@@ -710,8 +999,11 @@ struct BillsView: View {
     }
 
     private var upcomingSection: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            SectionTitle("Taking soon")
+        BillsCollapsibleSection(
+            title: "Taking soon",
+            subtitle: upcomingSectionSubtitle,
+            isExpanded: $isTakingSoonExpanded
+        ) {
             if upcomingOccurrences.isEmpty {
                 AppCard {
                     EmptyStateView(title: "No upcoming bills", message: "Bills with due dates will appear here.", systemImage: "calendar")
@@ -730,8 +1022,11 @@ struct BillsView: View {
     }
 
     private var groupedBillsSection: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            SectionTitle("Your bills")
+        BillsCollapsibleSection(
+            title: "Your bills",
+            subtitle: yourBillsSectionSubtitle,
+            isExpanded: $isYourBillsExpanded
+        ) {
             if sortedBills.isEmpty && store.activeBillGroups.isEmpty {
                 AppCard {
                     EmptyStateView(title: "No bills yet", message: "Use Add to create rent, subscriptions, utilities, transfers, or card-linked bills.", systemImage: "calendar.badge.plus")
@@ -747,10 +1042,29 @@ struct BillsView: View {
                         store.assignRecurringPayment(id: paymentId, toBillGroup: groupId)
                     } archive: { paymentId in
                         store.archiveRecurringPayment(id: paymentId)
+                    } edit: { payment in
+                        selectedBillIdForEdit = payment.id
                     }
                 }
             }
         }
+    }
+
+    private var yourBillsSectionSubtitle: String {
+        if sortedBills.isEmpty {
+            return "No recurring bills yet"
+        }
+
+        return "\(sortedBills.count) bill\(sortedBills.count == 1 ? "" : "s")"
+    }
+
+    private var upcomingSectionSubtitle: String {
+        if upcomingOccurrences.isEmpty {
+            return "Nothing scheduled in the next 30 days"
+        }
+
+        let visibleCount = min(upcomingOccurrences.count, 6)
+        return "\(visibleCount) due soon"
     }
 
     private var activeBillCount: Int {
@@ -850,6 +1164,110 @@ struct BillsView: View {
             .first
             .map { "Next \(billsFriendlyDate($0.dueDate))" }
             ?? billsDueTemplateLabel(payment)
+    }
+}
+
+private struct BillsFundingChecklistRow: View {
+    var item: FundingChecklistPresentationItem
+    var isReadOnly: Bool
+    var action: () -> Void
+    var excludeAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Button(action: action) {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 32, height: 32)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(titleColor)
+                            .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
+                            .lineLimit(2)
+
+                        Text(detailText)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isReadOnly)
+
+            if !isReadOnly {
+                Button(action: excludeAction) {
+                    Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
+            }
+        }
+        .opacity(isReadOnly ? 0.72 : 1)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var iconColor: Color {
+        if isReadOnly {
+            return AppTheme.Colors.secondaryText
+        }
+
+        if item.isExcluded {
+            return AppTheme.Colors.warning
+        }
+
+        return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.secondaryText
+    }
+
+    private var titleColor: Color {
+        if isReadOnly {
+            return AppTheme.Colors.secondaryText
+        }
+
+        if item.isExcluded {
+            return AppTheme.Colors.secondaryText
+        }
+
+        return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.primaryText
+    }
+
+    private var detailText: String {
+        if item.isExcluded {
+            return "\(item.detail) · excluded this period"
+        }
+
+        guard let paidDate = item.paidDate else {
+            return item.detail
+        }
+
+        return "\(item.detail) · paid \(shortDate(paidDate))"
+    }
+
+    private var accessibilityLabel: String {
+        if isReadOnly {
+            return "Paid \(item.name)"
+        }
+
+        if item.isExcluded {
+            return "Fund excluded \(item.name)"
+        }
+
+        return "\(item.isCompleted ? "Undo" : "Fund") \(item.name)"
+    }
+
+    private func shortDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated))
     }
 }
 
@@ -1077,6 +1495,60 @@ private struct BillsDisplaySection: Identifiable {
     var payments: [RecurringPayment]
 }
 
+private struct BillsCollapsibleSection<Content: View>: View {
+    var title: String
+    var subtitle: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            Button {
+                withAnimation(AppTheme.Animation.standard) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+
+                        Text(subtitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.black))
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 32, height: 32)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .padding(.horizontal, AppTheme.Spacing.md)
+                .frame(minHeight: 64)
+                .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+            )
+
+            if isExpanded {
+                content
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(AppTheme.Animation.standard, value: isExpanded)
+    }
+}
+
 private struct BillsOverviewPill: View {
     var title: String
     var subtitle: String
@@ -1172,6 +1644,7 @@ private struct BillsGroupSectionCard: View {
     var nextDueLabel: (RecurringPayment) -> String
     var assignGroup: (String, String?) -> Void
     var archive: (String) -> Void
+    var edit: (RecurringPayment) -> Void
 
     private var totalPence: Int {
         section.payments.filter(\.active).reduce(0) { $0 + $1.amountPence }
@@ -1220,6 +1693,8 @@ private struct BillsGroupSectionCard: View {
                         assignGroup(payment.id, groupId)
                     } archive: {
                         archive(payment.id)
+                    } edit: {
+                        edit(payment)
                     }
 
                     if index != section.payments.count - 1 {
@@ -1239,67 +1714,74 @@ private struct BillsPaymentRow: View {
     var nextDueLabel: String
     var assignGroup: (String?) -> Void
     var archive: () -> Void
+    var edit: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-            BillsBillIcon(payment: payment)
+            Button(action: edit) {
+                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                    BillsBillIcon(payment: payment)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Text(payment.name)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 8) {
+                            Text(payment.name)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
+                                .lineLimit(1)
 
-                    if !payment.active {
-                        Pill(text: "Inactive", color: AppTheme.Colors.tertiaryText)
-                    }
-                }
-
-                Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-
-                BillsLinkChipsView(payment: payment, snapshot: snapshot)
-            }
-
-            Spacer(minLength: AppTheme.Spacing.sm)
-
-            VStack(alignment: .trailing, spacing: 8) {
-                Text(MoneyParser.formatPence(payment.amountPence))
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-                    .multilineTextAlignment(.trailing)
-
-                Menu {
-                    Button("Ungrouped") {
-                        assignGroup(nil)
-                    }
-
-                    if !groups.isEmpty {
-                        Divider()
-                        ForEach(groups) { group in
-                            Button(group.name) {
-                                assignGroup(group.id)
+                            if !payment.active {
+                                Pill(text: "Inactive", color: AppTheme.Colors.tertiaryText)
                             }
                         }
+
+                        Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+
+                        BillsLinkChipsView(payment: payment, snapshot: snapshot)
                     }
 
-                    Divider()
-                    Button("Archive bill", role: .destructive, action: archive)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "folder")
-                        Text(group?.name ?? "Group")
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(MoneyParser.formatPence(payment.amountPence))
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                            .multilineTextAlignment(.trailing)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
                     }
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background((group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText).opacity(0.12), in: Capsule())
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                Button("Ungrouped") {
+                    assignGroup(nil)
+                }
+
+                if !groups.isEmpty {
+                    Divider()
+                    ForEach(groups) { group in
+                        Button(group.name) {
+                            assignGroup(group.id)
+                        }
+                    }
+                }
+
+                Divider()
+                Button("Archive bill", role: .destructive, action: archive)
+            } label: {
+                Image(systemName: "folder")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText)
+                    .frame(width: 32, height: 32)
+                    .background((group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText).opacity(0.12), in: Circle())
             }
         }
         .padding(.vertical, 2)

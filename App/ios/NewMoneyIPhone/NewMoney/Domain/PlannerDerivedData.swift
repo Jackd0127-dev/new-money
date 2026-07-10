@@ -786,8 +786,16 @@ enum PlannerDerivedData {
     static func recurringBillFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [RecurringBillFundingChecklistItem] {
         guard let payPeriod else { return [] }
 
-        let activeCards = Dictionary(uniqueKeysWithValues: snapshot.creditCards.filter { !$0.archived }.map { ($0.id, $0) })
-        let activePots = Dictionary(uniqueKeysWithValues: snapshot.pots.filter { !$0.archived }.map { ($0.id, $0) })
+        let activeCards = snapshot.creditCards
+            .filter { !$0.archived }
+            .reduce(into: [String: CreditCard]()) { result, card in
+                result[card.id] = card
+            }
+        let activePots = snapshot.pots
+            .filter { !$0.archived }
+            .reduce(into: [String: Pot]()) { result, pot in
+                result[pot.id] = pot
+            }
 
         return recurringOccurrences(
             payments: snapshot.recurringPayments,
@@ -870,7 +878,11 @@ enum PlannerDerivedData {
     static func cardSpendFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [CardSpendFundingChecklistItem] {
         guard let payPeriod else { return [] }
 
-        let activeCards = Dictionary(uniqueKeysWithValues: snapshot.creditCards.filter { !$0.archived }.map { ($0.id, $0) })
+        let activeCards = snapshot.creditCards
+            .filter { !$0.archived }
+            .reduce(into: [String: CreditCard]()) { result, card in
+                result[card.id] = card
+            }
 
         return snapshot.transactions
             .filter {
@@ -1424,28 +1436,7 @@ enum PlannerDerivedData {
             return total + min(max(0, transaction.amountPence), fundedPence)
         }
 
-        let manualSpendFundingPence = snapshot.transactions.reduce(0) { total, transaction in
-            guard transaction.deletedAt == nil,
-                  transaction.type == .spending,
-                  transaction.paymentMethod == .creditCard,
-                  transaction.creditCardId == cardId,
-                  transaction.recurringPaymentId == nil,
-                  transaction.date <= endDate,
-                  startDate.map({ transaction.date >= $0 }) ?? true
-            else { return total }
-
-            let fundedPence = snapshot.potAllocations
-                .filter {
-                    $0.deletedAt == nil &&
-                    $0.source == .cardSpendFunding &&
-                    $0.transactionId == transaction.id
-                }
-                .reduce(0) { $0 + max(0, $1.amountPence) }
-
-            return total + min(max(0, transaction.amountPence), fundedPence)
-        }
-
-        return recurringFundingPence + manualSpendFundingPence
+        return recurringFundingPence
     }
 
     static func findPayPeriod(payPeriods: [PayPeriod], date: String) -> PayPeriod? {
@@ -1537,7 +1528,9 @@ enum PlannerDerivedData {
                 )
             }
 
-        let potLookup = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
+        let potLookup = snapshot.pots.reduce(into: [String: Pot]()) { result, pot in
+            result[pot.id] = pot
+        }
         let potAllocationItems = snapshot.potAllocations
             .filter {
                 $0.payPeriodId == payPeriod.id &&
@@ -1851,12 +1844,63 @@ enum PlannerDerivedData {
         events += snapshot.potAllocations.compactMap { allocation in
             guard let period = snapshot.payPeriods.first(where: { $0.id == allocation.payPeriodId }) else { return nil }
             let potName = snapshot.pots.first(where: { $0.id == allocation.potId })?.name ?? "Pot"
-            return CalendarEvent(id: "allocation-\(allocation.id)", date: period.payday, title: "\(potName) allocation", amountPence: allocation.amountPence, type: .allocation, detail: allocation.source?.rawValue ?? "manual")
+            let sourceTitle = potAllocationCalendarTitle(
+                allocation: allocation,
+                potName: potName,
+                snapshot: snapshot
+            )
+            return CalendarEvent(
+                id: "allocation-\(allocation.id)",
+                date: period.payday,
+                title: sourceTitle,
+                amountPence: allocation.amountPence,
+                type: .allocation,
+                detail: "Allocated to \(potName)"
+            )
         }
 
         return events
             .filter { $0.date >= startDate && $0.date <= endDate }
             .sorted { $0.date == $1.date ? eventRank($0.type) < eventRank($1.type) : $0.date < $1.date }
+    }
+
+    private static func potAllocationCalendarTitle(
+        allocation: PotAllocation,
+        potName: String,
+        snapshot: PlannerSnapshot
+    ) -> String {
+        switch allocation.source {
+        case .recurring, .recurringBillFunding, .cardBillFunding:
+            if let paymentName = allocation.recurringPaymentId.flatMap({ recurringPaymentId in
+                snapshot.recurringPayments.first { $0.id == recurringPaymentId }?.name
+            }) {
+                return "\(paymentName) funding"
+            }
+        case .cardSpendFunding:
+            if let transaction = allocation.transactionId.flatMap({ transactionId in
+                snapshot.transactions.first { $0.id == transactionId }
+            }) {
+                return transaction.note.isEmpty ? "Card spend funding" : "\(transaction.note) funding"
+            }
+        case .cardOpeningBalanceFunding:
+            if let cardName = allocation.creditCardId.flatMap({ creditCardId in
+                snapshot.creditCards.first { $0.id == creditCardId }?.name
+            }) {
+                return "\(cardName) opening balance"
+            }
+        case .debtFunding:
+            if let debtName = allocation.debtId.flatMap({ debtId in
+                snapshot.debts.first { $0.id == debtId }?.name
+            }) {
+                return "\(debtName) payment funding"
+            }
+        case .potAuto:
+            return "\(potName) payday top-up"
+        case .manual, .none:
+            break
+        }
+
+        return "\(potName) allocation"
     }
 
     private static func dueDates(for payment: RecurringPayment, startDate: String, endDate: String) -> [String] {
@@ -2071,7 +2115,11 @@ enum PlannerDerivedData {
     }
 
     private static func applyLinkedPotBalances(to items: [PeriodCostItem], pots: [Pot]) -> [PeriodCostItem] {
-        var availableBalanceByPot = Dictionary(uniqueKeysWithValues: pots.filter { !$0.archived }.map { ($0.id, max(0, $0.balancePence)) })
+        var availableBalanceByPot = pots
+            .filter { !$0.archived }
+            .reduce(into: [String: Int]()) { result, pot in
+                result[pot.id] = max(0, pot.balancePence)
+            }
 
         return items.map { item in
             guard let potId = item.potId, item.amountPence > 0 else { return item }
@@ -2327,8 +2375,12 @@ private extension PlannerDerivedData {
     ) -> [FundingChecklistPresentationItem] {
         guard let payPeriod else { return [] }
 
-        let cardsById = Dictionary(uniqueKeysWithValues: snapshot.creditCards.map { ($0.id, $0) })
-        let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
+        let cardsById = snapshot.creditCards.reduce(into: [String: CreditCard]()) { result, card in
+            result[card.id] = card
+        }
+        let potsById = snapshot.pots.reduce(into: [String: Pot]()) { result, pot in
+            result[pot.id] = pot
+        }
 
         return snapshot.potAllocations
             .filter {
@@ -2565,7 +2617,8 @@ private extension PlannerDerivedData {
                 $0.potId == potId &&
                 (
                     $0.source == .recurringBillFunding ||
-                    $0.source == .cardBillFunding
+                    $0.source == .cardBillFunding ||
+                    $0.source == .cardSpendFunding
                 )
             }
             .reduce(0) { total, allocation in
@@ -2829,7 +2882,9 @@ private extension PlannerDerivedData {
         includesCycleStart: Bool,
         asOfDate: String
     ) -> [CreditCardStatementTransaction] {
-        let recurringNames = Dictionary(uniqueKeysWithValues: snapshot.recurringPayments.map { ($0.id, $0.name) })
+        let recurringNames = snapshot.recurringPayments.reduce(into: [String: String]()) { result, payment in
+            result[payment.id] = payment.name
+        }
         var transactions = snapshot.transactions
             .filter {
                 $0.deletedAt == nil &&

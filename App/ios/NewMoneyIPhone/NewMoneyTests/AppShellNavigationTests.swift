@@ -399,7 +399,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDetailPresentation, .navigationPush)
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDetailUsesInlineTitle)
         XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsGeneratedPayPeriodSummaries)
+        XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsGeneratedAutomaticPaychecks)
         XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsZeroValuePaychecks)
+        XCTAssertEqual(ActivityLayoutPolicy.paycheckActivityDateSource, "payday")
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceChartMetric, "currentMonthIncomeMinusSpending")
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceDetailPresentation, .navigationPush)
         XCTAssertTrue(ActivityLayoutPolicy.monthBalanceDetailUsesInlineTitle)
@@ -408,6 +410,32 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.spendingDetailToolbarMode, "editDone")
         XCTAssertTrue(ActivityLayoutPolicy.incomeDetailUsesNativeToolbarMorph)
         XCTAssertTrue(ActivityLayoutPolicy.spendingDetailUsesNativeToolbarMorph)
+
+        let period = PayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            nextPayday: "2026-08-01",
+            payFrequency: .monthly,
+            incomePence: 340663,
+            status: .active,
+            createdAt: "2026-07-09T12:00:00.000Z",
+            updatedAt: "2026-07-09T12:00:00.000Z",
+            deletedAt: nil
+        )
+        let paycheck = Paycheck(
+            id: "paycheck-july",
+            payPeriodId: period.id,
+            hoursWorked: 0,
+            hourlyRatePence: 0,
+            calculatedAmountPence: 340663,
+            actualAmountPence: 340663,
+            createdAt: "2026-07-09T12:00:00.000Z",
+            updatedAt: "2026-07-09T12:00:00.000Z",
+            deletedAt: nil
+        )
+        XCTAssertEqual(ActivityLayoutPolicy.paycheckActivityDate(paycheck: paycheck, payPeriod: period), "2026-07-01")
     }
 
     func testActivityInfinityButtonIsPlaceholderOnly() {
@@ -459,6 +487,72 @@ final class DashboardSpendingChartTests: XCTestCase {
         XCTAssertTrue(chartData.points[19].isFuture)
     }
 
+    func testMonthlyOutgoingsChartIncludesBillsAndFuturePlannedOutgoings() {
+        var snapshot = DefaultData.emptySnapshot
+        snapshot.transactions = [
+            makeTransaction(id: "coffee", amountPence: 450, type: .spending, date: "2026-07-03")
+        ]
+        snapshot.recurringPayments = [
+            makeRecurringPayment(
+                id: "icloud",
+                name: "iCloud+",
+                amountPence: 899,
+                dueDay: 10,
+                potId: nil
+            )
+        ]
+        snapshot.payPeriods = [
+            PayPeriod(
+                id: "period-july",
+                startDate: "2026-07-01",
+                endDate: "2026-07-31",
+                payday: "2026-07-01",
+                nextPayday: "2026-08-01",
+                payFrequency: .monthly,
+                incomePence: 100000,
+                status: .active,
+                createdAt: "2026-07-01T00:00:00.000Z",
+                updatedAt: "2026-07-01T00:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+        snapshot.potAllocations = [
+            PotAllocation(
+                id: "allocation-icloud",
+                payPeriodId: "period-july",
+                potId: "pot-bills",
+                fundingPotId: nil,
+                amountPence: 16240,
+                source: .recurringBillFunding,
+                recurringPaymentId: "icloud",
+                recurringDueDate: "2026-07-10",
+                debtId: nil,
+                debtDueDate: nil,
+                createdAt: "2026-07-01T00:00:00.000Z",
+                updatedAt: "2026-07-01T00:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+
+        let manualData = DashboardMonthlySpendChartData.make(
+            transactions: snapshot.transactions,
+            todayIso: "2026-07-09"
+        )
+        let outgoingsData = DashboardMonthlySpendChartData.makeAllOutgoings(
+            snapshot: snapshot,
+            todayIso: "2026-07-09"
+        )
+
+        XCTAssertEqual(DashboardMonthlySpendChartMode.manualSpends.title, "Manual spends")
+        XCTAssertEqual(DashboardMonthlySpendChartMode.manualSpends.next, .allOutgoings)
+        XCTAssertEqual(manualData.totalPence, 450)
+        XCTAssertEqual(outgoingsData.totalPence, 1349)
+        XCTAssertEqual(outgoingsData.points[0].amountPence, 0)
+        XCTAssertEqual(outgoingsData.points[2].amountPence, 450)
+        XCTAssertEqual(outgoingsData.points[9].amountPence, 899)
+        XCTAssertTrue(outgoingsData.points[9].isFuture)
+    }
+
     private func makeTransaction(
         id: String,
         amountPence: Int,
@@ -478,6 +572,30 @@ final class DashboardSpendingChartTests: XCTestCase {
             note: id,
             createdAt: date,
             updatedAt: date,
+            deletedAt: nil
+        )
+    }
+
+    private func makeRecurringPayment(
+        id: String,
+        name: String,
+        amountPence: Int,
+        dueDay: Int?,
+        potId: String?
+    ) -> RecurringPayment {
+        RecurringPayment(
+            id: id,
+            name: name,
+            amountPence: amountPence,
+            dueDay: dueDay,
+            dueDate: nil,
+            frequency: .monthly,
+            potId: potId,
+            creditCardId: nil,
+            priority: .essential,
+            active: true,
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
             deletedAt: nil
         )
     }

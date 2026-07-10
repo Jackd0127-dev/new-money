@@ -1009,10 +1009,7 @@ struct CardDetailView: View {
     }
 
     private var nextDirectDebitDate: String? {
-        guard let statementDate = nextStatementDate,
-              let dueDay = currentCard.dueDay
-        else { return nil }
-        return PlannerDerivedData.creditCardDirectDebitDate(statementDate: statementDate, dueDay: dueDay)
+        nextStatementPayment?.directDebitDate
     }
 
     private var nextStatementPayment: CreditCardStatementPayment? {
@@ -1090,6 +1087,7 @@ struct CardPaymentFlowSheetView: View {
         AppCard(glow: true) {
             SectionTitle("Record payment")
             Picker("Card", selection: $repaymentCardId) {
+                Text("Choose card").tag("")
                 ForEach(store.activeCards) { Text($0.name).tag($0.id) }
             }
             .pickerStyle(.menu)

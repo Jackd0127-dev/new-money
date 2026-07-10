@@ -16,6 +16,24 @@ struct AuthenticatedRootView: View {
     @State private var didStart = false
 
     var body: some View {
+        rootContent
+            .preferredColorScheme(AppThemePreset.resolved(from: selectedThemeRawValue).palette.preferredColorScheme)
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+#if DEBUG
+        if PersonalJuly2026LiveRepairLaunchProfile.isActive {
+            PersonalJuly2026LiveRepairView()
+        } else {
+            normalAuthenticatedFlow
+        }
+#else
+        normalAuthenticatedFlow
+#endif
+    }
+
+    private var normalAuthenticatedFlow: some View {
         Group {
             switch session.state {
             case .loading:
@@ -33,7 +51,6 @@ struct AuthenticatedRootView: View {
             }
         }
         .environmentObject(session)
-        .preferredColorScheme(AppThemePreset.resolved(from: selectedThemeRawValue).palette.preferredColorScheme)
         .task {
             guard !didStart else { return }
             didStart = true
@@ -454,7 +471,11 @@ private struct AuthEntryView: View {
     }
 
     private func configureAppleRequest(_ request: ASAuthorizationAppleIDRequest) {
-        let nonce = AppleSignInNonce.randomNonceString()
+        guard let nonce = AppleSignInNonce.randomNonceString() else {
+            currentAppleNonce = nil
+            session.errorMessage = "Unable to prepare Apple sign in. Please try again."
+            return
+        }
         currentAppleNonce = nonce
         request.requestedScopes = [.fullName, .email]
         request.nonce = AppleSignInNonce.sha256(nonce)
@@ -903,8 +924,8 @@ private struct AuthScaffold<Content: View>: View {
 }
 
 private enum AppleSignInNonce {
-    static func randomNonceString(length: Int = 32) -> String {
-        precondition(length > 0)
+    static func randomNonceString(length: Int = 32) -> String? {
+        guard length > 0 else { return nil }
         let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
         var result = ""
         var remainingLength = length
@@ -913,7 +934,7 @@ private enum AppleSignInNonce {
             var randomBytes = [UInt8](repeating: 0, count: 16)
             let status = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
             guard status == errSecSuccess else {
-                fatalError("Unable to generate secure random bytes for Apple sign-in.")
+                return nil
             }
 
             randomBytes.forEach { randomByte in

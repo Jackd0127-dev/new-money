@@ -170,7 +170,10 @@ struct PlanView: View {
                 PlanSubtitleCard(text: PlanLayoutPolicy.emptyUpcomingBillsSubtitle)
             } else {
                 ForEach(Array(upcoming.prefix(4))) { occurrence in
-                    PlanSubtitleCard(text: "\(occurrence.payment.name) is due \(shortDate(occurrence.dueDate)).")
+                    PlanSubtitleCard(
+                        text: "\(occurrence.payment.name) is due \(shortDate(occurrence.dueDate)).",
+                        trailingText: MoneyParser.formatPence(occurrence.amountPence)
+                    )
                 }
             }
         }
@@ -193,13 +196,24 @@ struct PlanView: View {
 
 private struct PlanSubtitleCard: View {
     var text: String
+    var trailingText: String?
 
     var body: some View {
         AppCard {
-            Text(text)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
+                Text(text)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let trailingText {
+                    Text(trailingText)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.warning)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+            }
         }
     }
 }
@@ -901,7 +915,9 @@ struct ActivityLayoutPolicy {
     static let recentActivityDetailPresentation: ActivityDetailPresentation = .navigationPush
     static let recentActivityDetailUsesInlineTitle = true
     static let recentActivityShowsGeneratedPayPeriodSummaries = false
+    static let recentActivityShowsGeneratedAutomaticPaychecks = false
     static let recentActivityShowsZeroValuePaychecks = false
+    static let paycheckActivityDateSource = "payday"
     static let monthBalanceChartMetric = "currentMonthIncomeMinusSpending"
     static let monthBalanceDetailPresentation: ActivityDetailPresentation = .navigationPush
     static let monthBalanceDetailUsesInlineTitle = true
@@ -910,6 +926,10 @@ struct ActivityLayoutPolicy {
     static let spendingDetailToolbarMode = "editDone"
     static let incomeDetailUsesNativeToolbarMorph = true
     static let spendingDetailUsesNativeToolbarMorph = true
+
+    static func paycheckActivityDate(paycheck: Paycheck, payPeriod: PayPeriod?) -> String {
+        payPeriod?.payday ?? paycheck.createdAt.prefixDateLabel
+    }
 }
 
 enum ActivityTimelineLayoutPolicy {
@@ -1159,7 +1179,8 @@ struct ActivityView: View {
                 }
             } else {
                 AppCard {
-                    ForEach(filteredEntries.prefix(18)) { entry in
+                    let visibleEntries = Array(filteredEntries.prefix(18))
+                    ForEach(Array(visibleEntries.enumerated()), id: \.offset) { index, entry in
                         NavigationLink {
                             ActivityEntryDetailView(entry: entry)
                         } label: {
@@ -1167,7 +1188,7 @@ struct ActivityView: View {
                         }
                         .buttonStyle(.plain)
 
-                        if entry.id != filteredEntries.prefix(18).last?.id {
+                        if index < visibleEntries.count - 1 {
                             AppDivider()
                         }
                     }
@@ -1252,9 +1273,11 @@ struct ActivityView: View {
 
         let income = store.snapshot.paychecks
             .filter { $0.deletedAt == nil }
+            .filter { ActivityLayoutPolicy.recentActivityShowsGeneratedAutomaticPaychecks || !$0.id.hasPrefix("paycheck-pay-period-") }
             .filter { ActivityLayoutPolicy.recentActivityShowsZeroValuePaychecks || paycheckActivityAmount($0) > 0 }
             .map { paycheck in
                 let period = periodsById[paycheck.payPeriodId]
+                let activityDate = ActivityLayoutPolicy.paycheckActivityDate(paycheck: paycheck, payPeriod: period)
                 let amountPence = paycheckActivityAmount(paycheck)
                 var detailRows = [
                     ActivityDetailRow(label: "Amount", value: MoneyParser.formatPence(amountPence), valueColor: AppTheme.Colors.success),
@@ -1277,11 +1300,11 @@ struct ActivityView: View {
                     id: paycheck.id,
                     kind: .income,
                     title: "Paycheck",
-                    detail: activityDisplayDate(paycheck.createdAt),
+                    detail: activityDisplayDate(activityDate),
                     amount: MoneyParser.formatPence(amountPence),
                     typeLabel: "Income",
                     color: AppTheme.Colors.success,
-                    sortDate: paycheck.createdAt.prefixDateLabel,
+                    sortDate: activityDate,
                     detailRows: detailRows,
                     recordRows: activityRecordRows(createdAt: paycheck.createdAt, updatedAt: paycheck.updatedAt)
                 )
@@ -1589,7 +1612,7 @@ private struct ActivityTimelineCanvas: View {
             let totalHeight = ActivityTimelineBranchLayoutPolicy.totalHeight(eventCount: events.count)
 
             ZStack(alignment: .topLeading) {
-                ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                ForEach(Array(events.enumerated()), id: \.offset) { index, event in
                     Color.clear
                         .frame(width: 1, height: 1)
                         .position(ActivityTimelineBranchLayoutPolicy.cardFocusPoint(for: layouts[index]))
@@ -1626,7 +1649,7 @@ private struct ActivityTimelineCanvas: View {
                     .allowsHitTesting(false)
                 }
 
-                ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                ForEach(Array(events.enumerated()), id: \.offset) { index, event in
                     let layout = layouts[index]
                     let progress = cardProgress(index)
                     let revealOffset = cardRevealOffset(for: layout, progress: progress, containerWidth: proxy.size.width)
@@ -2521,7 +2544,11 @@ private struct ActivityMonthlyBalanceChartData: Equatable {
         let daysInMonth = calendar.range(of: .day, in: .month, for: today)?.count ?? 1
         let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
 
-        let payPeriodsById = Dictionary(uniqueKeysWithValues: snapshot.payPeriods.map { ($0.id, $0) })
+        // Cloud/local merges can contain the same record ID more than once. Keep the
+        // latest array entry instead of trapping while constructing the lookup.
+        let payPeriodsById = snapshot.payPeriods.reduce(into: [String: PayPeriod]()) { result, period in
+            result[period.id] = period
+        }
         let paycheckIncomeEvents = snapshot.paychecks.compactMap { paycheck -> ActivityDailyAmount? in
             guard paycheck.deletedAt == nil else { return nil }
             let date = payPeriodsById[paycheck.payPeriodId]?.payday ?? paycheck.createdAt.prefixDateLabel

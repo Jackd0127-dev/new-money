@@ -49,6 +49,17 @@
 		100000000000000000000135 /* AppShellNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000235 /* AppShellNavigationTests.swift */; };
 		34B1E3EE2FF884FB007D21AC /* muno-splash.html in Resources */ = {isa = PBXBuildFile; fileRef = 34B1E3EC2FF884FB007D21AC /* muno-splash.html */; };
 		34B1E3EF2FF884FB007D21AC /* MUNOSplashWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */; };
+		A10000000000000000000001 /* PersonalJuly2026Fixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* PersonalJuly2026Fixture.swift */; };
+		A10000000000000000000003 /* PersonalJuly2026ExpectedResults.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* PersonalJuly2026ExpectedResults.swift */; };
+		A10000000000000000000005 /* PersonalJuly2026ScenarioAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* PersonalJuly2026ScenarioAudit.swift */; };
+		A10000000000000000000007 /* PersonalJuly2026ScenarioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* PersonalJuly2026ScenarioTests.swift */; };
+		B20000000000000000000001 /* PersonalJuly2026LiveRepairPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* PersonalJuly2026LiveRepairPlanner.swift */; };
+		B20000000000000000000003 /* PersonalJuly2026LiveRepairReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* PersonalJuly2026LiveRepairReport.swift */; };
+		B20000000000000000000005 /* PersonalJuly2026LiveRepairFirebaseReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* PersonalJuly2026LiveRepairFirebaseReader.swift */; };
+		B20000000000000000000007 /* PersonalJuly2026LiveRepairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* PersonalJuly2026LiveRepairView.swift */; };
+		B20000000000000000000009 /* PersonalJuly2026LiveRepairTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* PersonalJuly2026LiveRepairTests.swift */; };
+		B30000000000000000000001 /* PersonalJuly2026LiveRepairExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000002 /* PersonalJuly2026LiveRepairExecutor.swift */; };
+		B30000000000000000000003 /* PersonalJuly2026LiveRepairExecutionReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000004 /* PersonalJuly2026LiveRepairExecutionReport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -105,6 +116,17 @@
 		34B1E3EB2FF884AA007D21AC /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
 		34B1E3EC2FF884FB007D21AC /* muno-splash.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "muno-splash.html"; sourceTree = "<group>"; };
 		34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MUNOSplashWebView.swift; sourceTree = "<group>"; };
+		A10000000000000000000002 /* PersonalJuly2026Fixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026Fixture.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 /* PersonalJuly2026ExpectedResults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026ExpectedResults.swift; sourceTree = "<group>"; };
+		A10000000000000000000006 /* PersonalJuly2026ScenarioAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026ScenarioAudit.swift; sourceTree = "<group>"; };
+		A10000000000000000000008 /* PersonalJuly2026ScenarioTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026ScenarioTests.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* PersonalJuly2026LiveRepairPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairPlanner.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* PersonalJuly2026LiveRepairReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairReport.swift; sourceTree = "<group>"; };
+		B20000000000000000000006 /* PersonalJuly2026LiveRepairFirebaseReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairFirebaseReader.swift; sourceTree = "<group>"; };
+		B20000000000000000000008 /* PersonalJuly2026LiveRepairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairView.swift; sourceTree = "<group>"; };
+		B20000000000000000000010 /* PersonalJuly2026LiveRepairTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairTests.swift; sourceTree = "<group>"; };
+		B30000000000000000000002 /* PersonalJuly2026LiveRepairExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairExecutor.swift; sourceTree = "<group>"; };
+		B30000000000000000000004 /* PersonalJuly2026LiveRepairExecutionReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairExecutionReport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -168,6 +190,10 @@
 				100000000000000000000226 /* AuthSyncTests.swift */,
 				100000000000000000000234 /* AuthEmailFormValidationTests.swift */,
 				100000000000000000000235 /* AppShellNavigationTests.swift */,
+				A10000000000000000000004 /* PersonalJuly2026ExpectedResults.swift */,
+				A10000000000000000000006 /* PersonalJuly2026ScenarioAudit.swift */,
+				A10000000000000000000008 /* PersonalJuly2026ScenarioTests.swift */,
+				B20000000000000000000010 /* PersonalJuly2026LiveRepairTests.swift */,
 			);
 			path = NewMoneyTests;
 			sourceTree = "<group>";
@@ -215,6 +241,10 @@
 			children = (
 				100000000000000000000210 /* DefaultData.swift */,
 				100000000000000000000211 /* PlannerRepository.swift */,
+				A10000000000000000000002 /* PersonalJuly2026Fixture.swift */,
+				B20000000000000000000002 /* PersonalJuly2026LiveRepairPlanner.swift */,
+				B20000000000000000000004 /* PersonalJuly2026LiveRepairReport.swift */,
+				B30000000000000000000004 /* PersonalJuly2026LiveRepairExecutionReport.swift */,
 			);
 			path = Data;
 			sourceTree = "<group>";
@@ -252,6 +282,8 @@
 				100000000000000000000227 /* CloudPlannerSync.swift */,
 				100000000000000000000228 /* FirebaseServices.swift */,
 				100000000000000000000229 /* FirebaseAuthSession.swift */,
+				B20000000000000000000006 /* PersonalJuly2026LiveRepairFirebaseReader.swift */,
+				B30000000000000000000002 /* PersonalJuly2026LiveRepairExecutor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -326,6 +358,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000230 /* AuthGateView.swift */,
+				B20000000000000000000008 /* PersonalJuly2026LiveRepairView.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -483,6 +516,13 @@
 				100000000000000000000131 /* FirebaseAuthSession.swift in Sources */,
 				100000000000000000000132 /* AuthGateView.swift in Sources */,
 				100000000000000000000133 /* NewMoneyAppDelegate.swift in Sources */,
+				A10000000000000000000001 /* PersonalJuly2026Fixture.swift in Sources */,
+				B20000000000000000000001 /* PersonalJuly2026LiveRepairPlanner.swift in Sources */,
+				B20000000000000000000003 /* PersonalJuly2026LiveRepairReport.swift in Sources */,
+				B20000000000000000000005 /* PersonalJuly2026LiveRepairFirebaseReader.swift in Sources */,
+				B20000000000000000000007 /* PersonalJuly2026LiveRepairView.swift in Sources */,
+				B30000000000000000000001 /* PersonalJuly2026LiveRepairExecutor.swift in Sources */,
+				B30000000000000000000003 /* PersonalJuly2026LiveRepairExecutionReport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -494,6 +534,10 @@
 				100000000000000000000124 /* AuthSyncTests.swift in Sources */,
 				100000000000000000000134 /* AuthEmailFormValidationTests.swift in Sources */,
 				100000000000000000000135 /* AppShellNavigationTests.swift in Sources */,
+				A10000000000000000000003 /* PersonalJuly2026ExpectedResults.swift in Sources */,
+				A10000000000000000000005 /* PersonalJuly2026ScenarioAudit.swift in Sources */,
+				A10000000000000000000007 /* PersonalJuly2026ScenarioTests.swift in Sources */,
+				B20000000000000000000009 /* PersonalJuly2026LiveRepairTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -662,6 +706,15 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XK5H4LTL88;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					PersonalJuly2026Fixture.swift,
+					PersonalJuly2026LiveRepairPlanner.swift,
+					PersonalJuly2026LiveRepairReport.swift,
+					PersonalJuly2026LiveRepairFirebaseReader.swift,
+					PersonalJuly2026LiveRepairView.swift,
+					PersonalJuly2026LiveRepairExecutor.swift,
+					PersonalJuly2026LiveRepairExecutionReport.swift,
+				);
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NewMoney/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

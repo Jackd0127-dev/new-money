@@ -131,6 +131,12 @@ final class PlannerStore: ObservableObject {
             let migration = DefaultData.migratedSnapshot(loadedSnapshot)
             snapshot = migration.snapshot
             var shouldPersist = migration.didChange
+#if DEBUG
+            if PersonalJuly2026Fixture.isActive,
+               bootstrapPersonalJuly2026FixtureIfNeeded() {
+                shouldPersist = true
+            }
+#endif
             if ensureDebtSchedules(today: todayIso) {
                 shouldPersist = true
             }
@@ -486,6 +492,34 @@ final class PlannerStore: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func updateOneOffIncome(id: String, name: String, amountPence: Int, date: String, note: String) -> Bool {
+        guard let index = snapshot.oneOffIncomes.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else { return false }
+        let amount = abs(amountPence)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard amount > 0, FinanceEngine.isIsoDate(date) else { return false }
+
+        snapshot.oneOffIncomes[index].name = trimmedName.isEmpty ? "One-off income" : trimmedName
+        snapshot.oneOffIncomes[index].amountPence = amount
+        snapshot.oneOffIncomes[index].date = date
+        snapshot.oneOffIncomes[index].note = trimmedNote
+        snapshot.oneOffIncomes[index].payPeriodId = PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id
+        snapshot.oneOffIncomes[index].updatedAt = DateUtilities.nowIsoString()
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deleteOneOffIncome(id: String) -> Bool {
+        guard let index = snapshot.oneOffIncomes.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else { return false }
+        let now = DateUtilities.nowIsoString()
+        snapshot.oneOffIncomes[index].updatedAt = now
+        snapshot.oneOffIncomes[index].deletedAt = now
+        persist()
+        return true
+    }
+
     func updatePaycheck(id: String, payday: String, hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?, payFrequency: PayFrequency? = nil) {
         guard let paycheckIndex = snapshot.paychecks.firstIndex(where: { $0.id == id }) else { return }
         let payPeriodId = snapshot.paychecks[paycheckIndex].payPeriodId
@@ -809,7 +843,20 @@ final class PlannerStore: ObservableObject {
         color: String
     ) {
         let now = DateUtilities.nowIsoString()
-        let statementDate = statementDay.map { FinanceEngine.monthlyDate(onOrAfter: todayIso, day: $0) }
+        let statementDate = statementDay.map { day in
+            let nextStatementDate = FinanceEngine.monthlyDate(onOrAfter: todayIso, day: day)
+
+            // An entered statement balance belongs to the latest statement that
+            // has already been issued. A blank statement balance means the opening
+            // balance will feed the next statement cycle instead.
+            guard openingStatementBalancePence != nil,
+                  nextStatementDate > todayIso
+            else {
+                return nextStatementDate
+            }
+
+            return PlannerDerivedData.addIsoMonthsClamped(date: nextStatementDate, months: -1)
+        }
         let card = CreditCard(
             id: DateUtilities.newId(prefix: "card"),
             name: name,
@@ -2180,7 +2227,7 @@ final class PlannerStore: ObservableObject {
         }
         guard item.amountPence > 0,
               !hasMatchingAllocation,
-              snapshot.pots.contains(where: { $0.id == item.potId && !$0.archived })
+              let potIndex = snapshot.pots.firstIndex(where: { $0.id == item.potId && !$0.archived })
         else { return true }
 
         let now = DateUtilities.nowIsoString()
@@ -2206,6 +2253,8 @@ final class PlannerStore: ObservableObject {
             ),
             at: 0
         )
+        snapshot.pots[potIndex].balancePence += item.amountPence
+        snapshot.pots[potIndex].updatedAt = now
         if shouldPersist {
             persist()
         }
@@ -2221,9 +2270,8 @@ final class PlannerStore: ObservableObject {
         }
         guard !matchingAllocationIndices.isEmpty else { return true }
 
-        for index in matchingAllocationIndices.sorted(by: >) {
-            snapshot.potAllocations.remove(at: index)
-        }
+        let now = DateUtilities.nowIsoString()
+        guard reverseCardSpendFundingAllocations(at: matchingAllocationIndices, now: now) else { return false }
         if shouldPersist {
             persist()
         }
@@ -2409,11 +2457,37 @@ final class PlannerStore: ObservableObject {
             payPeriodIds.insert(allocation.payPeriodId)
         }
 
-        for index in matchingAllocationIndices.sorted(by: >) {
-            snapshot.potAllocations.remove(at: index)
-        }
+        guard reverseCardSpendFundingAllocations(at: matchingAllocationIndices, now: now) else { return nil }
 
         return Array(payPeriodIds)
+    }
+
+    private func reverseCardSpendFundingAllocations(at indices: [Int], now: String) -> Bool {
+        let allocations = indices.map { snapshot.potAllocations[$0] }
+        let amountByPotId = allocations.reduce(into: [String: Int]()) { result, allocation in
+            result[allocation.potId, default: 0] += max(0, allocation.amountPence)
+        }
+
+        var potIndexById: [String: Int] = [:]
+        for (potId, amountPence) in amountByPotId {
+            guard let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived }),
+                  snapshot.pots[potIndex].balancePence >= amountPence
+            else {
+                errorMessage = "Unable to reverse card-spend funding because its linked pot no longer contains the allocated money."
+                return false
+            }
+            potIndexById[potId] = potIndex
+        }
+
+        for (potId, amountPence) in amountByPotId {
+            guard let potIndex = potIndexById[potId] else { return false }
+            snapshot.pots[potIndex].balancePence -= amountPence
+            snapshot.pots[potIndex].updatedAt = now
+        }
+        for index in indices.sorted(by: >) {
+            snapshot.potAllocations.remove(at: index)
+        }
+        return true
     }
 
     private func restoreCardSpendFundingAllocations(transactionId: String, payPeriodIds: [String]) {
@@ -2595,6 +2669,8 @@ final class PlannerStore: ObservableObject {
     }
 
     private func markCloudSyncNeeded() {
+        // Fixture repositories are test-only, in-memory stores and must never enqueue cloud writes.
+        guard !PlannerLaunchProfile.isUsingFixture() else { return }
         cloudSyncRevision += 1
     }
 
@@ -2665,7 +2741,8 @@ final class PlannerStore: ObservableObject {
             snapshot.payPeriods[existingIndex].status = .active
             snapshot.payPeriods[existingIndex].updatedAt = now
         } else {
-            let incomePence = sourcePeriod?.incomePence ?? 0
+            let isBackfilledBeforeSourcePeriod = sourcePeriod.map { payday < $0.payday } ?? false
+            let incomePence = isBackfilledBeforeSourcePeriod ? 0 : sourcePeriod?.incomePence ?? 0
             let period = PayPeriod(
                 id: id,
                 startDate: dates.startDate,
@@ -2680,23 +2757,6 @@ final class PlannerStore: ObservableObject {
                 deletedAt: nil
             )
             snapshot.payPeriods.insert(period, at: 0)
-
-            if !snapshot.paychecks.contains(where: { $0.payPeriodId == id }) {
-                snapshot.paychecks.insert(
-                    Paycheck(
-                        id: "paycheck-\(id)",
-                        payPeriodId: id,
-                        hoursWorked: 0,
-                        hourlyRatePence: 0,
-                        calculatedAmountPence: incomePence,
-                        actualAmountPence: incomePence,
-                        createdAt: now,
-                        updatedAt: now,
-                        deletedAt: nil
-                    ),
-                    at: 0
-                )
-            }
         }
 
         for index in snapshot.payPeriods.indices where snapshot.payPeriods[index].status == .active && snapshot.payPeriods[index].id != id {
@@ -2972,6 +3032,50 @@ private extension UIImage {
 
 #if DEBUG
 extension PlannerStore {
+    /// The sole fixture-specific bootstrap point. It uses the same checklist commands as the app.
+    @discardableResult
+    func bootstrapPersonalJuly2026FixtureIfNeeded() -> Bool {
+        guard snapshot.payPeriods.contains(where: { $0.id == PersonalJuly2026Fixture.payPeriodId }) else { return false }
+
+        suppressAutomaticDueCatchUpForSimulation = true
+        defer { suppressAutomaticDueCatchUpForSimulation = false }
+
+        let periodId = PersonalJuly2026Fixture.payPeriodId
+        let actions = [
+            setRecurringBillFundingCompleted(paymentId: PersonalJuly2026Fixture.iCloudBillId, dueDate: "2026-07-10", payPeriodId: periodId, completed: true),
+            setRecurringBillFundingCompleted(paymentId: PersonalJuly2026Fixture.runnaBillId, dueDate: "2026-07-18", payPeriodId: periodId, completed: true),
+            setRecurringBillFundingCompleted(paymentId: PersonalJuly2026Fixture.appleCareBillId, dueDate: "2026-07-19", payPeriodId: periodId, completed: true),
+            recordPersonalJuly2026AquaOpeningFundingIfNeeded(payPeriodId: periodId),
+        ]
+        return actions.contains(true)
+    }
+
+    /// The standard checklist intentionally omits this row when an existing pot balance covers it.
+    /// The historical QA action still runs the production completion workflow with its raw source amount.
+    @discardableResult
+    private func recordPersonalJuly2026AquaOpeningFundingIfNeeded(payPeriodId: String) -> Bool {
+        guard let card = snapshot.creditCards.first(where: { $0.id == PersonalJuly2026Fixture.aquaCardId && !$0.archived }),
+              let pot = snapshot.pots.first(where: { $0.id == "pot-aqua" && !$0.archived })
+        else { return false }
+
+        return completeCardOpeningBalanceFunding(
+            CreditCardOpeningBalanceFundingChecklistItem(
+                id: PlannerDerivedData.cardOpeningBalanceFundingChecklistId(
+                    cardId: card.id,
+                    directDebitDate: PersonalJuly2026Fixture.aquaOpeningDueDate
+                ),
+                cardId: card.id,
+                cardName: card.name,
+                amountPence: 12_843,
+                directDebitDate: PersonalJuly2026Fixture.aquaOpeningDueDate,
+                payPeriodId: payPeriodId,
+                potId: pot.id,
+                potName: pot.name,
+                isCompleted: false
+            )
+        )
+    }
+
     func useSnapshotForSimulation(_ snapshot: PlannerSnapshot) {
         suppressAutomaticDueCatchUpForSimulation = true
         self.snapshot = snapshot

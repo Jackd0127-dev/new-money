@@ -1167,7 +1167,9 @@ enum DefaultData {
     static func migratedSnapshot(_ snapshot: PlannerSnapshot) -> (snapshot: PlannerSnapshot, didChange: Bool) {
         var migrated = snapshot
         let referencedPotIds = legacyReferencedPotIds(in: snapshot)
-        let legacyPotsById = Dictionary(uniqueKeysWithValues: defaultPots.map { ($0.id, $0) })
+        let legacyPotsById = defaultPots.reduce(into: [String: Pot]()) { result, pot in
+            result[pot.id] = pot
+        }
 
         migrated.pots.removeAll { pot in
             guard let legacyPot = legacyPotsById[pot.id],

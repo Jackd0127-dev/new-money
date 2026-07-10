@@ -638,9 +638,17 @@ private struct PotTimelineEvent: Identifiable, Equatable {
     }
 
     static func moneyEvents(snapshot: PlannerSnapshot) -> [PotTimelineEvent] {
-        let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
-        let periodsById = Dictionary(uniqueKeysWithValues: snapshot.payPeriods.map { ($0.id, $0) })
-        let recurringById = Dictionary(uniqueKeysWithValues: snapshot.recurringPayments.map { ($0.id, $0) })
+        // Cloud/local merges can contain repeated IDs. Keep the latest entry so the
+        // overview remains renderable while the source data is repaired elsewhere.
+        let potsById = snapshot.pots.reduce(into: [String: Pot]()) { result, pot in
+            result[pot.id] = pot
+        }
+        let periodsById = snapshot.payPeriods.reduce(into: [String: PayPeriod]()) { result, period in
+            result[period.id] = period
+        }
+        let recurringById = snapshot.recurringPayments.reduce(into: [String: RecurringPayment]()) { result, payment in
+            result[payment.id] = payment
+        }
 
         let allocationEvents = snapshot.potAllocations
             .filter { $0.deletedAt == nil }
@@ -759,7 +767,7 @@ private struct PotTimelineCard: View {
                     )
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                        ForEach(Array(events.enumerated()), id: \.offset) { index, event in
                             PotTimelineRow(
                                 event: event,
                                 isFirst: index == 0,
@@ -1037,7 +1045,7 @@ private struct LinkedCardPaymentsBlock: View {
                     .foregroundStyle(AppTheme.Colors.secondaryText)
             }
 
-            ForEach(Array(payments.enumerated()), id: \.element.dueIso) { _, payment in
+            ForEach(Array(payments.enumerated()), id: \.offset) { _, payment in
                 HStack(spacing: 6) {
                     Text(shortDayMonth(payment.dueIso))
                         .font(.caption2.weight(.semibold))

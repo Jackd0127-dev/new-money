@@ -361,8 +361,12 @@ struct DashboardView: View {
 
     private var monthlySpendChart: some View {
         DashboardMonthlySpendChartView(
-            data: DashboardMonthlySpendChartData.make(
+            manualData: DashboardMonthlySpendChartData.make(
                 transactions: snapshot.transactions,
+                todayIso: store.todayIso
+            ),
+            outgoingsData: DashboardMonthlySpendChartData.makeAllOutgoings(
+                snapshot: snapshot,
                 todayIso: store.todayIso
             )
         )
@@ -775,6 +779,39 @@ struct DashboardMonthlySpendChartPoint: Equatable, Identifiable {
     var id: Int { day }
 }
 
+enum DashboardMonthlySpendChartMode: String, Equatable, CaseIterable {
+    case manualSpends
+    case allOutgoings
+
+    var title: String {
+        switch self {
+        case .manualSpends: "Manual spends"
+        case .allOutgoings: "All outgoings"
+        }
+    }
+
+    var emptyMessagePrefix: String {
+        switch self {
+        case .manualSpends: "No manual spend recorded in"
+        case .allOutgoings: "No outgoings planned in"
+        }
+    }
+
+    var activeMessageSuffix: String {
+        switch self {
+        case .manualSpends: "so far"
+        case .allOutgoings: "planned and recorded"
+        }
+    }
+
+    var next: DashboardMonthlySpendChartMode {
+        switch self {
+        case .manualSpends: .allOutgoings
+        case .allOutgoings: .manualSpends
+        }
+    }
+}
+
 struct DashboardMonthlySpendChartData: Equatable {
     var monthLabel: String
     var totalPence: Int
@@ -835,17 +872,88 @@ struct DashboardMonthlySpendChartData: Equatable {
             points: points
         )
     }
+
+    static func makeAllOutgoings(snapshot: PlannerSnapshot, todayIso: String) -> DashboardMonthlySpendChartData {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+
+        let today = FinanceEngine.parseDate(todayIso)
+        let todayComponents = calendar.dateComponents([.year, .month, .day], from: today)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: today)?.count ?? 0
+        let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
+        let monthStart = monthBoundaryIsoDate(today, calendar: calendar, day: 1)
+        let monthEnd = monthBoundaryIsoDate(today, calendar: calendar, day: max(daysInMonth, 1))
+
+        var buckets: [Int: Int] = [:]
+        for event in PlannerDerivedData.calendarEvents(snapshot: snapshot, startDate: monthStart, endDate: monthEnd) {
+            // Pot allocations are internal transfers. The bill/card/debt event they
+            // fund is already represented in this chart, so including both would
+            // inflate "All outgoings" without changing the safe-to-spend calculation.
+            guard event.type != .payday,
+                  event.type != .allocation,
+                  let amountPence = event.amountPence,
+                  amountPence > 0
+            else {
+                continue
+            }
+
+            let eventDate = FinanceEngine.parseDate(event.date)
+            let eventComponents = calendar.dateComponents([.year, .month, .day], from: eventDate)
+            guard eventComponents.year == todayComponents.year,
+                  eventComponents.month == todayComponents.month,
+                  let eventDay = eventComponents.day
+            else {
+                continue
+            }
+
+            buckets[eventDay, default: 0] += amountPence
+        }
+
+        let points = (1...max(daysInMonth, 1)).map { day in
+            DashboardMonthlySpendChartPoint(
+                day: day,
+                amountPence: buckets[day, default: 0],
+                isFuture: day > currentDay
+            )
+        }
+        let totalPence = points.reduce(0) { $0 + $1.amountPence }
+
+        return DashboardMonthlySpendChartData(
+            monthLabel: today.formatted(.dateTime.month(.wide).year()),
+            totalPence: totalPence,
+            averageDailyPence: totalPence / max(daysInMonth, 1),
+            highestDailyPence: points.map(\.amountPence).max() ?? 0,
+            daysElapsed: currentDay,
+            daysInMonth: max(daysInMonth, 1),
+            points: points
+        )
+    }
+
+    private static func monthBoundaryIsoDate(_ date: Date, calendar: Calendar, day: Int) -> String {
+        var components = calendar.dateComponents([.year, .month], from: date)
+        components.day = day
+        return FinanceEngine.toIsoDate(calendar.date(from: components) ?? date)
+    }
 }
 
 private struct DashboardMonthlySpendChartView: View {
-    var data: DashboardMonthlySpendChartData
+    var manualData: DashboardMonthlySpendChartData
+    var outgoingsData: DashboardMonthlySpendChartData
+    @State private var mode: DashboardMonthlySpendChartMode = .manualSpends
+
+    private var data: DashboardMonthlySpendChartData {
+        switch mode {
+        case .manualSpends: manualData
+        case .allOutgoings: outgoingsData
+        }
+    }
 
     var body: some View {
         AppCard(glow: data.hasSpending) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
                 HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("Spent this month")
+                        Text(mode.title)
                             .font(.caption.weight(.bold))
                             .foregroundStyle(AppTheme.Colors.cardEyebrow)
                             .textCase(.uppercase)
@@ -854,14 +962,31 @@ private struct DashboardMonthlySpendChartView: View {
                             .foregroundStyle(data.hasSpending ? AppTheme.Colors.primaryText : AppTheme.Colors.secondaryText)
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
-                        Text(data.hasSpending ? "\(data.monthLabel) so far" : "No spend recorded in \(data.monthLabel)")
+                        Text(data.hasSpending ? "\(data.monthLabel) \(mode.activeMessageSuffix)" : "\(mode.emptyMessagePrefix) \(data.monthLabel)")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                     }
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
-                    DashboardMonthProgressBadge(progress: data.progressFraction, label: "\(data.daysElapsed)/\(data.daysInMonth)")
+                    VStack(alignment: .trailing, spacing: AppTheme.Spacing.sm) {
+                        Button {
+                            withAnimation(AppTheme.Animation.standard) {
+                                mode = mode.next
+                            }
+                        } label: {
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                                .frame(width: 34, height: 34)
+                                .background(AppTheme.Colors.primaryOrange.opacity(0.14))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                        .accessibilityLabel("Switch monthly chart")
+
+                        DashboardMonthProgressBadge(progress: data.progressFraction, label: "\(data.daysElapsed)/\(data.daysInMonth)")
+                    }
                 }
 
                 DashboardSpendBarGraph(data: data)
@@ -874,7 +999,7 @@ private struct DashboardMonthlySpendChartView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Spent this month \(MoneyParser.formatPence(data.totalPence))")
+        .accessibilityLabel("\(mode.title) \(MoneyParser.formatPence(data.totalPence))")
     }
 }
 
@@ -950,7 +1075,7 @@ private struct DashboardSpendBarGraph: View {
     }
 
     private func barHeight(for point: DashboardMonthlySpendChartPoint, maxAmount: Int, availableHeight: CGFloat) -> CGFloat {
-        guard !point.isFuture, point.amountPence > 0 else { return 7 }
+        guard point.amountPence > 0 else { return 7 }
         return max(12, CGFloat(point.amountPence) / CGFloat(maxAmount) * availableHeight)
     }
 
@@ -1263,6 +1388,7 @@ struct IncomeBreakdownView: View {
     @ObservedObject var store: PlannerStore
     @State private var isAddIncomePresented = false
     @State private var isPaycheckInputsExpanded = true
+    @State private var isOneOffIncomeExpanded = true
     @State private var isPayPeriodsExpanded = false
     @State private var editMode: EditMode = .inactive
 
@@ -1289,6 +1415,7 @@ struct IncomeBreakdownView: View {
             }
 
             paycheckInputsSection
+            oneOffIncomeSection
             payPeriodsSection
         }
         .sheet(isPresented: $isAddIncomePresented) {
@@ -1321,6 +1448,41 @@ struct IncomeBreakdownView: View {
         }
     }
 
+    private var oneOffIncomeSection: some View {
+        IncomeExpandableSection(title: "One-off income", isExpanded: $isOneOffIncomeExpanded) {
+            let incomes = snapshot.oneOffIncomes
+                .filter { $0.deletedAt == nil }
+                .sorted { $0.date > $1.date }
+
+            if incomes.isEmpty {
+                AppCard {
+                    EmptyStateView(
+                        title: "No one-off income",
+                        message: "Birthday money, bonuses, and corrections will appear here.",
+                        systemImage: "plus.circle"
+                    )
+                }
+            } else {
+                VStack(spacing: AppTheme.Spacing.md) {
+                    ForEach(incomes, id: \.id) { income in
+                        NavigationLink {
+                            OneOffIncomeDetailView(store: store, income: income)
+                        } label: {
+                            OneOffIncomeRow(
+                                name: income.name,
+                                dateLabel: FinanceEngine.formatPaydayLabel(income.date),
+                                periodLabel: period(for: income).map { FinanceEngine.formatPaydayLabel($0.payday) },
+                                amountLabel: MoneyParser.formatPence(income.amountPence)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open income \(income.name)")
+                    }
+                }
+            }
+        }
+    }
+
     private var payPeriodsSection: some View {
         IncomeExpandableSection(title: "Pay periods", isExpanded: $isPayPeriodsExpanded) {
             if snapshot.payPeriods.isEmpty {
@@ -1345,6 +1507,14 @@ struct IncomeBreakdownView: View {
 
     private func period(for paycheck: Paycheck) -> PayPeriod? {
         snapshot.payPeriods.first { $0.id == paycheck.payPeriodId }
+    }
+
+    private func period(for income: OneOffIncome) -> PayPeriod? {
+        if let payPeriodId = income.payPeriodId,
+           let period = snapshot.payPeriods.first(where: { $0.id == payPeriodId }) {
+            return period
+        }
+        return PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: income.date)
     }
 
     private func allocations(for period: PayPeriod) -> [PotAllocation] {
@@ -1426,6 +1596,155 @@ private struct PaycheckInputRow: View {
             }
             .contentShape(Rectangle())
         }
+    }
+}
+
+private struct OneOffIncomeRow: View {
+    var name: String
+    var dateLabel: String
+    var periodLabel: String?
+    var amountLabel: String
+
+    var body: some View {
+        AppCard {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                    .frame(width: 40, height: 40)
+                    .background(AppTheme.Colors.success.opacity(0.12))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                    Text(periodLabel.map { "\(dateLabel) · \($0)" } ?? dateLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text(amountLabel)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+            .contentShape(Rectangle())
+        }
+    }
+}
+
+private struct OneOffIncomeDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var income: OneOffIncome
+    @State private var name: String
+    @State private var amount: String
+    @State private var date: Date
+    @State private var note: String
+    @State private var showDeleteAlert = false
+
+    init(store: PlannerStore, income: OneOffIncome) {
+        self.store = store
+        self.income = income
+        _name = State(initialValue: income.name)
+        _amount = State(initialValue: Self.formatMoneyInput(income.amountPence))
+        _date = State(initialValue: income.date.isoDate)
+        _note = State(initialValue: income.note)
+    }
+
+    var body: some View {
+        DashboardBreakdownScaffold(
+            title: "Edit income",
+            subtitle: "",
+            toolbarMode: .none
+        ) {
+            summaryCard
+            editCard
+            SecondaryButton(title: "Delete income", systemImage: "trash", role: .destructive) {
+                showDeleteAlert = true
+            }
+        }
+        .alert("Delete income?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                if store.deleteOneOffIncome(id: income.id) {
+                    dismiss()
+                }
+            }
+        } message: {
+            Text("This removes the income from your totals for this pay period.")
+        }
+    }
+
+    private var summaryCard: some View {
+        AppCard(glow: true) {
+            MetricRow(label: "Name", value: currentIncome.name)
+            MetricRow(label: "Amount", value: MoneyParser.formatPence(currentIncome.amountPence), valueColor: AppTheme.Colors.success)
+            MetricRow(label: "Date", value: FinanceEngine.formatPaydayLabel(currentIncome.date))
+            if let period = currentPeriod {
+                MetricRow(label: "Pay period", value: "\(FinanceEngine.formatPaydayLabel(period.startDate)) to \(FinanceEngine.formatPaydayLabel(period.endDate))")
+            }
+        }
+    }
+
+    private var editCard: some View {
+        AppCard {
+            SectionTitle("Edit one-off income")
+
+            TextField("Source", text: $name)
+                .textFieldStyle(AppTextFieldStyle())
+
+            MoneyField(title: "Amount", text: $amount)
+
+            DatePicker("Date", selection: $date, displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .tint(AppTheme.Colors.primaryOrange)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+
+            TextField("Note", text: $note, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(AppTextFieldStyle())
+
+            PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSaveChanges) {
+                _ = store.updateOneOffIncome(
+                    id: income.id,
+                    name: name,
+                    amountPence: MoneyParser.parsePoundsToPence(amount),
+                    date: date.isoDateString,
+                    note: note
+                )
+            }
+        }
+    }
+
+    private var currentIncome: OneOffIncome {
+        store.snapshot.oneOffIncomes.first(where: { $0.id == income.id }) ?? income
+    }
+
+    private var currentPeriod: PayPeriod? {
+        if let payPeriodId = currentIncome.payPeriodId,
+           let period = store.snapshot.payPeriods.first(where: { $0.id == payPeriodId }) {
+            return period
+        }
+        return PlannerDerivedData.findPayPeriod(payPeriods: store.snapshot.payPeriods, date: currentIncome.date)
+    }
+
+    private var canSaveChanges: Bool {
+        MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        String(format: "%.2f", Double(amountPence) / 100)
     }
 }
 

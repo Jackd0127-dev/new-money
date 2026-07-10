@@ -81,6 +81,9 @@ enum PlannerLaunchProfile {
     static let fullAppLogicTortureJulSep2027FixtureValue = "full-app-logic-torture-jul-sep-2027"
     static let finalDebtFullAppSimJanApr2028FixtureValue = "final-debt-full-app-sim-jan-apr-2028"
     static let debtDemoFixtureValue = "debt-demo"
+#if DEBUG
+    static let personalJuly2026FixtureValue = PersonalJuly2026Fixture.fixtureValue
+#endif
 
     static func repository(environment: [String: String] = ProcessInfo.processInfo.environment) -> PlannerRepository {
         switch environment[fixtureEnvironmentKey] {
@@ -98,6 +101,10 @@ enum PlannerLaunchProfile {
             return InMemoryPlannerRepository(seedSnapshot: DefaultData.finalDebtFullAppSimJanApr2028Snapshot)
         case debtDemoFixtureValue:
             return InMemoryPlannerRepository(seedSnapshot: DefaultData.debtDemoSnapshot)
+#if DEBUG
+        case personalJuly2026FixtureValue:
+            return InMemoryPlannerRepository(seedSnapshot: PersonalJuly2026Fixture.snapshot(phase: PersonalJuly2026Fixture.phase(environment: environment)))
+#endif
         default:
             return FilePlannerRepository()
         }

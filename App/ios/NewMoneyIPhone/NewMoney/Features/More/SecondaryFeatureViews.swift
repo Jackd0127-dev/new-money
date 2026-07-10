@@ -268,6 +268,7 @@ private struct SpendingTransactionDetailView: View {
 
                     if paymentMethod == .pot {
                         Picker("Pot", selection: $selectedPotId) {
+                            Text("No pot").tag("")
                             ForEach(selectablePots) { pot in
                                 Text(pot.name).tag(pot.id)
                             }
@@ -275,6 +276,7 @@ private struct SpendingTransactionDetailView: View {
                         .pickerStyle(.menu)
                     } else {
                         Picker("Card", selection: $selectedCardId) {
+                            Text("No card").tag("")
                             ForEach(selectableCards) { card in
                                 Text(card.name).tag(card.id)
                             }

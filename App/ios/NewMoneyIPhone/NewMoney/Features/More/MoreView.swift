@@ -158,7 +158,8 @@ struct PlanView: View {
 
     private var upcomingBills: some View {
         let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 30)
-        let upcoming = PlannerDerivedData.recurringOccurrences(
+        let upcoming = PlannerDerivedData.resolvedRecurringOccurrences(
+            snapshot: store.snapshot,
             payments: store.snapshot.recurringPayments,
             startDate: store.todayIso,
             endDate: endDate

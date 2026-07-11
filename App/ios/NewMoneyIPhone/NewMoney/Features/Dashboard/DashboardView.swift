@@ -1866,7 +1866,7 @@ private struct BillsBreakdownView: View {
 
     private var nextBillOccurrence: RecurringPaymentOccurrence? {
         let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 90)
-        return PlannerDerivedData.recurringOccurrences(payments: snapshot.recurringPayments, startDate: store.todayIso, endDate: endDate)
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: store.todayIso, endDate: endDate)
             .sorted { lhs, rhs in
                 if lhs.dueDate == rhs.dueDate {
                     return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
@@ -1878,7 +1878,7 @@ private struct BillsBreakdownView: View {
 
     private var currentPeriodBillOccurrences: [RecurringPaymentOccurrence] {
         guard let period = store.selectedPayPeriod else { return [] }
-        return PlannerDerivedData.recurringOccurrences(payments: snapshot.recurringPayments, startDate: period.startDate, endDate: period.endDate)
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: period.startDate, endDate: period.endDate)
             .sorted { lhs, rhs in
                 if lhs.dueDate == rhs.dueDate {
                     return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending

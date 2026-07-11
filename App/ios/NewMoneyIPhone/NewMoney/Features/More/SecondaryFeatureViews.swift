@@ -737,6 +737,7 @@ struct BillsView: View {
     @State private var isTakingSoonExpanded = true
     @State private var isNewGroupPresented = false
     @State private var newGroupName = ""
+    @State private var selectedOccurrenceForAdjustment: RecurringPaymentOccurrence?
 
     private let ungroupedGroupId = "ungrouped"
 
@@ -774,6 +775,9 @@ struct BillsView: View {
             if let payment = store.snapshot.recurringPayments.first(where: { $0.id == paymentId }) {
                 EditBillView(store: store, payment: payment)
             }
+        }
+        .sheet(item: $selectedOccurrenceForAdjustment) { occurrence in
+            RecurringBillOccurrenceAdjustmentSheet(store: store, occurrence: occurrence)
         }
     }
 
@@ -917,6 +921,8 @@ struct BillsView: View {
                     applyFundingChecklistAction(item)
                 } excludeAction: {
                     applyFundingChecklistExclusion(item)
+                } adjustAction: {
+                    selectedOccurrenceForAdjustment = recurringOccurrence(for: item)
                 }
 
                 if item.id != items.last?.id {
@@ -932,6 +938,20 @@ struct BillsView: View {
             payPeriod: store.selectedPayPeriod,
             asOfDate: store.todayIso
         )
+    }
+
+    private func recurringOccurrence(for item: FundingChecklistPresentationItem) -> RecurringPaymentOccurrence? {
+        guard case let .recurringBill(paymentId, dueDate, _) = item.action,
+              let payment = store.snapshot.recurringPayments.first(where: { $0.id == paymentId })
+        else { return nil }
+
+        return PlannerDerivedData.resolvedRecurringOccurrences(
+            snapshot: store.snapshot,
+            payments: [payment],
+            startDate: PlannerDerivedData.addIsoMonthsClamped(date: store.todayIso, months: -2),
+            endDate: PlannerDerivedData.addIsoMonthsClamped(date: store.todayIso, months: 3)
+        )
+        .first { $0.dueDate == dueDate }
     }
 
     private func applyFundingChecklistAction(_ item: FundingChecklistPresentationItem) {
@@ -1013,7 +1033,9 @@ struct BillsView: View {
             } else {
                 AppCard {
                     ForEach(Array(upcomingOccurrences.prefix(6).enumerated()), id: \.element.id) { index, occurrence in
-                        BillsUpcomingRow(occurrence: occurrence, snapshot: store.snapshot)
+                        BillsUpcomingRow(occurrence: occurrence, snapshot: store.snapshot) {
+                            selectedOccurrenceForAdjustment = occurrence
+                        }
                         if index != min(upcomingOccurrences.count, 6) - 1 {
                             AppDivider()
                         }
@@ -1095,7 +1117,7 @@ struct BillsView: View {
 
     private var upcomingOccurrences: [RecurringPaymentOccurrence] {
         let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 30)
-        return PlannerDerivedData.recurringOccurrences(payments: sortedBills, startDate: store.todayIso, endDate: endDate)
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: store.snapshot, payments: sortedBills, startDate: store.todayIso, endDate: endDate)
             .sorted { lhs, rhs in
                 if lhs.dueDate == rhs.dueDate {
                     return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
@@ -1161,11 +1183,107 @@ struct BillsView: View {
 
     private func nextDueLabel(for payment: RecurringPayment) -> String {
         let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 180)
-        return PlannerDerivedData.recurringOccurrences(payments: [payment], startDate: store.todayIso, endDate: endDate)
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: store.snapshot, payments: [payment], startDate: store.todayIso, endDate: endDate)
             .sorted { $0.dueDate < $1.dueDate }
             .first
             .map { "Next \(billsFriendlyDate($0.dueDate))" }
             ?? billsDueTemplateLabel(payment)
+    }
+}
+
+private enum RecurringBillOccurrenceDateChoice: String, CaseIterable, Identifiable {
+    case asExpected = "As expected"
+    case awaiting = "Not yet"
+    case actualDate = "Choose date"
+
+    var id: String { rawValue }
+}
+
+private struct RecurringBillOccurrenceAdjustmentSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var occurrence: RecurringPaymentOccurrence
+    @State private var choice: RecurringBillOccurrenceDateChoice
+    @State private var actualDate: Date
+    @State private var confirmsExpectedDateWasMissed = false
+
+    init(store: PlannerStore, occurrence: RecurringPaymentOccurrence) {
+        self.store = store
+        self.occurrence = occurrence
+        let override = store.snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil &&
+            $0.paymentId == occurrence.payment.id &&
+            $0.scheduledDueDate == occurrence.scheduledDueDate
+        }
+        _choice = State(initialValue: override?.state == .awaitingPayment ? .awaiting : (override?.state == .confirmed ? .actualDate : .asExpected))
+        _actualDate = State(initialValue: FinanceEngine.parseDate(override?.actualDueDate ?? occurrence.dueDate))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Expected date") { Text(displayDate(occurrence.scheduledDueDate)) }
+                    LabeledContent("Amount") { Text(MoneyParser.formatPence(occurrence.amountPence)) }
+                    Text("This update applies only to this occurrence. The normal recurring schedule is unchanged.")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Section("What happened?") {
+                    Picker("Payment status", selection: $choice) {
+                        ForEach(RecurringBillOccurrenceDateChoice.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if choice == .awaiting {
+                        Text("New Money will hold this bill, prevent automatic settlement, and keep its amount reserved until you confirm the date.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.warning)
+                    }
+
+                    if choice == .actualDate {
+                        DatePicker("Actual payment date", selection: $actualDate, displayedComponents: .date)
+                        Toggle("I confirm this bill was not paid on the expected date", isOn: $confirmsExpectedDateWasMissed)
+                            .font(.footnote.weight(.medium))
+                        Text("If New Money had already created an automatic bill transaction, it will be reversed before the occurrence is recorded on the date above.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.warning)
+                    }
+                }
+            }
+            .navigationTitle("Check this bill")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                    .disabled(choice == .actualDate && !confirmsExpectedDateWasMissed)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        switch choice {
+        case .asExpected:
+            store.clearRecurringBillOccurrenceAdjustment(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
+        case .awaiting:
+            store.markRecurringBillOccurrenceAwaiting(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
+        case .actualDate:
+            store.markRecurringBillOccurrenceAwaiting(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
+            store.confirmRecurringBillOccurrence(
+                paymentId: occurrence.payment.id,
+                scheduledDueDate: occurrence.scheduledDueDate,
+                actualDueDate: FinanceEngine.toIsoDate(actualDate)
+            )
+        }
+    }
+
+    private func displayDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }
 
@@ -1174,6 +1292,7 @@ private struct BillsFundingChecklistRow: View {
     var isReadOnly: Bool
     var action: () -> Void
     var excludeAction: () -> Void
+    var adjustAction: () -> Void
 
     var body: some View {
         HStack(spacing: AppTheme.Spacing.sm) {
@@ -1205,6 +1324,18 @@ private struct BillsFundingChecklistRow: View {
             .disabled(isReadOnly)
 
             if !isReadOnly {
+                if canAdjustOccurrence {
+                    Button(action: adjustAction) {
+                        Image(systemName: "calendar.badge.exclamationmark")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Check \(item.name) occurrence")
+                }
+
                 Button(action: excludeAction) {
                     Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
                         .font(.subheadline.weight(.bold))
@@ -1230,6 +1361,13 @@ private struct BillsFundingChecklistRow: View {
         }
 
         return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.secondaryText
+    }
+
+    private var canAdjustOccurrence: Bool {
+        if case .recurringBill = item.action {
+            return true
+        }
+        return false
     }
 
     private var titleColor: Color {
@@ -1403,7 +1541,7 @@ private struct BillsOverviewDetailView: View {
 
     private var upcomingOccurrences: [RecurringPaymentOccurrence] {
         let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 60)
-        return PlannerDerivedData.recurringOccurrences(payments: sortedBills, startDate: store.todayIso, endDate: endDate)
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: store.snapshot, payments: sortedBills, startDate: store.todayIso, endDate: endDate)
             .sorted { lhs, rhs in
                 if lhs.dueDate == rhs.dueDate {
                     return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
@@ -1616,6 +1754,7 @@ private struct BillsGroupFilterPill: View {
 private struct BillsUpcomingRow: View {
     var occurrence: RecurringPaymentOccurrence
     var snapshot: PlannerSnapshot
+    var adjustAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
@@ -1635,6 +1774,16 @@ private struct BillsUpcomingRow: View {
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(AppTheme.Colors.warning)
                 .multilineTextAlignment(.trailing)
+
+            if let adjustAction {
+                Button(action: adjustAction) {
+                    Image(systemName: "calendar.badge.exclamationmark")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Check (occurrence.payment.name) occurrence")
+            }
         }
     }
 }

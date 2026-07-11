@@ -3136,6 +3136,81 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testHeldRecurringPotBillRestoresPotThenSettlesOnConfirmedActualDate() async {
+        let settings = makeManualSettings(today: "2026-06-15")
+        let pot = makePot(id: "pot-bills", name: "Bills", balancePence: 10_000, targetPence: nil)
+        let payment = makeRecurringPayment(id: "rec-phone", name: "Phone", amountPence: 4_000, dueDay: 15, potId: pot.id)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, pots: [pot], recurringPayments: [payment])))
+
+        await store.load()
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 6_000)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 1)
+
+        store.markRecurringBillOccurrenceAwaiting(paymentId: payment.id, scheduledDueDate: "2026-06-15")
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
+        XCTAssertTrue(store.snapshot.transactions.first?.deletedAt != nil)
+
+        store.confirmRecurringBillOccurrence(paymentId: payment.id, scheduledDueDate: "2026-06-15", actualDueDate: "2026-06-18")
+        var laterSettings = store.snapshot.settings
+        laterSettings.manualTodayIso = "2026-06-19"
+        store.updateSettings(laterSettings)
+
+        let activeTransaction = store.snapshot.transactions.first { $0.deletedAt == nil }
+        XCTAssertEqual(activeTransaction?.id, "recurring-rec-phone-2026-06-15")
+        XCTAssertEqual(activeTransaction?.date, "2026-06-18")
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 6_000)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 1)
+    }
+
+    @MainActor
+    func testConfirmedRecurringCardBillMovesGeneratedChargeToActualDate() async {
+        let settings = makeManualSettings(today: "2026-06-15")
+        let card = makeCreditCard(id: "card-main", name: "Main card", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-20", dueDay: 1)
+        let payment = makeRecurringPayment(id: "rec-streaming", name: "Streaming", amountPence: 1_500, dueDay: 15, potId: nil, creditCardId: card.id)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, recurringPayments: [payment], creditCards: [card])))
+
+        await store.load()
+        store.markRecurringBillOccurrenceAwaiting(paymentId: payment.id, scheduledDueDate: "2026-06-15")
+        store.confirmRecurringBillOccurrence(paymentId: payment.id, scheduledDueDate: "2026-06-15", actualDueDate: "2026-06-18")
+        var laterSettings = store.snapshot.settings
+        laterSettings.manualTodayIso = "2026-06-19"
+        store.updateSettings(laterSettings)
+
+        let charge = store.snapshot.transactions.first { $0.deletedAt == nil && $0.recurringPaymentId == payment.id }
+        XCTAssertEqual(charge?.id, "card-recurring-rec-streaming-2026-06-15")
+        XCTAssertEqual(charge?.date, "2026-06-18")
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 1_500)
+    }
+
+    func testPlanningOnlyRecurringBillOverrideMovesOnlyTheResolvedOccurrence() {
+        let payment = makeRecurringPayment(id: "rec-plan", name: "Planning bill", amountPence: 2_000, dueDay: 15, potId: nil)
+        var snapshot = makeSnapshot(recurringPayments: [payment])
+        snapshot.recurringPaymentOccurrenceOverrides = [
+            RecurringPaymentOccurrenceOverride(
+                id: "override",
+                paymentId: payment.id,
+                scheduledDueDate: "2026-06-15",
+                state: .confirmed,
+                actualDueDate: "2026-06-18",
+                reversedGeneratedTransactionIds: [],
+                createdAt: "2026-06-15T00:00:00.000Z",
+                updatedAt: "2026-06-15T00:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+
+        let occurrences = PlannerDerivedData.resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: [payment],
+            startDate: "2026-06-01",
+            endDate: "2026-07-31"
+        )
+
+        XCTAssertEqual(occurrences.first { $0.scheduledDueDate == "2026-06-15" }?.dueDate, "2026-06-18")
+        XCTAssertEqual(occurrences.first { $0.scheduledDueDate == "2026-07-15" }?.dueDate, "2026-07-15")
+    }
+
+    @MainActor
     func testDueLinkedDebtPotPaysDebtOnce() async {
         let settings = makeManualSettings(today: "2026-06-10")
         let debt = makeDebt(id: "debt-loan", name: "Personal loan", currentBalancePence: 50000, dueDate: "2026-06-10")

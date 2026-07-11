@@ -1,10 +1,12 @@
 import Foundation
 
 struct RecurringPaymentOccurrence: Identifiable, Equatable, Sendable {
-    var id: String { "\(payment.id)-\(dueDate)" }
+    var id: String { "\(payment.id)-\(scheduledDueDate)" }
     var payment: RecurringPayment
+    var scheduledDueDate: String
     var dueDate: String
     var amountPence: Int
+    var isAwaitingPayment: Bool = false
 }
 
 struct PotProgress: Equatable, Sendable {
@@ -836,7 +838,8 @@ enum PlannerDerivedData {
                 result[pot.id] = pot
             }
 
-        return recurringOccurrences(
+        return resolvedRecurringOccurrences(
+            snapshot: snapshot,
             payments: snapshot.recurringPayments,
             startDate: payPeriod.startDate,
             endDate: payPeriod.endDate
@@ -1669,9 +1672,73 @@ enum PlannerDerivedData {
             .filter(\.active)
             .flatMap { payment in
                 dueDates(for: payment, startDate: startDate, endDate: endDate).map {
-                    RecurringPaymentOccurrence(payment: payment, dueDate: $0, amountPence: payment.amountPence)
+                    RecurringPaymentOccurrence(payment: payment, scheduledDueDate: $0, dueDate: $0, amountPence: payment.amountPence)
                 }
             }
+            .sorted {
+                if $0.dueDate == $1.dueDate {
+                    return priorityRank($0.payment.priority) < priorityRank($1.payment.priority)
+                }
+                return $0.dueDate < $1.dueDate
+            }
+    }
+
+    static func resolvedRecurringOccurrences(
+        snapshot: PlannerSnapshot,
+        payments: [RecurringPayment],
+        startDate: String,
+        endDate: String
+    ) -> [RecurringPaymentOccurrence] {
+        guard startDate <= endDate else { return [] }
+
+        let activePayments = payments.filter(\.active)
+        let paymentsById = Dictionary(uniqueKeysWithValues: activePayments.map { ($0.id, $0) })
+        let overrides = snapshot.recurringPaymentOccurrenceOverrides.filter {
+            $0.deletedAt == nil && paymentsById[$0.paymentId] != nil
+        }
+        let overridesByKey = Dictionary(uniqueKeysWithValues: overrides.map { ("\($0.paymentId)-\($0.scheduledDueDate)", $0) })
+        var scheduledOccurrences = recurringOccurrences(payments: activePayments, startDate: startDate, endDate: endDate)
+        var presentKeys = Set(scheduledOccurrences.map { "\($0.payment.id)-\($0.scheduledDueDate)" })
+
+        for override in overrides {
+            let effectiveDate = override.state == .confirmed ? override.actualDueDate : override.scheduledDueDate
+            guard let payment = paymentsById[override.paymentId],
+                  let effectiveDate,
+                  FinanceEngine.isIsoDate(effectiveDate),
+                  (effectiveDate >= startDate && effectiveDate <= endDate) || override.state == .awaitingPayment
+            else { continue }
+
+            let key = "\(payment.id)-\(override.scheduledDueDate)"
+            guard !presentKeys.contains(key) else { continue }
+            scheduledOccurrences.append(
+                RecurringPaymentOccurrence(
+                    payment: payment,
+                    scheduledDueDate: override.scheduledDueDate,
+                    dueDate: override.scheduledDueDate,
+                    amountPence: payment.amountPence
+                )
+            )
+            presentKeys.insert(key)
+        }
+
+        return scheduledOccurrences
+            .compactMap { occurrence -> RecurringPaymentOccurrence? in
+                let key = "\(occurrence.payment.id)-\(occurrence.scheduledDueDate)"
+                guard let override = overridesByKey[key] else { return occurrence }
+
+                var resolved = occurrence
+                switch override.state {
+                case .normal:
+                    break
+                case .awaitingPayment:
+                    resolved.isAwaitingPayment = true
+                case .confirmed:
+                    guard let actualDueDate = override.actualDueDate, FinanceEngine.isIsoDate(actualDueDate) else { return occurrence }
+                    resolved.dueDate = actualDueDate
+                }
+                return resolved
+            }
+            .filter { ($0.dueDate >= startDate && $0.dueDate <= endDate) || $0.isAwaitingPayment }
             .sorted {
                 if $0.dueDate == $1.dueDate {
                     return priorityRank($0.payment.priority) < priorityRank($1.payment.priority)
@@ -1683,10 +1750,10 @@ enum PlannerDerivedData {
     static func cardBalance(card: CreditCard, snapshot: PlannerSnapshot) -> Int {
         let opening = card.openingBalancePence ?? 0
         let cardSpending = snapshot.transactions
-            .filter { $0.creditCardId == card.id && $0.paymentMethod == .creditCard }
+            .filter { $0.deletedAt == nil && $0.creditCardId == card.id && $0.paymentMethod == .creditCard }
             .reduce(0) { $0 + abs($1.amountPence) }
         let repayments = snapshot.creditCardRepayments
-            .filter { $0.creditCardId == card.id }
+            .filter { $0.deletedAt == nil && $0.creditCardId == card.id }
             .reduce(0) { $0 + $1.amountPence }
 
         return max(0, opening + cardSpending - repayments)
@@ -1706,7 +1773,8 @@ enum PlannerDerivedData {
     ) -> PayPeriodCostSummary {
         guard let payPeriod else { return emptyPayPeriodCostSummary }
 
-        let recurringOccurrencesForPeriod = recurringOccurrences(
+        let recurringOccurrencesForPeriod = resolvedRecurringOccurrences(
+            snapshot: snapshot,
             payments: snapshot.recurringPayments,
             startDate: payPeriod.startDate,
             endDate: payPeriod.endDate
@@ -2063,7 +2131,7 @@ enum PlannerDerivedData {
                 )
             }
 
-        events += recurringOccurrences(payments: snapshot.recurringPayments, startDate: startDate, endDate: endDate).map {
+        events += resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: startDate, endDate: endDate).map {
             CalendarEvent(id: "recurring-\($0.id)", date: $0.dueDate, title: $0.payment.name, amountPence: $0.amountPence, type: .recurring, detail: "Recurring \($0.payment.frequency.rawValue)")
         }
 
@@ -3346,7 +3414,7 @@ private extension PlannerDerivedData {
     }
 
     static func creditCardAllocationItems(snapshot: PlannerSnapshot, rangeStart: String, rangeEnd: String) -> [CreditCardAllocationItem] {
-        let recurring = recurringOccurrences(payments: snapshot.recurringPayments, startDate: rangeStart, endDate: rangeEnd)
+        let recurring = resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: rangeStart, endDate: rangeEnd)
             .map {
                 CreditCardAllocationItem(
                     creditCardId: $0.payment.creditCardId,
@@ -3413,6 +3481,7 @@ private extension PlannerDerivedData {
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
+                $0.deletedAt == nil &&
                 $0.date <= asOfDate
             }
             .map {
@@ -3425,7 +3494,7 @@ private extension PlannerDerivedData {
             }
 
         let repayments = repayments
-            .filter { $0.creditCardId == card.id && $0.date <= asOfDate }
+            .filter { $0.deletedAt == nil && $0.creditCardId == card.id && $0.date <= asOfDate }
             .map {
                 CreditCardAllocationItem(
                     creditCardId: card.id,
@@ -3530,7 +3599,8 @@ private extension PlannerDerivedData {
         let recurringForecastEnd = min(statementDate, currentPayPeriod?.endDate ?? statementDate)
         let recurringLines: [CreditCardStatementLine]
         if recurringForecastStart <= recurringForecastEnd {
-            recurringLines = recurringOccurrences(
+            recurringLines = resolvedRecurringOccurrences(
+                snapshot: snapshot,
                 payments: snapshot.recurringPayments,
                 startDate: recurringForecastStart,
                 endDate: recurringForecastEnd

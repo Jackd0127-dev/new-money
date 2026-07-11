@@ -747,6 +747,136 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func markRecurringBillOccurrenceAwaiting(paymentId: String, scheduledDueDate: String) {
+        let reversedIds = reverseGeneratedRecurringBillTransactions(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.state = .awaitingPayment
+            $0.actualDueDate = nil
+            $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
+        }
+        persist()
+    }
+
+    func confirmRecurringBillOccurrence(paymentId: String, scheduledDueDate: String, actualDueDate: String) {
+        guard FinanceEngine.isIsoDate(actualDueDate),
+              let previousEffectiveDate = recurringBillOccurrenceEffectiveDate(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+        else { return }
+
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.state = .confirmed
+            $0.actualDueDate = actualDueDate
+        }
+        moveRecurringBillFundingReferences(
+            paymentId: paymentId,
+            fromDueDate: previousEffectiveDate,
+            toDueDate: actualDueDate
+        )
+        persist()
+    }
+
+    func clearRecurringBillOccurrenceAdjustment(paymentId: String, scheduledDueDate: String) {
+        guard let previousEffectiveDate = recurringBillOccurrenceEffectiveDate(paymentId: paymentId, scheduledDueDate: scheduledDueDate) else { return }
+        _ = reverseGeneratedRecurringBillTransactions(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.state = .normal
+            $0.actualDueDate = nil
+        }
+        moveRecurringBillFundingReferences(
+            paymentId: paymentId,
+            fromDueDate: previousEffectiveDate,
+            toDueDate: scheduledDueDate
+        )
+        persist()
+    }
+
+    private func upsertRecurringBillOccurrenceOverride(
+        paymentId: String,
+        scheduledDueDate: String,
+        mutate: (inout RecurringPaymentOccurrenceOverride) -> Void
+    ) {
+        guard FinanceEngine.isIsoDate(scheduledDueDate),
+              snapshot.recurringPayments.contains(where: { $0.id == paymentId && $0.active && $0.deletedAt == nil })
+        else { return }
+
+        let now = DateUtilities.nowIsoString()
+        if let index = snapshot.recurringPaymentOccurrenceOverrides.firstIndex(where: {
+            $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate && $0.deletedAt == nil
+        }) {
+            mutate(&snapshot.recurringPaymentOccurrenceOverrides[index])
+            snapshot.recurringPaymentOccurrenceOverrides[index].updatedAt = now
+        } else {
+            var override = RecurringPaymentOccurrenceOverride(
+                id: "recurring-occurrence-override-\(paymentId)-\(scheduledDueDate)",
+                paymentId: paymentId,
+                scheduledDueDate: scheduledDueDate,
+                state: .normal,
+                actualDueDate: nil,
+                reversedGeneratedTransactionIds: [],
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: nil
+            )
+            mutate(&override)
+            snapshot.recurringPaymentOccurrenceOverrides.insert(override, at: 0)
+        }
+    }
+
+    private func recurringBillOccurrenceEffectiveDate(paymentId: String, scheduledDueDate: String) -> String? {
+        guard FinanceEngine.isIsoDate(scheduledDueDate) else { return nil }
+        let override = snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+        }
+        return override?.state == .confirmed ? override?.actualDueDate ?? scheduledDueDate : scheduledDueDate
+    }
+
+    private func reverseGeneratedRecurringBillTransactions(paymentId: String, scheduledDueDate: String) -> [String] {
+        let now = DateUtilities.nowIsoString()
+        let generatedIds = [
+            recurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate),
+            cardRecurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+        ]
+        let indices = snapshot.transactions.indices.filter {
+            snapshot.transactions[$0].deletedAt == nil && generatedIds.contains(snapshot.transactions[$0].id)
+        }
+
+        for index in indices {
+            let transaction = snapshot.transactions[index]
+            restorePotBalanceAfterRemovingTransaction(transaction, now: now)
+            snapshot.transactions[index].deletedAt = now
+            snapshot.transactions[index].updatedAt = now
+        }
+        return indices.map { snapshot.transactions[$0].id }
+    }
+
+    private func moveRecurringBillFundingReferences(paymentId: String, fromDueDate: String, toDueDate: String) {
+        guard fromDueDate != toDueDate else { return }
+        let destinationPayPeriodId = PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: toDueDate)?.id
+        let now = DateUtilities.nowIsoString()
+
+        for index in snapshot.potAllocations.indices where
+            snapshot.potAllocations[index].deletedAt == nil &&
+            snapshot.potAllocations[index].recurringPaymentId == paymentId &&
+            snapshot.potAllocations[index].recurringDueDate == fromDueDate {
+            snapshot.potAllocations[index].recurringDueDate = toDueDate
+            if let destinationPayPeriodId {
+                snapshot.potAllocations[index].payPeriodId = destinationPayPeriodId
+            }
+            snapshot.potAllocations[index].updatedAt = now
+        }
+
+        for index in snapshot.fundingChecklistExclusions.indices where
+            snapshot.fundingChecklistExclusions[index].deletedAt == nil &&
+            snapshot.fundingChecklistExclusions[index].kind == .recurringBill &&
+            snapshot.fundingChecklistExclusions[index].sourceId == paymentId &&
+            snapshot.fundingChecklistExclusions[index].occurrenceDate == fromDueDate {
+            snapshot.fundingChecklistExclusions[index].occurrenceDate = toDueDate
+            if let destinationPayPeriodId {
+                snapshot.fundingChecklistExclusions[index].payPeriodId = destinationPayPeriodId
+            }
+            snapshot.fundingChecklistExclusions[index].updatedAt = now
+        }
+    }
+
     @discardableResult
     func addBillGroup(named name: String) -> BillGroup? {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1681,12 +1811,13 @@ final class PlannerStore: ObservableObject {
 
         for payment in directPayments {
             let startDate = recurringApplicationStartDate(payment, todayIso: todayIso)
-            let occurrences = PlannerDerivedData.recurringOccurrences(payments: [payment], startDate: startDate, endDate: todayIso)
+            let occurrences = PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: [payment], startDate: startDate, endDate: todayIso)
 
             for occurrence in occurrences {
-                let transactionId = recurringTransactionId(paymentId: payment.id, dueDate: occurrence.dueDate)
+                guard !occurrence.isAwaitingPayment else { continue }
+                let transactionId = recurringTransactionId(paymentId: payment.id, scheduledDueDate: occurrence.scheduledDueDate)
 
-                guard !snapshot.transactions.contains(where: { $0.id == transactionId }),
+                guard !snapshot.transactions.contains(where: { $0.id == transactionId && $0.deletedAt == nil }),
                       let potId = payment.potId,
                       let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived }),
                       occurrence.amountPence > 0
@@ -1727,21 +1858,28 @@ final class PlannerStore: ObservableObject {
 
         for payment in cardPayments {
             let startDate = recurringApplicationStartDate(payment, todayIso: todayIso)
-            let occurrences = PlannerDerivedData.recurringOccurrences(payments: [payment], startDate: startDate, endDate: todayIso)
+            let occurrences = PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: [payment], startDate: startDate, endDate: todayIso)
 
             for occurrence in occurrences {
                 guard let cardId = payment.creditCardId,
                       snapshot.creditCards.contains(where: { $0.id == cardId && !$0.archived }),
-                      occurrence.amountPence > 0
+                      occurrence.amountPence > 0,
+                      !occurrence.isAwaitingPayment
                 else { continue }
 
-                let transactionId = cardRecurringTransactionId(paymentId: payment.id, dueDate: occurrence.dueDate)
+                let transactionId = cardRecurringTransactionId(paymentId: payment.id, scheduledDueDate: occurrence.scheduledDueDate)
                 if let existingTransactionIndex = cardRecurringTransactionIndex(
                     transactionId: transactionId,
                     paymentId: payment.id,
-                    dueDate: occurrence.dueDate,
+                    scheduledDueDate: occurrence.scheduledDueDate,
                     cardId: cardId
                 ) {
+                    if snapshot.transactions[existingTransactionIndex].date != occurrence.dueDate {
+                        snapshot.transactions[existingTransactionIndex].date = occurrence.dueDate
+                        snapshot.transactions[existingTransactionIndex].payPeriodId = PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: occurrence.dueDate)?.id
+                        snapshot.transactions[existingTransactionIndex].updatedAt = now
+                        changed = true
+                    }
                     if snapshot.transactions[existingTransactionIndex].potId == nil,
                        let potId = fundedCardBillPotId(payment: payment, occurrence: occurrence) {
                         snapshot.transactions[existingTransactionIndex].potId = potId
@@ -2043,17 +2181,19 @@ final class PlannerStore: ObservableObject {
     private func cardRecurringTransactionIndex(
         transactionId: String,
         paymentId: String,
-        dueDate: String,
+        scheduledDueDate: String,
         cardId: String
     ) -> Int? {
         snapshot.transactions.firstIndex {
-            $0.id == transactionId ||
+            $0.deletedAt == nil && (
+                $0.id == transactionId ||
             (
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == cardId &&
                 $0.recurringPaymentId == paymentId &&
-                $0.date == dueDate
+                $0.id == cardRecurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            )
             )
         }
     }
@@ -2066,12 +2206,12 @@ final class PlannerStore: ObservableObject {
         return createdDate <= todayIso ? createdDate : todayIso
     }
 
-    private func recurringTransactionId(paymentId: String, dueDate: String) -> String {
-        "recurring-\(paymentId)-\(dueDate)"
+    private func recurringTransactionId(paymentId: String, scheduledDueDate: String) -> String {
+        "recurring-\(paymentId)-\(scheduledDueDate)"
     }
 
-    private func cardRecurringTransactionId(paymentId: String, dueDate: String) -> String {
-        "card-recurring-\(paymentId)-\(dueDate)"
+    private func cardRecurringTransactionId(paymentId: String, scheduledDueDate: String) -> String {
+        "card-recurring-\(paymentId)-\(scheduledDueDate)"
     }
 
     private func cardBillFundingAllocationId(paymentId: String, dueDate: String, payPeriodId: String) -> String {

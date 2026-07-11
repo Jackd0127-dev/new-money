@@ -339,6 +339,26 @@ struct RecurringPayment: Codable, Equatable, Identifiable, Sendable {
     var deletedAt: String?
 }
 
+enum RecurringPaymentOccurrenceState: String, Codable, Equatable, Sendable {
+    case normal
+    case awaitingPayment
+    case confirmed
+}
+
+/// A one-off correction to a recurring bill. The scheduled date stays immutable so
+/// the bill returns to its normal recurrence after this occurrence.
+struct RecurringPaymentOccurrenceOverride: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var paymentId: String
+    var scheduledDueDate: String
+    var state: RecurringPaymentOccurrenceState
+    var actualDueDate: String?
+    var reversedGeneratedTransactionIds: [String]
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
 struct BillGroup: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
@@ -848,6 +868,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var settings: Settings
     var pots: [Pot]
     var recurringPayments: [RecurringPayment]
+    var recurringPaymentOccurrenceOverrides: [RecurringPaymentOccurrenceOverride]
     var billGroups: [BillGroup]
     var payPeriods: [PayPeriod]
     var paychecks: [Paycheck]
@@ -871,6 +892,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         settings: Settings,
         pots: [Pot],
         recurringPayments: [RecurringPayment],
+        recurringPaymentOccurrenceOverrides: [RecurringPaymentOccurrenceOverride] = [],
         billGroups: [BillGroup] = [],
         payPeriods: [PayPeriod],
         paychecks: [Paycheck],
@@ -893,6 +915,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.settings = settings
         self.pots = pots
         self.recurringPayments = recurringPayments
+        self.recurringPaymentOccurrenceOverrides = recurringPaymentOccurrenceOverrides
         self.billGroups = billGroups
         self.payPeriods = payPeriods
         self.paychecks = paychecks
@@ -914,7 +937,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions
+        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions
     }
 
     init(from decoder: Decoder) throws {
@@ -923,6 +946,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             settings: try container.decode(Settings.self, forKey: .settings),
             pots: try container.decodeIfPresent([Pot].self, forKey: .pots) ?? [],
             recurringPayments: try container.decodeIfPresent([RecurringPayment].self, forKey: .recurringPayments) ?? [],
+            recurringPaymentOccurrenceOverrides: try container.decodeIfPresent([RecurringPaymentOccurrenceOverride].self, forKey: .recurringPaymentOccurrenceOverrides) ?? [],
             billGroups: try container.decodeIfPresent([BillGroup].self, forKey: .billGroups) ?? [],
             payPeriods: try container.decodeIfPresent([PayPeriod].self, forKey: .payPeriods) ?? [],
             paychecks: try container.decodeIfPresent([Paycheck].self, forKey: .paychecks) ?? [],

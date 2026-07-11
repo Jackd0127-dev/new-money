@@ -294,6 +294,8 @@ struct Settings: Codable, Equatable, Identifiable, Sendable {
     var appDateMode: AppDateMode
     var manualTodayIso: String?
     var lastProcessedDateIso: String? = nil
+    /// Tracks one-time repairs to persisted planner snapshots. Optional so older snapshots decode safely.
+    var cardRecurringPotReserveMigrationVersion: Int? = nil
     var aiInstructions: String
     var aiProvider: AIProvider
     var assistantName: String?

@@ -449,7 +449,7 @@ final class FinanceEngineTests: XCTestCase {
         let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
         XCTAssertEqual(potsById["pot-cc1"]?.name, "Pot 1")
         XCTAssertEqual(potsById["pot-cc1"]?.linkedCreditCardId, "card-cc1")
-        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 0)
+        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 12500)
         XCTAssertEqual(potsById["pot-cc2"]?.name, "Pot 2")
         XCTAssertEqual(potsById["pot-cc2"]?.linkedCreditCardId, "card-cc2")
         XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 0)
@@ -2073,7 +2073,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(toolsTransaction.creditCardId, "card-cc2")
         XCTAssertEqual(toolsTransaction.potId, "pot-pot2")
         XCTAssertEqual(toolsTransaction.amountPence, 2400)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-pot2" }?.balancePence, 22000)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-pot2" }?.balancePence, 35400)
 
         var september30Settings = store.snapshot.settings
         september30Settings.manualTodayIso = "2026-09-30"
@@ -2083,7 +2083,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(roadTaxTransaction.creditCardId, "card-cc4")
         XCTAssertEqual(roadTaxTransaction.potId, "pot-pot5")
         XCTAssertEqual(roadTaxTransaction.amountPence, 18000)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-pot5" }?.balancePence, 0)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-pot5" }?.balancePence, 18000)
     }
 
     @MainActor
@@ -2737,7 +2737,7 @@ final class FinanceEngineTests: XCTestCase {
         store.updateSettings(july2Settings)
 
         var potsById = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.id, $0) })
-        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 5000)
+        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 12500)
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(store.snapshot.creditCards.first { $0.id == "card-cc1" }), snapshot: store.snapshot), 7500)
         var summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-07-02")
         XCTAssertEqual(summary.moneyLeftPence, 7500)
@@ -2747,7 +2747,7 @@ final class FinanceEngineTests: XCTestCase {
         store.updateSettings(july15Settings)
 
         potsById = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.id, $0) })
-        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 0)
+        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 12500)
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(store.snapshot.creditCards.first { $0.id == "card-cc1" }), snapshot: store.snapshot), 12500)
         XCTAssertEqual(store.snapshot.transactions.first { $0.id == "card-recurring-rec-skincare-2026-07-15" }?.potId, "pot-cc1")
         summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-07-15")
@@ -2755,7 +2755,7 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testFundingSameDayCardBillAfterItPostedConsumesPotAndTagsTransactionOnce() async {
+    func testFundingSameDayCardBillAfterItPostedKeepsPotReserveAndTagsTransactionOnce() async {
         let settings = makeManualSettings(today: "2026-07-01")
         let period = makePayPeriod(id: "period-july", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 50000)
         let card = makeCreditCard(
@@ -2786,7 +2786,7 @@ final class FinanceEngineTests: XCTestCase {
 
         XCTAssertTrue(store.setCardBillFundingCompleted(paymentId: bill.id, dueDate: "2026-07-01", payPeriodId: period.id, completed: true))
 
-        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
         XCTAssertEqual(store.snapshot.transactions.first { $0.id == "card-recurring-rec-bill-2026-07-01" }?.potId, pot.id)
         let summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-07-01")
         XCTAssertEqual(summary.potAllocationsPence, 10000)
@@ -2795,7 +2795,7 @@ final class FinanceEngineTests: XCTestCase {
 
         XCTAssertFalse(store.applyDueLinkedPotObligations(asOf: "2026-07-01"))
         XCTAssertEqual(store.snapshot.transactions.filter { $0.id == "card-recurring-rec-bill-2026-07-01" }.count, 1)
-        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
     }
 
     @MainActor
@@ -4025,7 +4025,7 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testCardBillPotCycleForecastsPostsConsumesFundedPotAndRepaysWithoutSecondCost() async {
+    func testCardBillPotCycleForecastsPostsKeepsFundedPotUntilRepayment() async {
         let settingsBeforeDue = makeManualSettings(today: "2026-06-01")
         let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
         let card = makeCreditCard(
@@ -4071,14 +4071,14 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(dueDateTransaction?.creditCardId, card.id)
         XCTAssertEqual(dueDateTransaction?.potId, pot.id)
         XCTAssertEqual(dueDateTransaction?.recurringPaymentId, payment.id)
-        XCTAssertEqual(dueDateStore.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(dueDateStore.snapshot.pots.first?.balancePence, 10000)
         XCTAssertFalse(dueDateStore.applyDueLinkedPotObligations(asOf: "2026-06-10"))
 
         let onDueAvailability = PlannerDerivedData.creditCardAvailabilitySummary(card: card, snapshot: dueDateStore.snapshot, payPeriod: period, asOfDate: "2026-06-10")
         XCTAssertEqual(onDueAvailability.actualAvailablePence, 70000)
         XCTAssertEqual(onDueAvailability.forecastAvailablePence, 70000)
         let onDueProgress = PlannerDerivedData.potProgress(pot: dueDateStore.snapshot.pots[0], snapshot: dueDateStore.snapshot, today: "2026-06-10")
-        XCTAssertEqual(onDueProgress.targetPence, 0)
+        XCTAssertEqual(onDueProgress.targetPence, 10000)
         XCTAssertEqual(onDueProgress.shortfallPence, 0)
 
         var julySettings = dueDateStore.snapshot.settings
@@ -4088,11 +4088,172 @@ final class FinanceEngineTests: XCTestCase {
         let repayment = dueDateStore.snapshot.creditCardRepayments.first
         XCTAssertEqual(repayment?.amountPence, 10000)
         XCTAssertEqual(repayment?.source, .linkedPotStatement)
-        XCTAssertEqual(repayment?.potContributionPence, 0)
+        XCTAssertEqual(repayment?.potContributionPence, 10000)
         XCTAssertEqual(repayment?.paycheckContributionPence, 0)
         XCTAssertEqual(dueDateStore.snapshot.pots.first?.balancePence, 0)
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: dueDateStore.snapshot), 0)
         XCTAssertEqual(dueDateStore.snapshot.transactions.filter { $0.id == "card-recurring-rec-chatgpt-2026-06-10" }.count, 1)
+    }
+
+    @MainActor
+    func testVitaminsCardBillKeepsReserveUntilStatementDirectDebit() async {
+        let period = makePayPeriod(id: "period-july", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 100000)
+        let card = makeCreditCard(
+            id: "card-zable",
+            name: "Zable",
+            limitPence: 50000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-24",
+            dueDay: 1,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let pot = makePot(id: "pot-zable", name: "Zable", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let vitamins = makeRecurringPayment(
+            id: "rec-vitamins",
+            name: "Vitamins",
+            amountPence: 2212,
+            dueDay: 11,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: makeManualSettings(today: "2026-07-10"),
+            pots: [pot],
+            recurringPayments: [vitamins],
+            payPeriods: [period],
+            creditCards: [card]
+        )))
+
+        await store.load()
+        XCTAssertTrue(store.setCardBillFundingCompleted(paymentId: vitamins.id, dueDate: "2026-07-11", payPeriodId: period.id, completed: true))
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 2212)
+
+        var dueSettings = store.snapshot.settings
+        dueSettings.manualTodayIso = "2026-07-11"
+        store.updateSettings(dueSettings)
+
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 2212)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 2212)
+        let progress = PlannerDerivedData.potProgress(pot: try! XCTUnwrap(store.snapshot.pots.first), snapshot: store.snapshot, today: "2026-07-11")
+        XCTAssertEqual(progress.targetPence, 2212)
+        XCTAssertEqual(progress.shortfallPence, 0)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.id == "card-recurring-rec-vitamins-2026-07-11" }.count, 1)
+
+        var statementSettings = store.snapshot.settings
+        statementSettings.manualTodayIso = "2026-07-24"
+        store.updateSettings(statementSettings)
+        XCTAssertTrue(store.snapshot.creditCardRepayments.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 2212)
+
+        var directDebitSettings = store.snapshot.settings
+        directDebitSettings.manualTodayIso = "2026-08-01"
+        store.updateSettings(directDebitSettings)
+
+        let repayment = try! XCTUnwrap(store.snapshot.creditCardRepayments.first)
+        XCTAssertEqual(repayment.amountPence, 2212)
+        XCTAssertEqual(repayment.statementDate, "2026-07-24")
+        XCTAssertEqual(repayment.directDebitDate, "2026-08-01")
+        XCTAssertEqual(repayment.potContributionPence, 2212)
+        XCTAssertEqual(repayment.paycheckContributionPence, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 0)
+
+        XCTAssertFalse(store.applyDueLinkedPotObligations(asOf: "2026-08-01"))
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.id == "card-recurring-rec-vitamins-2026-07-11" }.count, 1)
+        XCTAssertEqual(store.snapshot.creditCardRepayments.count, 1)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+    }
+
+    func testMigrationRestoresUnsettledLegacyRecurringCardBillReserveOnce() {
+        var settings = makeManualSettings(today: "2026-07-11")
+        settings.cardRecurringPotReserveMigrationVersion = nil
+        let card = makeCreditCard(id: "card-zable", name: "Zable", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-07-24", dueDay: 1)
+        let pot = makePot(id: "pot-zable", name: "Zable", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let transaction = Transaction(
+            id: "card-recurring-rec-vitamins-2026-07-11",
+            potId: pot.id,
+            payPeriodId: "period-july",
+            amountPence: 2212,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: card.id,
+            recurringPaymentId: "rec-vitamins",
+            date: "2026-07-11",
+            note: "Vitamins",
+            createdAt: "2026-07-11T00:00:00.000Z",
+            updatedAt: "2026-07-11T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let allocation = makePotAllocation(
+            id: "allocation-vitamins",
+            payPeriodId: "period-july",
+            potId: pot.id,
+            amountPence: 2212,
+            recurringPaymentId: "rec-vitamins",
+            recurringDueDate: "2026-07-11"
+        )
+        let legacySnapshot = makeSnapshot(settings: settings, pots: [pot], payPeriods: [], potAllocations: [allocation], transactions: [transaction], creditCards: [card])
+
+        let migrated = DefaultData.migratedSnapshot(legacySnapshot).snapshot
+        XCTAssertEqual(migrated.pots.first?.balancePence, 2212)
+        XCTAssertEqual(migrated.settings.cardRecurringPotReserveMigrationVersion, 1)
+
+        let rerun = DefaultData.migratedSnapshot(migrated).snapshot
+        XCTAssertEqual(rerun.pots.first?.balancePence, 2212)
+    }
+
+    func testMigrationDoesNotRestoreLegacyCardBillReserveAfterStatementRepayment() {
+        var settings = makeManualSettings(today: "2026-08-01")
+        settings.cardRecurringPotReserveMigrationVersion = nil
+        let card = makeCreditCard(id: "card-zable", name: "Zable", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-07-24", dueDay: 1)
+        let pot = makePot(id: "pot-zable", name: "Zable", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let transaction = Transaction(
+            id: "card-recurring-rec-vitamins-2026-07-11",
+            potId: pot.id,
+            payPeriodId: "period-july",
+            amountPence: 2212,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: card.id,
+            recurringPaymentId: "rec-vitamins",
+            date: "2026-07-11",
+            note: "Vitamins",
+            createdAt: "2026-07-11T00:00:00.000Z",
+            updatedAt: "2026-07-11T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let allocation = makePotAllocation(
+            id: "allocation-vitamins",
+            payPeriodId: "period-july",
+            potId: pot.id,
+            amountPence: 2212,
+            recurringPaymentId: "rec-vitamins",
+            recurringDueDate: "2026-07-11"
+        )
+        let repayment = CreditCardRepayment(
+            id: "repayment-zable-2026-08-01",
+            creditCardId: card.id,
+            amountPence: 2212,
+            date: "2026-08-01",
+            note: "Zable statement payment",
+            statementDate: "2026-07-24",
+            directDebitDate: "2026-08-01",
+            source: .linkedPotStatement,
+            potId: pot.id,
+            potContributionPence: 0,
+            potContributions: [],
+            paycheckContributionPence: 0,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let legacySnapshot = makeSnapshot(settings: settings, pots: [pot], potAllocations: [allocation], transactions: [transaction], creditCards: [card], creditCardRepayments: [repayment])
+
+        let migrated = DefaultData.migratedSnapshot(legacySnapshot).snapshot
+        XCTAssertEqual(migrated.pots.first?.balancePence, 0)
+        XCTAssertEqual(migrated.settings.cardRecurringPotReserveMigrationVersion, 1)
     }
 
     @MainActor
@@ -4139,7 +4300,7 @@ final class FinanceEngineTests: XCTestCase {
         dueSettings.manualTodayIso = "2026-07-01"
         store.updateSettings(dueSettings)
 
-        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 7500)
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 7500)
         XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == "card-recurring-rec-bill-2026-07-01" })?.potId, pot.id)
         let repayment = store.snapshot.creditCardRepayments.first(where: { $0.id == "card-opening-balance-repayment-card-main-2026-07-01" })

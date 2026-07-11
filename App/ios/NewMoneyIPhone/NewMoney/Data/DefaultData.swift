@@ -12,6 +12,7 @@ enum DefaultData {
         defaultHoursWorked: 0,
         appDateMode: .automatic,
         manualTodayIso: nil,
+        cardRecurringPotReserveMigrationVersion: 1,
         aiInstructions: "",
         aiProvider: .gemini,
         assistantName: "Assistant",
@@ -1180,7 +1181,56 @@ enum DefaultData {
             return true
         }
 
+        repairUnsettledRecurringCardBillReserves(in: &migrated)
+
         return (migrated, migrated != snapshot)
+    }
+
+    /// Before version 1, posting a funded recurring card bill removed its cash from the
+    /// linked pot immediately. Restore that cash only when the matching card charge has
+    /// not yet been included in a statement repayment.
+    private static func repairUnsettledRecurringCardBillReserves(in snapshot: inout PlannerSnapshot) {
+        guard (snapshot.settings.cardRecurringPotReserveMigrationVersion ?? 0) < 1 else { return }
+
+        for allocation in snapshot.potAllocations where
+            allocation.deletedAt == nil &&
+            (allocation.source == .recurringBillFunding || allocation.source == .cardBillFunding) &&
+            allocation.amountPence > 0 &&
+            allocation.recurringPaymentId != nil &&
+            allocation.recurringDueDate != nil
+        {
+            guard let paymentId = allocation.recurringPaymentId,
+                  let dueDate = allocation.recurringDueDate,
+                  let transaction = snapshot.transactions.first(where: {
+                      $0.deletedAt == nil &&
+                      $0.type == .spending &&
+                      $0.paymentMethod == .creditCard &&
+                      $0.recurringPaymentId == paymentId &&
+                      $0.date == dueDate &&
+                      $0.potId == allocation.potId
+                  }),
+                  let cardId = transaction.creditCardId ?? allocation.creditCardId,
+                  !hasStatementRepaymentSettling(cardId: cardId, chargeDate: dueDate, in: snapshot),
+                  let potIndex = snapshot.pots.firstIndex(where: { $0.id == allocation.potId && !$0.archived })
+            else { continue }
+
+            snapshot.pots[potIndex].balancePence += allocation.amountPence
+            snapshot.pots[potIndex].updatedAt = allocation.updatedAt
+        }
+
+        snapshot.settings.cardRecurringPotReserveMigrationVersion = 1
+    }
+
+    private static func hasStatementRepaymentSettling(cardId: String, chargeDate: String, in snapshot: PlannerSnapshot) -> Bool {
+        snapshot.creditCardRepayments.contains { repayment in
+            guard repayment.deletedAt == nil,
+                  repayment.creditCardId == cardId,
+                  repayment.amountPence > 0
+            else { return false }
+
+            let statementDate = repayment.statementDate ?? repayment.date
+            return statementDate >= chargeDate
+        }
     }
 
     private static func legacyReferencedPotIds(in snapshot: PlannerSnapshot) -> Set<String> {

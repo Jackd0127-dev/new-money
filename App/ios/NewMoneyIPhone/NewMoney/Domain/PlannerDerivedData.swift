@@ -710,12 +710,7 @@ enum PlannerDerivedData {
                     cardId: cardId,
                     excludingPotId: pot.id
                 )
-                let consumedBillFundingPence = linkedCreditCardConsumedBillFundingPence(
-                    cardId: cardId,
-                    snapshot: snapshot,
-                    endDate: today
-                )
-                let cardTargetPence = max(0, rawCardTargetPence - consumedBillFundingPence - otherPotCardBillTargetPence)
+                let cardTargetPence = max(0, rawCardTargetPence - otherPotCardBillTargetPence)
                 let activeReserveTargetPence = activeLinkedCreditCardReserveTargetPence(
                     potId: pot.id,
                     cardId: cardId,
@@ -1695,39 +1690,6 @@ enum PlannerDerivedData {
             .reduce(0) { $0 + $1.amountPence }
 
         return max(0, opening + cardSpending - repayments)
-    }
-
-    static func linkedCreditCardConsumedBillFundingPence(
-        cardId: String,
-        snapshot: PlannerSnapshot,
-        startDate: String? = nil,
-        endDate: String
-    ) -> Int {
-        let recurringFundingPence = snapshot.transactions.reduce(0) { total, transaction in
-            guard transaction.deletedAt == nil,
-                  transaction.type == .spending,
-                  transaction.paymentMethod == .creditCard,
-                  transaction.creditCardId == cardId,
-                  transaction.date <= endDate,
-                  startDate.map({ transaction.date >= $0 }) ?? true,
-                  let potId = transaction.potId,
-                  let recurringPaymentId = transaction.recurringPaymentId
-            else { return total }
-
-            let fundedPence = snapshot.potAllocations
-                .filter {
-                    $0.deletedAt == nil &&
-                    $0.potId == potId &&
-                    isRecurringBillFundingSource($0.source) &&
-                    $0.recurringPaymentId == recurringPaymentId &&
-                    $0.recurringDueDate == transaction.date
-                }
-                .reduce(0) { $0 + max(0, $1.amountPence) }
-
-            return total + min(max(0, transaction.amountPence), fundedPence)
-        }
-
-        return recurringFundingPence
     }
 
     static func findPayPeriod(payPeriods: [PayPeriod], date: String) -> PayPeriod? {

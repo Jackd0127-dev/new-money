@@ -1742,29 +1742,19 @@ final class PlannerStore: ObservableObject {
                     dueDate: occurrence.dueDate,
                     cardId: cardId
                 ) {
-                    let consumedPotId = consumeCardBillFundingIfAvailable(
-                        payment: payment,
-                        occurrence: occurrence,
-                        cardId: cardId,
-                        existingTransactionIndex: existingTransactionIndex,
-                        now: now
-                    )
-                    changed = consumedPotId != nil || changed
+                    if snapshot.transactions[existingTransactionIndex].potId == nil,
+                       let potId = fundedCardBillPotId(payment: payment, occurrence: occurrence) {
+                        snapshot.transactions[existingTransactionIndex].potId = potId
+                        snapshot.transactions[existingTransactionIndex].updatedAt = now
+                        changed = true
+                    }
                     continue
                 }
-
-                let consumedPotId = consumeCardBillFundingIfAvailable(
-                    payment: payment,
-                    occurrence: occurrence,
-                    cardId: cardId,
-                    existingTransactionIndex: nil,
-                    now: now
-                )
 
                 snapshot.transactions.insert(
                     Transaction(
                         id: transactionId,
-                        potId: consumedPotId,
+                        potId: fundedCardBillPotId(payment: payment, occurrence: occurrence),
                         payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: occurrence.dueDate)?.id,
                         amountPence: occurrence.amountPence,
                         type: .spending,
@@ -1784,6 +1774,27 @@ final class PlannerStore: ObservableObject {
         }
 
         return changed
+    }
+
+    private func fundedCardBillPotId(
+        payment: RecurringPayment,
+        occurrence: RecurringPaymentOccurrence
+    ) -> String? {
+        guard let potId = payment.potId,
+              snapshot.pots.contains(where: { $0.id == potId && !$0.archived })
+        else { return nil }
+
+        let fundedPence = snapshot.potAllocations
+            .filter {
+                $0.deletedAt == nil &&
+                $0.potId == potId &&
+                isRecurringBillFundingSource($0.source) &&
+                $0.recurringPaymentId == payment.id &&
+                $0.recurringDueDate == occurrence.dueDate
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        return fundedPence >= occurrence.amountPence ? potId : nil
     }
 
     private func applyDueCreditCardStatementRepayments(asOf todayIso: String) -> Bool {
@@ -1828,23 +1839,13 @@ final class PlannerStore: ObservableObject {
 
                 guard repaymentAmountPence > 0 else { continue }
 
-                let consumedBillFundingPence = min(
-                    repaymentAmountPence,
-                    PlannerDerivedData.linkedCreditCardConsumedBillFundingPence(
-                        cardId: card.id,
-                        snapshot: snapshot,
-                        startDate: creditCardStatementCycleStartDate(card: card, statementDate: statementPayment.statementDate),
-                        endDate: statementPayment.statementDate
-                    )
-                )
-                let remainingFundingPence = max(0, repaymentAmountPence - consumedBillFundingPence)
                 let linkedPotContribution = deductLinkedCreditCardPots(
                     creditCardId: card.id,
-                    amountPence: remainingFundingPence,
+                    amountPence: repaymentAmountPence,
                     now: now
                 )
-                let paycheckContributionPence = max(0, remainingFundingPence - linkedPotContribution.amountPence)
-                let source: CreditCardRepaymentSource = (consumedBillFundingPence > 0 || linkedPotContribution.amountPence > 0) ? .linkedPotStatement : .automaticStatement
+                let paycheckContributionPence = max(0, repaymentAmountPence - linkedPotContribution.amountPence)
+                let source: CreditCardRepaymentSource = linkedPotContribution.amountPence > 0 ? .linkedPotStatement : .automaticStatement
 
                 snapshot.creditCardRepayments.insert(
                     CreditCardRepayment(
@@ -2039,49 +2040,6 @@ final class PlannerStore: ObservableObject {
         return changed
     }
 
-    private func consumeCardBillFundingIfAvailable(
-        payment: RecurringPayment,
-        occurrence: RecurringPaymentOccurrence,
-        cardId: String,
-        existingTransactionIndex: Int?,
-        now: String
-    ) -> String? {
-        guard let potId = payment.potId,
-              let potIndex = snapshot.pots.firstIndex(where: {
-                  $0.id == potId &&
-                  !$0.archived
-              })
-        else { return nil }
-
-        let fundedPence = snapshot.potAllocations
-            .filter {
-                $0.deletedAt == nil &&
-                $0.potId == potId &&
-                isRecurringBillFundingSource($0.source) &&
-                $0.recurringPaymentId == payment.id &&
-                $0.recurringDueDate == occurrence.dueDate
-            }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
-
-        if let existingTransactionIndex,
-           snapshot.transactions[existingTransactionIndex].potId != nil {
-            return nil
-        }
-
-        guard fundedPence >= occurrence.amountPence,
-              occurrence.amountPence > 0,
-              snapshot.pots[potIndex].balancePence >= occurrence.amountPence
-        else { return nil }
-
-        snapshot.pots[potIndex].balancePence -= occurrence.amountPence
-        snapshot.pots[potIndex].updatedAt = now
-        if let existingTransactionIndex {
-            snapshot.transactions[existingTransactionIndex].potId = potId
-            snapshot.transactions[existingTransactionIndex].updatedAt = now
-        }
-        return potId
-    }
-
     private func cardRecurringTransactionIndex(
         transactionId: String,
         paymentId: String,
@@ -2224,15 +2182,6 @@ final class PlannerStore: ObservableObject {
                 )
             )
         }
-    }
-
-    private func creditCardStatementCycleStartDate(card: CreditCard, statementDate: String) -> String {
-        if statementDate == card.statementDate {
-            return card.createdAt.isoDatePrefix ?? statementDate
-        }
-
-        let previousStatementDate = PlannerDerivedData.addIsoMonthsClamped(date: statementDate, months: -1)
-        return FinanceEngine.addIsoDays(date: previousStatementDate, days: 1)
     }
 
     private func deductLinkedCreditCardPots(creditCardId: String, amountPence: Int, now: String) -> LinkedPotContribution {

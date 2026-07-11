@@ -108,6 +108,7 @@ enum PotAllocationSource: String, Codable, Sendable {
     case cardBillFunding = "card_bill_funding"
     case cardSpendFunding = "card_spend_funding"
     case cardOpeningBalanceFunding = "card_opening_balance_funding"
+    case cardPaymentFunding = "card_payment_funding"
     case debtFunding = "debt_funding"
     case potAuto = "pot_auto"
 }
@@ -388,6 +389,7 @@ enum FundingChecklistExclusionKind: String, Codable, Sendable {
     case cardBill = "card_bill"
     case cardSpend = "card_spend"
     case cardOpeningBalance = "card_opening_balance"
+    case cardPayment = "card_payment"
     case debt
 }
 
@@ -750,6 +752,34 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     var deletedAt: String?
 }
 
+enum CreditCardCycleStatementState: String, Codable, Equatable, Sendable {
+    case normal
+    case awaitingConfirmation
+    case confirmed
+}
+
+enum CreditCardCycleDirectDebitState: String, Codable, Equatable, Sendable {
+    case normal
+    case awaitingPayment
+    case confirmed
+}
+
+/// A one-off correction to a card's normal monthly cycle. The scheduled statement
+/// date remains the stable identity so a temporary bank delay never changes future cycles.
+struct CreditCardCycleOverride: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var creditCardId: String
+    var scheduledStatementDate: String
+    var statementState: CreditCardCycleStatementState
+    var actualStatementDate: String?
+    var directDebitState: CreditCardCycleDirectDebitState
+    var actualDirectDebitDate: String?
+    var reversedAutomaticRepaymentIds: [String]
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
 struct CustomPayment: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
@@ -773,10 +803,16 @@ struct CreditCardRepayment: Codable, Equatable, Identifiable, Sendable {
     var source: CreditCardRepaymentSource? = nil
     var potId: String? = nil
     var potContributionPence: Int? = nil
+    var potContributions: [CreditCardPotContribution]? = nil
     var paycheckContributionPence: Int? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
+}
+
+struct CreditCardPotContribution: Codable, Equatable, Sendable {
+    var potId: String
+    var amountPence: Int
 }
 
 struct CreditCardPot: Codable, Equatable, Identifiable, Sendable {
@@ -824,6 +860,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var customPayments: [CustomPayment]
     var creditCardRepayments: [CreditCardRepayment]
     var creditCardPots: [CreditCardPot]
+    var creditCardCycleOverrides: [CreditCardCycleOverride]
     var dailyBriefs: [DailyBrief]
     var oneOffIncomes: [OneOffIncome]
     var fundingChecklistExclusions: [FundingChecklistExclusion]
@@ -846,6 +883,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         customPayments: [CustomPayment],
         creditCardRepayments: [CreditCardRepayment],
         creditCardPots: [CreditCardPot],
+        creditCardCycleOverrides: [CreditCardCycleOverride] = [],
         dailyBriefs: [DailyBrief],
         oneOffIncomes: [OneOffIncome] = [],
         fundingChecklistExclusions: [FundingChecklistExclusion] = []
@@ -867,13 +905,14 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.customPayments = customPayments
         self.creditCardRepayments = creditCardRepayments
         self.creditCardPots = creditCardPots
+        self.creditCardCycleOverrides = creditCardCycleOverrides
         self.dailyBriefs = dailyBriefs
         self.oneOffIncomes = oneOffIncomes
         self.fundingChecklistExclusions = fundingChecklistExclusions
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, dailyBriefs, oneOffIncomes, fundingChecklistExclusions
+        case settings, pots, recurringPayments, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions
     }
 
     init(from decoder: Decoder) throws {
@@ -896,6 +935,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             customPayments: try container.decodeIfPresent([CustomPayment].self, forKey: .customPayments) ?? [],
             creditCardRepayments: try container.decodeIfPresent([CreditCardRepayment].self, forKey: .creditCardRepayments) ?? [],
             creditCardPots: try container.decodeIfPresent([CreditCardPot].self, forKey: .creditCardPots) ?? [],
+            creditCardCycleOverrides: try container.decodeIfPresent([CreditCardCycleOverride].self, forKey: .creditCardCycleOverrides) ?? [],
             dailyBriefs: try container.decodeIfPresent([DailyBrief].self, forKey: .dailyBriefs) ?? [],
             oneOffIncomes: try container.decodeIfPresent([OneOffIncome].self, forKey: .oneOffIncomes) ?? [],
             fundingChecklistExclusions: try container.decodeIfPresent([FundingChecklistExclusion].self, forKey: .fundingChecklistExclusions) ?? []

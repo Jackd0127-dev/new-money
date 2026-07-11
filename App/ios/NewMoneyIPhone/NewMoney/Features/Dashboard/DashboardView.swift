@@ -171,7 +171,7 @@ struct DashboardView: View {
             return nil
         }
         return FinanceEngine.getDailySafeToSpendPence(
-            spendablePence: currentCostSummary.currentMoneyLeftPence,
+            spendablePence: currentCostSummary.projectedMoneyLeftPence,
             today: store.todayIso,
             endDate: period.endDate
         )
@@ -631,7 +631,7 @@ private struct DashboardMoneyLeftDetailView: View {
             return nil
         }
         return FinanceEngine.getDailySafeToSpendPence(
-            spendablePence: currentCostSummary.currentMoneyLeftPence,
+            spendablePence: currentCostSummary.projectedMoneyLeftPence,
             today: store.todayIso,
             endDate: period.endDate
         )

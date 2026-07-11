@@ -707,6 +707,7 @@ struct CardDetailView: View {
     var card: CreditCard
     @State private var isHistoryExpanded = true
     @State private var isCardPaymentPresented = false
+    @State private var isCycleAdjustmentPresented = false
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
@@ -761,6 +762,9 @@ struct CardDetailView: View {
             .sheet(isPresented: $isCardPaymentPresented) {
                 CardPaymentFlowSheetView(store: store, initialCardId: currentCard.id)
             }
+            .sheet(isPresented: $isCycleAdjustmentPresented) {
+                CreditCardCycleAdjustmentSheet(store: store, card: currentCard)
+            }
         }
     }
 
@@ -771,6 +775,9 @@ struct CardDetailView: View {
             MetricRow(label: "Next statement", value: nextStatementDate.map(friendlyDate) ?? "Not set")
             MetricRow(label: "Direct debit", value: nextDirectDebitDate.map(friendlyDate) ?? "Not set")
             MetricRow(label: "Current statement due", value: MoneyParser.formatPence(currentStatementDuePence), valueColor: currentStatementDuePence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
+            if heldCycleReservePence > 0 {
+                MetricRow(label: "Held cycle reserve", value: MoneyParser.formatPence(heldCycleReservePence), valueColor: AppTheme.Colors.warning)
+            }
             MetricRow(
                 label: cardAvailability.actualAvailablePence < 0 ? "Over limit" : "Available",
                 value: MoneyParser.formatPence(abs(cardAvailability.actualAvailablePence)),
@@ -785,6 +792,20 @@ struct CardDetailView: View {
             }
             MetricRow(label: "Linked pot cover", value: MoneyParser.formatPence(linkedPotCoverPence), valueColor: AppTheme.Colors.primaryOrange)
             MetricRow(label: "Paycheck impact", value: MoneyParser.formatPence(directDebitPaycheckImpactPence), valueColor: directDebitPaycheckImpactPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success)
+            if let cycleAdjustmentSummary, cycleAdjustmentSummary.isStatementHeld || cycleAdjustmentSummary.isDirectDebitHeld {
+                Text("This cycle is on hold. New card spending is kept reserved until you confirm the bank dates.")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AppTheme.Colors.warning)
+            }
+            Button {
+                isCycleAdjustmentPresented = true
+            } label: {
+                Label("Check this cycle", systemImage: "calendar.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(AppTheme.Colors.primaryOrange)
         }
     }
 
@@ -999,17 +1020,19 @@ struct CardDetailView: View {
     }
 
     private var nextStatementDate: String? {
-        guard var statementDate = currentCard.statementDate, FinanceEngine.isIsoDate(statementDate) else { return nil }
-
-        for _ in 0..<240 where statementDate < store.todayIso {
-            statementDate = PlannerDerivedData.addIsoMonthsClamped(date: statementDate, months: 1)
-        }
-
-        return statementDate
+        cycleAdjustmentSummary?.statementDate
     }
 
     private var nextDirectDebitDate: String? {
-        nextStatementPayment?.directDebitDate
+        cycleAdjustmentSummary?.directDebitDate ?? nextStatementPayment?.directDebitDate
+    }
+
+    private var cycleAdjustmentSummary: CreditCardCycleAdjustmentSummary? {
+        PlannerDerivedData.creditCardCycleAdjustmentSummary(
+            card: currentCard,
+            snapshot: store.snapshot,
+            asOfDate: store.todayIso
+        )
     }
 
     private var nextStatementPayment: CreditCardStatementPayment? {
@@ -1027,6 +1050,10 @@ struct CardDetailView: View {
         nextStatementPayment?.actualDuePence ?? 0
     }
 
+    private var heldCycleReservePence: Int {
+        PlannerDerivedData.creditCardHeldCycleReservePence(card: currentCard, snapshot: store.snapshot, asOfDate: store.todayIso)
+    }
+
     private var linkedPotCoverPence: Int {
         FinanceEngine.getLinkedCreditCardPotPence(pots: store.snapshot.pots, creditCardId: currentCard.id)
     }
@@ -1039,10 +1066,133 @@ struct CardDetailView: View {
             return max(0, repayment.paycheckContributionPence ?? repayment.amountPence)
         }
 
-        return max(0, currentStatementDuePence - linkedPotCoverPence)
+        return max(0, max(currentStatementDuePence, heldCycleReservePence) - linkedPotCoverPence)
     }
 
     private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private enum CreditCardCycleDateChoice: String, CaseIterable, Identifiable {
+    case asExpected = "As expected"
+    case awaiting = "Not yet"
+    case actualDate = "Choose date"
+
+    var id: String { rawValue }
+}
+
+private struct CreditCardCycleAdjustmentSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var card: CreditCard
+    @State private var statementChoice: CreditCardCycleDateChoice
+    @State private var directDebitChoice: CreditCardCycleDateChoice
+    @State private var statementDate: Date
+    @State private var directDebitDate: Date
+
+    init(store: PlannerStore, card: CreditCard) {
+        self.store = store
+        self.card = card
+        let cycle = PlannerDerivedData.creditCardCycleAdjustmentSummary(card: card, snapshot: store.snapshot, asOfDate: store.todayIso)
+        let override = cycle.flatMap { summary in
+            store.snapshot.creditCardCycleOverrides.first {
+                $0.deletedAt == nil && $0.creditCardId == card.id && $0.scheduledStatementDate == summary.scheduledStatementDate
+            }
+        }
+        _statementChoice = State(initialValue: override?.statementState == .awaitingConfirmation ? .awaiting : (override?.statementState == .confirmed ? .actualDate : .asExpected))
+        _directDebitChoice = State(initialValue: override?.directDebitState == .awaitingPayment ? .awaiting : (override?.directDebitState == .confirmed ? .actualDate : .asExpected))
+        _statementDate = State(initialValue: FinanceEngine.parseDate(override?.actualStatementDate ?? cycle?.statementDate ?? store.todayIso))
+        _directDebitDate = State(initialValue: FinanceEngine.parseDate(override?.actualDirectDebitDate ?? cycle?.directDebitDate ?? store.todayIso))
+    }
+
+    private var cycle: CreditCardCycleAdjustmentSummary? {
+        PlannerDerivedData.creditCardCycleAdjustmentSummary(card: card, snapshot: store.snapshot, asOfDate: store.todayIso)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("This changes only this card cycle. Your usual statement and direct-debit days stay the same.")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                    Button("Enable statement and direct-debit reminders") {
+                        store.requestCreditCardCycleReminderPermission()
+                    }
+                }
+
+                if let cycle {
+                    Section("Statement") {
+                        LabeledContent("Expected") { Text(displayDate(cycle.scheduledStatementDate)) }
+                        Picker("Statement status", selection: $statementChoice) {
+                            ForEach(CreditCardCycleDateChoice.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        if statementChoice == .actualDate {
+                            DatePicker("Statement date", selection: $statementDate, displayedComponents: .date)
+                        }
+                        if statementChoice == .awaiting {
+                            Text("Automatic settlement is paused. Spending after the expected date remains reserved until you confirm it.")
+                                .font(.footnote)
+                                .foregroundStyle(AppTheme.Colors.warning)
+                        }
+                    }
+
+                    Section("Direct debit") {
+                        LabeledContent("Expected") { Text(displayDate(cycle.directDebitDate)) }
+                        Picker("Direct debit status", selection: $directDebitChoice) {
+                            ForEach(CreditCardCycleDateChoice.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        if directDebitChoice == .actualDate {
+                            DatePicker("Direct debit date", selection: $directDebitDate, displayedComponents: .date)
+                        }
+                        if directDebitChoice == .awaiting {
+                            Text("Use this only when the bank has not taken the payment. Any app-generated payment for this cycle will be safely reversed and rescheduled.")
+                                .font(.footnote)
+                                .foregroundStyle(AppTheme.Colors.warning)
+                        }
+                    }
+                } else {
+                    ContentUnavailableView("Statement setup needed", systemImage: "calendar.badge.exclamationmark", description: Text("Add a statement day and direct-debit day before adjusting a cycle."))
+                }
+            }
+            .navigationTitle("Check this cycle")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                    .disabled(cycle == nil)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        guard let cycle else { return }
+        switch statementChoice {
+        case .asExpected:
+            store.clearCreditCardStatementAdjustment(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate)
+        case .awaiting:
+            store.markCreditCardStatementAwaiting(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate)
+        case .actualDate:
+            store.confirmCreditCardStatement(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate, actualStatementDate: FinanceEngine.toIsoDate(statementDate))
+        }
+        switch directDebitChoice {
+        case .asExpected:
+            store.clearCreditCardDirectDebitAdjustment(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate)
+        case .awaiting:
+            store.markCreditCardDirectDebitAwaiting(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate)
+        case .actualDate:
+            store.confirmCreditCardDirectDebit(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate, actualDirectDebitDate: FinanceEngine.toIsoDate(directDebitDate))
+        }
+    }
+
+    private func displayDate(_ isoDate: String) -> String {
         FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }

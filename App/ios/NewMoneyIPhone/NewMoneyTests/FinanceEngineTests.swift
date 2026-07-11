@@ -31,6 +31,75 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(FinanceEngine.calculatePaycheckAmount(hoursWorked: 72, hourlyRatePence: 1250, actualAmountPence: 87550), 87550)
     }
 
+    func testDailySafeToSpendUsesTheProjectedBalanceAfterCommittedCosts() {
+        XCTAssertEqual(
+            FinanceEngine.getDailySafeToSpendPence(
+                spendablePence: 222773,
+                today: "2026-07-10",
+                endDate: "2026-07-31"
+            ),
+            10126
+        )
+    }
+
+    @MainActor
+    func testFirstPaycheckDoesNotCreateOrRetainAnEmptyTodayPlaceholderPeriod() async {
+        var settings = makeManualSettings(today: "2026-07-10")
+        settings.payFrequency = .monthly
+
+        let emptyStore = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings)))
+        await emptyStore.load()
+        XCTAssertTrue(emptyStore.snapshot.payPeriods.isEmpty)
+
+        emptyStore.createPayPeriod(
+            payday: "2026-07-01",
+            hoursWorked: 2261.91,
+            hourlyRatePence: 100,
+            actualAmountPence: 226191,
+            payFrequency: .monthly
+        )
+        XCTAssertEqual(emptyStore.snapshot.payPeriods.map(\.payday), ["2026-07-01"])
+        XCTAssertEqual(emptyStore.selectedPayPeriod?.endDate, "2026-07-31")
+
+        var realPeriod = makePayPeriod(
+            id: "pay-period-2026-07-01",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 226191
+        )
+        realPeriod.status = .active
+        var placeholder = makePayPeriod(
+            id: "pay-period-2026-07-10",
+            startDate: "2026-07-10",
+            endDate: "2026-08-09",
+            payday: "2026-07-10",
+            incomePence: 0
+        )
+        placeholder.status = .closed
+        let paycheck = Paycheck(
+            id: "paycheck-july",
+            payPeriodId: realPeriod.id,
+            hoursWorked: 2261.91,
+            hourlyRatePence: 100,
+            calculatedAmountPence: 226191,
+            actualAmountPence: 226191,
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        var legacySnapshot = makeSnapshot(
+            settings: settings,
+            payPeriods: [placeholder, realPeriod]
+        )
+        legacySnapshot.paychecks = [paycheck]
+        let repairedStore = PlannerStore(repository: TestPlannerRepository(snapshot: legacySnapshot))
+        await repairedStore.load()
+
+        XCTAssertEqual(repairedStore.snapshot.payPeriods.map(\.payday), ["2026-07-01"])
+        XCTAssertEqual(repairedStore.selectedPayPeriod?.id, realPeriod.id)
+    }
+
     func testPlannerSnapshotDecodesMissingOneOffIncomeAndChecklistExclusions() throws {
         let encoded = try JSONEncoder().encode(makeSnapshot())
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
@@ -1083,6 +1152,11 @@ final class FinanceEngineTests: XCTestCase {
             let period = snapshot.payPeriods.first { $0.id == expectation.periodId }
             let recurringItems = PlannerDerivedData.recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: period)
             let openingItems = PlannerDerivedData.cardOpeningBalanceFundingChecklistItems(snapshot: snapshot, payPeriod: period)
+            let cardPaymentItems = PlannerDerivedData.cardPaymentFundingChecklistItems(
+                snapshot: snapshot,
+                payPeriod: period,
+                asOfDate: expectation.today
+            )
             let presentationItems = PlannerDerivedData.fundingChecklistPresentationItems(
                 snapshot: snapshot,
                 payPeriod: period,
@@ -1096,7 +1170,11 @@ final class FinanceEngineTests: XCTestCase {
 
             XCTAssertEqual(recurringItems.count, expectation.recurringCount, expectation.periodId)
             XCTAssertEqual(openingItems.count, expectation.openingCount, expectation.periodId)
-            XCTAssertEqual(presentationItems.count, expectation.recurringCount + expectation.openingCount, expectation.periodId)
+            XCTAssertEqual(
+                presentationItems.count,
+                expectation.recurringCount + expectation.openingCount + cardPaymentItems.count,
+                expectation.periodId
+            )
             XCTAssertEqual((recurringItems.map(\.amountPence) + openingItems.map(\.amountPence)).reduce(0, +), expectation.total, expectation.periodId)
             XCTAssertEqual(summary.totalCostsPence, expectation.total, expectation.periodId)
             XCTAssertEqual(summary.moneyLeftPence, expectation.moneyLeft, expectation.periodId)
@@ -1278,6 +1356,8 @@ final class FinanceEngineTests: XCTestCase {
                 XCTAssertTrue(store.setCardSpendFundingCompleted(transactionId: transactionId, payPeriodId: payPeriodId, completed: true), item.name)
             case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
                 XCTAssertTrue(store.setCardOpeningBalanceFundingCompleted(cardId: cardId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true), item.name)
+            case .cardPayment(let cardId, let potId, let directDebitDate, let payPeriodId):
+                XCTAssertTrue(store.setCardPaymentFundingCompleted(cardId: cardId, potId: potId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true), item.name)
             case .debt(let debtId, let dueDate, let payPeriodId):
                 XCTAssertTrue(store.setDebtFundingCompleted(debtId: debtId, dueDate: dueDate, payPeriodId: payPeriodId, completed: true), item.name)
             }
@@ -1386,6 +1466,8 @@ final class FinanceEngineTests: XCTestCase {
                 XCTAssertTrue(store.setCardSpendFundingCompleted(transactionId: transactionId, payPeriodId: payPeriodId, completed: true), item.name)
             case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
                 XCTAssertTrue(store.setCardOpeningBalanceFundingCompleted(cardId: cardId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true), item.name)
+            case .cardPayment(let cardId, let potId, let directDebitDate, let payPeriodId):
+                XCTAssertTrue(store.setCardPaymentFundingCompleted(cardId: cardId, potId: potId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true), item.name)
             case .debt(let debtId, let dueDate, let payPeriodId):
                 XCTAssertTrue(store.setDebtFundingCompleted(debtId: debtId, dueDate: dueDate, payPeriodId: payPeriodId, completed: true), item.name)
             }
@@ -1447,6 +1529,8 @@ final class FinanceEngineTests: XCTestCase {
                 XCTAssertTrue(store.setCardSpendFundingCompleted(transactionId: transactionId, payPeriodId: payPeriodId, completed: true), item.name)
             case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
                 XCTAssertTrue(store.setCardOpeningBalanceFundingCompleted(cardId: cardId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true), item.name)
+            case .cardPayment(let cardId, let potId, let directDebitDate, let payPeriodId):
+                XCTAssertTrue(store.setCardPaymentFundingCompleted(cardId: cardId, potId: potId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true), item.name)
             case .debt(let debtId, let dueDate, let payPeriodId):
                 XCTAssertTrue(store.setDebtFundingCompleted(debtId: debtId, dueDate: dueDate, payPeriodId: payPeriodId, completed: true), item.name)
             }
@@ -1701,6 +1785,11 @@ final class FinanceEngineTests: XCTestCase {
 
         let recurringItems = PlannerDerivedData.recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: januaryPeriod)
         let openingItems = PlannerDerivedData.cardOpeningBalanceFundingChecklistItems(snapshot: snapshot, payPeriod: januaryPeriod)
+        let cardPaymentItems = PlannerDerivedData.cardPaymentFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: januaryPeriod,
+            asOfDate: "2027-01-01"
+        )
         let presentationItems = PlannerDerivedData.fundingChecklistPresentationItems(
             snapshot: snapshot,
             payPeriod: januaryPeriod,
@@ -1714,7 +1803,7 @@ final class FinanceEngineTests: XCTestCase {
 
         XCTAssertEqual(recurringItems.count, 26)
         XCTAssertEqual(openingItems.count, 4)
-        XCTAssertEqual(presentationItems.count, 30)
+        XCTAssertEqual(presentationItems.count, 30 + cardPaymentItems.count)
         XCTAssertEqual((recurringItems.map(\.amountPence) + openingItems.map(\.amountPence)).reduce(0, +), 351900)
         XCTAssertEqual(summary.totalCostsPence, 351900)
         XCTAssertEqual(summary.moneyLeftPence, 48100)
@@ -3115,6 +3204,90 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testDelayedCardStatementReassignsSpendingToConfirmedActualStatementDate() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let card = makeCreditCard(
+            id: "card-main",
+            name: "Main Card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-06-10",
+            dueDay: 15,
+            createdAt: "2026-06-01T00:00:00.000Z"
+        )
+        let transactions = [
+            makeTransaction(id: "before", cardId: card.id, amountPence: 10_000, date: "2026-06-09", note: "Before"),
+            makeTransaction(id: "during-delay", cardId: card.id, amountPence: 5_000, date: "2026-06-11", note: "During delay")
+        ]
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, transactions: transactions, creditCards: [card])))
+
+        await store.load()
+        store.markCreditCardStatementAwaiting(cardId: card.id, scheduledStatementDate: "2026-06-10")
+
+        XCTAssertTrue(
+            PlannerDerivedData.creditCardStatementPayments(
+                card: card,
+                snapshot: store.snapshot,
+                startDate: "2026-06-01",
+                endDate: "2026-06-30",
+                asOfDate: "2026-06-11"
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            PlannerDerivedData.creditCardHeldCycleReservePence(card: card, snapshot: store.snapshot, asOfDate: "2026-06-11"),
+            15_000
+        )
+
+        store.confirmCreditCardStatement(cardId: card.id, scheduledStatementDate: "2026-06-10", actualStatementDate: "2026-06-13")
+        let payment = PlannerDerivedData.creditCardStatementPayments(
+            card: card,
+            snapshot: store.snapshot,
+            startDate: "2026-06-01",
+            endDate: "2026-06-30",
+            asOfDate: "2026-06-13"
+        ).first
+
+        XCTAssertEqual(payment?.statementDate, "2026-06-13")
+        XCTAssertEqual(payment?.directDebitDate, "2026-06-15")
+        XCTAssertEqual(payment?.actualDuePence, 15_000)
+    }
+
+    @MainActor
+    func testHeldDirectDebitVoidsOnlyAutomaticRepaymentAndRestoresLinkedPot() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let card = makeCreditCard(
+            id: "card-main",
+            name: "Main Card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-06-10",
+            dueDay: 10,
+            createdAt: "2026-06-01T00:00:00.000Z"
+        )
+        let pot = makePot(id: "pot-card", name: "Card pot", balancePence: 20_000, targetPence: nil, linkedCreditCardId: card.id)
+        let transaction = makeTransaction(id: "charge", cardId: card.id, amountPence: 10_000, date: "2026-06-09", note: "Charge")
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, pots: [pot], transactions: [transaction], creditCards: [card])))
+
+        await store.load()
+        XCTAssertEqual(store.snapshot.creditCardRepayments.first?.amountPence, 10_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
+
+        store.markCreditCardDirectDebitAwaiting(cardId: card.id, scheduledStatementDate: "2026-06-10")
+        XCTAssertEqual(store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }.count, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 20_000)
+
+        store.confirmCreditCardDirectDebit(cardId: card.id, scheduledStatementDate: "2026-06-10", actualDirectDebitDate: "2026-06-12")
+        var laterSettings = store.snapshot.settings
+        laterSettings.manualTodayIso = "2026-06-12"
+        store.updateSettings(laterSettings)
+
+        let activeRepayments = store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }
+        XCTAssertEqual(activeRepayments.count, 1)
+        XCTAssertEqual(activeRepayments.first?.directDebitDate, "2026-06-12")
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
+    }
+
+    @MainActor
     func testAddingCreditCardDerivesFirstStatementDateFromStatementDayAndToday() async {
         let settings = makeManualSettings(today: "2026-06-05")
         let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings)))
@@ -3459,6 +3632,50 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(items.first?.isCompleted, false)
     }
 
+    func testPostStatementOpeningBalanceDifferenceUsesTheFollowingStatementCycle() {
+        let settings = makeManualSettings(today: "2026-07-10")
+        let period = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 226191
+        )
+        let card = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            openingBalancePence: 31430,
+            openingStatementBalancePence: 30731,
+            statementDate: "2026-07-02",
+            dueDay: 20
+        )
+        let pot = makePot(
+            id: "pot-aqua",
+            name: "Aqua",
+            balancePence: 30710,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [period],
+            creditCards: [card]
+        )
+
+        let openingItems = PlannerDerivedData.cardOpeningBalanceFundingChecklistItems(snapshot: snapshot, payPeriod: period)
+        let paymentItems = PlannerDerivedData.cardPaymentFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: period,
+            asOfDate: "2026-07-10"
+        )
+
+        XCTAssertEqual(openingItems.first?.amountPence, 21)
+        XCTAssertEqual(openingItems.first?.directDebitDate, "2026-07-20")
+        XCTAssertEqual(paymentItems.first?.amountPence, 699)
+        XCTAssertEqual(paymentItems.first?.directDebitDate, "2026-08-20")
+    }
+
     @MainActor
     func testOpeningBalanceDueThisPaycheckAppearsWhenFuturePlannedPeriodExists() async {
         let settings = makeManualSettings(today: "2026-07-01")
@@ -3635,12 +3852,24 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(store.snapshot.potAllocations.count, 1)
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
 
-        let fundedItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-01").first)
+        let fundedItem = try XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: "2026-06-01"
+            ).first { $0.name == payment.name }
+        )
         XCTAssertTrue(store.setFundingChecklistExcluded(action: fundedItem.action, excluded: true))
         XCTAssertTrue(store.snapshot.potAllocations.isEmpty)
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
 
-        let excludedItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-01").first)
+        let excludedItem = try XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: "2026-06-01"
+            ).first { $0.name == payment.name }
+        )
         XCTAssertTrue(excludedItem.isExcluded)
 
         XCTAssertTrue(store.setFundingChecklistCompleted(action: excludedItem.action, completed: true))
@@ -4434,6 +4663,8 @@ final class FinanceEngineTests: XCTestCase {
             completed = store.setCardSpendFundingCompleted(transactionId: transactionId, payPeriodId: payPeriodId, completed: true)
         case .cardOpeningBalance(let cardId, let directDebitDate, let payPeriodId):
             completed = store.setCardOpeningBalanceFundingCompleted(cardId: cardId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true)
+        case .cardPayment(let cardId, let potId, let directDebitDate, let payPeriodId):
+            completed = store.setCardPaymentFundingCompleted(cardId: cardId, potId: potId, directDebitDate: directDebitDate, payPeriodId: payPeriodId, completed: true)
         case .debt(let debtId, let dueDate, let payPeriodId):
             completed = store.setDebtFundingCompleted(debtId: debtId, dueDate: dueDate, payPeriodId: payPeriodId, completed: true)
         }

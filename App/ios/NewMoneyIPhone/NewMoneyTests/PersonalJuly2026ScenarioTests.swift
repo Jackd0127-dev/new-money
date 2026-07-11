@@ -99,6 +99,85 @@ final class PersonalJuly2026ScenarioTests: XCTestCase {
         XCTAssertEqual(try PersonalJuly2026ScenarioAudit.write(snapshot: store.snapshot, date: PersonalJuly2026ExpectedResults.afterICloudDate).lastPathComponent, "PersonalJuly2026ScenarioAudit-2026-07-10.md")
     }
 
+    func testLinkedCardPaymentGapsAppearInChecklistAndAquaCanBeFundedFromIncome() async throws {
+        let store = await makeFundedBaselineStore()
+        store.setManualTodayForSimulation(PersonalJuly2026ExpectedResults.afterICloudDate)
+        XCTAssertTrue(store.applyDueScheduledPaymentsForSimulation(asOf: PersonalJuly2026ExpectedResults.afterICloudDate))
+
+        let period = try XCTUnwrap(store.selectedPayPeriod)
+        let items = PlannerDerivedData.cardPaymentFundingChecklistItems(
+            snapshot: store.snapshot,
+            payPeriod: period,
+            asOfDate: PersonalJuly2026ExpectedResults.afterICloudDate
+        )
+        let amountsByCard = Dictionary(uniqueKeysWithValues: items.map { ($0.cardName, $0.amountPence) })
+
+        XCTAssertEqual(amountsByCard["Aqua"], 699)
+        XCTAssertEqual(amountsByCard["Capital One"], 12_158)
+        XCTAssertEqual(amountsByCard["Barclays"], 13_859)
+
+        let aqua = try XCTUnwrap(items.first { $0.cardId == PersonalJuly2026Fixture.aquaCardId })
+        XCTAssertEqual(aqua.potId, "pot-aqua")
+        XCTAssertEqual(aqua.directDebitDate, "2026-08-20")
+        XCTAssertFalse(aqua.isCompleted)
+
+        let currentMoneyLeftBefore = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: store.snapshot,
+            payPeriod: period,
+            asOfDate: PersonalJuly2026ExpectedResults.afterICloudDate
+        ).currentMoneyLeftPence
+        XCTAssertEqual(currentMoneyLeftBefore, PersonalJuly2026ExpectedResults.baselineMoneyLeftPence)
+
+        XCTAssertTrue(store.setCardPaymentFundingCompleted(
+            cardId: aqua.cardId,
+            potId: aqua.potId,
+            directDebitDate: aqua.directDebitDate,
+            payPeriodId: aqua.payPeriodId,
+            completed: true
+        ))
+
+        let aquaAllocation = try XCTUnwrap(store.snapshot.potAllocations.first {
+            $0.source == .cardPaymentFunding && $0.creditCardId == PersonalJuly2026Fixture.aquaCardId
+        })
+        XCTAssertEqual(aquaAllocation.amountPence, 699)
+        XCTAssertEqual(aquaAllocation.creditCardDirectDebitDate, "2026-08-20")
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-aqua" }?.balancePence, 31_430)
+        XCTAssertEqual(
+            PlannerDerivedData.cardPaymentFundingChecklistItems(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: PersonalJuly2026ExpectedResults.afterICloudDate
+            ).first { $0.cardId == PersonalJuly2026Fixture.aquaCardId }?.isCompleted,
+            true
+        )
+        XCTAssertEqual(
+            PlannerDerivedData.payPeriodCostSummary(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: PersonalJuly2026ExpectedResults.afterICloudDate
+            ).currentMoneyLeftPence,
+            PersonalJuly2026ExpectedResults.baselineMoneyLeftPence - 699
+        )
+
+        XCTAssertTrue(store.setCardPaymentFundingCompleted(
+            cardId: aqua.cardId,
+            potId: aqua.potId,
+            directDebitDate: aqua.directDebitDate,
+            payPeriodId: aqua.payPeriodId,
+            completed: false
+        ))
+        XCTAssertFalse(store.snapshot.potAllocations.contains { $0.source == .cardPaymentFunding })
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-aqua" }?.balancePence, 30_731)
+        XCTAssertEqual(
+            PlannerDerivedData.payPeriodCostSummary(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: PersonalJuly2026ExpectedResults.afterICloudDate
+            ).currentMoneyLeftPence,
+            PersonalJuly2026ExpectedResults.baselineMoneyLeftPence
+        )
+    }
+
     private func makeFundedBaselineStore() async -> PlannerStore {
         let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: PersonalJuly2026Fixture.snapshot(phase: .beforeICloud)))
         await store.load()

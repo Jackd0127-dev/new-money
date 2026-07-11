@@ -3531,6 +3531,8 @@ private struct StatementSummaryCard: View {
             return "Paid"
         case .overdue:
             return "Overdue"
+        case .awaitingConfirmation:
+            return "Awaiting confirmation"
         }
     }
 
@@ -3542,6 +3544,8 @@ private struct StatementSummaryCard: View {
             return AppTheme.Colors.success
         case .overdue:
             return AppTheme.Colors.danger
+        case .awaitingConfirmation:
+            return AppTheme.Colors.warning
         }
     }
 

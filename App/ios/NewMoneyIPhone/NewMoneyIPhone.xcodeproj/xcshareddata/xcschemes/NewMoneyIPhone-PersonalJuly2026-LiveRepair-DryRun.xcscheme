@@ -39,7 +39,9 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
-         <TestableReference skipped = "NO" parallelizable = "NO">
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "100000000000000000000402"
@@ -60,12 +62,8 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "NO">
-      <EnvironmentVariables>
-         <EnvironmentVariable key = "NEWMONEY_LIVE_REPAIR" value = "personal-july-2026-v1" isEnabled = "YES"/>
-         <EnvironmentVariable key = "NEWMONEY_LIVE_REPAIR_MODE" value = "dry-run" isEnabled = "YES"/>
-         <EnvironmentVariable key = "NEWMONEY_LIVE_REPAIR_CHECKPOINT" value = "20260710T144446Z" isEnabled = "YES"/>
-      </EnvironmentVariables>
-      <BuildableProductRunnable runnableDebuggingMode = "0">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "100000000000000000000401"
@@ -74,7 +72,36 @@
             ReferencedContainer = "container:NewMoneyIPhone.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR"
+            value = "personal-july-2026-v1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR_MODE"
+            value = "dry-run"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR_CHECKPOINT"
+            value = "20260710T144446Z"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
-   <AnalyzeAction buildConfiguration = "Debug">
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
    </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
 </Scheme>

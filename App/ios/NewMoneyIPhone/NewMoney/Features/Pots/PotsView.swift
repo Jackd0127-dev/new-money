@@ -1254,6 +1254,8 @@ struct PotHistorySheetView: View {
             return "Card spend funding"
         case .cardOpeningBalanceFunding:
             return "Card opening balance funding"
+        case .cardPaymentFunding:
+            return "Card payment funding"
         case .debtFunding:
             return "Debt funding"
         case .potAuto:
@@ -1845,6 +1847,8 @@ private func allocationSourceLabel(_ source: PotAllocationSource?) -> String {
         return "Card spend funding"
     case .cardOpeningBalanceFunding:
         return "Card opening balance funding"
+    case .cardPaymentFunding:
+        return "Card payment funding"
     case .debtFunding:
         return "Debt funding"
     case .potAuto:

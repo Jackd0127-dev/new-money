@@ -1136,7 +1136,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(fullAppPence(cc1AugustDd, in: ddPayments, "amount_paid"), 19850)
         XCTAssertEqual(
             fullAppText(cc1AugustDd, in: ddPayments, "source_breakdown"),
-            "£82.50 from Pot1; £75 from CC1 reserve; £41 from CC1 reserve"
+            "£198.50 from Pot1"
         )
     }
 

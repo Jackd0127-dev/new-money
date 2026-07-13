@@ -2,11 +2,144 @@ import XCTest
 @testable import NewMoneyIPhone
 
 final class AppShellNavigationTests: XCTestCase {
-    func testSplashPlaysOnlyOncePerProcessLaunch() {
-        XCTAssertTrue(MUNOSplashPresentationPolicy.playsOncePerProcessLaunch)
-        XCTAssertFalse(MUNOSplashPresentationPolicy.replaysOnForeground)
-        XCTAssertFalse(MUNOSplashPresentationPolicy.usesScenePhaseReplayRevision)
-        XCTAssertEqual(MUNOSplashPresentationPolicy.fadeOutDuration, 0.28, accuracy: 0.001)
+    @MainActor
+    func testTabPresentationCacheReusesMatchingPresentationAndRebuildsForNewRevision() {
+        let cache = PlannerTabPresentationCache()
+        let initialKey = PlannerTabPresentationKey(
+            tab: .home,
+            activePlannerAccountId: "personal",
+            snapshotRevision: 4,
+            todayIso: "2026-09-12",
+            selectedPayPeriodId: "period-september"
+        )
+        var builds = 0
+
+        let first: [Int] = cache.value(for: initialKey) {
+            builds += 1
+            return [builds]
+        }
+        let second: [Int] = cache.value(for: initialKey) {
+            builds += 1
+            return [builds]
+        }
+
+        XCTAssertEqual(first, [1])
+        XCTAssertEqual(second, [1])
+        XCTAssertEqual(builds, 1)
+        XCTAssertEqual(cache.buildCount(for: .home), 1)
+
+        let refreshedKey = PlannerTabPresentationKey(
+            tab: .home,
+            activePlannerAccountId: "personal",
+            snapshotRevision: 5,
+            todayIso: "2026-09-12",
+            selectedPayPeriodId: "period-september"
+        )
+        let refreshed: [Int] = cache.value(for: refreshedKey) {
+            builds += 1
+            return [builds]
+        }
+
+        XCTAssertEqual(refreshed, [2])
+        XCTAssertEqual(builds, 2)
+        XCTAssertEqual(cache.buildCount(for: .home), 2)
+
+        let nextDayKey = PlannerTabPresentationKey(
+            tab: .home,
+            activePlannerAccountId: "personal",
+            snapshotRevision: 5,
+            todayIso: "2026-09-13",
+            selectedPayPeriodId: "period-september"
+        )
+        let otherAccountKey = PlannerTabPresentationKey(
+            tab: .home,
+            activePlannerAccountId: "household",
+            snapshotRevision: 5,
+            todayIso: "2026-09-13",
+            selectedPayPeriodId: "period-september"
+        )
+        let nextPayPeriodKey = PlannerTabPresentationKey(
+            tab: .home,
+            activePlannerAccountId: "household",
+            snapshotRevision: 5,
+            todayIso: "2026-09-13",
+            selectedPayPeriodId: "period-october"
+        )
+
+        for key in [nextDayKey, otherAccountKey, nextPayPeriodKey] {
+            let _: [Int] = cache.value(for: key) {
+                builds += 1
+                return [builds]
+            }
+        }
+
+        XCTAssertEqual(builds, 5)
+        XCTAssertEqual(cache.buildCount(for: .home), 5)
+    }
+
+    @MainActor
+    func testRootTabWarmUpBuildsEveryTabWithoutPersistingPlannerData() {
+        let cache = PlannerTabPresentationCache()
+        let snapshot = DefaultData.complexStressSnapshot
+        let context = PlannerTabPresentationContext(
+            snapshot: snapshot,
+            activePlannerAccountId: "performance-account",
+            snapshotRevision: 1,
+            todayIso: FinanceEngine.getAppTodayIso(settings: snapshot.settings),
+            selectedPayPeriod: snapshot.payPeriods.first
+        )
+
+        DashboardView.warmPresentation(cache: cache, context: context)
+        BillsView.warmPresentation(cache: cache, context: context)
+        ActivityView.warmPresentation(cache: cache, context: context)
+        PotsView.warmPresentation(cache: cache, context: context)
+        CreditView.warmPresentation(cache: cache, context: context)
+
+        XCTAssertEqual(cache.buildCount(for: .home), 1)
+        XCTAssertEqual(cache.buildCount(for: .bills), 1)
+        XCTAssertEqual(cache.buildCount(for: .activity), 1)
+        XCTAssertEqual(cache.buildCount(for: .pots), 1)
+        XCTAssertEqual(cache.buildCount(for: .credit), 1)
+
+        DashboardView.warmPresentation(cache: cache, context: context)
+        BillsView.warmPresentation(cache: cache, context: context)
+        ActivityView.warmPresentation(cache: cache, context: context)
+        PotsView.warmPresentation(cache: cache, context: context)
+        CreditView.warmPresentation(cache: cache, context: context)
+
+        XCTAssertEqual(cache.buildCounts.values.reduce(0, +), AppTab.allCases.count)
+    }
+
+    @MainActor
+    func testPresentationCacheHitDoesNotRepeatBuilderWork() {
+        let cache = PlannerTabPresentationCache()
+        let key = PlannerTabPresentationKey(
+            tab: .activity,
+            activePlannerAccountId: "personal",
+            snapshotRevision: 1,
+            todayIso: "2026-09-12",
+            selectedPayPeriodId: "period-september"
+        )
+        let initial: [Int] = cache.value(for: key) { Array(0..<10_000) }
+        XCTAssertEqual(initial.count, 10_000)
+
+        measure {
+            let value: [Int] = cache.value(for: key) {
+                XCTFail("A cache hit must not rebuild the presentation.")
+                return []
+            }
+            XCTAssertEqual(value.count, 10_000)
+        }
+    }
+
+    @MainActor
+    func testSnapshotRevisionAdvancesWhenPlannerSnapshotIsReplaced() async throws {
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.emptySnapshot))
+        let initialRevision = store.snapshotRevision
+
+        try await store.replaceSnapshot(DefaultData.complexStressSnapshot)
+
+        XCTAssertGreaterThan(store.snapshotRevision, initialRevision)
     }
 
     func testPrimaryTabOrderMatchesMainNavigationRestructure() {
@@ -31,6 +164,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(RootTabScrollPolicy.usesScrollReaderForTabReset)
         XCTAssertTrue(RootTabScrollPolicy.updatesResetTargetBeforeSelectedTab)
         XCTAssertTrue(RootTabScrollPolicy.preventsPreviousTabResetDuringSwitch)
+        XCTAssertTrue(RootTabScrollPolicy.scopesResetRevisionToSelectedTab)
         XCTAssertEqual(RootTabScrollPolicy.topAnchorID, "root-tab-scroll-top")
     }
 
@@ -647,17 +781,22 @@ final class AppThemePresetTests: XCTestCase {
         XCTAssertTrue(AppThemeRefreshPolicy.screenBackgroundAvoidsGlobalAccentOverlay)
     }
 
-    func testCurrentThemeIsFirstPreset() {
-        XCTAssertEqual(AppThemePreset.allCases.first, .classic)
-        XCTAssertEqual(AppThemePreset.classic.palette.accentHex, "#E85002")
-        XCTAssertEqual(AppThemePreset.classic.palette.backgroundHex, "#000000")
-        XCTAssertEqual(AppThemePreset.classic.palette.textHex, "#F9F9F9")
+    func testMintCreamIsTheDefaultTheme() {
+        XCTAssertEqual(AppThemePreset.allCases.first, .mintCream)
+        XCTAssertEqual(AppThemePreset.defaultPreset, .mintCream)
+        XCTAssertEqual(AppThemePreset.mintCream.palette.accentHex, "#0F6B2B")
+        XCTAssertEqual(AppThemePreset.mintCream.palette.backgroundHex, "#FEF6EA")
+        XCTAssertEqual(AppThemePreset.mintCream.palette.textHex, "#07130A")
+        XCTAssertEqual(AppThemePreset.mintCream.palette.elevatedSurfaceHex, "#F1FAF5")
+        XCTAssertEqual(AppThemePreset.mintCream.palette.selectionFillHex, "#D3E9D6")
     }
 
     func testThemePresetIdsAreStableAndUnique() {
         XCTAssertEqual(
             AppThemePreset.allCases.map(\.rawValue),
             [
+                "mintCream",
+                "mintCreamDark",
                 "classic",
                 "goldObsidian",
                 "warmLight",
@@ -674,6 +813,8 @@ final class AppThemePresetTests: XCTestCase {
 
     func testListedThemePalettesMapToExpectedHexValues() {
         let expected: [(AppThemePreset, String, String, String)] = [
+            (.mintCream, "#0F6B2B", "#FEF6EA", "#07130A"),
+            (.mintCreamDark, "#5FC98A", "#0C120F", "#F7F4EC"),
             (.goldObsidian, "#E6B450", "#0B0E14", "#BFBDB6"),
             (.warmLight, "#CC7D5E", "#F9F9F7", "#2D2D2B"),
             (.sagePaper, "#3D755D", "#F5F3ED", "#2F312D"),
@@ -691,18 +832,21 @@ final class AppThemePresetTests: XCTestCase {
         }
     }
 
-    func testInvalidStoredThemeFallsBackToClassic() {
-        XCTAssertEqual(AppThemePreset.resolved(from: "missing-theme"), .classic)
-        XCTAssertEqual(AppThemePreset.resolved(from: nil), .classic)
+    func testInvalidStoredThemeFallsBackToMintCream() {
+        XCTAssertEqual(AppThemePreset.resolved(from: "missing-theme"), .mintCream)
+        XCTAssertEqual(AppThemePreset.resolved(from: nil), .mintCream)
     }
 
     func testAccentReadableTextAdaptsToBrightAccent() {
+        XCTAssertEqual(AppThemePreset.mintCream.palette.accentReadableTextHex, "#FEF6EA")
+        XCTAssertEqual(AppThemePreset.mintCreamDark.palette.accentReadableTextHex, "#07130A")
         XCTAssertEqual(AppThemePreset.classic.palette.accentReadableTextHex, "#FFFFFF")
         XCTAssertEqual(AppThemePreset.goldObsidian.palette.accentReadableTextHex, "#111111")
         XCTAssertEqual(AppThemePreset.navyEmerald.palette.accentReadableTextHex, "#FFFFFF")
     }
 
     func testCardEyebrowUsesReadablePresetTextOnLightThemes() {
+        XCTAssertEqual(AppThemePreset.mintCream.palette.cardEyebrowHex, "#505752")
         XCTAssertEqual(AppThemePreset.classic.palette.cardEyebrowHex, "#D9C3AB")
         XCTAssertEqual(AppThemePreset.warmLight.palette.cardEyebrowHex, "#69665F")
         XCTAssertEqual(AppThemePreset.sagePaper.palette.cardEyebrowHex, "#66695F")
@@ -724,7 +868,25 @@ final class AppThemePresetTests: XCTestCase {
         XCTAssertEqual(Array(AppTheme.selectableColorHexes(includeWhite: true).prefix(3)), ["#3D755D", "#5C9479", "#2D5E49"])
         XCTAssertTrue(AppTheme.selectableColorHexes(includeWhite: true).contains("#FFFFFF"))
 
-        defaults.set(AppThemePreset.classic.rawValue, forKey: AppTheme.selectedPresetStorageKey)
-        XCTAssertEqual(AppTheme.selectableColorHexes().first, "#E85002")
+        defaults.set(AppThemePreset.mintCream.rawValue, forKey: AppTheme.selectedPresetStorageKey)
+        XCTAssertEqual(AppTheme.selectableColorHexes().first, "#0F6B2B")
+    }
+
+    func testDefaultThemeDoesNotMakeAnEmptyCloudCollectionMeaningful() {
+        var collection = PlannerAccountCollection.singleAccount(snapshot: DefaultData.emptySnapshot)
+        collection.selectedThemePresetId = AppThemePreset.defaultPreset.rawValue
+
+        XCTAssertFalse(collection.hasMeaningfulPlannerData)
+
+        collection.selectedThemePresetId = AppThemePreset.classic.rawValue
+        XCTAssertTrue(collection.hasMeaningfulPlannerData)
+    }
+}
+
+final class StartupSplashTransitionTests: XCTestCase {
+    func testStartupSplashCrossFadesIntoMainContent() {
+        XCTAssertTrue(StartupSplashTransitionPolicy.hidesMainContentUntilVideoCompletes)
+        XCTAssertEqual(StartupSplashTransitionPolicy.crossFadeDuration, 0.42, accuracy: 0.001)
+        XCTAssertEqual(StartupSplashTransitionPolicy.fallbackDuration, 5)
     }
 }

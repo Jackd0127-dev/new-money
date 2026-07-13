@@ -30,6 +30,84 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+struct PlannerTabPresentationKey: Hashable {
+    var tab: AppTab
+    var activePlannerAccountId: String?
+    var snapshotRevision: Int
+    var todayIso: String
+    var selectedPayPeriodId: String?
+}
+
+struct PlannerTabPresentationContext {
+    var snapshot: PlannerSnapshot
+    var activePlannerAccountId: String?
+    var snapshotRevision: Int
+    var todayIso: String
+    var selectedPayPeriod: PayPeriod?
+    var isLoading = false
+
+    func key(for tab: AppTab) -> PlannerTabPresentationKey {
+        PlannerTabPresentationKey(
+            tab: tab,
+            activePlannerAccountId: activePlannerAccountId,
+            snapshotRevision: snapshotRevision,
+            todayIso: todayIso,
+            selectedPayPeriodId: selectedPayPeriod?.id
+        )
+    }
+
+    var warmUpIdentity: PlannerTabPresentationWarmUpIdentity {
+        PlannerTabPresentationWarmUpIdentity(
+            activePlannerAccountId: activePlannerAccountId,
+            snapshotRevision: snapshotRevision,
+            todayIso: todayIso,
+            selectedPayPeriodId: selectedPayPeriod?.id,
+            isLoading: isLoading
+        )
+    }
+}
+
+struct PlannerTabPresentationWarmUpIdentity: Hashable {
+    var activePlannerAccountId: String?
+    var snapshotRevision: Int
+    var todayIso: String
+    var selectedPayPeriodId: String?
+    var isLoading: Bool
+}
+
+@MainActor
+final class PlannerTabPresentationCache {
+    private struct Entry {
+        var key: PlannerTabPresentationKey
+        var presentation: Any
+    }
+
+    private var entries: [AppTab: Entry] = [:]
+    private(set) var buildCounts: [AppTab: Int] = [:]
+
+    func value<Value>(for key: PlannerTabPresentationKey, build: () -> Value) -> Value {
+        if let entry = entries[key.tab],
+           entry.key == key,
+           let presentation = entry.presentation as? Value {
+            return presentation
+        }
+
+        let presentation = build()
+        entries[key.tab] = Entry(key: key, presentation: presentation)
+        buildCounts[key.tab, default: 0] += 1
+        return presentation
+    }
+
+    func buildCount(for tab: AppTab) -> Int {
+        buildCounts[tab, default: 0]
+    }
+
+    func removeAll() {
+        entries.removeAll()
+        buildCounts.removeAll()
+    }
+}
+
 enum AppAddAction: String, CaseIterable, Identifiable {
     case spend
     case bill
@@ -249,9 +327,10 @@ private enum AppNavigationDestination: String, Identifiable {
 
 struct AppView: View {
     @ObservedObject var store: PlannerStore
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
     @State private var selectedTab: AppTab = .home
-    @State private var rootTabScrollState = RootTabScrollState.inactive
+    @State private var rootTabResetRevisions: [AppTab: Int] = [:]
+    @State private var tabPresentationCache = PlannerTabPresentationCache()
     @State private var isAssistantPresented = false
     @State private var activeSheet: AppSheetDestination?
     @State private var activeNavigationDestination: AppNavigationDestination?
@@ -310,13 +389,18 @@ struct AppView: View {
     }
 
     private var appTabShell: some View {
-        ZStack(alignment: .bottomTrailing) {
+        let presentationContext = plannerTabPresentationContext
+
+        return ZStack(alignment: .bottomTrailing) {
             TabView(selection: selectedTabBinding) {
                 tabNavigationRoot(for: .home) {
                     DashboardView(
                         store: store,
                         navigationMode: .tabRoot,
                         toolbarMode: .none,
+                        rootTabResetRevision: rootTabResetRevision(for: .home),
+                        presentationCache: tabPresentationCache,
+                        presentationContext: presentationContext,
                         onOpenAccount: { activeSheet = .accounts },
                         onViewPlan: { activeNavigationDestination = .plan },
                         onViewActivity: { selectTab(.activity) }
@@ -326,33 +410,53 @@ struct AppView: View {
                 .tag(AppTab.home)
 
                 tabNavigationRoot(for: .bills) {
-                    BillsView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                    BillsView(
+                        store: store,
+                        navigationMode: .tabRoot,
+                        toolbarMode: .none,
+                        rootTabResetRevision: rootTabResetRevision(for: .bills),
+                        presentationCache: tabPresentationCache,
+                        presentationContext: presentationContext
+                    )
                 }
                 .tabItem { Label(AppTab.bills.title, systemImage: AppTab.bills.symbol) }
                 .tag(AppTab.bills)
 
                 tabNavigationRoot(for: .activity) {
-                    ActivityView(store: store)
+                    ActivityView(
+                        store: store,
+                        rootTabResetRevision: rootTabResetRevision(for: .activity),
+                        presentationCache: tabPresentationCache,
+                        presentationContext: presentationContext
+                    )
                 }
                 .tabItem { Label(AppTab.activity.title, systemImage: AppTab.activity.symbol) }
                 .tag(AppTab.activity)
 
                 tabNavigationRoot(for: .pots) {
-                    PotsView(store: store, navigationMode: .tabRoot, toolbarMode: .none)
+                    PotsView(
+                        store: store,
+                        navigationMode: .tabRoot,
+                        toolbarMode: .none,
+                        rootTabResetRevision: rootTabResetRevision(for: .pots),
+                        presentationCache: tabPresentationCache,
+                        presentationContext: presentationContext
+                    )
                 }
                 .tabItem { Label(AppTab.pots.title, systemImage: AppTab.pots.symbol) }
                 .tag(AppTab.pots)
 
                 tabNavigationRoot(for: .credit) {
-                    CreditView(store: store)
+                    CreditView(
+                        store: store,
+                        rootTabResetRevision: rootTabResetRevision(for: .credit),
+                        presentationCache: tabPresentationCache,
+                        presentationContext: presentationContext
+                    )
                 }
                 .tabItem { Label(AppTab.credit.title, systemImage: AppTab.credit.symbol) }
                 .tag(AppTab.credit)
             }
-            .environment(
-                \.rootTabScrollState,
-                rootTabScrollState
-            )
             .id("tabs-\(selectedThemeRawValue)")
             .tint(AppTheme.Colors.primaryOrange)
 
@@ -378,6 +482,9 @@ struct AppView: View {
         .toolbarColorScheme(selectedTheme.palette.preferredColorScheme, for: .navigationBar)
         .toolbar {
             tabToolbarContent(for: selectedTab)
+        }
+        .task(id: presentationContext.warmUpIdentity) {
+            await warmRootTabPresentations(context: presentationContext)
         }
     }
 
@@ -415,6 +522,17 @@ struct AppView: View {
 
     private var selectedTabAddActions: [AppAddAction] {
         AppAddMenuPolicy.actions(for: selectedTab)
+    }
+
+    private var plannerTabPresentationContext: PlannerTabPresentationContext {
+        PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod,
+            isLoading: store.isLoading
+        )
     }
 
     private func navigationTitle(for tab: AppTab) -> String {
@@ -488,10 +606,36 @@ struct AppView: View {
     }
 
     private func requestRootScrollReset(for tab: AppTab) {
-        rootTabScrollState = RootTabScrollState(
-            selectedTitle: tab.title,
-            revision: rootTabScrollState.revision + 1
-        )
+        rootTabResetRevisions[tab, default: 0] += 1
+    }
+
+    private func rootTabResetRevision(for tab: AppTab) -> Int {
+        rootTabResetRevisions[tab, default: 0]
+    }
+
+    private func warmRootTabPresentations(context: PlannerTabPresentationContext) async {
+        guard !store.isLoading else { return }
+
+        await Task.yield()
+
+        for tab in AppTab.allCases where tab != .home {
+            guard !Task.isCancelled else { return }
+
+            switch tab {
+            case .home:
+                break
+            case .bills:
+                BillsView.warmPresentation(cache: tabPresentationCache, context: context)
+            case .activity:
+                ActivityView.warmPresentation(cache: tabPresentationCache, context: context)
+            case .pots:
+                PotsView.warmPresentation(cache: tabPresentationCache, context: context)
+            case .credit:
+                CreditView.warmPresentation(cache: tabPresentationCache, context: context)
+            }
+
+            await Task.yield()
+        }
     }
 
     private func openAddFlowForSelectedTab() {
@@ -570,7 +714,7 @@ struct AppView: View {
 }
 
 private struct PremiumRootBackground: View {
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
 
     var body: some View {
         ZStack {

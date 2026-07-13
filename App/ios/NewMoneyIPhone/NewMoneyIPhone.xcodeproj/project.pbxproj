@@ -47,8 +47,6 @@
 		100000000000000000000133 /* NewMoneyAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* NewMoneyAppDelegate.swift */; };
 		100000000000000000000134 /* AuthEmailFormValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000234 /* AuthEmailFormValidationTests.swift */; };
 		100000000000000000000135 /* AppShellNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000235 /* AppShellNavigationTests.swift */; };
-		34B1E3EE2FF884FB007D21AC /* muno-splash.html in Resources */ = {isa = PBXBuildFile; fileRef = 34B1E3EC2FF884FB007D21AC /* muno-splash.html */; };
-		34B1E3EF2FF884FB007D21AC /* MUNOSplashWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */; };
 		A10000000000000000000001 /* PersonalJuly2026Fixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* PersonalJuly2026Fixture.swift */; };
 		A10000000000000000000003 /* PersonalJuly2026ExpectedResults.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* PersonalJuly2026ExpectedResults.swift */; };
 		A10000000000000000000005 /* PersonalJuly2026ScenarioAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* PersonalJuly2026ScenarioAudit.swift */; };
@@ -60,6 +58,10 @@
 		B20000000000000000000009 /* PersonalJuly2026LiveRepairTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* PersonalJuly2026LiveRepairTests.swift */; };
 		B30000000000000000000001 /* PersonalJuly2026LiveRepairExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000002 /* PersonalJuly2026LiveRepairExecutor.swift */; };
 		B30000000000000000000003 /* PersonalJuly2026LiveRepairExecutionReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000004 /* PersonalJuly2026LiveRepairExecutionReport.swift */; };
+		C10000000000000000000001 /* StartupSplashHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000011 /* StartupSplashHost.swift */; };
+		C10000000000000000000002 /* StartupSplashVideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* StartupSplashVideoPlayer.swift */; };
+		C10000000000000000000003 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000013 /* LaunchScreen.storyboard */; };
+		C10000000000000000000004 /* StartupSplash.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000014 /* StartupSplash.mp4 */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -113,9 +115,6 @@
 		100000000000000000000233 /* NewMoneyIPhone.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NewMoneyIPhone.entitlements; sourceTree = "<group>"; };
 		100000000000000000000234 /* AuthEmailFormValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthEmailFormValidationTests.swift; sourceTree = "<group>"; };
 		100000000000000000000235 /* AppShellNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellNavigationTests.swift; sourceTree = "<group>"; };
-		34B1E3EB2FF884AA007D21AC /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
-		34B1E3EC2FF884FB007D21AC /* muno-splash.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "muno-splash.html"; sourceTree = "<group>"; };
-		34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MUNOSplashWebView.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* PersonalJuly2026Fixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026Fixture.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* PersonalJuly2026ExpectedResults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026ExpectedResults.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* PersonalJuly2026ScenarioAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026ScenarioAudit.swift; sourceTree = "<group>"; };
@@ -127,6 +126,10 @@
 		B20000000000000000000010 /* PersonalJuly2026LiveRepairTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairTests.swift; sourceTree = "<group>"; };
 		B30000000000000000000002 /* PersonalJuly2026LiveRepairExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairExecutor.swift; sourceTree = "<group>"; };
 		B30000000000000000000004 /* PersonalJuly2026LiveRepairExecutionReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalJuly2026LiveRepairExecutionReport.swift; sourceTree = "<group>"; };
+		C10000000000000000000011 /* StartupSplashHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupSplashHost.swift; sourceTree = "<group>"; };
+		C10000000000000000000012 /* StartupSplashVideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupSplashVideoPlayer.swift; sourceTree = "<group>"; };
+		C10000000000000000000013 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		C10000000000000000000014 /* StartupSplash.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartupSplash.mp4; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,12 +157,9 @@
 		100000000000000000000601 = {
 			isa = PBXGroup;
 			children = (
-				34B1E3EB2FF884AA007D21AC /* Splash.swift */,
 				100000000000000000000602 /* NewMoney */,
 				100000000000000000000603 /* NewMoneyTests */,
 				100000000000000000000604 /* Products */,
-				34B1E3EC2FF884FB007D21AC /* muno-splash.html */,
-				34B1E3ED2FF884FB007D21AC /* MUNOSplashWebView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -179,6 +179,8 @@
 				100000000000000000000225 /* GoogleService-Info.plist */,
 				100000000000000000000231 /* Info.plist */,
 				100000000000000000000233 /* NewMoneyIPhone.entitlements */,
+				C10000000000000000000013 /* LaunchScreen.storyboard */,
+				C100000000000000000000614 /* Resources */,
 			);
 			path = NewMoney;
 			sourceTree = "<group>";
@@ -212,11 +214,21 @@
 			children = (
 				100000000000000000000201 /* NewMoneyApp.swift */,
 				100000000000000000000232 /* NewMoneyAppDelegate.swift */,
+				C10000000000000000000011 /* StartupSplashHost.swift */,
+				C10000000000000000000012 /* StartupSplashVideoPlayer.swift */,
 				100000000000000000000202 /* AppView.swift */,
 				34B1E3F52FF8B111007D21AC /* AccountsSheetView.swift */,
 				100000000000000000000212 /* PlannerStore.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		C100000000000000000000614 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C10000000000000000000014 /* StartupSplash.mp4 */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		100000000000000000000606 /* Models */ = {
@@ -467,7 +479,8 @@
 			files = (
 				100000000000000000000122 /* Assets.xcassets in Resources */,
 				100000000000000000000123 /* GoogleService-Info.plist in Resources */,
-				34B1E3EE2FF884FB007D21AC /* muno-splash.html in Resources */,
+				C10000000000000000000003 /* LaunchScreen.storyboard in Resources */,
+				C10000000000000000000004 /* StartupSplash.mp4 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -493,7 +506,6 @@
 				100000000000000000000106 /* FinanceEngine.swift in Sources */,
 				100000000000000000000107 /* DateUtilities.swift in Sources */,
 				100000000000000000000108 /* DefaultData.swift in Sources */,
-				34B1E3EF2FF884FB007D21AC /* MUNOSplashWebView.swift in Sources */,
 				100000000000000000000109 /* PlannerRepository.swift in Sources */,
 				100000000000000000000110 /* PlannerStore.swift in Sources */,
 				100000000000000000000111 /* ServicePlaceholders.swift in Sources */,
@@ -523,6 +535,8 @@
 				B20000000000000000000007 /* PersonalJuly2026LiveRepairView.swift in Sources */,
 				B30000000000000000000001 /* PersonalJuly2026LiveRepairExecutor.swift in Sources */,
 				B30000000000000000000003 /* PersonalJuly2026LiveRepairExecutionReport.swift in Sources */,
+				C10000000000000000000001 /* StartupSplashHost.swift in Sources */,
+				C10000000000000000000002 /* StartupSplashVideoPlayer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

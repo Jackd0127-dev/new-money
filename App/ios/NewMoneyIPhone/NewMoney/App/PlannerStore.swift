@@ -13,7 +13,12 @@ private struct LinkedPotContribution {
 
 @MainActor
 final class PlannerStore: ObservableObject {
-    @Published private(set) var snapshot: PlannerSnapshot = DefaultData.emptySnapshot
+    @Published private(set) var snapshot: PlannerSnapshot = DefaultData.emptySnapshot {
+        didSet {
+            snapshotRevision &+= 1
+        }
+    }
+    @Published private(set) var snapshotRevision = 0
     @Published private(set) var plannerAccounts: [PlannerAccount] = []
     @Published private(set) var activePlannerAccountId: String?
     @Published private(set) var cloudSyncRevision = 0
@@ -888,7 +893,7 @@ final class PlannerStore: ObservableObject {
 
         let now = DateUtilities.nowIsoString()
         let colors = AppTheme.selectableColorHexes()
-        let color = colors.isEmpty ? AppThemePreset.classic.palette.accentHex : colors[snapshot.billGroups.count % colors.count]
+        let color = colors.isEmpty ? AppThemePreset.defaultPreset.palette.accentHex : colors[snapshot.billGroups.count % colors.count]
         let group = BillGroup(
             id: DateUtilities.newId(prefix: "bill-group"),
             name: cleanName,

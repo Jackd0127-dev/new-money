@@ -1083,8 +1083,16 @@ enum ActivityTimelineBranchLayoutPolicy {
     }
 }
 
+private struct ActivityTabPresentation {
+    var monthlyBalanceData: ActivityMonthlyBalanceChartData
+    var entries: [ActivityEntry]
+}
+
 struct ActivityView: View {
     @ObservedObject var store: PlannerStore
+    var rootTabResetRevision: Int?
+    var presentationCache: PlannerTabPresentationCache?
+    var presentationContext: PlannerTabPresentationContext?
     @State private var filter: ActivityFilter = .all
     @State private var searchText = ""
 
@@ -1093,7 +1101,8 @@ struct ActivityView: View {
             title: "Activity",
             subtitle: "Transactions, spending, income, and pay-period history.",
             navigationMode: .tabRoot,
-            toolbarMode: .none
+            toolbarMode: .none,
+            rootTabResetRevision: rootTabResetRevision
         ) {
             ForEach(ActivityLayoutPolicy.sections, id: \.rawValue) { section in
                 activitySection(section)
@@ -1155,10 +1164,7 @@ struct ActivityView: View {
 
     @ViewBuilder
     private var activityMonthBalance: some View {
-        let data = ActivityMonthlyBalanceChartData.make(
-            snapshot: store.snapshot,
-            todayIso: store.todayIso
-        )
+        let data = tabPresentation.monthlyBalanceData
 
         NavigationLink {
             ActivityMonthlyBalanceDetailView(data: data)
@@ -1215,20 +1221,58 @@ struct ActivityView: View {
     }
 
     private var activityEntries: [ActivityEntry] {
-        let potsById = store.snapshot.pots.reduce(into: [String: Pot]()) { result, pot in
+        tabPresentation.entries
+    }
+
+    private var tabPresentation: ActivityTabPresentation {
+        let context = presentationContext ?? PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
+
+        guard let presentationCache else {
+            return Self.makePresentation(context: context)
+        }
+
+        return presentationCache.value(for: context.key(for: .activity)) {
+            Self.makePresentation(context: context)
+        }
+    }
+
+    static func warmPresentation(cache: PlannerTabPresentationCache, context: PlannerTabPresentationContext) {
+        let _: ActivityTabPresentation = cache.value(for: context.key(for: .activity)) {
+            makePresentation(context: context)
+        }
+    }
+
+    private static func makePresentation(context: PlannerTabPresentationContext) -> ActivityTabPresentation {
+        ActivityTabPresentation(
+            monthlyBalanceData: ActivityMonthlyBalanceChartData.make(
+                snapshot: context.snapshot,
+                todayIso: context.todayIso
+            ),
+            entries: makeActivityEntries(snapshot: context.snapshot)
+        )
+    }
+
+    private static func makeActivityEntries(snapshot: PlannerSnapshot) -> [ActivityEntry] {
+        let potsById = snapshot.pots.reduce(into: [String: Pot]()) { result, pot in
             result[pot.id] = pot
         }
-        let cardsById = store.snapshot.creditCards.reduce(into: [String: CreditCard]()) { result, card in
+        let cardsById = snapshot.creditCards.reduce(into: [String: CreditCard]()) { result, card in
             result[card.id] = card
         }
-        let recurringById = store.snapshot.recurringPayments.reduce(into: [String: RecurringPayment]()) { result, payment in
+        let recurringById = snapshot.recurringPayments.reduce(into: [String: RecurringPayment]()) { result, payment in
             result[payment.id] = payment
         }
-        let periodsById = store.snapshot.payPeriods.reduce(into: [String: PayPeriod]()) { result, period in
+        let periodsById = snapshot.payPeriods.reduce(into: [String: PayPeriod]()) { result, period in
             result[period.id] = period
         }
 
-        let spending = store.snapshot.transactions
+        let spending = snapshot.transactions
             .filter { $0.type == .spending }
             .map { transaction in
                 let amount = "-\(MoneyParser.formatPence(transaction.amountPence))"
@@ -1272,7 +1316,7 @@ struct ActivityView: View {
                 )
             }
 
-        let income = store.snapshot.paychecks
+        let income = snapshot.paychecks
             .filter { $0.deletedAt == nil }
             .filter { ActivityLayoutPolicy.recentActivityShowsGeneratedAutomaticPaychecks || !$0.id.hasPrefix("paycheck-pay-period-") }
             .filter { ActivityLayoutPolicy.recentActivityShowsZeroValuePaychecks || paycheckActivityAmount($0) > 0 }
@@ -1311,7 +1355,7 @@ struct ActivityView: View {
                 )
             }
 
-        let oneOffIncome = store.snapshot.oneOffIncomes
+        let oneOffIncome = snapshot.oneOffIncomes
             .filter { $0.deletedAt == nil }
             .map { income in
                 var detailRows = [
@@ -1341,15 +1385,15 @@ struct ActivityView: View {
                 )
             }
 
-        return (spending + income + oneOffIncome + payPeriodSummaryEntries()).sorted { $0.sortDate > $1.sortDate }
+        return (spending + income + oneOffIncome + payPeriodSummaryEntries(snapshot: snapshot)).sorted { $0.sortDate > $1.sortDate }
     }
 
-    private func payPeriodSummaryEntries() -> [ActivityEntry] {
+    private static func payPeriodSummaryEntries(snapshot: PlannerSnapshot) -> [ActivityEntry] {
         guard ActivityLayoutPolicy.recentActivityShowsGeneratedPayPeriodSummaries else { return [] }
 
-        return store.snapshot.payPeriods.map { period in
+        return snapshot.payPeriods.map { period in
             var detailRows = [
-                ActivityDetailRow(label: "Income", value: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: store.snapshot, payPeriod: period)), valueColor: AppTheme.Colors.success),
+                ActivityDetailRow(label: "Income", value: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period)), valueColor: AppTheme.Colors.success),
                 ActivityDetailRow(label: "Start", value: activityDisplayDate(period.startDate)),
                 ActivityDetailRow(label: "End", value: activityDisplayDate(period.endDate)),
                 ActivityDetailRow(label: "Payday", value: activityDisplayDate(period.payday)),
@@ -1365,7 +1409,7 @@ struct ActivityView: View {
                 kind: .income,
                 title: "Pay period",
                 detail: "\(activityDisplayDate(period.startDate)) to \(activityDisplayDate(period.endDate))",
-                amount: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: store.snapshot, payPeriod: period)),
+                amount: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period)),
                 typeLabel: "Pay period",
                 color: AppTheme.Colors.primaryOrange,
                 sortDate: period.startDate,
@@ -1375,18 +1419,18 @@ struct ActivityView: View {
         }
     }
 
-    private func paycheckActivityAmount(_ paycheck: Paycheck) -> Int {
+    private static func paycheckActivityAmount(_ paycheck: Paycheck) -> Int {
         paycheck.actualAmountPence ?? paycheck.calculatedAmountPence
     }
 
-    private func activityRecordRows(createdAt: String, updatedAt: String) -> [ActivityDetailRow] {
+    private static func activityRecordRows(createdAt: String, updatedAt: String) -> [ActivityDetailRow] {
         [
             ActivityDetailRow(label: "Created", value: activityDisplayDate(createdAt)),
             ActivityDetailRow(label: "Updated", value: activityDisplayDate(updatedAt))
         ]
     }
 
-    private func activityPaymentMethodLabel(_ method: PaymentMethod?) -> String {
+    private static func activityPaymentMethodLabel(_ method: PaymentMethod?) -> String {
         switch method {
         case .creditCard:
             "Credit card"
@@ -1397,7 +1441,7 @@ struct ActivityView: View {
         }
     }
 
-    private func formattedActivityLabel(_ value: String) -> String {
+    private static func formattedActivityLabel(_ value: String) -> String {
         value
             .replacingOccurrences(of: "_", with: " ")
             .capitalized
@@ -3123,6 +3167,9 @@ private struct ActivityChartMetricPill: View {
 
 struct CreditView: View {
     @ObservedObject var store: PlannerStore
+    var rootTabResetRevision: Int?
+    var presentationCache: PlannerTabPresentationCache?
+    var presentationContext: PlannerTabPresentationContext?
     @State private var selectedCard: CreditCard?
 
     var body: some View {
@@ -3132,7 +3179,8 @@ struct CreditView: View {
             title: "Credit",
             subtitle: "Cards, debts, and payments due.",
             navigationMode: .tabRoot,
-            toolbarMode: .none
+            toolbarMode: .none,
+            rootTabResetRevision: rootTabResetRevision
         ) {
             creditSummary(summary: displayData.summary, dueItems: displayData.dueItems)
             activeCardRows(cardModels: displayData.cardModels)
@@ -3155,22 +3203,47 @@ struct CreditView: View {
     }
 
     private var creditDisplayData: CreditDisplayData {
-        let activeCards = store.activeCards
+        let context = presentationContext ?? PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
+
+        guard let presentationCache else {
+            return Self.makePresentation(context: context)
+        }
+
+        return presentationCache.value(for: context.key(for: .credit)) {
+            Self.makePresentation(context: context)
+        }
+    }
+
+    static func warmPresentation(cache: PlannerTabPresentationCache, context: PlannerTabPresentationContext) {
+        let _: CreditDisplayData = cache.value(for: context.key(for: .credit)) {
+            makePresentation(context: context)
+        }
+    }
+
+    private static func makePresentation(context: PlannerTabPresentationContext) -> CreditDisplayData {
+        let snapshot = context.snapshot
+        let activeCards = snapshot.creditCards.filter { !$0.archived }
         let cardModels = creditCardPreviewModels(
             cards: activeCards,
-            snapshot: store.snapshot,
-            payPeriod: store.selectedPayPeriod,
-            asOfDate: store.todayIso
+            snapshot: snapshot,
+            payPeriod: context.selectedPayPeriod,
+            asOfDate: context.todayIso
         )
         let cardOwed = cardModels.reduce(0) { $0 + $1.balancePence }
         let debtSummary = FinanceEngine.getDebtSummary(
-            debts: store.snapshot.debts,
-            payments: store.snapshot.debtPayments,
-            reserves: store.snapshot.debtReserves,
-            pots: store.snapshot.pots,
-            today: store.todayIso
+            debts: snapshot.debts,
+            payments: snapshot.debtPayments,
+            reserves: snapshot.debtReserves,
+            pots: snapshot.pots,
+            today: context.todayIso
         )
-        let statements = PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: store.todayIso)
+        let statements = PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: context.todayIso)
         let unpaidStatements = statements.reduce(0) { $0 + $1.unpaidAmountPence }
         let statementDueItems = statements
             .filter { $0.status != .paid }
@@ -3183,15 +3256,16 @@ struct CreditView: View {
                     isOverdue: $0.status == .overdue
                 )
             }
-        let debtDueItems = PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
+        let debtsById = Dictionary(uniqueKeysWithValues: snapshot.debts.map { ($0.id, $0) })
+        let debtDueItems = PlannerDerivedData.debtScheduleItems(snapshot: snapshot, payPeriod: nil)
             .filter { $0.status != .paid && $0.status != .cancelled }
             .map { item in
                 CreditDueItem(
                     id: "debt-\(item.id)",
-                    title: store.snapshot.debts.first { debt in debt.id == item.debtId }?.name ?? "Debt payment",
+                    title: debtsById[item.debtId]?.name ?? "Debt payment",
                     date: item.dueDate,
                     amountPence: item.plannedAmountPence,
-                    isOverdue: item.dueDate < store.todayIso
+                    isOverdue: item.dueDate < context.todayIso
                 )
             }
 
@@ -3204,7 +3278,7 @@ struct CreditView: View {
                 unpaidStatementsPence: unpaidStatements,
                 unpaidStatementCount: statements.filter { $0.status != .paid }.count,
                 activeCardCount: activeCards.count,
-                activeDebtCount: store.snapshot.debts.filter { $0.deletedAt == nil && $0.status.isActiveLike }.count
+                activeDebtCount: snapshot.debts.filter { $0.deletedAt == nil && $0.status.isActiveLike }.count
             ),
             dueItems: (statementDueItems + debtDueItems).sorted { $0.date < $1.date },
             cardModels: cardModels

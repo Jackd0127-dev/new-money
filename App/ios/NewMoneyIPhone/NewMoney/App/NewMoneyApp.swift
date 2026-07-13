@@ -6,11 +6,11 @@ struct NewMoneyApp: App {
 
     var body: some Scene {
         WindowGroup {
-            MUNOSplashHost {
+            StartupSplashHost {
                 AuthenticatedRootView()
-            }
-            .onOpenURL { url in
-                NativeAuthCallbackHandler.handle(url)
+                    .onOpenURL { url in
+                        NativeAuthCallbackHandler.handle(url)
+                    }
             }
         }
     }

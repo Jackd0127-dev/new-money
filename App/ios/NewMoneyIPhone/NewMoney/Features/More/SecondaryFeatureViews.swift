@@ -727,10 +727,26 @@ enum BillsLayoutPolicy {
     static let editUsesExistingRecurringPaymentUpdate = true
 }
 
+private struct BillsTabPresentation {
+    var activeBillGroups: [BillGroup]
+    var sortedBills: [RecurringPayment]
+    var ungroupedBills: [RecurringPayment]
+    var billsByGroupId: [String: [RecurringPayment]]
+    var upcomingOccurrences: [RecurringPaymentOccurrence]
+    var fundingChecklistItems: [FundingChecklistPresentationItem]
+    var nextDueLabelsByPaymentId: [String: String]
+    var activeBillCount: Int
+    var activeTemplateTotalPence: Int
+    var linkedBillCount: Int
+}
+
 struct BillsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
+    var rootTabResetRevision: Int?
+    var presentationCache: PlannerTabPresentationCache?
+    var presentationContext: PlannerTabPresentationContext?
     @State private var selectedGroupId: String?
     @State private var selectedBillIdForEdit: String?
     @State private var isYourBillsExpanded = true
@@ -746,7 +762,8 @@ struct BillsView: View {
             title: "Bills",
             subtitle: "Recurring bills, groups, due dates, and linked pots or cards.",
             navigationMode: navigationMode,
-            toolbarMode: toolbarMode
+            toolbarMode: toolbarMode,
+            rootTabResetRevision: rootTabResetRevision
         ) {
             ForEach(BillsLayoutPolicy.sections, id: \.rawValue) { section in
                 billsSection(section)
@@ -764,7 +781,7 @@ struct BillsView: View {
         } message: {
             Text("Use groups to keep subscriptions, home bills, card bills, and savings transfers tidy.")
         }
-        .onChange(of: store.activeBillGroups.map(\.id)) { _, groupIds in
+        .onChange(of: tabPresentation.activeBillGroups.map(\.id)) { _, groupIds in
             if let selectedGroupId,
                selectedGroupId != ungroupedGroupId,
                !groupIds.contains(selectedGroupId) {
@@ -844,7 +861,7 @@ struct BillsView: View {
 
                     HStack(spacing: AppTheme.Spacing.sm) {
                         BillsOverviewPill(title: "\(linkedBillCount)", subtitle: "linked", color: AppTheme.Colors.success)
-                        BillsOverviewPill(title: "\(store.activeBillGroups.count)", subtitle: "groups", color: AppTheme.Colors.primaryOrange)
+                        BillsOverviewPill(title: "\(tabPresentation.activeBillGroups.count)", subtitle: "groups", color: AppTheme.Colors.primaryOrange)
                         BillsOverviewPill(title: "\(ungroupedBills.count)", subtitle: "ungrouped", color: AppTheme.Colors.secondaryText)
                     }
                 }
@@ -933,11 +950,7 @@ struct BillsView: View {
     }
 
     private var fundingChecklistItems: [FundingChecklistPresentationItem] {
-        PlannerDerivedData.fundingChecklistPresentationItems(
-            snapshot: store.snapshot,
-            payPeriod: store.selectedPayPeriod,
-            asOfDate: store.todayIso
-        )
+        tabPresentation.fundingChecklistItems
     }
 
     private func recurringOccurrence(for item: FundingChecklistPresentationItem) -> RecurringPaymentOccurrence? {
@@ -986,7 +999,7 @@ struct BillsView: View {
                         selectedGroupId = nil
                     }
 
-                    ForEach(store.activeBillGroups) { group in
+                    ForEach(tabPresentation.activeBillGroups) { group in
                         BillsGroupFilterPill(
                             title: group.name,
                             count: bills(in: group).count,
@@ -1051,7 +1064,7 @@ struct BillsView: View {
             subtitle: yourBillsSectionSubtitle,
             isExpanded: $isYourBillsExpanded
         ) {
-            if sortedBills.isEmpty && store.activeBillGroups.isEmpty {
+            if sortedBills.isEmpty && tabPresentation.activeBillGroups.isEmpty {
                 AppCard {
                     EmptyStateView(title: "No bills yet", message: "Use Add to create rent, subscriptions, utilities, transfers, or card-linked bills.", systemImage: "calendar.badge.plus")
                 }
@@ -1059,7 +1072,7 @@ struct BillsView: View {
                 ForEach(displaySections) { section in
                     BillsGroupSectionCard(
                         section: section,
-                        groups: store.activeBillGroups,
+                        groups: tabPresentation.activeBillGroups,
                         snapshot: store.snapshot,
                         nextDueLabel: nextDueLabel(for:)
                     ) { paymentId, groupId in
@@ -1092,15 +1105,15 @@ struct BillsView: View {
     }
 
     private var activeBillCount: Int {
-        sortedBills.filter(\.active).count
+        tabPresentation.activeBillCount
     }
 
     private var activeTemplateTotalPence: Int {
-        sortedBills.filter(\.active).reduce(0) { $0 + $1.amountPence }
+        tabPresentation.activeTemplateTotalPence
     }
 
     private var linkedBillCount: Int {
-        sortedBills.filter { $0.potId != nil || $0.creditCardId != nil }.count
+        tabPresentation.linkedBillCount
     }
 
     private var nextBillTitle: String {
@@ -1116,18 +1129,53 @@ struct BillsView: View {
     }
 
     private var upcomingOccurrences: [RecurringPaymentOccurrence] {
-        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 30)
-        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: store.snapshot, payments: sortedBills, startDate: store.todayIso, endDate: endDate)
-            .sorted { lhs, rhs in
-                if lhs.dueDate == rhs.dueDate {
-                    return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
-                }
-                return lhs.dueDate < rhs.dueDate
-            }
+        tabPresentation.upcomingOccurrences
     }
 
     private var sortedBills: [RecurringPayment] {
-        store.snapshot.recurringPayments
+        tabPresentation.sortedBills
+    }
+
+    private var ungroupedBills: [RecurringPayment] {
+        tabPresentation.ungroupedBills
+    }
+
+    private var tabPresentation: BillsTabPresentation {
+        let context = presentationContext ?? PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
+
+        guard let presentationCache else {
+            return Self.makePresentation(context: context)
+        }
+
+        return presentationCache.value(for: context.key(for: .bills)) {
+            Self.makePresentation(context: context)
+        }
+    }
+
+    static func warmPresentation(cache: PlannerTabPresentationCache, context: PlannerTabPresentationContext) {
+        let _: BillsTabPresentation = cache.value(for: context.key(for: .bills)) {
+            makePresentation(context: context)
+        }
+    }
+
+    private static func makePresentation(context: PlannerTabPresentationContext) -> BillsTabPresentation {
+        let snapshot = context.snapshot
+        let todayIso = context.todayIso
+        let activeBillGroups = snapshot.billGroups
+            .filter { $0.deletedAt == nil }
+            .sorted {
+                if $0.name == $1.name {
+                    return $0.id < $1.id
+                }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+        let sortedBills = snapshot.recurringPayments
             .filter { $0.deletedAt == nil }
             .sorted { lhs, rhs in
                 if lhs.active == rhs.active {
@@ -1135,13 +1183,59 @@ struct BillsView: View {
                 }
                 return lhs.active && !rhs.active
             }
-    }
-
-    private var ungroupedBills: [RecurringPayment] {
-        sortedBills.filter { payment in
+        let groupIds = Set(activeBillGroups.map(\.id))
+        let ungroupedBills = sortedBills.filter { payment in
             guard let groupId = payment.billGroupId else { return true }
-            return !store.activeBillGroups.contains { $0.id == groupId }
+            return !groupIds.contains(groupId)
         }
+        let billsByGroupId = Dictionary(grouping: sortedBills.compactMap { payment -> (String, RecurringPayment)? in
+            guard let groupId = payment.billGroupId else { return nil }
+            return (groupId, payment)
+        }, by: { $0.0 })
+        .mapValues { rows in rows.map(\.1) }
+        let upcomingOccurrences = PlannerDerivedData.resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: sortedBills,
+            startDate: todayIso,
+            endDate: FinanceEngine.addIsoDays(date: todayIso, days: 30)
+        )
+        .sorted { lhs, rhs in
+            if lhs.dueDate == rhs.dueDate {
+                return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
+            }
+            return lhs.dueDate < rhs.dueDate
+        }
+        let nextDueEndDate = FinanceEngine.addIsoDays(date: todayIso, days: 180)
+        let nextDueLabelsByPaymentId = Dictionary(uniqueKeysWithValues: sortedBills.map { payment in
+            let label = PlannerDerivedData.resolvedRecurringOccurrences(
+                snapshot: snapshot,
+                payments: [payment],
+                startDate: todayIso,
+                endDate: nextDueEndDate
+            )
+            .sorted { $0.dueDate < $1.dueDate }
+            .first
+            .map { "Next \(billsFriendlyDate($0.dueDate))" }
+                ?? billsDueTemplateLabel(payment)
+            return (payment.id, label)
+        })
+
+        return BillsTabPresentation(
+            activeBillGroups: activeBillGroups,
+            sortedBills: sortedBills,
+            ungroupedBills: ungroupedBills,
+            billsByGroupId: billsByGroupId,
+            upcomingOccurrences: upcomingOccurrences,
+            fundingChecklistItems: PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: snapshot,
+                payPeriod: context.selectedPayPeriod,
+                asOfDate: todayIso
+            ),
+            nextDueLabelsByPaymentId: nextDueLabelsByPaymentId,
+            activeBillCount: sortedBills.filter(\.active).count,
+            activeTemplateTotalPence: sortedBills.filter(\.active).reduce(0) { $0 + $1.amountPence },
+            linkedBillCount: sortedBills.filter { $0.potId != nil || $0.creditCardId != nil }.count
+        )
     }
 
     private var displaySections: [BillsDisplaySection] {
@@ -1150,11 +1244,11 @@ struct BillsView: View {
         }
 
         if let selectedGroupId,
-           let group = store.activeBillGroups.first(where: { $0.id == selectedGroupId }) {
+           let group = tabPresentation.activeBillGroups.first(where: { $0.id == selectedGroupId }) {
             return [section(for: group)]
         }
 
-        var sections = store.activeBillGroups.map(section(for:))
+        var sections = tabPresentation.activeBillGroups.map(section(for:))
         if !ungroupedBills.isEmpty {
             sections.append(BillsDisplaySection(id: ungroupedGroupId, title: "Ungrouped", color: AppTheme.Colors.tertiaryText, payments: ungroupedBills))
         }
@@ -1172,7 +1266,7 @@ struct BillsView: View {
     }
 
     private func bills(in group: BillGroup) -> [RecurringPayment] {
-        sortedBills.filter { $0.billGroupId == group.id }
+        tabPresentation.billsByGroupId[group.id, default: []]
     }
 
     private func createGroup() {
@@ -1182,12 +1276,7 @@ struct BillsView: View {
     }
 
     private func nextDueLabel(for payment: RecurringPayment) -> String {
-        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 180)
-        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: store.snapshot, payments: [payment], startDate: store.todayIso, endDate: endDate)
-            .sorted { $0.dueDate < $1.dueDate }
-            .first
-            .map { "Next \(billsFriendlyDate($0.dueDate))" }
-            ?? billsDueTemplateLabel(payment)
+        tabPresentation.nextDueLabelsByPaymentId[payment.id] ?? billsDueTemplateLabel(payment)
     }
 }
 
@@ -2921,7 +3010,7 @@ enum SettingsRoute: String, CaseIterable, Equatable {
 struct AppearanceSettingsView: View {
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .none
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
 
     var body: some View {
         ScreenScaffold(
@@ -2940,7 +3029,7 @@ struct SettingsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
     @State private var hourlyRate = ""
     @State private var hours = ""
     @State private var showResetAlert = false

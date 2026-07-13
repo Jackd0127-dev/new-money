@@ -1444,10 +1444,15 @@ enum PlannerDerivedData {
         return existingItems + generatedItems
     }
 
-    private static func creditCardStatementCycles(card: CreditCard, snapshot: PlannerSnapshot) -> [CreditCardStatementCycle] {
+    private static func creditCardStatementCycles(
+        card: CreditCard,
+        snapshot: PlannerSnapshot,
+        through endDate: String
+    ) -> [CreditCardStatementCycle] {
         guard var scheduledStatementDate = card.statementDate,
               FinanceEngine.isIsoDate(scheduledStatementDate),
-              let dueDay = card.dueDay
+              let dueDay = card.dueDay,
+              FinanceEngine.isIsoDate(endDate)
         else { return [] }
 
         let overrides = Dictionary(
@@ -1458,6 +1463,7 @@ enum PlannerDerivedData {
         var cycles: [CreditCardStatementCycle] = []
         var previousStatementDate: String?
 
+        let boundedEndDate = max(endDate, scheduledStatementDate)
         for _ in 0..<240 {
             let override = overrides[scheduledStatementDate]
             let statementDate = override?.statementState == .confirmed &&
@@ -1483,6 +1489,7 @@ enum PlannerDerivedData {
                 )
             )
 
+            guard scheduledStatementDate < boundedEndDate else { break }
             previousStatementDate = statementDate
             scheduledStatementDate = addIsoMonthsClamped(date: scheduledStatementDate, months: 1)
         }
@@ -1495,7 +1502,11 @@ enum PlannerDerivedData {
         snapshot: PlannerSnapshot,
         asOfDate: String
     ) -> CreditCardCycleAdjustmentSummary? {
-        creditCardStatementCycles(card: card, snapshot: snapshot)
+        creditCardStatementCycles(
+            card: card,
+            snapshot: snapshot,
+            through: addIsoMonthsClamped(date: asOfDate, months: 1)
+        )
             .first { cycle in
                 cycle.isHeld || cycle.directDebitDate >= asOfDate || cycle.statementDate >= asOfDate
             }
@@ -1515,7 +1526,7 @@ enum PlannerDerivedData {
         return snapshot.creditCards
             .filter { !$0.archived }
             .flatMap { card in
-                creditCardStatementCycles(card: card, snapshot: snapshot)
+                creditCardStatementCycles(card: card, snapshot: snapshot, through: endDate)
                     .filter { $0.statementDate >= asOfDate && $0.statementDate <= endDate }
                     .map {
                         CreditCardCycleReminder(
@@ -1530,7 +1541,11 @@ enum PlannerDerivedData {
     }
 
     static func creditCardHeldCycleReservePence(card: CreditCard, snapshot: PlannerSnapshot, asOfDate: String) -> Int {
-        creditCardStatementCycles(card: card, snapshot: snapshot)
+        creditCardStatementCycles(
+            card: card,
+            snapshot: snapshot,
+            through: addIsoMonthsClamped(date: asOfDate, months: 1)
+        )
             .filter { $0.isHeld && $0.cycleStartDate <= asOfDate }
             .reduce(0) { total, cycle in
                 let breakdown = creditCardStatementBreakdown(
@@ -1557,7 +1572,7 @@ enum PlannerDerivedData {
         guard card.statementDate != nil, card.dueDay != nil else { return [] }
 
         var payments: [CreditCardStatementPayment] = []
-        for cycle in creditCardStatementCycles(card: card, snapshot: snapshot) {
+        for cycle in creditCardStatementCycles(card: card, snapshot: snapshot, through: endDate) {
             if cycle.directDebitDate > endDate { break }
             if cycle.directDebitDate >= startDate, !cycle.isHeld {
                 let nextStatementDate = addIsoMonthsClamped(date: cycle.scheduledStatementDate, months: 1)
@@ -1598,7 +1613,11 @@ enum PlannerDerivedData {
                 guard card.statementDate != nil, card.dueDay != nil else { return [] }
 
                 var summaries: [CreditCardStatementSummary] = []
-                for cycle in creditCardStatementCycles(card: card, snapshot: snapshot) {
+                for cycle in creditCardStatementCycles(
+                    card: card,
+                    snapshot: snapshot,
+                    through: addIsoMonthsClamped(date: asOfDate, months: 1)
+                ) {
                     if cycle.statementDate > asOfDate && !cycle.isStatementHeld { break }
 
                     let cycleEnd = cycle.isStatementHeld ? asOfDate : cycle.statementDate
@@ -2866,7 +2885,7 @@ private extension PlannerDerivedData {
             )
         }
 
-        let heldRows = creditCardStatementCycles(card: card, snapshot: snapshot)
+        let heldRows = creditCardStatementCycles(card: card, snapshot: snapshot, through: endDate)
             .filter { $0.isHeld && $0.directDebitDate >= today && $0.directDebitDate <= endDate }
             .compactMap { cycle -> LinkedCardPaymentDue? in
                 let amountPence = creditCardHeldCycleReservePence(card: card, snapshot: snapshot, asOfDate: today)
@@ -3311,7 +3330,11 @@ private extension PlannerDerivedData {
     }
 
     static func creditCardStatementDate(for card: CreditCard, snapshot: PlannerSnapshot, chargeDate: String) -> String? {
-        creditCardStatementCycles(card: card, snapshot: snapshot)
+        creditCardStatementCycles(
+            card: card,
+            snapshot: snapshot,
+            through: addIsoMonthsClamped(date: chargeDate, months: 1)
+        )
             .first { cycle in
                 cycle.statementDate >= chargeDate ||
                 (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
@@ -3379,7 +3402,11 @@ private extension PlannerDerivedData {
     }
 
     static func creditCardDirectDebitDate(for card: CreditCard, snapshot: PlannerSnapshot, chargeDate: String) -> String? {
-        creditCardStatementCycles(card: card, snapshot: snapshot)
+        creditCardStatementCycles(
+            card: card,
+            snapshot: snapshot,
+            through: addIsoMonthsClamped(date: chargeDate, months: 1)
+        )
             .first { cycle in
                 cycle.statementDate >= chargeDate ||
                 (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
@@ -3733,11 +3760,11 @@ private extension PlannerDerivedData {
         return FinanceEngine.toIsoDate(utcCalendar.date(from: components) ?? firstOfMonth)
     }
 
-    static var utcCalendar: Calendar {
+    static let utcCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
         return calendar
-    }
+    }()
 }
 
 private extension String {

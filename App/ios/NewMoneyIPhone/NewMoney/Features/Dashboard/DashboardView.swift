@@ -45,10 +45,24 @@ private enum DashboardSheetDestination: Identifiable {
     }
 }
 
+private struct DashboardTabPresentation {
+    var selectedPayPeriod: PayPeriod?
+    var currentCostSummary: PayPeriodCostSummary
+    var fundingChecklistItems: [FundingChecklistPresentationItem]
+    var manualMonthlySpendData: DashboardMonthlySpendChartData
+    var outgoingsMonthlySpendData: DashboardMonthlySpendChartData
+    var alertRows: [HomeAlertRow]
+    var upcomingMoneyEvents: [CalendarEvent]
+    var recentRows: [DashboardActivityRow]
+}
+
 struct DashboardView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
+    var rootTabResetRevision: Int?
+    var presentationCache: PlannerTabPresentationCache?
+    var presentationContext: PlannerTabPresentationContext?
     var onOpenAccount: (() -> Void)?
     var onViewPlan: (() -> Void)?
     var onViewActivity: (() -> Void)?
@@ -61,7 +75,8 @@ struct DashboardView: View {
             title: "Home",
             subtitle: "Money left and upcoming pressure.",
             navigationMode: navigationMode,
-            toolbarMode: toolbarMode
+            toolbarMode: toolbarMode,
+            rootTabResetRevision: rootTabResetRevision
         ) {
             if store.isLoading {
                 LoadingView()
@@ -160,14 +175,14 @@ struct DashboardView: View {
     }
 
     private var paydayLabel: String {
-        guard let period = store.selectedPayPeriod else {
+        guard let period = tabPresentation.selectedPayPeriod else {
             return "No payday"
         }
         return FinanceEngine.formatPaydayLabel(period.payday)
     }
 
     private var safeToSpendTodayPence: Int? {
-        guard let period = store.selectedPayPeriod else {
+        guard let period = tabPresentation.selectedPayPeriod else {
             return nil
         }
         return FinanceEngine.getDailySafeToSpendPence(
@@ -179,11 +194,7 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var fundingChecklist: some View {
-        let items = PlannerDerivedData.fundingChecklistPresentationItems(
-            snapshot: snapshot,
-            payPeriod: store.selectedPayPeriod,
-            asOfDate: store.todayIso
-        )
+        let items = tabPresentation.fundingChecklistItems
         let activeItems = items.filter { $0.status != .paidCompleted }
         let paidItems = items.filter { $0.status == .paidCompleted }
         let fundedCount = items.filter(\.isCompleted).count
@@ -325,7 +336,7 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var upcomingBeforePayday: some View {
-        if store.selectedPayPeriod != nil {
+        if tabPresentation.selectedPayPeriod != nil {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 SectionTitle("Before payday")
                 AppCard {
@@ -361,19 +372,13 @@ struct DashboardView: View {
 
     private var monthlySpendChart: some View {
         DashboardMonthlySpendChartView(
-            manualData: DashboardMonthlySpendChartData.make(
-                transactions: snapshot.transactions,
-                todayIso: store.todayIso
-            ),
-            outgoingsData: DashboardMonthlySpendChartData.makeAllOutgoings(
-                snapshot: snapshot,
-                todayIso: store.todayIso
-            )
+            manualData: tabPresentation.manualMonthlySpendData,
+            outgoingsData: tabPresentation.outgoingsMonthlySpendData
         )
     }
 
     private var heroSubtitle: String {
-        guard let period = store.selectedPayPeriod else {
+        guard let period = tabPresentation.selectedPayPeriod else {
             return "Add income to create a live period."
         }
         if currentCostSummary.unfundedChecklistPence > 0 {
@@ -383,74 +388,15 @@ struct DashboardView: View {
     }
 
     private var currentCostSummary: PayPeriodCostSummary {
-        PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
+        tabPresentation.currentCostSummary
     }
 
     private var alertRows: [HomeAlertRow] {
-        var alerts: [HomeAlertRow] = []
-
-        if currentCostSummary.currentMoneyLeftPence < 0 {
-            alerts.append(
-                HomeAlertRow(
-                    title: "Money left is negative",
-                    message: "\(MoneyParser.formatPence(abs(currentCostSummary.currentMoneyLeftPence))) over the current position.",
-                    symbol: "exclamationmark.triangle",
-                    color: AppTheme.Colors.danger
-                )
-            )
-        }
-
-        if currentCostSummary.unfundedChecklistPence > 0 {
-            alerts.append(
-                HomeAlertRow(
-                    title: "Funding still pending",
-                    message: "\(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is not marked as funded yet.",
-                    symbol: "checklist.unchecked",
-                    color: AppTheme.Colors.warning
-                )
-            )
-        }
-
-        let debtSummary = FinanceEngine.getDebtSummary(
-            debts: snapshot.debts,
-            payments: snapshot.debtPayments,
-            reserves: snapshot.debtReserves,
-            pots: snapshot.pots,
-            today: store.todayIso
-        )
-        if debtSummary.overdueDebtCount > 0 {
-            alerts.append(
-                HomeAlertRow(
-                    title: "Debt payment overdue",
-                    message: "\(debtSummary.overdueDebtCount) debt item\(debtSummary.overdueDebtCount == 1 ? "" : "s") need attention.",
-                    symbol: "exclamationmark.shield",
-                    color: AppTheme.Colors.danger
-                )
-            )
-        }
-
-        let overdueStatements = PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: store.todayIso)
-            .filter { $0.status == .overdue }
-        if !overdueStatements.isEmpty {
-            alerts.append(
-                HomeAlertRow(
-                    title: "Statement payment overdue",
-                    message: "\(overdueStatements.count) card statement\(overdueStatements.count == 1 ? "" : "s") are overdue.",
-                    symbol: "creditcard.trianglebadge.exclamationmark",
-                    color: AppTheme.Colors.danger
-                )
-            )
-        }
-
-        return alerts
+        tabPresentation.alertRows
     }
 
     private var upcomingMoneyEvents: [CalendarEvent] {
-        let fallbackEndDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 14)
-        let endDate = store.selectedPayPeriod?.payday ?? fallbackEndDate
-        return PlannerDerivedData.calendarEvents(snapshot: snapshot, startDate: store.todayIso, endDate: endDate)
-            .filter { $0.date >= store.todayIso && $0.type != .spending }
-            .sorted { $0.date < $1.date }
+        tabPresentation.upcomingMoneyEvents
     }
 
     @ViewBuilder
@@ -470,17 +416,124 @@ struct DashboardView: View {
     }
 
     private var recentRows: [DashboardActivityRow] {
-        let transactions = snapshot.transactions.map {
+        tabPresentation.recentRows
+    }
+
+    private var tabPresentation: DashboardTabPresentation {
+        let context = presentationContext ?? PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
+
+        guard let presentationCache else {
+            return Self.makePresentation(context: context)
+        }
+
+        return presentationCache.value(for: context.key(for: .home)) {
+            Self.makePresentation(context: context)
+        }
+    }
+
+    static func warmPresentation(cache: PlannerTabPresentationCache, context: PlannerTabPresentationContext) {
+        _ = cache.value(for: context.key(for: .home)) {
+            makePresentation(context: context)
+        } as DashboardTabPresentation
+    }
+
+    private static func makePresentation(context: PlannerTabPresentationContext) -> DashboardTabPresentation {
+        let snapshot = context.snapshot
+        let payPeriod = context.selectedPayPeriod
+        let todayIso = context.todayIso
+        let costSummary = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: todayIso
+        )
+        let checklistItems = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: todayIso
+        )
+        let debtSummary = FinanceEngine.getDebtSummary(
+            debts: snapshot.debts,
+            payments: snapshot.debtPayments,
+            reserves: snapshot.debtReserves,
+            pots: snapshot.pots,
+            today: todayIso
+        )
+        let overdueStatements = PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: snapshot,
+            asOfDate: todayIso
+        )
+        .filter { $0.status == .overdue }
+
+        var alerts: [HomeAlertRow] = []
+        if costSummary.currentMoneyLeftPence < 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Money left is negative",
+                    message: "\(MoneyParser.formatPence(abs(costSummary.currentMoneyLeftPence))) over the current position.",
+                    symbol: "exclamationmark.triangle",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+        if costSummary.unfundedChecklistPence > 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Funding still pending",
+                    message: "\(MoneyParser.formatPence(costSummary.unfundedChecklistPence)) is not marked as funded yet.",
+                    symbol: "checklist.unchecked",
+                    color: AppTheme.Colors.warning
+                )
+            )
+        }
+        if debtSummary.overdueDebtCount > 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Debt payment overdue",
+                    message: "\(debtSummary.overdueDebtCount) debt item\(debtSummary.overdueDebtCount == 1 ? "" : "s") need attention.",
+                    symbol: "exclamationmark.shield",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+        if !overdueStatements.isEmpty {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Statement payment overdue",
+                    message: "\(overdueStatements.count) card statement\(overdueStatements.count == 1 ? "" : "s") are overdue.",
+                    symbol: "creditcard.trianglebadge.exclamationmark",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+
+        let fallbackEndDate = FinanceEngine.addIsoDays(date: todayIso, days: 14)
+        let eventEndDate = payPeriod?.payday ?? fallbackEndDate
+        let upcomingEvents = PlannerDerivedData.calendarEvents(
+            snapshot: snapshot,
+            startDate: todayIso,
+            endDate: eventEndDate
+        )
+        .filter { $0.date >= todayIso && $0.type != .spending }
+        .sorted { $0.date < $1.date }
+
+        let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
+        let transactionRows = snapshot.transactions.map {
             DashboardActivityRow(
                 id: $0.id,
                 title: $0.note.isEmpty ? "Spending" : $0.note,
-                detail: friendlyDate($0.date),
+                detail: dashboardFriendlyDate($0.date),
                 amount: "-\(MoneyParser.formatPence($0.amountPence))",
                 symbol: $0.paymentMethod == .creditCard ? "creditcard" : "cart",
                 color: AppTheme.Colors.orangeHighlight
             )
         }
-        let paychecks = snapshot.paychecks.map {
+        let paycheckRows = snapshot.paychecks.map {
             DashboardActivityRow(
                 id: $0.id,
                 title: "Paycheck",
@@ -491,27 +544,47 @@ struct DashboardView: View {
                 paycheckId: $0.id
             )
         }
-        let allocations = snapshot.potAllocations.map { allocation in
+        let allocationRows = snapshot.potAllocations.map { allocation in
             DashboardActivityRow(
                 id: allocation.id,
-                title: snapshot.pots.first(where: { pot in pot.id == allocation.potId })?.name ?? "Pot allocation",
+                title: potsById[allocation.potId]?.name ?? "Pot allocation",
                 detail: allocation.createdAt.prefixDateLabel,
                 amount: "-\(MoneyParser.formatPence(allocation.amountPence))",
                 symbol: "wallet.pass",
                 color: AppTheme.Colors.primaryOrange
             )
         }
-        let cardRepayments = snapshot.creditCardRepayments.map {
+        let repaymentRows = snapshot.creditCardRepayments.map {
             DashboardActivityRow(
                 id: $0.id,
                 title: $0.note.isEmpty ? "Card repayment" : $0.note,
-                detail: friendlyDate($0.date),
+                detail: dashboardFriendlyDate($0.date),
                 amount: "-\(MoneyParser.formatPence($0.amountPence))",
                 symbol: "creditcard.and.123",
                 color: AppTheme.Colors.warning
             )
         }
-        return (transactions + paychecks + allocations + cardRepayments).prefix(12).map { $0 }
+
+        return DashboardTabPresentation(
+            selectedPayPeriod: payPeriod,
+            currentCostSummary: costSummary,
+            fundingChecklistItems: checklistItems,
+            manualMonthlySpendData: DashboardMonthlySpendChartData.make(
+                transactions: snapshot.transactions,
+                todayIso: todayIso
+            ),
+            outgoingsMonthlySpendData: DashboardMonthlySpendChartData.makeAllOutgoings(
+                snapshot: snapshot,
+                todayIso: todayIso
+            ),
+            alertRows: alerts,
+            upcomingMoneyEvents: upcomingEvents,
+            recentRows: Array((transactionRows + paycheckRows + allocationRows + repaymentRows).prefix(12))
+        )
+    }
+
+    private static func dashboardFriendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 
     private func homeEventAmountText(_ event: CalendarEvent) -> String? {

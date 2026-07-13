@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct AppCard<Content: View>: View {
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
     var glow: Bool = false
     var cornerRadius: CGFloat = AppTheme.Radius.lg
     @ViewBuilder var content: Content
@@ -334,7 +334,7 @@ enum ScreenTopDividerPolicy {
 }
 
 private struct PremiumScreenBackground: View {
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
 
     var body: some View {
         ZStack {

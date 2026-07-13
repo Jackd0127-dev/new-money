@@ -19,10 +19,14 @@ struct AppThemePalette: Equatable, Sendable {
     var successHex: String
     var warningHex: String
     var dangerHex: String
+    var accentControlTextHex: String? = nil
+    var inverseTextHex: String? = nil
+    var selectionFillHex: String? = nil
+    var selectionStrokeHex: String? = nil
     var preferredColorScheme: ColorScheme
 
     var accentReadableTextHex: String {
-        Self.readableTextHex(on: accentHex)
+        accentControlTextHex ?? Self.readableTextHex(on: accentHex)
     }
 
     var cardEyebrowHex: String {
@@ -44,6 +48,8 @@ struct AppThemePalette: Equatable, Sendable {
 }
 
 enum AppThemePreset: String, CaseIterable, Identifiable, Sendable {
+    case mintCream
+    case mintCreamDark
     case classic
     case goldObsidian
     case warmLight
@@ -60,8 +66,62 @@ enum AppThemePreset: String, CaseIterable, Identifiable, Sendable {
 
     var subtitle: String { palette.subtitle }
 
+    static let defaultPreset: AppThemePreset = .mintCream
+
     var palette: AppThemePalette {
         switch self {
+        case .mintCream:
+            AppThemePalette(
+                title: "Mint Cream",
+                subtitle: "Warm cream with mint and forest green.",
+                accentHex: "#0F6B2B",
+                accentHighlightHex: "#68BF81",
+                accentMutedHex: "#3D9A5F",
+                warmHex: "#A8E3C6",
+                backgroundHex: "#FEF6EA",
+                surfaceHex: "#FFFDF8",
+                elevatedSurfaceHex: "#F1FAF5",
+                cardBackgroundHex: "#FFFDF8",
+                textHex: "#07130A",
+                secondaryTextHex: "#505752",
+                tertiaryTextHex: "#8B938B",
+                borderHex: "#E7E4DC",
+                dividerHex: "#DDDCD5",
+                successHex: "#3D9A5F",
+                warningHex: "#D89B3C",
+                dangerHex: "#D85C5C",
+                accentControlTextHex: "#FEF6EA",
+                inverseTextHex: "#FEF6EA",
+                selectionFillHex: "#D3E9D6",
+                selectionStrokeHex: "#C7DFD1",
+                preferredColorScheme: .light
+            )
+        case .mintCreamDark:
+            AppThemePalette(
+                title: "Mint Cream Dark",
+                subtitle: "Forest-night surfaces with bright mint.",
+                accentHex: "#5FC98A",
+                accentHighlightHex: "#9BE4C2",
+                accentMutedHex: "#3D9A5F",
+                warmHex: "#9BE4C2",
+                backgroundHex: "#0C120F",
+                surfaceHex: "#151D19",
+                elevatedSurfaceHex: "#1D2822",
+                cardBackgroundHex: "#151D19",
+                textHex: "#F7F4EC",
+                secondaryTextHex: "#B8C4BD",
+                tertiaryTextHex: "#7F8D85",
+                borderHex: "#314139",
+                dividerHex: "#314139",
+                successHex: "#5FC98A",
+                warningHex: "#D89B3C",
+                dangerHex: "#D85C5C",
+                accentControlTextHex: "#07130A",
+                inverseTextHex: "#07130A",
+                selectionFillHex: "#1D2822",
+                selectionStrokeHex: "#5FC98A",
+                preferredColorScheme: .dark
+            )
         case .classic:
             AppThemePalette(
                 title: "Classic",
@@ -265,7 +325,7 @@ enum AppThemePreset: String, CaseIterable, Identifiable, Sendable {
 
     static func resolved(from rawValue: String?) -> AppThemePreset {
         guard let rawValue, let preset = AppThemePreset(rawValue: rawValue) else {
-            return .classic
+            return defaultPreset
         }
 
         return preset
@@ -335,12 +395,27 @@ enum AppTheme {
         static var neonMoneyUp: Color { Color(hex: "#39FF14") }
         static var neonMoneyDown: Color { Color(hex: "#FF1744") }
         static var controlText: Color { Color(hex: AppTheme.selectedPalette.accentReadableTextHex) }
-        static var inverseText: Color { AppTheme.selectedColorScheme == .dark ? Color(hex: "#111111") : Color(hex: "#FFFFFF") }
+        static var inverseText: Color {
+            if let hex = AppTheme.selectedPalette.inverseTextHex {
+                return Color(hex: hex)
+            }
+            return AppTheme.selectedColorScheme == .dark ? Color(hex: "#111111") : Color(hex: "#FFFFFF")
+        }
         static var shadow: Color { AppTheme.selectedColorScheme == .dark ? Color(hex: "#000000").opacity(0.24) : primaryText.opacity(0.09) }
         static var strongShadow: Color { AppTheme.selectedColorScheme == .dark ? Color(hex: "#000000").opacity(0.34) : primaryText.opacity(0.14) }
         static var accentGlow: Color { accentHighlight.opacity(AppTheme.selectedColorScheme == .dark ? 0.45 : 0.26) }
-        static var selectedFill: Color { accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.18 : 0.12) }
-        static var selectedStroke: Color { accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.52 : 0.36) }
+        static var selectedFill: Color {
+            if let hex = AppTheme.selectedPalette.selectionFillHex {
+                return Color(hex: hex)
+            }
+            return accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.18 : 0.12)
+        }
+        static var selectedStroke: Color {
+            if let hex = AppTheme.selectedPalette.selectionStrokeHex {
+                return Color(hex: hex)
+            }
+            return accent.opacity(AppTheme.selectedColorScheme == .dark ? 0.52 : 0.36)
+        }
         static var cardEyebrow: Color { Color(hex: AppTheme.selectedPalette.cardEyebrowHex) }
 
         // Legacy names kept as aliases so older screens still resolve through the selected preset.

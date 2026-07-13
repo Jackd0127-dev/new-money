@@ -12,7 +12,7 @@ enum AuthLaunchPresentationPolicy {
 struct AuthenticatedRootView: View {
     @StateObject private var store = PlannerStore()
     @StateObject private var session = FirebaseAuthSession()
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
     @State private var didStart = false
 
     var body: some View {

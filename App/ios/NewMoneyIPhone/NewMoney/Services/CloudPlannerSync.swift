@@ -197,7 +197,7 @@ extension PlannerSnapshot {
 extension PlannerAccountCollection {
     var hasMeaningfulPlannerData: Bool {
         if let selectedThemePresetId,
-           selectedThemePresetId != AppThemePreset.classic.rawValue {
+           selectedThemePresetId != AppThemePreset.defaultPreset.rawValue {
             return true
         }
 

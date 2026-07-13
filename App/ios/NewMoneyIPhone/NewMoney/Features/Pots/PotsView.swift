@@ -54,16 +54,35 @@ enum PotFormLayoutPolicy {
     ]
 }
 
+private struct PotTabPresentationRow: Identifiable {
+    var pot: Pot
+    var linkedLabel: String?
+    var progress: PotProgress
+    var pendingFundingContext: PotPendingFundingContext
+
+    var id: String { pot.id }
+}
+
+private struct PotsTabPresentation {
+    var activePots: [Pot]
+    var totalSavedPence: Int
+    var rows: [PotTabPresentationRow]
+}
+
 struct PotsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
+    var rootTabResetRevision: Int?
+    var presentationCache: PlannerTabPresentationCache?
+    var presentationContext: PlannerTabPresentationContext?
     @State private var query = ""
     @State private var selectedType: PotType?
     @State private var selectedPot: Pot?
 
-    private var filteredPots: [Pot] {
-        store.activePots.filter { pot in
+    private var filteredRows: [PotTabPresentationRow] {
+        tabPresentation.rows.filter { row in
+            let pot = row.pot
             let matchesQuery = query.isEmpty
                 || pot.name.localizedCaseInsensitiveContains(query)
                 || (pot.category ?? "").localizedCaseInsensitiveContains(query)
@@ -72,19 +91,16 @@ struct PotsView: View {
         }
     }
 
-    private var pendingFundingContexts: [String: PotPendingFundingContext] {
-        potPendingFundingContexts(snapshot: store.snapshot, payPeriod: store.selectedPayPeriod, today: store.todayIso)
-    }
-
     var body: some View {
         ScreenScaffold(
             title: "Pots",
             subtitle: "Buckets for bills, spending, savings, investments, and buffers.",
             navigationMode: navigationMode,
-            toolbarMode: toolbarMode
+            toolbarMode: toolbarMode,
+            rootTabResetRevision: rootTabResetRevision
         ) {
             summaryCard
-            if !store.activePots.isEmpty {
+            if !tabPresentation.activePots.isEmpty {
                 controls
             }
             potList
@@ -99,8 +115,8 @@ struct PotsView: View {
             PotOverviewDetailView(store: store)
         } label: {
             PotsSummaryCardContent(
-                totalSavedPence: store.activePots.reduce(0) { $0 + $1.balancePence },
-                activePotCount: store.activePots.count
+                totalSavedPence: tabPresentation.totalSavedPence,
+                activePotCount: tabPresentation.activePots.count
             )
         }
         .buttonStyle(.plain)
@@ -127,32 +143,82 @@ struct PotsView: View {
     }
 
     private var potList: some View {
-        VStack(spacing: AppTheme.Spacing.md) {
-            if filteredPots.isEmpty {
+        LazyVStack(spacing: AppTheme.Spacing.md) {
+            if filteredRows.isEmpty {
                 AppCard {
-                    if store.activePots.isEmpty {
+                    if tabPresentation.activePots.isEmpty {
                         EmptyStateView(title: "Create your first pot", message: "Use Add in the toolbar to set up savings, bills, buffers, or goals.", systemImage: "wallet.pass")
                     } else {
                         EmptyStateView(title: "No pots match", message: "Adjust the search or clear the selected filter.", systemImage: "magnifyingglass")
                     }
                 }
             } else {
-                ForEach(filteredPots) { pot in
+                ForEach(filteredRows) { row in
                     Button {
-                        selectedPot = pot
+                        selectedPot = row.pot
                     } label: {
                         PotRow(
-                            pot: pot,
-                            linkedLabel: linkedTargetLabel(for: pot, in: store.snapshot),
-                            progress: PlannerDerivedData.potProgress(pot: pot, snapshot: store.snapshot, today: store.todayIso),
-                            pendingFundingContext: pendingFundingContexts[pot.id, default: .none],
-                            today: store.todayIso
+                            pot: row.pot,
+                            linkedLabel: row.linkedLabel,
+                            progress: row.progress,
+                            pendingFundingContext: row.pendingFundingContext,
+                            today: presentationContext?.todayIso ?? store.todayIso
                         )
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
+    }
+
+    private var tabPresentation: PotsTabPresentation {
+        let context = presentationContext ?? PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
+
+        guard let presentationCache else {
+            return Self.makePresentation(context: context)
+        }
+
+        return presentationCache.value(for: context.key(for: .pots)) {
+            Self.makePresentation(context: context)
+        }
+    }
+
+    static func warmPresentation(cache: PlannerTabPresentationCache, context: PlannerTabPresentationContext) {
+        let _: PotsTabPresentation = cache.value(for: context.key(for: .pots)) {
+            makePresentation(context: context)
+        }
+    }
+
+    private static func makePresentation(context: PlannerTabPresentationContext) -> PotsTabPresentation {
+        let activePots = context.snapshot.pots.filter { !$0.archived }
+        let pendingFundingContexts = potPendingFundingContexts(
+            snapshot: context.snapshot,
+            payPeriod: context.selectedPayPeriod,
+            today: context.todayIso
+        )
+
+        return PotsTabPresentation(
+            activePots: activePots,
+            totalSavedPence: activePots.reduce(0) { $0 + $1.balancePence },
+            rows: activePots.map { pot in
+                PotTabPresentationRow(
+                    pot: pot,
+                    linkedLabel: linkedTargetLabel(for: pot, in: context.snapshot),
+                    progress: PlannerDerivedData.potProgress(
+                        pot: pot,
+                        snapshot: context.snapshot,
+                        today: context.todayIso
+                    ),
+                    pendingFundingContext: pendingFundingContexts[pot.id, default: .none]
+                )
+            }
+        )
     }
 }
 

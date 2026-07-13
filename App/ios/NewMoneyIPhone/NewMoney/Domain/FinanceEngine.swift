@@ -1,20 +1,20 @@
 import Foundation
 
 enum FinanceEngine {
-    private static func makeIsoFormatter() -> DateFormatter {
+    private static let isoFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
-    }
+    }()
 
-    private static var utcCalendar: Calendar {
+    private static let utcCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
         return calendar
-    }
+    }()
 
     static func calculatePaycheckAmount(
         hoursWorked: Double,
@@ -256,7 +256,7 @@ enum FinanceEngine {
     }
 
     static func toIsoDate(_ date: Date) -> String {
-        makeIsoFormatter().string(from: date)
+        isoFormatter.string(from: date)
     }
 
     static func addIsoDays(date: String, days: Int) -> String {
@@ -284,7 +284,7 @@ enum FinanceEngine {
     }
 
     static func parseDate(_ value: String) -> Date {
-        makeIsoFormatter().date(from: value) ?? Date(timeIntervalSince1970: 0)
+        isoFormatter.date(from: value) ?? Date(timeIntervalSince1970: 0)
     }
 
     static func addDays(_ date: Date, days: Int) -> Date {

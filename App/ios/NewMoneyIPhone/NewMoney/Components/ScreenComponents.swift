@@ -101,13 +101,6 @@ enum ScreenNavigationMode {
     case tabRoot
 }
 
-struct RootTabScrollState: Equatable {
-    var selectedTitle: String
-    var revision: Int
-
-    static let inactive = RootTabScrollState(selectedTitle: "", revision: 0)
-}
-
 enum RootTabScrollPolicy {
     static let topAnchorID = "root-tab-scroll-top"
     static let resetsTabRootOnSelection = true
@@ -119,28 +112,18 @@ enum RootTabScrollPolicy {
     static let usesScrollReaderForTabReset = true
     static let updatesResetTargetBeforeSelectedTab = true
     static let preventsPreviousTabResetDuringSwitch = true
-}
-
-private struct RootTabScrollStateKey: EnvironmentKey {
-    static let defaultValue = RootTabScrollState.inactive
-}
-
-extension EnvironmentValues {
-    var rootTabScrollState: RootTabScrollState {
-        get { self[RootTabScrollStateKey.self] }
-        set { self[RootTabScrollStateKey.self] = newValue }
-    }
+    static let scopesResetRevisionToSelectedTab = true
 }
 
 struct ScreenScaffold<Content: View>: View {
-    @Environment(\.rootTabScrollState) private var rootTabScrollState
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.classic.rawValue
-    @State private var handledRootTabScrollRevision = RootTabScrollState.inactive.revision
+    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
+    @State private var handledRootTabScrollRevision = 0
     var title: String
     var subtitle: String
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
     var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
+    var rootTabResetRevision: Int?
     @ViewBuilder var content: Content
 
     @ViewBuilder
@@ -164,7 +147,7 @@ struct ScreenScaffold<Content: View>: View {
                     .frame(height: 0)
                     .id(RootTabScrollPolicy.topAnchorID)
 
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
                     if navigationMode != .tabRoot {
                         ScreenHeader(subtitle: subtitle)
                     }
@@ -176,8 +159,8 @@ struct ScreenScaffold<Content: View>: View {
             }
             .premiumScreenBackground()
             .id(screenContentIdentity)
-            .onChange(of: rootTabScrollState) { _, newState in
-                resetTabRootScrollIfNeeded(proxy, state: newState)
+            .onChange(of: rootTabResetRevision) { _, newRevision in
+                resetTabRootScrollIfNeeded(proxy, revision: newRevision)
             }
         }
     }
@@ -198,24 +181,24 @@ struct ScreenScaffold<Content: View>: View {
         }
 
         guard navigationMode == .tabRoot,
-              rootTabScrollState.selectedTitle == title else {
+              rootTabResetRevision != nil else {
             return baseIdentity
         }
 
-        return "\(baseIdentity)-selected-\(rootTabScrollState.revision)"
+        return "\(baseIdentity)-selected-\(rootTabResetRevision ?? 0)"
     }
 
-    private func resetTabRootScrollIfNeeded(_ proxy: ScrollViewProxy, state: RootTabScrollState) {
+    private func resetTabRootScrollIfNeeded(_ proxy: ScrollViewProxy, revision: Int?) {
         guard RootTabScrollPolicy.resetsTabRootOnSelection,
               navigationMode == .tabRoot,
-              state.selectedTitle == title else {
+              let revision else {
             return
         }
         if RootTabScrollPolicy.resetsOnlyWhenSelectionRevisionChanges {
-            guard handledRootTabScrollRevision != state.revision else {
+            guard handledRootTabScrollRevision != revision else {
                 return
             }
-            handledRootTabScrollRevision = state.revision
+            handledRootTabScrollRevision = revision
         }
 
         if RootTabScrollPolicy.disablesSelectionScrollAnimation {

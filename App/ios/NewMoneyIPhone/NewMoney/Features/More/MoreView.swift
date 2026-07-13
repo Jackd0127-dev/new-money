@@ -3250,7 +3250,7 @@ struct CreditView: View {
             .map {
                 CreditDueItem(
                     id: "statement-\($0.id)",
-                    title: "\($0.cardName) statement",
+                    title: "\($0.cardName) direct debit",
                     date: $0.directDebitDate,
                     amountPence: $0.unpaidAmountPence,
                     isOverdue: $0.status == .overdue
@@ -3626,6 +3626,8 @@ private struct StatementSummaryCard: View {
 
     private func sourceLabel(_ source: CreditCardStatementTransactionSource) -> String {
         switch source {
+        case .openingStatement:
+            return "Opening balance"
         case .spending:
             return "Card spend"
         case .recurring:

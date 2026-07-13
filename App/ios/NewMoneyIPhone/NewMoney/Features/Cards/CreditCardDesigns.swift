@@ -1091,6 +1091,7 @@ struct CreditCardDesignSelectionLink: View {
 }
 
 private struct CreditCardDesignBrowserView: View {
+    @Environment(\.dismiss) private var dismiss
     @Binding var selectedValue: String
     var provider: String
 
@@ -1114,6 +1115,7 @@ private struct CreditCardDesignBrowserView: View {
                                                 isSelected: isSelected(design)
                                             ) {
                                                 selectedValue = design.storageHex
+                                                dismiss()
                                             }
                                             .frame(maxWidth: .infinity)
                                         }

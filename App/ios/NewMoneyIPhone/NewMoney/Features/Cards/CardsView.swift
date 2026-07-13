@@ -630,6 +630,112 @@ struct CardFormView: View {
     }
 }
 
+private struct CreditCardEditFormView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var card: CreditCard
+    @State private var name: String
+    @State private var provider: String
+    @State private var limit: String
+    @State private var opening: String
+    @State private var openingStatement: String
+    @State private var statementDay: Int
+    @State private var directDebitDay: Int
+    @State private var color: String
+
+    init(store: PlannerStore, card: CreditCard) {
+        self.store = store
+        self.card = card
+        _name = State(initialValue: card.name)
+        _provider = State(initialValue: card.provider)
+        _limit = State(initialValue: MoneyParser.formatPence(card.limitPence))
+        _opening = State(initialValue: MoneyParser.formatPence(card.openingBalancePence ?? 0))
+        _openingStatement = State(initialValue: card.openingStatementBalancePence.map { MoneyParser.formatPence($0) } ?? "")
+        _statementDay = State(initialValue: card.statementDate.map { Calendar.current.component(.day, from: FinanceEngine.parseDate($0)) } ?? 1)
+        _directDebitDay = State(initialValue: card.dueDay ?? 1)
+        _color = State(initialValue: CreditCardDesignCatalog.design(forStoredValue: card.designId ?? card.color).storageHex)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                AppCard(glow: true) {
+                    SectionTitle("Edit card")
+                    TextField("Card name", text: $name).textFieldStyle(AppTextFieldStyle())
+                    TextField("Provider", text: $provider).textFieldStyle(AppTextFieldStyle())
+                    MoneyField(title: "Credit limit", text: $limit)
+                    MoneyField(title: "Opening balance", text: $opening)
+                    MoneyField(title: "Existing statement due", text: $openingStatement)
+
+                    dayFields
+
+                    CreditCardDesignSelectionLink(selectedValue: $color, provider: provider)
+
+                    PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: name.isBlank || limit.isBlank) {
+                        save()
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Edit card")
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var dayFields: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            CreditCardDayMenuField(
+                title: CardFormLayoutPolicy.directDebitDayTitle,
+                value: directDebitDay,
+                systemImage: "calendar.badge.clock",
+                accessibilityLabel: "Direct debit day"
+            ) { day in
+                directDebitDay = day
+            }
+            .frame(maxWidth: .infinity)
+
+            CreditCardDayMenuField(
+                title: CardFormLayoutPolicy.statementDayTitle,
+                value: statementDay,
+                systemImage: "calendar",
+                accessibilityLabel: "Statement day"
+            ) { day in
+                statementDay = day
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func save() {
+        var updatedCard = card
+        updatedCard.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updatedCard.provider = provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Card" : provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        updatedCard.limitPence = MoneyParser.parsePoundsToPence(limit)
+        updatedCard.openingBalancePence = MoneyParser.parsePoundsToPence(opening)
+        updatedCard.openingStatementBalancePence = openingStatement.isBlank ? nil : MoneyParser.parsePoundsToPence(openingStatement)
+        updatedCard.statementDate = statementCycleAnchor()
+        updatedCard.designId = nil
+        updatedCard.dueDay = directDebitDay
+        updatedCard.color = color
+        store.updateCreditCard(updatedCard)
+        dismiss()
+    }
+
+    private func statementCycleAnchor() -> String {
+        let nextStatementDate = FinanceEngine.monthlyDate(onOrAfter: store.todayIso, day: statementDay)
+        guard !openingStatement.isBlank, nextStatementDate > store.todayIso else {
+            return nextStatementDate
+        }
+        return PlannerDerivedData.addIsoMonthsClamped(date: nextStatementDate, months: -1)
+    }
+}
+
 private struct CreditCardDayMenuField: View {
     var title: String
     var value: Int
@@ -708,6 +814,7 @@ struct CardDetailView: View {
     @State private var isHistoryExpanded = true
     @State private var isCardPaymentPresented = false
     @State private var isCycleAdjustmentPresented = false
+    @State private var isCardEditPresented = false
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
@@ -726,12 +833,20 @@ struct CardDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: AppTheme.Spacing.lg) {
-                    CreditCardRow(
-                        card: currentCard,
-                        balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot),
-                        availability: cardAvailability,
-                        showsTitle: false
-                    )
+                    Button {
+                        isCardEditPresented = true
+                    } label: {
+                        CreditCardRow(
+                            card: currentCard,
+                            balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot),
+                            availability: cardAvailability,
+                            showsTitle: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit \(currentCard.name)")
+                    .accessibilityHint("Opens the card details editor")
+                    .accessibilityIdentifier("edit-credit-card-\(currentCard.id)")
                     statementSummaryCard
                     linkedSection
                     historySection
@@ -764,6 +879,9 @@ struct CardDetailView: View {
             }
             .sheet(isPresented: $isCycleAdjustmentPresented) {
                 CreditCardCycleAdjustmentSheet(store: store, card: currentCard)
+            }
+            .sheet(isPresented: $isCardEditPresented) {
+                CreditCardEditFormView(store: store, card: currentCard)
             }
         }
     }

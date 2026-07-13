@@ -144,6 +144,7 @@ enum CreditCardStatementStatus: Equatable, Sendable {
 }
 
 enum CreditCardStatementTransactionSource: Equatable, Sendable {
+    case openingStatement
     case spending
     case recurring
     case custom
@@ -3287,6 +3288,22 @@ private extension PlannerDerivedData {
                     source: transaction.recurringPaymentId == nil ? .spending : .recurring
                 )
             }
+
+        if statementDate == card.statementDate,
+           statementDate <= asOfDate {
+            let openingStatementPence = statementedOpeningBalancePence(card: card)
+            if openingStatementPence > 0 {
+                transactions.append(
+                    CreditCardStatementTransaction(
+                        id: "opening-statement-\(card.id)-\(statementDate)",
+                        name: "Opening statement balance",
+                        date: statementDate,
+                        amountPence: openingStatementPence,
+                        source: .openingStatement
+                    )
+                )
+            }
+        }
 
         if statementDate == card.statementDate,
            cardCreatedDateCanFeedFirstStatement(card: card, statementDate: statementDate),

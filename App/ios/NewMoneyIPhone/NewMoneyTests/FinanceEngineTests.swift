@@ -3558,6 +3558,39 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(statements.first { $0.cardId == "card-cc2" && $0.statementDate == "2026-07-15" }?.status, .overdue)
     }
 
+    func testStatementSummaryIncludesSavedOpeningStatementBalanceAfterCardWasCreated() {
+        let card = makeCreditCard(
+            id: "card-barclaycard",
+            name: "Barclaycard",
+            limitPence: 80_000,
+            openingBalancePence: 65_443,
+            openingStatementBalancePence: 65_443,
+            statementDate: "2026-07-13",
+            dueDay: 6,
+            createdAt: "2026-07-10T20:41:58.377Z"
+        )
+        let iCloud = makeTransaction(
+            id: "transaction-icloud",
+            cardId: card.id,
+            amountPence: 899,
+            date: "2026-07-10",
+            note: "iCloud+"
+        )
+        let snapshot = makeSnapshot(transactions: [iCloud], creditCards: [card])
+
+        let statement = PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: snapshot,
+            asOfDate: "2026-07-13"
+        ).first
+
+        XCTAssertEqual(statement?.statementAmountPence, 66_342)
+        XCTAssertEqual(statement?.unpaidAmountPence, 66_342)
+        XCTAssertEqual(statement?.directDebitDate, "2026-08-06")
+        XCTAssertEqual(statement?.transactions.map(\.name), ["iCloud+", "Opening statement balance"])
+        XCTAssertEqual(statement?.transactions.map(\.amountPence), [899, 65_443])
+        XCTAssertEqual(statement?.transactions.map(\.source), [.spending, .openingStatement])
+    }
+
     func testCreditCardDirectDebitCanFallOnStatementDay() {
         XCTAssertEqual(
             PlannerDerivedData.creditCardDirectDebitDate(statementDate: "2026-07-02", dueDay: 2),

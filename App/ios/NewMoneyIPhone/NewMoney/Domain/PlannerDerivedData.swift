@@ -818,6 +818,13 @@ enum PlannerDerivedData {
         return CreditCardOwedSummary(actualOwedPence: actualOwedPence, forecastOwedPence: forecastOwedPence)
     }
 
+    static func totalCreditLimitPence(cards: [CreditCard]) -> Int {
+        cards.reduce(0) { total, card in
+            guard !card.archived else { return total }
+            return total + max(0, card.limitPence)
+        }
+    }
+
     static func creditCardAvailabilitySummary(
         card: CreditCard,
         snapshot: PlannerSnapshot,

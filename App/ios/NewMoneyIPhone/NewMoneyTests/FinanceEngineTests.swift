@@ -53,6 +53,35 @@ final class FinanceEngineTests: XCTestCase {
         )
     }
 
+    func testTotalCreditAddsEveryActiveCardLimit() {
+        let activeCards = (1...5).map { index in
+            makeCreditCard(
+                id: "card-\(index)",
+                name: "Card \(index)",
+                limitPence: 50_000,
+                openingBalancePence: 0,
+                openingStatementBalancePence: nil,
+                statementDate: nil,
+                dueDay: 1
+            )
+        }
+        var archivedCard = makeCreditCard(
+            id: "card-archived",
+            name: "Archived card",
+            limitPence: 50_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: nil,
+            dueDay: 1
+        )
+        archivedCard.archived = true
+
+        XCTAssertEqual(
+            PlannerDerivedData.totalCreditLimitPence(cards: activeCards + [archivedCard]),
+            250_000
+        )
+    }
+
     @MainActor
     func testFirstPaycheckDoesNotCreateOrRetainAnEmptyTodayPlaceholderPeriod() async {
         var settings = makeManualSettings(today: "2026-07-10")

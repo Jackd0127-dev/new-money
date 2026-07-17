@@ -113,6 +113,7 @@ enum CreditDetailPresentation: Equatable {
 struct CreditLayoutPolicy {
     static let summaryPresentation: CreditDetailPresentation = .navigationPush
     static let summaryDetailUsesInlineTitle = true
+    static let summaryPrimaryMetric = "totalCreditLimit"
     static let cardsPlacement = "belowSummaryAboveDueSoon"
     static let cardsPresentation = "lazyHStack"
     static let cardsUseCardsViewRow = false
@@ -3241,6 +3242,7 @@ struct CreditView: View {
     private static func makePresentation(context: PlannerTabPresentationContext) -> CreditDisplayData {
         let snapshot = context.snapshot
         let activeCards = snapshot.creditCards.filter { !$0.archived }
+        let totalCredit = PlannerDerivedData.totalCreditLimitPence(cards: snapshot.creditCards)
         let cardModels = creditCardPreviewModels(
             cards: activeCards,
             snapshot: snapshot,
@@ -3283,6 +3285,7 @@ struct CreditView: View {
 
         return CreditDisplayData(
             summary: CreditSummaryData(
+                totalCreditPence: totalCredit,
                 cardOwedPence: cardOwed,
                 debtBalancePence: debtSummary.totalCurrentBalancePence,
                 debtPaidPence: debtSummary.totalPaidPence,
@@ -3398,6 +3401,7 @@ private struct CreditDisplayData {
 }
 
 private struct CreditSummaryData {
+    var totalCreditPence: Int
     var cardOwedPence: Int
     var debtBalancePence: Int
     var debtPaidPence: Int
@@ -3423,9 +3427,9 @@ private struct CreditSummaryCard: View {
     var body: some View {
         AppCard(glow: true) {
             MetricRow(
-                label: "Total owed",
-                value: MoneyParser.formatPence(summary.totalOwedPence),
-                valueColor: summary.totalOwedPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText
+                label: "Total credit",
+                value: MoneyParser.formatPence(summary.totalCreditPence),
+                valueColor: AppTheme.Colors.primaryText
             )
             MetricRow(label: "Cards owed", value: MoneyParser.formatPence(summary.cardOwedPence))
             MetricRow(label: "Debt balance", value: MoneyParser.formatPence(summary.debtBalancePence))

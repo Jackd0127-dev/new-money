@@ -1666,17 +1666,14 @@ struct IncomeBreakdownView: View {
 }
 
 private struct IncomeExpandableSection<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var title: String
     @Binding var isExpanded: Bool
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            Button {
-                withAnimation(AppTheme.Animation.standard) {
-                    isExpanded.toggle()
-                }
-            } label: {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: toggleExpansion) {
                 HStack(spacing: AppTheme.Spacing.sm) {
                     SectionTitle(title)
 
@@ -1687,14 +1684,40 @@ private struct IncomeExpandableSection<Content: View>: View {
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .background(AppTheme.Colors.appBackground)
+            .zIndex(1)
+            .accessibilityLabel(title)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isExpanded ? "Closes this section" : "Opens this section")
 
             if isExpanded {
                 content
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.top, AppTheme.Spacing.md)
+                    .transition(contentTransition)
+                    .zIndex(0)
             }
+        }
+    }
+
+    private var contentTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -14)),
+            removal: .opacity.combined(with: .offset(y: -14))
+        )
+    }
+
+    private func toggleExpansion() {
+        let animation = reduceMotion
+            ? Animation.linear(duration: 0.12)
+            : Animation.easeOut(duration: 0.18)
+
+        withAnimation(animation) {
+            isExpanded.toggle()
         }
     }
 }

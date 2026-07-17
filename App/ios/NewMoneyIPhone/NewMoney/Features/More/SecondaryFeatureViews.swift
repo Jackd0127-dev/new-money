@@ -756,9 +756,9 @@ enum BillsLayoutPolicy {
     static let overviewGroupsPresentation = "collapsibleDropdown"
     static let upcomingSchedulePageMonths = 12
     static let upcomingScheduleLoadsOnlyWhenExpanded = true
-    static let collapsibleHeaderStyle = "compactBorderlessDisclosure"
-    static let collapsibleHeaderMinimumHeight: CGFloat = 52
-    static let collapsibleToggleDuration = 0.16
+    static let collapsibleHeaderStyle = "activityExpandableSection"
+    static let collapsibleHeaderMinimumHeight: CGFloat = 44
+    static let collapsibleToggleDuration = 0.18
     static let collapsibleUsesReduceMotionSafeAnimation = true
     static let yourBillsAppearsAboveTakingSoon = true
     static let billRowsOpenEditScreen = true
@@ -1791,46 +1791,43 @@ private struct BillsCollapsibleSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: isExpanded ? AppTheme.Spacing.md : 0) {
+        VStack(alignment: .leading, spacing: 0) {
             Button(action: toggleExpansion) {
                 HStack(spacing: AppTheme.Spacing.sm) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(title)
-                            .font(.title3)
-                            .bold()
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                            .lineLimit(1)
-                    }
+                    SectionTitle(title)
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
                     Image(systemName: "chevron.down")
-                        .font(.caption)
-                        .bold()
-                        .foregroundStyle(isExpanded ? AppTheme.Colors.accent : AppTheme.Colors.secondaryText)
-                        .frame(width: 44, height: 44)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .frame(minHeight: BillsLayoutPolicy.collapsibleHeaderMinimumHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .background(AppTheme.Colors.appBackground)
+            .zIndex(1)
             .accessibilityLabel(title)
             .accessibilityValue("\(isExpanded ? "Expanded" : "Collapsed"). \(subtitle)")
             .accessibilityHint(isExpanded ? "Closes this section" : "Opens this section")
-            .overlay(alignment: .bottom) {
-                AppDivider()
-            }
 
             if isExpanded {
                 content
-                    .transition(.opacity)
+                    .padding(.top, AppTheme.Spacing.md)
+                    .transition(contentTransition)
+                    .zIndex(0)
             }
         }
+    }
+
+    private var contentTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -14)),
+            removal: .opacity.combined(with: .offset(y: -14))
+        )
     }
 
     private func toggleExpansion() {

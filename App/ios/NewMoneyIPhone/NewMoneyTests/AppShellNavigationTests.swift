@@ -428,7 +428,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(BillsLayoutPolicy.overviewGroupsPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.upcomingSchedulePageMonths, 12)
         XCTAssertTrue(BillsLayoutPolicy.upcomingScheduleLoadsOnlyWhenExpanded)
-        XCTAssertEqual(BillsLayoutPolicy.collapsibleHeaderStyle, "compactBorderlessDisclosure")
+        XCTAssertEqual(BillsLayoutPolicy.collapsibleHeaderStyle, "activityExpandableSection")
         XCTAssertGreaterThanOrEqual(BillsLayoutPolicy.collapsibleHeaderMinimumHeight, 44)
         XCTAssertLessThanOrEqual(BillsLayoutPolicy.collapsibleToggleDuration, 0.2)
         XCTAssertTrue(BillsLayoutPolicy.collapsibleUsesReduceMotionSafeAnimation)
@@ -460,6 +460,7 @@ final class AppShellNavigationTests: XCTestCase {
     func testCreditSummaryOpensInlineOverviewDetail() {
         XCTAssertEqual(CreditLayoutPolicy.summaryPresentation, .navigationPush)
         XCTAssertTrue(CreditLayoutPolicy.summaryDetailUsesInlineTitle)
+        XCTAssertEqual(CreditLayoutPolicy.summaryPrimaryMetric, "totalCreditLimit")
         XCTAssertEqual(CreditLayoutPolicy.cardsPlacement, "belowSummaryAboveDueSoon")
         XCTAssertEqual(CreditLayoutPolicy.cardsPresentation, "lazyHStack")
         XCTAssertFalse(CreditLayoutPolicy.cardsUseCardsViewRow)

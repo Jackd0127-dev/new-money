@@ -927,6 +927,9 @@ struct ActivityLayoutPolicy {
     static let spendingDetailToolbarMode = "editDone"
     static let incomeDetailUsesNativeToolbarMorph = true
     static let spendingDetailUsesNativeToolbarMorph = true
+    static let incomeEditRequiresDeletableItem = true
+    static let spendingEditRequiresDeletableItem = true
+    static let editDeleteBadgeRequiresConfirmation = true
 
     static func paycheckActivityDate(paycheck: Paycheck, payPeriod: PayPeriod?) -> String {
         payPeriod?.payday ?? paycheck.createdAt.prefixDateLabel
@@ -1306,7 +1309,7 @@ struct ActivityView: View {
                     id: transaction.id,
                     kind: .spending,
                     title: transaction.note.isEmpty ? "Spending" : transaction.note,
-                    detail: "\(date) · \(transaction.paymentMethod == .creditCard ? "Credit card" : "Manual")",
+                    detail: "\(date) · \(transaction.paymentMethod?.displayName ?? "Manual")",
                     amount: amount,
                     typeLabel: "Spending",
                     color: AppTheme.Colors.orangeHighlight,
@@ -1432,10 +1435,12 @@ struct ActivityView: View {
 
     private static func activityPaymentMethodLabel(_ method: PaymentMethod?) -> String {
         switch method {
+        case .income:
+            PaymentMethod.income.displayName
         case .creditCard:
-            "Credit card"
+            PaymentMethod.creditCard.displayName
         case .pot:
-            "Pot"
+            PaymentMethod.pot.displayName
         case nil:
             "Manual"
         }
@@ -2086,6 +2091,7 @@ private enum ActivityTimelineData {
             let isSpending = transaction.type == .spending
             let route = transaction.creditCardId.flatMap { cardsById[$0]?.name }
                 ?? transaction.potId.flatMap { potsById[$0]?.name }
+                ?? transaction.paymentMethod?.displayName
                 ?? "Manual"
             events.append(
                 ActivityTimelineEvent(
@@ -2094,7 +2100,7 @@ private enum ActivityTimelineData {
                     title: transaction.note.isEmpty ? (isSpending ? "Spending recorded" : "Money movement recorded") : transaction.note,
                     detail: route,
                     typeLabel: isSpending ? "Spend" : prettyLabel(transaction.type.rawValue),
-                    secondaryLabel: transaction.paymentMethod.map { prettyLabel($0.rawValue) },
+                    secondaryLabel: transaction.paymentMethod?.displayName,
                     amountPence: transaction.amountPence,
                     amountStyle: isSpending ? .negative : .positive,
                     color: isSpending ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp,
@@ -2305,11 +2311,17 @@ private struct ActivitySpendingDetailView: View {
         PaydayView(
             store: store,
             navigationMode: .inline,
-            toolbarMode: .editDone(isEditing: editMode.isEditing) {
+            toolbarMode: .editDone(isEditing: editMode.isEditing, canEdit: hasDeletableSpending) {
                 toggleEditMode()
             }
         )
         .environment(\.editMode, $editMode)
+    }
+
+    private var hasDeletableSpending: Bool {
+        store.snapshot.transactions.contains {
+            $0.type == .spending && $0.deletedAt == nil
+        }
     }
 
     private func toggleEditMode() {
@@ -3507,6 +3519,14 @@ struct StatementsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = StatementsLayoutPolicy.toolbarMode()
+    @State private var selectedStatementID: String?
+
+    private var statements: [CreditCardStatementSummary] {
+        PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: store.snapshot,
+            asOfDate: store.todayIso
+        )
+    }
 
     var body: some View {
         ScreenScaffold(
@@ -3515,22 +3535,35 @@ struct StatementsView: View {
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
-            let statements = PlannerDerivedData.creditCardStatementSummaries(
-                snapshot: store.snapshot,
-                asOfDate: store.todayIso
-            )
-
             if statements.isEmpty {
                 AppCard {
                     EmptyStateView(title: "No statements yet", message: "Statements appear after a card statement date has passed.", systemImage: "doc.text")
                 }
             } else {
                 ForEach(statements) { statement in
-                    StatementSummaryCard(statement: statement)
+                    Button {
+                        selectedStatementID = statement.id
+                    } label: {
+                        StatementSummaryCard(statement: statement)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(statement.cardName) statement from \(shortDate(statement.statementDate))")
+                    .accessibilityHint("Shows statement totals, payment status, and every transaction")
                 }
             }
         }
         .accessibilityIdentifier("statements-screen")
+        .navigationDestination(item: $selectedStatementID) { statementID in
+            if let statement = statements.first(where: { $0.id == statementID }) {
+                StatementDetailView(statement: statement)
+            } else {
+                ContentUnavailableView("Statement unavailable", systemImage: "doc.text.magnifyingglass")
+            }
+        }
+    }
+
+    private func shortDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }
 
@@ -3557,6 +3590,10 @@ private struct StatementSummaryCard: View {
                         .padding(.vertical, 6)
                         .background(statusColor.opacity(0.12))
                         .clipShape(Capsule())
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
                 }
 
                 VStack(spacing: 8) {
@@ -3568,30 +3605,11 @@ private struct StatementSummaryCard: View {
                     if statement.unpaidAmountPence > 0 {
                         MetricRow(label: "Unpaid", value: MoneyParser.formatPence(statement.unpaidAmountPence), valueColor: statement.status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.warning)
                     }
-                }
-
-                if !statement.transactions.isEmpty {
-                    AppDivider()
-                    VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                        SectionTitle("Transactions")
-                            .accessibilityIdentifier("statement-transactions-\(statement.cardId)-\(statement.statementDate)")
-                        ForEach(statement.transactions) { transaction in
-                            HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(transaction.name)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(AppTheme.Colors.primaryText)
-                                    Text("\(sourceLabel(transaction.source)) · \(shortDate(transaction.date))")
-                                        .font(.caption)
-                                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                                }
-                                Spacer()
-                                Text(MoneyParser.formatPence(transaction.amountPence))
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(AppTheme.Colors.primaryText)
-                            }
-                        }
-                    }
+                    MetricRow(
+                        label: "Transactions",
+                        value: "\(statement.transactions.count)",
+                        valueColor: AppTheme.Colors.secondaryText
+                    )
                 }
             }
         }
@@ -3621,19 +3639,6 @@ private struct StatementSummaryCard: View {
             return AppTheme.Colors.danger
         case .awaitingConfirmation:
             return AppTheme.Colors.warning
-        }
-    }
-
-    private func sourceLabel(_ source: CreditCardStatementTransactionSource) -> String {
-        switch source {
-        case .openingStatement:
-            return "Opening balance"
-        case .spending:
-            return "Card spend"
-        case .recurring:
-            return "Bill"
-        case .custom:
-            return "Payment"
         }
     }
 

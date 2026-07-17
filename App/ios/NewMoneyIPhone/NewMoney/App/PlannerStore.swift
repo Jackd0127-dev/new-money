@@ -565,9 +565,16 @@ final class PlannerStore: ObservableObject {
 
     func deletePaycheck(id: String) {
         guard let paycheck = snapshot.paychecks.first(where: { $0.id == id }) else { return }
+        deletePayPeriod(id: paycheck.payPeriodId)
+    }
+
+    func deletePayPeriod(id: String) {
+        let hasLinkedData = snapshot.payPeriods.contains { $0.id == id } ||
+            snapshot.paychecks.contains { $0.payPeriodId == id } ||
+            snapshot.potAllocations.contains { $0.payPeriodId == id }
+        guard hasLinkedData else { return }
         let now = DateUtilities.nowIsoString()
-        let payPeriodId = paycheck.payPeriodId
-        let linkedAllocations = snapshot.potAllocations.filter { $0.payPeriodId == payPeriodId }
+        let linkedAllocations = snapshot.potAllocations.filter { $0.payPeriodId == id }
 
         for allocation in linkedAllocations {
             guard let potIndex = snapshot.pots.firstIndex(where: { $0.id == allocation.potId }) else { continue }
@@ -575,9 +582,9 @@ final class PlannerStore: ObservableObject {
             snapshot.pots[potIndex].updatedAt = now
         }
 
-        snapshot.potAllocations.removeAll { $0.payPeriodId == payPeriodId }
-        snapshot.payPeriods.removeAll { $0.id == payPeriodId }
-        snapshot.paychecks.removeAll { $0.id == id }
+        snapshot.potAllocations.removeAll { $0.payPeriodId == id }
+        snapshot.payPeriods.removeAll { $0.id == id }
+        snapshot.paychecks.removeAll { $0.payPeriodId == id }
         persist()
     }
 
@@ -648,12 +655,12 @@ final class PlannerStore: ObservableObject {
         let now = DateUtilities.nowIsoString()
         let transaction = Transaction(
             id: DateUtilities.newId(prefix: "transaction"),
-            potId: potId,
+            potId: paymentMethod == .pot ? potId?.nilIfBlank : nil,
             payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id,
             amountPence: abs(amountPence),
             type: type,
             paymentMethod: paymentMethod,
-            creditCardId: creditCardId,
+            creditCardId: paymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil,
             recurringPaymentId: nil,
             date: date,
             note: note,
@@ -674,10 +681,20 @@ final class PlannerStore: ObservableObject {
         let amount = abs(amountPence)
         let cleanPotId = paymentMethod == .pot ? potId?.nilIfBlank : nil
         let cleanCardId = paymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil
+        let hasValidFundingSource: Bool
+        switch paymentMethod {
+        case .income:
+            hasValidFundingSource = true
+        case .pot:
+            hasValidFundingSource = cleanPotId != nil
+        case .creditCard:
+            hasValidFundingSource = cleanCardId != nil
+        }
+
         guard amount > 0,
               let index = snapshot.transactions.firstIndex(where: { $0.id == id }),
               snapshot.transactions[index].type == .spending,
-              paymentMethod == .pot ? cleanPotId != nil : cleanCardId != nil
+              hasValidFundingSource
         else { return }
 
         let now = DateUtilities.nowIsoString()
@@ -2437,6 +2454,7 @@ final class PlannerStore: ObservableObject {
                 transactionDate: nil,
                 creditCardId: item.cardId,
                 creditCardDirectDebitDate: nil,
+                userConfirmed: item.cardId == nil ? nil : true,
                 createdAt: now,
                 updatedAt: now,
                 deletedAt: nil
@@ -2477,6 +2495,20 @@ final class PlannerStore: ObservableObject {
         snapshot.pots[potIndex].updatedAt = now
         for index in matchingAllocationIndices.sorted(by: >) {
             snapshot.potAllocations.remove(at: index)
+        }
+        if item.cardId != nil {
+            for transactionIndex in snapshot.transactions.indices where
+                snapshot.transactions[transactionIndex].deletedAt == nil &&
+                snapshot.transactions[transactionIndex].type == .spending &&
+                snapshot.transactions[transactionIndex].paymentMethod == .creditCard &&
+                snapshot.transactions[transactionIndex].creditCardId == item.cardId &&
+                snapshot.transactions[transactionIndex].recurringPaymentId == item.paymentId &&
+                snapshot.transactions[transactionIndex].date == item.dueDate &&
+                snapshot.transactions[transactionIndex].potId == item.potId
+            {
+                snapshot.transactions[transactionIndex].potId = nil
+                snapshot.transactions[transactionIndex].updatedAt = now
+            }
         }
         persist()
         return true

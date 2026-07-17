@@ -13,6 +13,7 @@ enum DefaultData {
         appDateMode: .automatic,
         manualTodayIso: nil,
         cardRecurringPotReserveMigrationVersion: 1,
+        cardRecurringAutoFundingRepairVersion: 1,
         aiInstructions: "",
         aiProvider: .gemini,
         assistantName: "Assistant",
@@ -1182,8 +1183,55 @@ enum DefaultData {
         }
 
         repairUnsettledRecurringCardBillReserves(in: &migrated)
+        repairKnownAutomaticCardBillFunding(in: &migrated)
 
         return (migrated, migrated != snapshot)
+    }
+
+    /// Removes the single, confirmed automatic funding record created for the
+    /// Vitamins Zable card charge on 11 July 2026. The charge remains on the
+    /// card; only the erroneous pot reserve and funding allocation are undone.
+    private static func repairKnownAutomaticCardBillFunding(in snapshot: inout PlannerSnapshot) {
+        let allocationID = "recurring-bill-funding-allocation-recurring-dd0df7dd-f274-4902-8109-515c02762ca9-2026-07-11-pay-period-2026-07-01"
+        let paymentID = "recurring-dd0df7dd-f274-4902-8109-515c02762ca9"
+        let potID = "pot-4b7c6b1d-e5e8-4704-9d6b-e0a7243acbc9"
+        let cardID = "card-6747ab5b-82d1-4ccb-a3cc-3cc0dd0ad309"
+        let dueDate = "2026-07-11"
+
+        if let allocationIndex = snapshot.potAllocations.firstIndex(where: {
+            $0.id == allocationID &&
+            $0.deletedAt == nil &&
+            $0.potId == potID &&
+            $0.creditCardId == cardID &&
+            $0.recurringPaymentId == paymentID &&
+            $0.recurringDueDate == dueDate &&
+            $0.amountPence == 2_212 &&
+            $0.userConfirmed != true
+        }) {
+            let allocation = snapshot.potAllocations.remove(at: allocationIndex)
+            if let potIndex = snapshot.pots.firstIndex(where: { $0.id == potID && !$0.archived }) {
+                snapshot.pots[potIndex].balancePence = max(0, snapshot.pots[potIndex].balancePence - allocation.amountPence)
+                snapshot.pots[potIndex].updatedAt = DateUtilities.nowIsoString()
+            }
+
+            for transactionIndex in snapshot.transactions.indices where
+                snapshot.transactions[transactionIndex].deletedAt == nil &&
+                snapshot.transactions[transactionIndex].type == .spending &&
+                snapshot.transactions[transactionIndex].paymentMethod == .creditCard &&
+                snapshot.transactions[transactionIndex].creditCardId == cardID &&
+                snapshot.transactions[transactionIndex].recurringPaymentId == paymentID &&
+                snapshot.transactions[transactionIndex].date == dueDate &&
+                snapshot.transactions[transactionIndex].potId == potID
+            {
+                snapshot.transactions[transactionIndex].potId = nil
+                snapshot.transactions[transactionIndex].updatedAt = DateUtilities.nowIsoString()
+            }
+        }
+
+        // Some cached cloud documents already include the marker without the
+        // correction. Always use the exact allocation fingerprint above as the
+        // authority, then leave a marker once it is no longer present.
+        snapshot.settings.cardRecurringAutoFundingRepairVersion = 1
     }
 
     /// Before version 1, posting a funded recurring card bill removed its cash from the

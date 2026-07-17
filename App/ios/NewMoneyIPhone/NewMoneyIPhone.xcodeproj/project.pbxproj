@@ -23,6 +23,7 @@
 		100000000000000000000113 /* AppComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000215 /* AppComponents.swift */; };
 		100000000000000000000114 /* PlannerDerivedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000216 /* PlannerDerivedData.swift */; };
 		100000000000000000000115 /* ScreenComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000217 /* ScreenComponents.swift */; };
+		E50000000000000000000001 /* DestructiveBadgeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000002 /* DestructiveBadgeButton.swift */; };
 		100000000000000000000116 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000218 /* DashboardView.swift */; };
 		100000000000000000000117 /* PaydayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000219 /* PaydayView.swift */; };
 		100000000000000000000118 /* PotsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000220 /* PotsView.swift */; };
@@ -32,6 +33,7 @@
 		34B1E4002FF9000007D21AC /* CreditCardDesigns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E4012FF9000007D21AC /* CreditCardDesigns.swift */; };
 		34B1E4022FF9000007D21AC /* CardDesignPreviewBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B1E4032FF9000007D21AC /* CardDesignPreviewBrowserView.swift */; };
 		100000000000000000000120 /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* MoreView.swift */; };
+		D40000000000000000000001 /* StatementDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000002 /* StatementDetailView.swift */; };
 		100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* SecondaryFeatureViews.swift */; };
 		100000000000000000000122 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* Assets.xcassets */; };
 		100000000000000000000123 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000225 /* GoogleService-Info.plist */; };
@@ -93,6 +95,7 @@
 		100000000000000000000215 /* AppComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppComponents.swift; sourceTree = "<group>"; };
 		100000000000000000000216 /* PlannerDerivedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannerDerivedData.swift; sourceTree = "<group>"; };
 		100000000000000000000217 /* ScreenComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenComponents.swift; sourceTree = "<group>"; };
+		E50000000000000000000002 /* DestructiveBadgeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestructiveBadgeButton.swift; sourceTree = "<group>"; };
 		100000000000000000000218 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		100000000000000000000219 /* PaydayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaydayView.swift; sourceTree = "<group>"; };
 		100000000000000000000220 /* PotsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PotsView.swift; sourceTree = "<group>"; };
@@ -102,6 +105,7 @@
 		34B1E4012FF9000007D21AC /* CreditCardDesigns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditCardDesigns.swift; sourceTree = "<group>"; };
 		34B1E4032FF9000007D21AC /* CardDesignPreviewBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDesignPreviewBrowserView.swift; sourceTree = "<group>"; };
 		100000000000000000000222 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
+		D40000000000000000000002 /* StatementDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementDetailView.swift; sourceTree = "<group>"; };
 		100000000000000000000223 /* SecondaryFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryFeatureViews.swift; sourceTree = "<group>"; };
 		100000000000000000000224 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		100000000000000000000225 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
@@ -283,6 +287,7 @@
 			children = (
 				100000000000000000000215 /* AppComponents.swift */,
 				100000000000000000000217 /* ScreenComponents.swift */,
+				E50000000000000000000002 /* DestructiveBadgeButton.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -361,6 +366,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000222 /* MoreView.swift */,
+				D40000000000000000000002 /* StatementDetailView.swift */,
 				100000000000000000000223 /* SecondaryFeatureViews.swift */,
 			);
 			path = More;
@@ -513,6 +519,7 @@
 				100000000000000000000113 /* AppComponents.swift in Sources */,
 				100000000000000000000114 /* PlannerDerivedData.swift in Sources */,
 				100000000000000000000115 /* ScreenComponents.swift in Sources */,
+				E50000000000000000000001 /* DestructiveBadgeButton.swift in Sources */,
 				100000000000000000000116 /* DashboardView.swift in Sources */,
 				100000000000000000000117 /* PaydayView.swift in Sources */,
 				100000000000000000000118 /* PotsView.swift in Sources */,
@@ -522,6 +529,7 @@
 				34B1E4002FF9000007D21AC /* CreditCardDesigns.swift in Sources */,
 				34B1E4022FF9000007D21AC /* CardDesignPreviewBrowserView.swift in Sources */,
 				100000000000000000000120 /* MoreView.swift in Sources */,
+				D40000000000000000000001 /* StatementDetailView.swift in Sources */,
 				100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */,
 				100000000000000000000125 /* CloudPlannerSync.swift in Sources */,
 				100000000000000000000130 /* FirebaseServices.swift in Sources */,

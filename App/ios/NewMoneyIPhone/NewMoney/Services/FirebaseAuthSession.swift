@@ -228,7 +228,13 @@ final class FirebaseAuthSession: ObservableObject {
                 }
                 cloudStatus = "Downloading cloud data"
                 let savedCollection = try await store.replaceAccountCollection(cloud.collection)
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: savedCollection)
+                let cloudSignature = try PlannerCloudPayload.signature(for: cloud.collection)
+                let savedSignature = try PlannerCloudPayload.signature(for: savedCollection)
+                if savedSignature != cloudSignature {
+                    cloudStatus = "Uploading repaired data"
+                    try await cloudSyncService.pushAccountCollection(savedCollection, for: user)
+                }
+                lastUploadedSignature = savedSignature
                 cloudStatus = "Synced"
                 state = .ready(user)
             case .alreadySynced, .keepEmptyLocal:

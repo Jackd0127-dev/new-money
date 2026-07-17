@@ -239,8 +239,20 @@ enum DebtPayFirstTiming: String, Codable, Sendable, CaseIterable, Identifiable {
 }
 
 enum PaymentMethod: String, Codable, Sendable, CaseIterable {
+    case income
     case pot
     case creditCard = "credit_card"
+
+    var displayName: String {
+        switch self {
+        case .income:
+            "Money left"
+        case .pot:
+            "Pot"
+        case .creditCard:
+            "Credit card"
+        }
+    }
 }
 
 enum CustomPaymentStatus: String, Codable, Sendable, CaseIterable {
@@ -296,6 +308,8 @@ struct Settings: Codable, Equatable, Identifiable, Sendable {
     var lastProcessedDateIso: String? = nil
     /// Tracks one-time repairs to persisted planner snapshots. Optional so older snapshots decode safely.
     var cardRecurringPotReserveMigrationVersion: Int? = nil
+    /// Tracks the targeted removal of a known automatic card-bill funding error.
+    var cardRecurringAutoFundingRepairVersion: Int? = nil
     var aiInstructions: String
     var aiProvider: AIProvider
     var assistantName: String?
@@ -442,6 +456,10 @@ struct PotAllocation: Codable, Equatable, Identifiable, Sendable {
     var transactionDate: String? = nil
     var creditCardId: String? = nil
     var creditCardDirectDebitDate: String? = nil
+    /// Marks a recurring card-bill reserve that the user explicitly ticked in
+    /// the funding checklist. This keeps a one-off repair from removing a
+    /// legitimate later manual funding decision.
+    var userConfirmed: Bool? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?

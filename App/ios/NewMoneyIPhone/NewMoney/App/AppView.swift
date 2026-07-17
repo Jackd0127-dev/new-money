@@ -213,7 +213,7 @@ enum AppNavigationTitleDisplayStyle: Equatable {
 
 enum AppNavigationTitleDisplayPolicy {
     static func style(for tab: AppTab) -> AppNavigationTitleDisplayStyle {
-        tab == .activity ? .inline : .large
+        .inline
     }
 
     static func mode(for tab: AppTab) -> NavigationBarItem.TitleDisplayMode {

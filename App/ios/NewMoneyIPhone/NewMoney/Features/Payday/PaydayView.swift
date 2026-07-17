@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PaydayView: View {
+    @Environment(\.editMode) private var editMode
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
@@ -86,11 +87,24 @@ struct PaydayView: View {
                         } else {
                             AppDivider()
                             ForEach(group.transactions) { transaction in
-                                MetricRow(
-                                    label: transaction.note.isEmpty ? "Manual spend" : transaction.note,
-                                    value: "\(friendlyDate(transaction.date)) · \(transactionRouteLabel(transaction))",
-                                    valueColor: AppTheme.Colors.secondaryText
-                                )
+                                HStack(spacing: AppTheme.Spacing.sm) {
+                                    MetricRow(
+                                        label: transaction.note.isEmpty ? "Manual spend" : transaction.note,
+                                        value: "\(friendlyDate(transaction.date)) · \(transactionRouteLabel(transaction))",
+                                        valueColor: AppTheme.Colors.secondaryText
+                                    )
+
+                                    if editMode?.wrappedValue.isEditing == true {
+                                        DestructiveBadgeButton(
+                                            accessibilityLabel: "Delete \(transaction.note.isEmpty ? "manual spend" : transaction.note)",
+                                            confirmationTitle: "Delete this spending entry?",
+                                            confirmationMessage: "This spending entry will be removed and any linked balance will be restored.",
+                                            action: {
+                                                store.deleteTransaction(id: transaction.id)
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -102,7 +116,7 @@ struct PaydayView: View {
     private var selectedPeriodTransactions: [Transaction] {
         guard let selectedPeriod else { return [] }
         return snapshot.transactions
-            .filter { $0.type == .spending && transactionBelongsToPeriod($0, selectedPeriod) }
+            .filter { $0.type == .spending && $0.deletedAt == nil && transactionBelongsToPeriod($0, selectedPeriod) }
             .sorted { $0.date > $1.date }
     }
 
@@ -130,7 +144,7 @@ struct PaydayView: View {
             )
         }
 
-        for transaction in snapshot.transactions where transaction.type == .spending {
+        for transaction in snapshot.transactions where transaction.type == .spending && transaction.deletedAt == nil {
             let period = period(for: transaction)
             let id = period?.id ?? "outside-periods"
             var group = groups[id] ?? SpendingPeriodGroup(
@@ -175,6 +189,10 @@ struct PaydayView: View {
     }
 
     private func transactionRouteLabel(_ transaction: Transaction) -> String {
+        if transaction.paymentMethod == .income {
+            return PaymentMethod.income.displayName
+        }
+
         if transaction.paymentMethod == .creditCard || transaction.creditCardId != nil {
             guard let cardId = transaction.creditCardId else { return "Credit card" }
             return snapshot.creditCards.first { $0.id == cardId }?.name ?? "Credit card"
@@ -184,7 +202,7 @@ struct PaydayView: View {
             return snapshot.pots.first { $0.id == potId }?.name ?? "Pot"
         }
 
-        return "Unlinked"
+        return "Money left"
     }
 
     private func friendlyDate(_ isoDate: String) -> String {

@@ -42,6 +42,17 @@ final class FinanceEngineTests: XCTestCase {
         )
     }
 
+    func testDailySafeToSpendFloorsAnOvercommittedPlanAtZero() {
+        XCTAssertEqual(
+            FinanceEngine.getDailySafeToSpendPence(
+                spendablePence: -1590,
+                today: "2026-07-16",
+                endDate: "2026-07-31"
+            ),
+            0
+        )
+    }
+
     @MainActor
     func testFirstPaycheckDoesNotCreateOrRetainAnEmptyTodayPlaceholderPeriod() async {
         var settings = makeManualSettings(today: "2026-07-10")
@@ -132,6 +143,355 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testIncomeFundedSpendReducesMoneyLeftWithoutChangingPotsOrCreditCards() async throws {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 100000)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, payPeriods: [period])))
+        await store.load()
+
+        store.recordTransaction(
+            potId: nil,
+            creditCardId: nil,
+            paymentMethod: .income,
+            amountPence: 5000,
+            type: .spending,
+            date: "2026-06-10",
+            note: "Groceries"
+        )
+
+        let transaction = try XCTUnwrap(store.snapshot.transactions.first)
+        XCTAssertEqual(transaction.paymentMethod, .income)
+        XCTAssertNil(transaction.potId)
+        XCTAssertNil(transaction.creditCardId)
+
+        var summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-10")
+        XCTAssertEqual(summary.manualSpendingPence, 5000)
+        XCTAssertEqual(summary.currentMoneyLeftPence, 95000)
+
+        store.updateTransaction(
+            id: transaction.id,
+            potId: nil,
+            creditCardId: nil,
+            paymentMethod: .income,
+            amountPence: 7500,
+            date: "2026-06-10",
+            note: "Groceries"
+        )
+
+        summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-10")
+        XCTAssertEqual(summary.manualSpendingPence, 7500)
+        XCTAssertEqual(summary.currentMoneyLeftPence, 92500)
+        XCTAssertTrue(store.snapshot.pots.isEmpty)
+        XCTAssertTrue(store.snapshot.creditCards.isEmpty)
+    }
+
+    func testChargedLinkedCardRecurringBillStaysInFundingChecklistUntilPotIsFunded() {
+        let settings = makeManualSettings(today: "2026-07-11")
+        let period = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        let zablePot = makePot(
+            id: "pot-zable",
+            name: "Zable",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: "card-zable"
+        )
+        let zableCard = makeCreditCard(
+            id: "card-zable",
+            name: "Zable",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-20",
+            dueDay: 3
+        )
+        let bill = makeRecurringPayment(
+            id: "bill-zable-11th",
+            name: "Monthly bill",
+            amountPence: 2212,
+            dueDay: 11,
+            potId: zablePot.id,
+            creditCardId: zableCard.id
+        )
+        let chargedBill = Transaction(
+            id: "charge-zable-11th",
+            potId: zablePot.id,
+            payPeriodId: period.id,
+            amountPence: 2212,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: zableCard.id,
+            recurringPaymentId: bill.id,
+            date: "2026-07-11",
+            note: bill.name,
+            createdAt: "2026-07-11T12:00:00.000Z",
+            updatedAt: "2026-07-11T12:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [zablePot],
+            recurringPayments: [bill],
+            payPeriods: [period],
+            transactions: [chargedBill],
+            creditCards: [zableCard]
+        )
+
+        let checklistItem = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-11"
+            )
+            .first { $0.name == bill.name }
+        )
+        let progress = PlannerDerivedData.potProgress(pot: zablePot, snapshot: snapshot, today: "2026-07-11")
+
+        XCTAssertFalse(checklistItem.isCompleted)
+        XCTAssertEqual(checklistItem.status, .needsFunding)
+        XCTAssertNil(checklistItem.paidDate)
+        XCTAssertEqual(progress.coveredPence, 0)
+        XCTAssertEqual(progress.shortfallPence, 2212)
+    }
+
+    func testCardPaymentFundingBreakdownListsEveryStatementCharge() {
+        let settings = makeManualSettings(today: "2026-07-10")
+        let period = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        let card = makeCreditCard(
+            id: "card-main",
+            name: "Card 1",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-05",
+            dueDay: 1,
+            createdAt: "2026-06-01T00:00:00.000Z"
+        )
+        let pot = makePot(id: "pot-card", name: "Card 1", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let coffee = Transaction(
+            id: "coffee",
+            potId: nil,
+            payPeriodId: nil,
+            amountPence: 450,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: card.id,
+            recurringPaymentId: nil,
+            date: "2026-06-12",
+            note: "Coffee",
+            createdAt: "2026-06-12T12:00:00.000Z",
+            updatedAt: "2026-06-12T12:00:00.000Z",
+            deletedAt: nil
+        )
+        let groceries = Transaction(
+            id: "groceries",
+            potId: nil,
+            payPeriodId: nil,
+            amountPence: 8250,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: card.id,
+            recurringPaymentId: nil,
+            date: "2026-06-28",
+            note: "Groceries",
+            createdAt: "2026-06-28T12:00:00.000Z",
+            updatedAt: "2026-06-28T12:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [period],
+            transactions: [coffee, groceries],
+            creditCards: [card]
+        )
+
+        let item = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-10"
+            )
+            .first {
+                if case .cardPayment = $0.action { return true }
+                return false
+            }
+        )
+
+        XCTAssertEqual(item.title, "Add £87.00 to Card 1")
+        XCTAssertEqual(item.breakdown.map(\.title), ["Coffee", "Groceries"])
+        XCTAssertEqual(item.breakdown.map(\.amountPence), [450, 8250])
+        XCTAssertTrue(item.breakdown.allSatisfy { !$0.detail.isEmpty })
+    }
+
+    func testBarclaysCardPaymentBreakdownReconcilesOpeningBalanceICloudAndTemu() {
+        let settings = makeManualSettings(today: "2026-07-16")
+        let period = makePayPeriod(
+            id: "pay-period-2026-07-01",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 226191
+        )
+        let card = makeCreditCard(
+            id: "card-barclays",
+            name: "Barclaycard",
+            openingBalancePence: 65443,
+            openingStatementBalancePence: 65443,
+            statementDate: "2026-07-13",
+            dueDay: 6,
+            createdAt: "2026-07-10T20:41:58.377Z"
+        )
+        let pot = makePot(
+            id: "pot-barclays",
+            name: "Barclays",
+            balancePence: 68840,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let iCloud = makeRecurringPayment(
+            id: "rec-icloud",
+            name: "iCloud+",
+            amountPence: 899,
+            dueDay: 10,
+            potId: pot.id,
+            creditCardId: card.id
+        )
+        let runna = makeRecurringPayment(
+            id: "rec-runna",
+            name: "Runna",
+            amountPence: 1599,
+            dueDay: 18,
+            potId: pot.id,
+            creditCardId: card.id
+        )
+        let appleCare = makeRecurringPayment(
+            id: "rec-applecare",
+            name: "AppleCare",
+            amountPence: 899,
+            dueDay: 19,
+            potId: pot.id,
+            creditCardId: card.id
+        )
+        let iCloudTransaction = Transaction(
+            id: "transaction-icloud",
+            potId: nil,
+            payPeriodId: period.id,
+            amountPence: 899,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: card.id,
+            recurringPaymentId: iCloud.id,
+            date: "2026-07-10",
+            note: "iCloud+",
+            createdAt: "2026-07-10T21:11:55.570Z",
+            updatedAt: "2026-07-10T21:11:55.570Z",
+            deletedAt: nil
+        )
+        let temuTransaction = Transaction(
+            id: "transaction-temu",
+            potId: nil,
+            payPeriodId: period.id,
+            amountPence: 420,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: card.id,
+            recurringPaymentId: nil,
+            date: "2026-07-15",
+            note: "Temu",
+            createdAt: "2026-07-16T03:34:44.300Z",
+            updatedAt: "2026-07-16T03:34:44.300Z",
+            deletedAt: nil
+        )
+        var cardPaymentAllocation = makePotAllocation(
+            id: "allocation-card-payment",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 12260,
+            source: .cardPaymentFunding,
+            recurringPaymentId: nil,
+            recurringDueDate: nil
+        )
+        cardPaymentAllocation.creditCardId = card.id
+        cardPaymentAllocation.creditCardDirectDebitDate = "2026-08-06"
+        var runnaAllocation = makePotAllocation(
+            id: "allocation-runna",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 1599,
+            source: .recurringBillFunding,
+            recurringPaymentId: runna.id,
+            recurringDueDate: "2026-07-18"
+        )
+        runnaAllocation.creditCardId = card.id
+        var appleCareAllocation = makePotAllocation(
+            id: "allocation-applecare",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 899,
+            source: .recurringBillFunding,
+            recurringPaymentId: appleCare.id,
+            recurringDueDate: "2026-07-19"
+        )
+        appleCareAllocation.creditCardId = card.id
+        let iCloudExclusion = FundingChecklistExclusion(
+            id: "exclude-icloud",
+            kind: .cardBill,
+            sourceId: iCloud.id,
+            occurrenceDate: "2026-07-10",
+            payPeriodId: period.id,
+            createdAt: "2026-07-10T21:29:13.806Z",
+            updatedAt: "2026-07-10T21:29:13.806Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [iCloud, runna, appleCare],
+            payPeriods: [period],
+            potAllocations: [cardPaymentAllocation, runnaAllocation, appleCareAllocation],
+            transactions: [iCloudTransaction, temuTransaction],
+            creditCards: [card],
+            fundingChecklistExclusions: [iCloudExclusion]
+        )
+
+        let item = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-16"
+            )
+            .first {
+                if case .cardPayment = $0.action { return true }
+                return false
+            }
+        )
+
+        XCTAssertEqual(item.title, "Add £126.80 to Barclays")
+        XCTAssertEqual(item.breakdown.map(\.title), ["Opening balance", "iCloud+", "Temu"])
+        XCTAssertEqual(item.breakdown.map(\.amountPence), [11361, 899, 420])
+        XCTAssertEqual(item.breakdown.reduce(0) { $0 + $1.amountPence }, 12680)
+        XCTAssertTrue(item.breakdown.last?.detail.contains("15 Jul") == true)
+
+        let summary = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: snapshot,
+            payPeriod: period,
+            asOfDate: "2026-07-16"
+        )
+        XCTAssertEqual(summary.unfundedChecklistPence, 420)
+        XCTAssertEqual(summary.projectedMoneyLeftPence, summary.currentMoneyLeftPence - 420)
+    }
+
+    @MainActor
     func testOneOffIncomeCanBeUpdatedAndDeletedForCorrections() async {
         let settings = makeManualSettings(today: "2026-06-10")
         let junePeriod = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
@@ -161,6 +521,56 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertNotNil(deletedIncome.deletedAt)
         let deletedSummary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: julyPeriod, asOfDate: "2026-07-05")
         XCTAssertEqual(deletedSummary.payReceivedPence, 50000)
+    }
+
+    @MainActor
+    func testDeletingPayPeriodAlsoRemovesLinkedPaycheckAndReversesAllocations() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(
+            id: "period-june",
+            startDate: "2026-06-01",
+            endDate: "2026-06-30",
+            payday: "2026-06-01",
+            incomePence: 50000
+        )
+        let pot = makePot(id: "pot-bills", name: "Bills", balancePence: 10000, targetPence: nil)
+        let allocation = makePotAllocation(
+            id: "allocation-june",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 10000,
+            source: .manual,
+            recurringPaymentId: nil,
+            recurringDueDate: nil
+        )
+        var snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [period],
+            potAllocations: [allocation]
+        )
+        snapshot.paychecks = [
+            Paycheck(
+                id: "paycheck-june",
+                payPeriodId: period.id,
+                hoursWorked: 40,
+                hourlyRatePence: 1250,
+                calculatedAmountPence: 50000,
+                actualAmountPence: nil,
+                createdAt: "2026-06-01T00:00:00.000Z",
+                updatedAt: "2026-06-01T00:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+
+        await store.load()
+        store.deletePayPeriod(id: period.id)
+
+        XCTAssertTrue(store.snapshot.payPeriods.isEmpty)
+        XCTAssertTrue(store.snapshot.paychecks.isEmpty)
+        XCTAssertTrue(store.snapshot.potAllocations.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
     }
 
     @MainActor
@@ -1142,10 +1552,10 @@ final class FinanceEngineTests: XCTestCase {
 
     func testGroupedComplexJanMar2027ChecklistTotalsMatchWorkbook() {
         let snapshot = DefaultData.groupedComplexJanMar2027Snapshot
-        let expectations: [(periodId: String, today: String, recurringCount: Int, openingCount: Int, total: Int, moneyLeft: Int)] = [
-            ("pay-period-grouped-january-2027", "2027-01-01", 24, 5, 411600, 38400),
-            ("pay-period-grouped-february-2027", "2027-02-01", 24, 0, 285100, 164900),
-            ("pay-period-grouped-march-2027", "2027-03-01", 24, 0, 269000, 181000),
+        let expectations: [(periodId: String, today: String, recurringCount: Int, openingCount: Int, baseChecklistTotal: Int, projectedTotal: Int, moneyLeft: Int)] = [
+            ("pay-period-grouped-january-2027", "2027-01-01", 24, 5, 411600, 411600, 38400),
+            ("pay-period-grouped-february-2027", "2027-02-01", 24, 0, 285100, 383300, 66700),
+            ("pay-period-grouped-march-2027", "2027-03-01", 24, 0, 269000, 367200, 82800),
         ]
 
         for expectation in expectations {
@@ -1175,8 +1585,8 @@ final class FinanceEngineTests: XCTestCase {
                 expectation.recurringCount + expectation.openingCount + cardPaymentItems.count,
                 expectation.periodId
             )
-            XCTAssertEqual((recurringItems.map(\.amountPence) + openingItems.map(\.amountPence)).reduce(0, +), expectation.total, expectation.periodId)
-            XCTAssertEqual(summary.totalCostsPence, expectation.total, expectation.periodId)
+            XCTAssertEqual((recurringItems.map(\.amountPence) + openingItems.map(\.amountPence)).reduce(0, +), expectation.baseChecklistTotal, expectation.periodId)
+            XCTAssertEqual(summary.totalCostsPence, expectation.projectedTotal, expectation.periodId)
             XCTAssertEqual(summary.moneyLeftPence, expectation.moneyLeft, expectation.periodId)
         }
     }
@@ -1805,8 +2215,8 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(openingItems.count, 4)
         XCTAssertEqual(presentationItems.count, 30 + cardPaymentItems.count)
         XCTAssertEqual((recurringItems.map(\.amountPence) + openingItems.map(\.amountPence)).reduce(0, +), 351900)
-        XCTAssertEqual(summary.totalCostsPence, 351900)
-        XCTAssertEqual(summary.moneyLeftPence, 48100)
+        XCTAssertEqual(summary.totalCostsPence, 382900)
+        XCTAssertEqual(summary.moneyLeftPence, 17100)
 
         let openingByCard = Dictionary(uniqueKeysWithValues: openingItems.map { ($0.cardId, $0) })
         XCTAssertEqual(openingByCard["card-cc1"]?.amountPence, 52000)
@@ -2788,14 +3198,72 @@ final class FinanceEngineTests: XCTestCase {
 
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
         XCTAssertEqual(store.snapshot.transactions.first { $0.id == "card-recurring-rec-bill-2026-07-01" }?.potId, pot.id)
+        XCTAssertEqual(store.snapshot.potAllocations.first?.userConfirmed, true)
         let summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-07-01")
         XCTAssertEqual(summary.potAllocationsPence, 10000)
         XCTAssertEqual(summary.totalCostsPence, 10000)
         XCTAssertEqual(summary.moneyLeftPence, 40000)
 
+        let fundedChecklistItem = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-01"
+            )
+            .first { $0.name == bill.name }
+        )
+        XCTAssertTrue(fundedChecklistItem.isCompleted)
+        XCTAssertEqual(fundedChecklistItem.status, .activeReserved)
+        XCTAssertNil(fundedChecklistItem.paidDate)
+
+        var settledSnapshot = store.snapshot
+        settledSnapshot.creditCardRepayments.append(
+            CreditCardRepayment(
+                id: "repayment-card-main-2026-08-01",
+                creditCardId: card.id,
+                amountPence: 10000,
+                date: "2026-08-01",
+                note: "Card 1 statement payment",
+                statementDate: "2026-07-05",
+                directDebitDate: "2026-08-01",
+                source: .linkedPotStatement,
+                potId: pot.id,
+                potContributionPence: 10000,
+                paycheckContributionPence: 0,
+                createdAt: "2026-08-01T00:00:00.000Z",
+                updatedAt: "2026-08-01T00:00:00.000Z",
+                deletedAt: nil
+            )
+        )
+        let settledChecklistItem = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: settledSnapshot,
+                payPeriod: period,
+                asOfDate: "2026-08-01"
+            )
+            .first { $0.name == bill.name }
+        )
+        XCTAssertEqual(settledChecklistItem.status, .paidCompleted)
+        XCTAssertEqual(settledChecklistItem.paidDate, "2026-08-01")
+
         XCTAssertFalse(store.applyDueLinkedPotObligations(asOf: "2026-07-01"))
         XCTAssertEqual(store.snapshot.transactions.filter { $0.id == "card-recurring-rec-bill-2026-07-01" }.count, 1)
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10000)
+
+        XCTAssertTrue(store.setCardBillFundingCompleted(paymentId: bill.id, dueDate: "2026-07-01", payPeriodId: period.id, completed: false))
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertNil(store.snapshot.transactions.first { $0.id == "card-recurring-rec-bill-2026-07-01" }?.potId)
+        let checklistItem = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: store.snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-01"
+            )
+            .first { $0.name == bill.name }
+        )
+        XCTAssertFalse(checklistItem.isCompleted)
+        XCTAssertEqual(checklistItem.status, .needsFunding)
+        XCTAssertNil(checklistItem.paidDate)
     }
 
     @MainActor
@@ -3327,6 +3795,66 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(payment?.actualDuePence, 15_000)
     }
 
+    func testNextCreditCardStatementDateSkipsAnAlreadyClosedStatement() {
+        let card = makeCreditCard(
+            id: "card-capital-one",
+            name: "Capital one",
+            openingBalancePence: 20_237,
+            openingStatementBalancePence: 20_237,
+            statementDate: "2026-07-09",
+            dueDay: 4,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let snapshot = makeSnapshot(creditCards: [card])
+
+        let activeCycle = PlannerDerivedData.creditCardCycleAdjustmentSummary(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: "2026-07-16"
+        )
+
+        XCTAssertEqual(activeCycle?.statementDate, "2026-07-09")
+        XCTAssertEqual(activeCycle?.directDebitDate, "2026-08-04")
+        XCTAssertEqual(
+            PlannerDerivedData.creditCardNextStatementDate(
+                card: card,
+                snapshot: snapshot,
+                asOfDate: "2026-07-16"
+            ),
+            "2026-08-09"
+        )
+    }
+
+    func testNextCreditCardStatementDateUsesTheFirstFutureStatementBeforeCycleClose() {
+        let card = makeCreditCard(
+            id: "card-capital-one",
+            name: "Capital one",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-09",
+            dueDay: 4,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let snapshot = makeSnapshot(creditCards: [card])
+
+        XCTAssertEqual(
+            PlannerDerivedData.creditCardNextStatementDate(
+                card: card,
+                snapshot: snapshot,
+                asOfDate: "2026-07-08"
+            ),
+            "2026-07-09"
+        )
+        XCTAssertEqual(
+            PlannerDerivedData.creditCardNextStatementDate(
+                card: card,
+                snapshot: snapshot,
+                asOfDate: "2026-07-09"
+            ),
+            "2026-08-09"
+        )
+    }
+
     @MainActor
     func testHeldDirectDebitVoidsOnlyAutomaticRepaymentAndRestoresLinkedPot() async {
         let settings = makeManualSettings(today: "2026-06-10")
@@ -3782,6 +4310,19 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(openingItems.first?.directDebitDate, "2026-07-20")
         XCTAssertEqual(paymentItems.first?.amountPence, 699)
         XCTAssertEqual(paymentItems.first?.directDebitDate, "2026-08-20")
+
+        let presentationItem = try! XCTUnwrap(
+            PlannerDerivedData.fundingChecklistPresentationItems(
+                snapshot: snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-10"
+            )
+            .first {
+                if case .cardPayment = $0.action { return true }
+                return false
+            }
+        )
+        XCTAssertEqual(presentationItem.breakdown.reduce(0) { $0 + $1.amountPence }, 699)
     }
 
     @MainActor
@@ -4272,6 +4813,97 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(store.snapshot.transactions.filter { $0.id == "card-recurring-rec-vitamins-2026-07-11" }.count, 1)
         XCTAssertEqual(store.snapshot.creditCardRepayments.count, 1)
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+    }
+
+    func testMigrationRemovesKnownAutomaticVitaminsCardBillFunding() {
+        var settings = makeManualSettings(today: "2026-07-16")
+        settings.cardRecurringAutoFundingRepairVersion = 1
+        let potID = "pot-4b7c6b1d-e5e8-4704-9d6b-e0a7243acbc9"
+        let cardID = "card-6747ab5b-82d1-4ccb-a3cc-3cc0dd0ad309"
+        let paymentID = "recurring-dd0df7dd-f274-4902-8109-515c02762ca9"
+        let allocation = PotAllocation(
+            id: "recurring-bill-funding-allocation-recurring-dd0df7dd-f274-4902-8109-515c02762ca9-2026-07-11-pay-period-2026-07-01",
+            payPeriodId: "pay-period-2026-07-01",
+            potId: potID,
+            fundingPotId: nil,
+            amountPence: 2212,
+            source: .recurringBillFunding,
+            recurringPaymentId: paymentID,
+            recurringDueDate: "2026-07-11",
+            debtId: nil,
+            debtDueDate: nil,
+            transactionId: nil,
+            transactionDate: nil,
+            creditCardId: cardID,
+            creditCardDirectDebitDate: nil,
+            createdAt: "2026-07-11T13:16:31.944Z",
+            updatedAt: "2026-07-11T13:16:31.944Z",
+            deletedAt: nil
+        )
+        let transaction = Transaction(
+            id: "card-recurring-recurring-dd0df7dd-f274-4902-8109-515c02762ca9-2026-07-11",
+            potId: potID,
+            payPeriodId: "pay-period-2026-07-01",
+            amountPence: 2212,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: cardID,
+            recurringPaymentId: paymentID,
+            date: "2026-07-11",
+            note: "Vitamins",
+            createdAt: "2026-07-11T13:16:14.296Z",
+            updatedAt: "2026-07-11T13:16:31.946Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [makePot(id: potID, name: "Zable", balancePence: 2212, targetPence: nil, linkedCreditCardId: cardID)],
+            potAllocations: [allocation],
+            transactions: [transaction]
+        )
+
+        let migrated = DefaultData.migratedSnapshot(snapshot).snapshot
+        XCTAssertEqual(migrated.settings.cardRecurringAutoFundingRepairVersion, 1)
+        XCTAssertTrue(migrated.potAllocations.isEmpty)
+        XCTAssertEqual(migrated.pots.first?.balancePence, 0)
+        XCTAssertNil(migrated.transactions.first?.potId)
+    }
+
+    func testMigrationKeepsLaterUserConfirmedVitaminsCardBillFunding() {
+        var settings = makeManualSettings(today: "2026-07-16")
+        settings.cardRecurringAutoFundingRepairVersion = 1
+        let potID = "pot-4b7c6b1d-e5e8-4704-9d6b-e0a7243acbc9"
+        let cardID = "card-6747ab5b-82d1-4ccb-a3cc-3cc0dd0ad309"
+        let allocation = PotAllocation(
+            id: "recurring-bill-funding-allocation-recurring-dd0df7dd-f274-4902-8109-515c02762ca9-2026-07-11-pay-period-2026-07-01",
+            payPeriodId: "pay-period-2026-07-01",
+            potId: potID,
+            fundingPotId: nil,
+            amountPence: 2212,
+            source: .recurringBillFunding,
+            recurringPaymentId: "recurring-dd0df7dd-f274-4902-8109-515c02762ca9",
+            recurringDueDate: "2026-07-11",
+            debtId: nil,
+            debtDueDate: nil,
+            transactionId: nil,
+            transactionDate: nil,
+            creditCardId: cardID,
+            creditCardDirectDebitDate: nil,
+            userConfirmed: true,
+            createdAt: "2026-07-16T12:00:00.000Z",
+            updatedAt: "2026-07-16T12:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [makePot(id: potID, name: "Zable", balancePence: 2212, targetPence: nil, linkedCreditCardId: cardID)],
+            potAllocations: [allocation]
+        )
+
+        let migrated = DefaultData.migratedSnapshot(snapshot).snapshot
+        XCTAssertEqual(migrated.potAllocations.first?.id, allocation.id)
+        XCTAssertEqual(migrated.potAllocations.first?.userConfirmed, true)
+        XCTAssertEqual(migrated.pots.first?.balancePence, 2212)
     }
 
     func testMigrationRestoresUnsettledLegacyRecurringCardBillReserveOnce() {

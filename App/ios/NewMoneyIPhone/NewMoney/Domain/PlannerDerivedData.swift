@@ -117,11 +117,19 @@ struct FundingChecklistPresentationItem: Identifiable, Equatable, Sendable {
     var title: String
     var detail: String
     var dueDate: String
+    var breakdown: [FundingChecklistBreakdownItem]
     var isCompleted: Bool
     var isExcluded: Bool
     var status: FundingChecklistStatus
     var paidDate: String?
     var action: FundingChecklistAction
+}
+
+struct FundingChecklistBreakdownItem: Identifiable, Equatable, Sendable {
+    var id: String
+    var title: String
+    var detail: String
+    var amountPence: Int
 }
 
 struct CreditCardPaymentFundingChecklistItem: Identifiable, Equatable, Sendable {
@@ -1236,8 +1244,28 @@ enum PlannerDerivedData {
                 occurrenceDate: $0.dueDate,
                 payPeriodId: $0.payPeriodId
             )
-            let paidDate = paidDateForRecurringBillFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
-            let statusPaidDate = isUnfundedPaydayDirectRecurringBillAlreadyPaid(item: $0, paidDate: paidDate, payPeriod: payPeriod) ? nil : paidDate
+            let chargePaidDate = paidDateForRecurringBillFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
+            // A card charge and a pot funding tick only reserve money for a later
+            // statement payment. A recurring card bill becomes paid/completed only
+            // after the repayment for that statement has actually been recorded.
+            let statusPaidDate: String?
+            let presentationPaidDate: String?
+            if $0.cardId != nil {
+                let statementPaidDate = paidDateForRecurringCardBillStatementRepayment(
+                    item: $0,
+                    snapshot: snapshot,
+                    asOfDate: asOfDate
+                )
+                statusPaidDate = statementPaidDate
+                presentationPaidDate = statementPaidDate
+            } else {
+                statusPaidDate = isUnfundedPaydayDirectRecurringBillAlreadyPaid(
+                    item: $0,
+                    paidDate: chargePaidDate,
+                    payPeriod: payPeriod
+                ) ? nil : chargePaidDate
+                presentationPaidDate = chargePaidDate
+            }
             let detail: String
             if let cardName = $0.cardName {
                 detail = "\($0.paymentName) bill · \(cardName) · due \(shortDate($0.dueDate))"
@@ -1250,10 +1278,18 @@ enum PlannerDerivedData {
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: detail,
                 dueDate: $0.dueDate,
+                breakdown: [
+                    FundingChecklistBreakdownItem(
+                        id: "recurring-\($0.id)",
+                        title: $0.paymentName,
+                        detail: "Bill due \(shortDate($0.dueDate))",
+                        amountPence: $0.amountPence
+                    )
+                ],
                 isCompleted: $0.isCompleted,
                 isExcluded: isExcluded,
                 status: isExcluded ? .excluded : checklistStatus(isCompleted: $0.isCompleted, paidDate: statusPaidDate),
-                paidDate: paidDate,
+                paidDate: presentationPaidDate,
                 action: .recurringBill(paymentId: $0.paymentId, dueDate: $0.dueDate, payPeriodId: $0.payPeriodId)
             )
         }
@@ -1273,6 +1309,14 @@ enum PlannerDerivedData {
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.transactionName) spend · \($0.cardName) · due \(shortDate($0.dueDate))",
                 dueDate: $0.dueDate,
+                breakdown: [
+                    FundingChecklistBreakdownItem(
+                        id: "card-spend-\($0.transactionId)",
+                        title: $0.transactionName,
+                        detail: "\($0.cardName) card spend · \(shortDate($0.transactionDate))",
+                        amountPence: $0.amountPence
+                    )
+                ],
                 isCompleted: $0.isCompleted,
                 isExcluded: isExcluded,
                 status: isExcluded ? .excluded : checklistStatus(isCompleted: $0.isCompleted, paidDate: paidDate),
@@ -1296,6 +1340,14 @@ enum PlannerDerivedData {
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.cardName) opening balance · due \(shortDate($0.directDebitDate))",
                 dueDate: $0.directDebitDate,
+                breakdown: [
+                    FundingChecklistBreakdownItem(
+                        id: "opening-\($0.id)",
+                        title: "Opening statement balance",
+                        detail: "\($0.cardName) · due \(shortDate($0.directDebitDate))",
+                        amountPence: $0.amountPence
+                    )
+                ],
                 isCompleted: $0.isCompleted,
                 isExcluded: isExcluded,
                 status: isExcluded ? .excluded : checklistStatus(isCompleted: $0.isCompleted, paidDate: paidDate),
@@ -1329,6 +1381,7 @@ enum PlannerDerivedData {
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.cardName) card payment · due \(shortDate($0.directDebitDate))",
                 dueDate: $0.directDebitDate,
+                breakdown: cardPaymentFundingBreakdown(item: $0, snapshot: snapshot, asOfDate: asOfDate),
                 isCompleted: $0.isCompleted,
                 isExcluded: isExcluded,
                 status: isExcluded ? .excluded : checklistStatus(isCompleted: $0.isCompleted, paidDate: paidDate),
@@ -1352,6 +1405,14 @@ enum PlannerDerivedData {
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.debtName) debt · \($0.lenderName) · due \(shortDate($0.dueDate))",
                 dueDate: $0.dueDate,
+                breakdown: [
+                    FundingChecklistBreakdownItem(
+                        id: "debt-\($0.scheduleItemId)",
+                        title: $0.debtName,
+                        detail: "\($0.lenderName) · due \(shortDate($0.dueDate))",
+                        amountPence: $0.amountPence
+                    )
+                ],
                 isCompleted: $0.isCompleted,
                 isExcluded: isExcluded,
                 status: isExcluded ? .excluded : checklistStatus(isCompleted: $0.isCompleted, paidDate: paidDate),
@@ -1520,6 +1581,22 @@ enum PlannerDerivedData {
                     isDirectDebitHeld: $0.isDirectDebitHeld
                 )
             }
+    }
+
+    static func creditCardNextStatementDate(
+        card: CreditCard,
+        snapshot: PlannerSnapshot,
+        asOfDate: String
+    ) -> String? {
+        guard FinanceEngine.isIsoDate(asOfDate) else { return nil }
+
+        return creditCardStatementCycles(
+            card: card,
+            snapshot: snapshot,
+            through: addIsoMonthsClamped(date: asOfDate, months: 2)
+        )
+        .first { $0.statementDate > asOfDate }
+        .map(\.statementDate)
     }
 
     static func creditCardCycleReminders(snapshot: PlannerSnapshot, asOfDate: String, months: Int = 3) -> [CreditCardCycleReminder] {
@@ -2024,6 +2101,7 @@ enum PlannerDerivedData {
     }
 
     private static func plannedFundingCostItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod, asOfDate: String?) -> [PeriodCostItem] {
+        let fundingAsOfDate = asOfDate ?? FinanceEngine.getAppTodayIso(settings: snapshot.settings)
         let billItems = recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
             .filter {
                 !$0.isCompleted &&
@@ -2125,7 +2203,49 @@ enum PlannerDerivedData {
                 )
             }
 
-        return billItems + spendItems + openingItems + debtItems
+        let cardPaymentItems = cardPaymentFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: fundingAsOfDate
+        )
+            .compactMap { item -> PeriodCostItem? in
+                guard !item.isCompleted,
+                      !isFundingChecklistExcluded(
+                        snapshot: snapshot,
+                        kind: .cardPayment,
+                        sourceId: item.cardId,
+                        occurrenceDate: item.directDebitDate,
+                        payPeriodId: item.payPeriodId
+                      )
+                else { return nil }
+
+                let fundedPence = snapshot.potAllocations
+                    .filter {
+                        $0.deletedAt == nil &&
+                        $0.payPeriodId == item.payPeriodId &&
+                        $0.potId == item.potId &&
+                        $0.source == .cardPaymentFunding &&
+                        $0.creditCardId == item.cardId &&
+                        $0.creditCardDirectDebitDate == item.directDebitDate
+                    }
+                    .reduce(0) { $0 + max(0, $1.amountPence) }
+                let remainingPence = max(0, item.amountPence - fundedPence)
+                guard remainingPence > 0 else { return nil }
+
+                return PeriodCostItem(
+                    id: "planned-card-payment-funding-\(item.id)",
+                    label: "\(item.potName) card payment funding",
+                    amountPence: remainingPence,
+                    date: payPeriod.payday,
+                    source: .potAllocation,
+                    creditCardId: nil,
+                    potId: item.potId,
+                    fundingPotId: nil,
+                    isProjected: true
+                )
+            }
+
+        return billItems + spendItems + openingItems + debtItems + cardPaymentItems
     }
 
     static func calendarEvents(snapshot: PlannerSnapshot, startDate: String, endDate: String) -> [CalendarEvent] {
@@ -2713,7 +2833,279 @@ private struct CreditCardStatementLine {
     var source: CreditCardStatementLineSource
 }
 
+private struct CardPaymentBreakdownComponent {
+    var id: String
+    var title: String
+    var detail: String
+    var date: String
+    var amountPence: Int
+}
+
 private extension PlannerDerivedData {
+    static func cardPaymentFundingBreakdown(
+        item: CreditCardPaymentFundingChecklistItem,
+        snapshot: PlannerSnapshot,
+        asOfDate: String
+    ) -> [FundingChecklistBreakdownItem] {
+        let fallback = [
+            FundingChecklistBreakdownItem(
+                id: "card-payment-\(item.id)",
+                title: "\(item.cardName) statement payment",
+                detail: "Direct debit due \(shortDate(item.directDebitDate))",
+                amountPence: item.amountPence
+            )
+        ]
+
+        guard let card = snapshot.creditCards.first(where: { $0.id == item.cardId && !$0.archived }),
+              let payPeriod = snapshot.payPeriods.first(where: { $0.id == item.payPeriodId }),
+              let pot = snapshot.pots.first(where: { $0.id == item.potId && !$0.archived })
+        else { return fallback }
+
+        let matchingCardPaymentFundingPence = snapshot.potAllocations
+            .filter {
+                $0.deletedAt == nil &&
+                $0.payPeriodId == item.payPeriodId &&
+                $0.potId == item.potId &&
+                $0.source == .cardPaymentFunding &&
+                $0.creditCardId == item.cardId
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+        let specificChecklistFundingPence = snapshot.potAllocations
+            .filter {
+                $0.deletedAt == nil &&
+                $0.payPeriodId == item.payPeriodId &&
+                $0.potId == item.potId &&
+                (
+                    isRecurringBillFundingSource($0.source) ||
+                    $0.source == .cardSpendFunding ||
+                    $0.source == .cardOpeningBalanceFunding
+                )
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+        var availableGeneralPotPence = max(
+            0,
+            pot.balancePence - matchingCardPaymentFundingPence - specificChecklistFundingPence
+        )
+
+        let recurringItems = recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+            .filter { $0.cardId == item.cardId && $0.potId == item.potId }
+        let recurringItemsByOccurrence = Dictionary(
+            uniqueKeysWithValues: recurringItems.map { ("\($0.paymentId):\($0.dueDate)", $0) }
+        )
+        let cardSpendItems = cardSpendFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+            .filter { $0.cardId == item.cardId && $0.potId == item.potId }
+        let cardSpendItemsByTransaction = Dictionary(
+            uniqueKeysWithValues: cardSpendItems.map { ($0.transactionId, $0) }
+        )
+        let openingItem = cardOpeningBalanceFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+            .first { $0.cardId == item.cardId && $0.potId == item.potId }
+        let recurringPaymentsById = Dictionary(
+            uniqueKeysWithValues: snapshot.recurringPayments.map { ($0.id, $0) }
+        )
+
+        var components: [CardPaymentBreakdownComponent] = []
+        let openingBalancePence = max(0, card.openingBalancePence ?? 0)
+        if openingBalancePence > 0 {
+            let separatelyFundedPence: Int
+            if let openingItem,
+               !isFundingChecklistExcluded(
+                    snapshot: snapshot,
+                    kind: .cardOpeningBalance,
+                    sourceId: openingItem.cardId,
+                    occurrenceDate: openingItem.directDebitDate,
+                    payPeriodId: openingItem.payPeriodId
+               ) {
+                separatelyFundedPence = min(openingBalancePence, openingItem.amountPence)
+            } else {
+                separatelyFundedPence = 0
+            }
+            let includedPence = max(0, openingBalancePence - separatelyFundedPence)
+            if includedPence > 0 {
+                components.append(
+                    CardPaymentBreakdownComponent(
+                        id: "card-payment-opening-\(item.id)",
+                        title: "Opening balance",
+                        detail: breakdownDetail(
+                            base: "Opening card balance",
+                            separatelyFundedPence: separatelyFundedPence
+                        ),
+                        date: card.createdAt.prefixDate ?? payPeriod.startDate,
+                        amountPence: includedPence
+                    )
+                )
+            }
+        }
+
+        components += snapshot.transactions
+            .filter {
+                $0.deletedAt == nil &&
+                $0.type == .spending &&
+                $0.paymentMethod == .creditCard &&
+                $0.creditCardId == card.id &&
+                $0.date <= asOfDate
+            }
+            .compactMap { transaction -> CardPaymentBreakdownComponent? in
+                let transactionName = transaction.note.trimmingCharacters(in: .whitespacesAndNewlines)
+                let title = transaction.recurringPaymentId
+                    .flatMap { recurringPaymentsById[$0]?.name }
+                    ?? (transactionName.isEmpty ? "Card spend" : transactionName)
+                let separatelyFundedPence: Int
+
+                if let recurringPaymentId = transaction.recurringPaymentId,
+                   let recurringItem = recurringItemsByOccurrence["\(recurringPaymentId):\(transaction.date)"] {
+                    guard recurringPaymentsById[recurringPaymentId]?.potId == item.potId else { return nil }
+                    let isExcluded = isFundingChecklistExcluded(
+                        snapshot: snapshot,
+                        kind: .cardBill,
+                        sourceId: recurringItem.paymentId,
+                        occurrenceDate: recurringItem.dueDate,
+                        payPeriodId: recurringItem.payPeriodId
+                    )
+                    separatelyFundedPence = isExcluded ? 0 : min(transaction.amountPence, recurringItem.amountPence)
+                } else if transaction.recurringPaymentId != nil {
+                    separatelyFundedPence = 0
+                } else if let spendItem = cardSpendItemsByTransaction[transaction.id] {
+                    let isExcluded = isFundingChecklistExcluded(
+                        snapshot: snapshot,
+                        kind: .cardSpend,
+                        sourceId: spendItem.transactionId,
+                        occurrenceDate: spendItem.transactionDate,
+                        payPeriodId: spendItem.payPeriodId
+                    )
+                    separatelyFundedPence = isExcluded ? 0 : min(transaction.amountPence, spendItem.amountPence)
+                } else {
+                    separatelyFundedPence = 0
+                }
+
+                let includedPence = max(0, transaction.amountPence - separatelyFundedPence)
+                guard includedPence > 0 else { return nil }
+                return CardPaymentBreakdownComponent(
+                    id: "card-payment-transaction-\(item.id)-\(transaction.id)",
+                    title: title,
+                    detail: breakdownDetail(
+                        base: "\(transaction.recurringPaymentId == nil ? "Card spend" : "Card bill") · \(shortDate(transaction.date))",
+                        separatelyFundedPence: separatelyFundedPence
+                    ),
+                    date: transaction.date,
+                    amountPence: includedPence
+                )
+            }
+
+        components += resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: snapshot.recurringPayments,
+            startDate: payPeriod.startDate,
+            endDate: payPeriod.endDate
+        )
+            .filter {
+                $0.dueDate > asOfDate &&
+                $0.payment.creditCardId == item.cardId &&
+                $0.payment.potId == item.potId
+            }
+            .compactMap { occurrence -> CardPaymentBreakdownComponent? in
+                let recurringItem = recurringItemsByOccurrence["\(occurrence.payment.id):\(occurrence.dueDate)"]
+                let isExcluded = recurringItem.map {
+                    isFundingChecklistExcluded(
+                        snapshot: snapshot,
+                        kind: .cardBill,
+                        sourceId: $0.paymentId,
+                        occurrenceDate: $0.dueDate,
+                        payPeriodId: $0.payPeriodId
+                    )
+                } ?? true
+                let separatelyFundedPence = isExcluded
+                    ? 0
+                    : min(occurrence.amountPence, recurringItem?.amountPence ?? 0)
+                let includedPence = max(0, occurrence.amountPence - separatelyFundedPence)
+                guard includedPence > 0 else { return nil }
+                return CardPaymentBreakdownComponent(
+                    id: "card-payment-recurring-\(item.id)-\(occurrence.payment.id)-\(occurrence.dueDate)",
+                    title: occurrence.payment.name,
+                    detail: breakdownDetail(
+                        base: "Scheduled card bill · \(shortDate(occurrence.dueDate))",
+                        separatelyFundedPence: separatelyFundedPence
+                    ),
+                    date: occurrence.dueDate,
+                    amountPence: includedPence
+                )
+            }
+
+        components += snapshot.customPayments
+            .filter {
+                $0.deletedAt == nil &&
+                $0.status == .unpaid &&
+                $0.creditCardId == item.cardId &&
+                $0.dueDate > asOfDate &&
+                $0.dueDate >= payPeriod.startDate &&
+                $0.dueDate <= payPeriod.endDate
+            }
+            .map {
+                CardPaymentBreakdownComponent(
+                    id: "card-payment-custom-\(item.id)-\($0.id)",
+                    title: $0.name,
+                    detail: "Scheduled card payment · \(shortDate($0.dueDate))",
+                    date: $0.dueDate,
+                    amountPence: $0.amountPence
+                )
+            }
+
+        components.sort {
+            if $0.date == $1.date { return $0.title < $1.title }
+            return $0.date < $1.date
+        }
+        applyCardPaymentCoverage(&components, coveragePence: &availableGeneralPotPence)
+
+        let derivedTotalPence = components.reduce(0) { $0 + max(0, $1.amountPence) }
+        if derivedTotalPence > item.amountPence {
+            var extraCoveragePence = derivedTotalPence - item.amountPence
+            applyCardPaymentCoverage(&components, coveragePence: &extraCoveragePence)
+        } else if derivedTotalPence < item.amountPence {
+            components.insert(
+                CardPaymentBreakdownComponent(
+                    id: "card-payment-existing-reserve-\(item.id)",
+                    title: "Existing card payment reserve",
+                    detail: "Previously included in this funding total",
+                    date: payPeriod.startDate,
+                    amountPence: item.amountPence - derivedTotalPence
+                ),
+                at: 0
+            )
+        }
+
+        let breakdown = components
+            .filter { $0.amountPence > 0 }
+            .map {
+                FundingChecklistBreakdownItem(
+                    id: $0.id,
+                    title: $0.title,
+                    detail: $0.detail,
+                    amountPence: $0.amountPence
+                )
+            }
+
+        return breakdown.isEmpty ? fallback : breakdown
+    }
+
+    static func breakdownDetail(base: String, separatelyFundedPence: Int) -> String {
+        guard separatelyFundedPence > 0 else { return base }
+        return "\(base) · \(MoneyParser.formatPence(separatelyFundedPence)) shown separately"
+    }
+
+    static func applyCardPaymentCoverage(
+        _ components: inout [CardPaymentBreakdownComponent],
+        coveragePence: inout Int
+    ) {
+        guard coveragePence > 0 else { return }
+
+        for index in components.indices where coveragePence > 0 {
+            let coveredPence = min(components[index].amountPence, coveragePence)
+            guard coveredPence > 0 else { continue }
+            components[index].amountPence -= coveredPence
+            coveragePence -= coveredPence
+            components[index].detail += " · \(MoneyParser.formatPence(coveredPence)) already covered"
+        }
+    }
+
     static func paidOpeningBalanceFundingPresentationItems(
         snapshot: PlannerSnapshot,
         payPeriod: PayPeriod?,
@@ -2768,6 +3160,14 @@ private extension PlannerDerivedData {
                     title: "Add \(MoneyParser.formatPence(allocation.amountPence)) to \(pot.name)",
                     detail: "\(card.name) opening balance · due \(shortDate(directDebitDate))",
                     dueDate: directDebitDate,
+                    breakdown: [
+                        FundingChecklistBreakdownItem(
+                            id: "opening-allocation-\(allocation.id)",
+                            title: "Opening statement balance",
+                            detail: "\(card.name) · due \(shortDate(directDebitDate))",
+                            amountPence: allocation.amountPence
+                        )
+                    ],
                     isCompleted: true,
                     isExcluded: false,
                     status: .paidCompleted,
@@ -3149,6 +3549,31 @@ private extension PlannerDerivedData {
                 $0.date == item.dueDate &&
                 $0.date <= asOfDate &&
                 $0.potId == item.potId
+            }
+            .map(\.date)
+            .sorted()
+            .first
+    }
+
+    static func paidDateForRecurringCardBillStatementRepayment(
+        item: RecurringBillFundingChecklistItem,
+        snapshot: PlannerSnapshot,
+        asOfDate: String
+    ) -> String? {
+        guard let cardId = item.cardId,
+              let card = snapshot.creditCards.first(where: { $0.id == cardId && !$0.archived }),
+              let statementDate = creditCardStatementDate(for: card, snapshot: snapshot, chargeDate: item.dueDate),
+              let directDebitDate = creditCardDirectDebitDate(for: card, snapshot: snapshot, chargeDate: item.dueDate)
+        else { return nil }
+
+        return snapshot.creditCardRepayments
+            .filter {
+                $0.deletedAt == nil &&
+                $0.creditCardId == cardId &&
+                $0.date <= asOfDate &&
+                $0.amountPence > 0 &&
+                ($0.statementDate == statementDate ||
+                    ($0.statementDate == nil && ($0.directDebitDate ?? $0.date) == directDebitDate))
             }
             .map(\.date)
             .sorted()

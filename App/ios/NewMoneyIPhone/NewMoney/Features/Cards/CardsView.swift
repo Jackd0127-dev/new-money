@@ -20,6 +20,8 @@ struct CardsLayoutPolicy {
     static let activeCardExpandedUsesLazyGrid = true
     static let activeCardViewAllPillEnabled = true
     static let activeCardStackAnimation = "matchedGeometrySpring"
+    static let statementSummarySeparatesCurrentAndNextStatement = true
+    static let statementSummaryShowsPaycheckImpact = false
     static let sections: [CardsSection] = [
         .summary,
         .activeCards
@@ -119,7 +121,7 @@ struct CardsView: View {
 
         ScreenScaffold(
             title: "Cards",
-            subtitle: "Track card balances, repayments, saved payments, and cover pots.",
+            subtitle: "",
             navigationMode: navigationMode,
             toolbarMode: resolvedToolbarMode
         ) {
@@ -138,7 +140,7 @@ struct CardsView: View {
 
     private var resolvedToolbarMode: AppToolbarMode {
         switch toolbarMode {
-        case .none, .add(_), .editDone(_, _), .actions(_):
+        case .none, .add(_), .editDone(_, _, _), .actions(_):
             toolbarMode
         case .primaryDouble, .secondarySingle, .modalSingle:
             CardsLayoutPolicy.toolbarMode {
@@ -272,11 +274,13 @@ struct CardsView: View {
     }
 
     private func summary(cardModels: [CreditCardPreviewModel]) -> some View {
+        let totalCredit = cardModels.reduce(0) { $0 + $1.card.limitPence }
         let owed = cardModels.reduce(0) { $0 + $1.availability.actualOwedPence }
         let forecastOwed = cardModels.reduce(0) { $0 + $1.availability.forecastOwedPence }
         let available = cardModels.reduce(0) { $0 + $1.availability.actualAvailablePence }
         let forecastAvailable = cardModels.reduce(0) { $0 + $1.availability.forecastAvailablePence }
         return AppCard(glow: true) {
+            MetricRow(label: "Total credit", value: MoneyParser.formatPence(totalCredit), valueColor: AppTheme.Colors.primaryText)
             MetricRow(label: "Owed", value: MoneyParser.formatPence(owed), valueColor: AppTheme.Colors.orangeHighlight)
             MetricRow(
                 label: available < 0 ? "Over limit" : "Available credit",
@@ -600,6 +604,7 @@ struct CardFormView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add card")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationTopDividerHidden()
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
@@ -679,6 +684,7 @@ private struct CreditCardEditFormView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Edit card")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -815,6 +821,7 @@ struct CardDetailView: View {
     @State private var isCardPaymentPresented = false
     @State private var isCycleAdjustmentPresented = false
     @State private var isCardEditPresented = false
+    @State private var isDeleteConfirmationPresented = false
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
@@ -851,14 +858,24 @@ struct CardDetailView: View {
                     linkedSection
                     historySection
                     SecondaryButton(title: "Delete card", systemImage: "trash", role: .destructive) {
-                        store.deleteCreditCard(id: card.id)
-                        dismiss()
+                        isDeleteConfirmationPresented = true
+                    }
+                    .confirmationDialog(
+                        "Delete \(currentCard.name)?",
+                        isPresented: $isDeleteConfirmationPresented,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete card", role: .destructive, action: deleteCard)
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This will remove the card and its saved details from New Money.")
                     }
                 }
                 .padding(AppTheme.Spacing.lg)
             }
             .premiumScreenBackground()
             .navigationTitle(currentCard.name)
+            .navigationBarTitleDisplayMode(.inline)
             .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -890,6 +907,9 @@ struct CardDetailView: View {
         AppCard {
             SectionTitle("Statement")
             MetricRow(label: "Statement day", value: statementDayLabel)
+            if let currentStatementDate {
+                MetricRow(label: "Current statement", value: friendlyDate(currentStatementDate))
+            }
             MetricRow(label: "Next statement", value: nextStatementDate.map(friendlyDate) ?? "Not set")
             MetricRow(label: "Direct debit", value: nextDirectDebitDate.map(friendlyDate) ?? "Not set")
             MetricRow(label: "Current statement due", value: MoneyParser.formatPence(currentStatementDuePence), valueColor: currentStatementDuePence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
@@ -909,7 +929,6 @@ struct CardDetailView: View {
                 )
             }
             MetricRow(label: "Linked pot cover", value: MoneyParser.formatPence(linkedPotCoverPence), valueColor: AppTheme.Colors.primaryOrange)
-            MetricRow(label: "Paycheck impact", value: MoneyParser.formatPence(directDebitPaycheckImpactPence), valueColor: directDebitPaycheckImpactPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success)
             if let cycleAdjustmentSummary, cycleAdjustmentSummary.isStatementHeld || cycleAdjustmentSummary.isDirectDebitHeld {
                 Text("This cycle is on hold. New card spending is kept reserved until you confirm the bank dates.")
                     .font(.footnote.weight(.medium))
@@ -1138,7 +1157,20 @@ struct CardDetailView: View {
     }
 
     private var nextStatementDate: String? {
-        cycleAdjustmentSummary?.statementDate
+        PlannerDerivedData.creditCardNextStatementDate(
+            card: currentCard,
+            snapshot: store.snapshot,
+            asOfDate: store.todayIso
+        )
+    }
+
+    private var currentStatementDate: String? {
+        guard let statementDate = cycleAdjustmentSummary?.statementDate,
+              statementDate <= store.todayIso else {
+            return nil
+        }
+
+        return statementDate
     }
 
     private var nextDirectDebitDate: String? {
@@ -1176,15 +1208,9 @@ struct CardDetailView: View {
         FinanceEngine.getLinkedCreditCardPotPence(pots: store.snapshot.pots, creditCardId: currentCard.id)
     }
 
-    private var directDebitPaycheckImpactPence: Int {
-        if let repayment = store.snapshot.creditCardRepayments
-            .filter({ $0.creditCardId == currentCard.id && $0.directDebitDate == nextDirectDebitDate })
-            .sorted(by: { $0.date > $1.date })
-            .first {
-            return max(0, repayment.paycheckContributionPence ?? repayment.amountPence)
-        }
-
-        return max(0, max(currentStatementDuePence, heldCycleReservePence) - linkedPotCoverPence)
+    private func deleteCard() {
+        store.deleteCreditCard(id: currentCard.id)
+        dismiss()
     }
 
     private func friendlyDate(_ isoDate: String) -> String {
@@ -1276,6 +1302,8 @@ private struct CreditCardCycleAdjustmentSheet: View {
                     ContentUnavailableView("Statement setup needed", systemImage: "calendar.badge.exclamationmark", description: Text("Add a statement day and direct-debit day before adjusting a cycle."))
                 }
             }
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
             .navigationTitle("Check this cycle")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -1334,6 +1362,7 @@ struct CardPaymentFlowSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Card payments")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

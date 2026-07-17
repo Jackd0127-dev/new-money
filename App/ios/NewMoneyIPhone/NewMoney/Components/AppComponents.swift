@@ -2,7 +2,6 @@ import SwiftUI
 import UIKit
 
 struct AppCard<Content: View>: View {
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
     var glow: Bool = false
     var cornerRadius: CGFloat = AppTheme.Radius.lg
     @ViewBuilder var content: Content
@@ -20,7 +19,6 @@ struct AppCard<Content: View>: View {
                 .stroke(glow ? AppTheme.Colors.selectedStroke : AppTheme.Colors.border, lineWidth: 1)
         )
         .shadow(color: glow ? AppTheme.Colors.accentGlow : AppTheme.Colors.shadow, radius: glow ? 18 : 10, y: glow ? 8 : 4)
-        .id("card-\(selectedThemeRawValue)-\(glow)-\(Int(cornerRadius.rounded()))")
     }
 }
 
@@ -243,46 +241,76 @@ struct SelectionField<MenuContent: View>: View {
 
     var body: some View {
         let displayValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasValue = !displayValue.isEmpty
 
         Menu {
             menuContent
         } label: {
-            HStack(spacing: AppTheme.Spacing.md) {
+            HStack(spacing: AppTheme.Spacing.sm) {
                 if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
-                        .frame(width: 22)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                            .fill(AppTheme.Colors.accentSoft)
+
+                        Image(systemName: systemImage)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.accent)
+                    }
+                    .frame(width: 38, height: 38)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.caption.weight(.semibold))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .textCase(.uppercase)
+                        .tracking(0.45)
+
                     Text(displayValue.isEmpty ? placeholder : displayValue)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(displayValue.isEmpty ? AppTheme.Colors.tertiaryText : AppTheme.Colors.primaryText)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(hasValue ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer(minLength: AppTheme.Spacing.md)
 
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                ZStack {
+                    Circle()
+                        .fill(hasValue ? AppTheme.Colors.accentSoft : AppTheme.Colors.surface)
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(hasValue ? AppTheme.Colors.accent : AppTheme.Colors.tertiaryText)
+                }
+                .frame(width: 30, height: 30)
             }
             .padding(.horizontal, AppTheme.Spacing.md)
-            .frame(minHeight: 48)
-            .background(AppTheme.Colors.elevatedSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .frame(minHeight: 58)
+            .background(
+                LinearGradient(
+                    colors: [
+                        AppTheme.Colors.elevatedSurface,
+                        hasValue ? AppTheme.Colors.accentSoft.opacity(0.44) : AppTheme.Colors.cardBackground
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
-                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+                    .stroke(hasValue ? AppTheme.Colors.selectedStroke.opacity(0.7) : AppTheme.Colors.border, lineWidth: 1)
             )
+            .shadow(color: AppTheme.Colors.shadow.opacity(0.8), radius: 10, y: 5)
             .opacity(isDisabled ? 0.55 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .accessibilityLabel(title)
+        .accessibilityValue(hasValue ? displayValue : placeholder)
+        .accessibilityHint(isDisabled ? "Unavailable" : "Double tap to choose an option")
     }
 }
 

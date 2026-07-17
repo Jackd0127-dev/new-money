@@ -36,9 +36,9 @@
 | pot-jaja | Jaja | £215.80 |
 | pot-capital-one | Capital One | £80.79 |
 | pot-zable | Zable | £0.00 |
-| pot-barclays | Barclays | £531.83 |
+| pot-barclays | Barclays | £540.82 |
 | pot-aqua | Aqua | £307.31 |
-| total |  | £1135.73 |
+| total |  | £1144.72 |
 
 ## Stable bill occurrence IDs
 | Occurrence ID | Status | Transaction ID |
@@ -72,28 +72,31 @@ Included deductions for Home/current Money Left:
 Excluded candidates from Home/current Money Left:
 | Record ID | Type | Description | Amount | Reason |
 | --- | --- | --- | ---: | --- |
+| planned-card-payment-funding-card-payment-funding-card-aqua-pot-aqua-2026-08-20 | pot_allocation | Aqua card payment funding | £6.99 | projected/unfunded checklist item; excluded from currentMoneyLeftPence |
+| planned-card-payment-funding-card-payment-funding-card-barclays-pot-barclays-2026-08-06 | pot_allocation | Barclays card payment funding | £138.59 | projected/unfunded checklist item; excluded from currentMoneyLeftPence |
+| planned-card-payment-funding-card-payment-funding-card-capital-one-pot-capital-one-2026-08-02 | pot_allocation | Capital One card payment funding | £121.58 | projected/unfunded checklist item; excluded from currentMoneyLeftPence |
 
 - Home/current total deductions: £162.40
 - Home/current Money Left: £3244.23
-- Projected total deductions: £162.40
-- Projected Money Left (audit legacy field moneyLeftPence): £3244.23
+- Projected total deductions: £429.56
+- Projected Money Left (audit legacy field moneyLeftPence): £2977.07
 
 ## Planned-cost field comparison
 - Funding checklist completed allocations: £162.40
 - Committed costs (non-projected): £162.40
-- Outstanding/projected checklist costs: £0.00
-- All projected costs: £162.40
+- Outstanding/projected checklist costs: £267.16
+- All projected costs: £429.56
 - Value used by Home Money Left card: currentMoneyLeftPence = £3244.23
-- Value previously inspected by the audit: moneyLeftPence = £3244.23
+- Value previously inspected by the audit: moneyLeftPence = £2977.07
 
 ## Card-funding-gap inclusion report
-- Capital One gap £121.58: not represented as an exact projected cost item
-- Barclays gap £138.59: not represented as an exact projected cost item
-- Aqua gap £6.99: not represented as an exact projected cost item
+- Capital One gap £121.58: included in projected Money Left only
+- Barclays gap £138.59: included in projected Money Left only
+- Aqua gap £6.99: included in projected Money Left only
 
 ## Safe-to-spend numerator and denominator
 - Home/current: numerator £3244.23; denominator 22 inclusive days; result £147.46
-- Projected: numerator £3244.23; denominator 22 inclusive days; result £147.46
+- Projected: numerator £2977.07; denominator 22 inclusive days; result £135.32
 
 ## Specification checks
 - PASS [calculation discrepancy] Card balance: expected £1386.90; actual £1386.90
@@ -101,7 +104,7 @@ Excluded candidates from Home/current Money Left:
 - PASS [calculation provenance] Committed costs: expected £162.40; actual £162.40
 - PASS [calculation provenance] Home Money Left: expected £3244.23; actual £3244.23
 - PASS [calculation provenance] Home safe to spend: expected £147.46; actual £147.46
-- PASS [fixture loading] Final pot total: expected £1135.73; actual £1135.73
+- FAIL [fixture loading] Final pot total: expected £1135.73; actual £1144.72
 
 ## Final classification
 Fixture problem resolved: final balances had previously been seeded without completed funding history; projected Money Left remains a distinct metric.

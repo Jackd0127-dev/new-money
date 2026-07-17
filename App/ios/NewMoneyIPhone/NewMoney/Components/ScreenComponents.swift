@@ -5,6 +5,7 @@ enum AppEditDoneToolbarPolicy {
     static let editTitle = "Edit"
     static let doneTitle = "Done"
     static let usesNativeToolbarContentSwap = true
+    static let disablesEditWhenUnavailable = true
     static let springResponse = 0.28
     static let springDampingFraction = 0.86
 }
@@ -52,24 +53,28 @@ struct AppToolbarButton: View {
 
 struct AppEditDoneToolbarButton: View {
     var isEditing: Bool
+    var canEdit = true
     let action: () -> Void
 
     var body: some View {
         if isEditing {
             AppDoneToolbarBranchButton(action: action)
         } else {
-            AppEditToolbarBranchButton(action: action)
+            AppEditToolbarBranchButton(isEnabled: canEdit, action: action)
         }
     }
 }
 
 private struct AppEditToolbarBranchButton: View {
+    var isEnabled: Bool
     let action: () -> Void
 
     var body: some View {
         Button(AppEditDoneToolbarPolicy.editTitle, action: action)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(AppTheme.Colors.accent)
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1 : 0.42)
             .accessibilityLabel(AppEditDoneToolbarPolicy.editTitle)
     }
 }
@@ -91,7 +96,7 @@ enum AppToolbarMode {
     case secondarySingle
     case modalSingle
     case add(action: () -> Void)
-    case editDone(isEditing: Bool, action: () -> Void)
+    case editDone(isEditing: Bool, canEdit: Bool, action: () -> Void)
     case actions([AppToolbarAction])
 }
 
@@ -122,7 +127,7 @@ struct ScreenScaffold<Content: View>: View {
     var subtitle: String
     var navigationMode: ScreenNavigationMode = .root
     var toolbarMode: AppToolbarMode = .primaryDouble
-    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
+    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .inline
     var rootTabResetRevision: Int?
     @ViewBuilder var content: Content
 
@@ -218,10 +223,10 @@ private struct PlaceholderToolbarModifier: ViewModifier {
         switch mode {
         case .none:
             content
-        case .editDone(let isEditing, let action):
+        case .editDone(let isEditing, let canEdit, let action):
             content.toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    AppEditDoneToolbarButton(isEditing: isEditing, action: action)
+                    AppEditDoneToolbarButton(isEditing: isEditing, canEdit: canEdit, action: action)
                 }
             }
         default:
@@ -370,6 +375,70 @@ struct AppDivider: View {
         Rectangle()
             .fill(AppTheme.Colors.divider)
             .frame(height: 1)
+    }
+}
+
+struct FundingChecklistBreakdownToggle: View {
+    @Binding var isExpanded: Bool
+    var itemName: String
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(isExpanded ? "Hide" : "Show") \(itemName) payment breakdown")
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+    }
+}
+
+struct FundingChecklistBreakdownList: View {
+    var items: [FundingChecklistBreakdownItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Text("Payment breakdown")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .textCase(.uppercase)
+
+            ForEach(items) { item in
+                HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                            .lineLimit(2)
+                        Text(item.detail)
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    Text(MoneyParser.formatPence(item.amountPence))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .monospacedDigit()
+                        .multilineTextAlignment(.trailing)
+                }
+
+                if item.id != items.last?.id {
+                    AppDivider()
+                }
+            }
+        }
+        .padding(.leading, 48)
+        .padding(.top, AppTheme.Spacing.xs)
     }
 }
 

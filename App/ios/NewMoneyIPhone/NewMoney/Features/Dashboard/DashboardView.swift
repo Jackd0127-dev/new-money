@@ -658,7 +658,7 @@ private struct DashboardMoneyLeftDetailView: View {
     var body: some View {
         ScreenScaffold(
             title: "Money left",
-            subtitle: "Safe-to-spend details and current period spending.",
+            subtitle: "",
             navigationMode: .inline,
             toolbarMode: .none
         ) {
@@ -793,8 +793,10 @@ private struct DashboardMoneyLeftHeroContent: View {
                 AppDivider()
                 MetricRow(
                     label: "Safe to spend today",
-                    value: MoneyParser.formatPence(safeToSpendTodayPence),
-                    valueColor: safeToSpendTodayPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
+                    value: safeToSpendTodayPence == 0
+                        ? "No spending remaining"
+                        : MoneyParser.formatPence(safeToSpendTodayPence),
+                    valueColor: safeToSpendTodayPence == 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
                 )
             }
         }
@@ -1333,45 +1335,54 @@ private struct FundingChecklistRow: View {
     var isReadOnly: Bool
     var action: () -> Void
     var excludeAction: () -> Void
+    @State private var isBreakdownExpanded = false
 
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            Button(action: action) {
-                HStack(spacing: AppTheme.Spacing.md) {
-                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(iconColor)
-                        .frame(width: 32, height: 32)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Button(action: action) {
+                    HStack(spacing: AppTheme.Spacing.md) {
+                        Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(iconColor)
+                            .frame(width: 32, height: 32)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(titleColor)
-                            .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
-                            .lineLimit(2)
-                        Text(detailText)
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                            .lineLimit(2)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(titleColor)
+                                .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
+                                .lineLimit(2)
+                            Text(detailText)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(2)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.sm)
                     }
-
-                    Spacer(minLength: AppTheme.Spacing.sm)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isReadOnly)
-
-            if !isReadOnly {
-                Button(action: excludeAction) {
-                    Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
+                .disabled(isReadOnly)
+
+                FundingChecklistBreakdownToggle(isExpanded: $isBreakdownExpanded, itemName: item.name)
+
+                if !isReadOnly {
+                    Button(action: excludeAction) {
+                        Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
+                }
+            }
+
+            if isBreakdownExpanded {
+                FundingChecklistBreakdownList(items: item.breakdown)
             }
         }
         .opacity(isReadOnly ? 0.72 : 1)
@@ -1469,12 +1480,30 @@ struct IncomeBreakdownView: View {
     private var costSummary: PayPeriodCostSummary {
         PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
     }
+    private var activePaychecks: [Paycheck] {
+        snapshot.paychecks
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+    private var activeOneOffIncomes: [OneOffIncome] {
+        snapshot.oneOffIncomes
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.date > $1.date }
+    }
+    private var activePayPeriods: [PayPeriod] {
+        snapshot.payPeriods
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.payday > $1.payday }
+    }
+    private var hasDeletableIncome: Bool {
+        !activePaychecks.isEmpty || !activeOneOffIncomes.isEmpty || !activePayPeriods.isEmpty
+    }
 
     var body: some View {
         DashboardBreakdownScaffold(
             title: "Income",
             subtitle: "Paycheck inputs, pay periods, and period money left.",
-            toolbarMode: .editDone(isEditing: editMode.isEditing) {
+            toolbarMode: .editDone(isEditing: editMode.isEditing, canEdit: hasDeletableIncome) {
                 toggleEditMode()
             }
         ) {
@@ -1499,22 +1528,32 @@ struct IncomeBreakdownView: View {
 
     private var paycheckInputsSection: some View {
         IncomeExpandableSection(title: "Paycheck inputs", isExpanded: $isPaycheckInputsExpanded) {
-            if snapshot.paychecks.isEmpty {
+            if activePaychecks.isEmpty {
                 AppCard { EmptyStateView(title: "No paycheck inputs", message: "Saved paycheck plans will appear here.", systemImage: "sterlingsign.circle") }
             } else {
                 VStack(spacing: AppTheme.Spacing.md) {
-                    ForEach(snapshot.paychecks.sorted { $0.createdAt > $1.createdAt }, id: \.id) { paycheck in
+                    ForEach(activePaychecks, id: \.id) { paycheck in
                         let paydayLabel = period(for: paycheck).map { FinanceEngine.formatPaydayLabel($0.payday) } ?? "No linked period"
-                        NavigationLink {
-                            PaycheckDetailView(store: store, paycheck: paycheck, presentation: .push)
-                        } label: {
+                        if editMode.isEditing {
                             PaycheckInputRow(
                                 paydayLabel: paydayLabel,
-                                amountLabel: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+                                amountLabel: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence),
+                                onDelete: {
+                                    store.deletePaycheck(id: paycheck.id)
+                                }
                             )
+                        } else {
+                            NavigationLink {
+                                PaycheckDetailView(store: store, paycheck: paycheck, presentation: .push)
+                            } label: {
+                                PaycheckInputRow(
+                                    paydayLabel: paydayLabel,
+                                    amountLabel: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open paycheck \(paydayLabel)")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Open paycheck \(paydayLabel)")
                     }
                 }
             }
@@ -1523,11 +1562,7 @@ struct IncomeBreakdownView: View {
 
     private var oneOffIncomeSection: some View {
         IncomeExpandableSection(title: "One-off income", isExpanded: $isOneOffIncomeExpanded) {
-            let incomes = snapshot.oneOffIncomes
-                .filter { $0.deletedAt == nil }
-                .sorted { $0.date > $1.date }
-
-            if incomes.isEmpty {
+            if activeOneOffIncomes.isEmpty {
                 AppCard {
                     EmptyStateView(
                         title: "No one-off income",
@@ -1537,19 +1572,31 @@ struct IncomeBreakdownView: View {
                 }
             } else {
                 VStack(spacing: AppTheme.Spacing.md) {
-                    ForEach(incomes, id: \.id) { income in
-                        NavigationLink {
-                            OneOffIncomeDetailView(store: store, income: income)
-                        } label: {
+                    ForEach(activeOneOffIncomes, id: \.id) { income in
+                        if editMode.isEditing {
                             OneOffIncomeRow(
                                 name: income.name,
                                 dateLabel: FinanceEngine.formatPaydayLabel(income.date),
                                 periodLabel: period(for: income).map { FinanceEngine.formatPaydayLabel($0.payday) },
-                                amountLabel: MoneyParser.formatPence(income.amountPence)
+                                amountLabel: MoneyParser.formatPence(income.amountPence),
+                                onDelete: {
+                                    _ = store.deleteOneOffIncome(id: income.id)
+                                }
                             )
+                        } else {
+                            NavigationLink {
+                                OneOffIncomeDetailView(store: store, income: income)
+                            } label: {
+                                OneOffIncomeRow(
+                                    name: income.name,
+                                    dateLabel: FinanceEngine.formatPaydayLabel(income.date),
+                                    periodLabel: period(for: income).map { FinanceEngine.formatPaydayLabel($0.payday) },
+                                    amountLabel: MoneyParser.formatPence(income.amountPence)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open income \(income.name)")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Open income \(income.name)")
                     }
                 }
             }
@@ -1558,12 +1605,25 @@ struct IncomeBreakdownView: View {
 
     private var payPeriodsSection: some View {
         IncomeExpandableSection(title: "Pay periods", isExpanded: $isPayPeriodsExpanded) {
-            if snapshot.payPeriods.isEmpty {
+            if activePayPeriods.isEmpty {
                 AppCard { EmptyStateView(title: "No pay periods", message: "Create a paycheck plan to start tracking periods.", systemImage: "calendar") }
             } else {
-                ForEach(snapshot.payPeriods.sorted { $0.payday > $1.payday }) { period in
+                ForEach(activePayPeriods) { period in
                     AppCard {
-                        MetricRow(label: "Payday", value: FinanceEngine.formatPaydayLabel(period.payday))
+                        HStack(spacing: AppTheme.Spacing.sm) {
+                            MetricRow(label: "Payday", value: FinanceEngine.formatPaydayLabel(period.payday))
+
+                            if editMode.isEditing {
+                                DestructiveBadgeButton(
+                                    accessibilityLabel: "Delete pay period for \(FinanceEngine.formatPaydayLabel(period.payday))",
+                                    confirmationTitle: "Delete this pay period?",
+                                    confirmationMessage: "This removes the pay period, its linked paycheck inputs, and its pot allocations.",
+                                    action: {
+                                        store.deletePayPeriod(id: period.id)
+                                    }
+                                )
+                            }
+                        }
                         MetricRow(label: "Period", value: "\(FinanceEngine.formatPaydayLabel(period.startDate)) to \(FinanceEngine.formatPaydayLabel(period.endDate))")
                         MetricRow(label: "Next payday", value: FinanceEngine.formatPaydayLabel(period.nextPayday))
                         MetricRow(label: "Income", value: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period)), valueColor: AppTheme.Colors.success)
@@ -1642,6 +1702,7 @@ private struct IncomeExpandableSection<Content: View>: View {
 private struct PaycheckInputRow: View {
     var paydayLabel: String
     var amountLabel: String
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         AppCard {
@@ -1663,9 +1724,18 @@ private struct PaycheckInputRow: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
 
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                if let onDelete {
+                    DestructiveBadgeButton(
+                        accessibilityLabel: "Delete paycheck for \(paydayLabel)",
+                        confirmationTitle: "Delete this paycheck?",
+                        confirmationMessage: "This removes the paycheck, its linked pay period, and its pot allocations.",
+                        action: onDelete
+                    )
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
             }
             .contentShape(Rectangle())
         }
@@ -1677,6 +1747,7 @@ private struct OneOffIncomeRow: View {
     var dateLabel: String
     var periodLabel: String?
     var amountLabel: String
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         AppCard {
@@ -1707,9 +1778,18 @@ private struct OneOffIncomeRow: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
 
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                if let onDelete {
+                    DestructiveBadgeButton(
+                        accessibilityLabel: "Delete income \(name)",
+                        confirmationTitle: "Delete this income?",
+                        confirmationMessage: "This one-off income will be removed from your saved income.",
+                        action: onDelete
+                    )
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
             }
             .contentShape(Rectangle())
         }

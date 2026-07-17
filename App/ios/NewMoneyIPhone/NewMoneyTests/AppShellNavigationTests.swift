@@ -177,12 +177,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(AppTabNavigationStackPolicy.keepsTabRootScrollReset)
     }
 
-    func testActivityUsesToolbarTitleInsteadOfLargeTitle() {
-        XCTAssertEqual(AppNavigationTitleDisplayPolicy.style(for: .activity), .inline)
-        XCTAssertEqual(AppNavigationTitleDisplayPolicy.style(for: .home), .large)
-        XCTAssertEqual(AppNavigationTitleDisplayPolicy.style(for: .bills), .large)
-        XCTAssertEqual(AppNavigationTitleDisplayPolicy.style(for: .pots), .large)
-        XCTAssertEqual(AppNavigationTitleDisplayPolicy.style(for: .credit), .large)
+    func testTabsUseFixedToolbarTitles() {
+        XCTAssertTrue(AppTab.allCases.allSatisfy { AppNavigationTitleDisplayPolicy.style(for: $0) == .inline })
     }
 
     func testUniversalAddMenuIncludesSupportedAddFlows() {
@@ -282,8 +278,10 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AccountsLayoutPolicy.editMenuPresentation, "nativeSwiftUIMenu")
         XCTAssertEqual(AccountsLayoutPolicy.avatarSourcePresentation, "nativeSwiftUIMenu")
         XCTAssertEqual(AccountsLayoutPolicy.carouselInteraction, "directionalSwipeAutoAdvance")
-        XCTAssertEqual(AccountsLayoutPolicy.profileGraphMetric, "savedSpentTotals")
+        XCTAssertEqual(AccountsLayoutPolicy.profileGraphMetric, "monthlySavedSpentActivity")
         XCTAssertFalse(AccountsLayoutPolicy.profileGraphShowsMetricPills)
+        XCTAssertFalse(AccountsLayoutPolicy.profileGraphUsesContinuousAnimation)
+        XCTAssertFalse(AccountsLayoutPolicy.carouselUsesVerticalLift)
         XCTAssertEqual(AccountsLayoutPolicy.profilePulseCardCornerRadius, AppTheme.Radius.md)
         XCTAssertFalse(AccountsLayoutPolicy.showsBottomAccountList)
     }
@@ -310,6 +308,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AppEditDoneToolbarPolicy.editTitle, "Edit")
         XCTAssertEqual(AppEditDoneToolbarPolicy.doneTitle, "Done")
         XCTAssertTrue(AppEditDoneToolbarPolicy.usesNativeToolbarContentSwap)
+        XCTAssertTrue(AppEditDoneToolbarPolicy.disablesEditWhenUnavailable)
         XCTAssertEqual(AppEditDoneToolbarPolicy.springResponse, 0.28, accuracy: 0.001)
         XCTAssertEqual(AppEditDoneToolbarPolicy.springDampingFraction, 0.86, accuracy: 0.001)
     }
@@ -378,6 +377,7 @@ final class AppShellNavigationTests: XCTestCase {
 
     func testPlusAddFormsUseCleanBoxedLayouts() {
         XCTAssertEqual(SpendingFormLayoutPolicy.accountPickerStyle, "selectionFieldBox")
+        XCTAssertEqual(SpendingFormLayoutPolicy.paymentMethods, [.income, .pot, .creditCard])
         XCTAssertTrue(AddBillFormLayoutPolicy.hidesNavigationDivider)
         XCTAssertEqual(AddBillFormLayoutPolicy.allowedFrequencies, [.weekly, .biweekly, .monthly, .yearly])
         XCTAssertFalse(AddBillFormLayoutPolicy.allowedFrequencies.contains(.once))
@@ -403,6 +403,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(CardsLayoutPolicy.activeCardExpandedUsesLazyGrid)
         XCTAssertTrue(CardsLayoutPolicy.activeCardViewAllPillEnabled)
         XCTAssertEqual(CardsLayoutPolicy.activeCardStackAnimation, "matchedGeometrySpring")
+        XCTAssertTrue(CardsLayoutPolicy.statementSummarySeparatesCurrentAndNextStatement)
+        XCTAssertFalse(CardsLayoutPolicy.statementSummaryShowsPaycheckImpact)
         XCTAssertEqual(DebtsLayoutPolicy.sections, [.summary, .activeDebts])
         XCTAssertFalse(DebtsLayoutPolicy.sections.map(\.rawValue).contains("addDebt"))
     }
@@ -422,6 +424,14 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistUsesExistingDerivedItems)
         XCTAssertEqual(BillsLayoutPolicy.yourBillsPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.takingSoonPresentation, "collapsibleDropdown")
+        XCTAssertEqual(BillsLayoutPolicy.overviewUpcomingPresentation, "collapsibleProgressiveLazyList")
+        XCTAssertEqual(BillsLayoutPolicy.overviewGroupsPresentation, "collapsibleDropdown")
+        XCTAssertEqual(BillsLayoutPolicy.upcomingSchedulePageMonths, 12)
+        XCTAssertTrue(BillsLayoutPolicy.upcomingScheduleLoadsOnlyWhenExpanded)
+        XCTAssertEqual(BillsLayoutPolicy.collapsibleHeaderStyle, "compactBorderlessDisclosure")
+        XCTAssertGreaterThanOrEqual(BillsLayoutPolicy.collapsibleHeaderMinimumHeight, 44)
+        XCTAssertLessThanOrEqual(BillsLayoutPolicy.collapsibleToggleDuration, 0.2)
+        XCTAssertTrue(BillsLayoutPolicy.collapsibleUsesReduceMotionSafeAnimation)
         XCTAssertTrue(BillsLayoutPolicy.yourBillsAppearsAboveTakingSoon)
         XCTAssertTrue(BillsLayoutPolicy.billRowsOpenEditScreen)
         XCTAssertEqual(BillsLayoutPolicy.editBillTitle, "Edit Bill")
@@ -544,6 +554,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.spendingDetailToolbarMode, "editDone")
         XCTAssertTrue(ActivityLayoutPolicy.incomeDetailUsesNativeToolbarMorph)
         XCTAssertTrue(ActivityLayoutPolicy.spendingDetailUsesNativeToolbarMorph)
+        XCTAssertTrue(ActivityLayoutPolicy.incomeEditRequiresDeletableItem)
+        XCTAssertTrue(ActivityLayoutPolicy.spendingEditRequiresDeletableItem)
+        XCTAssertTrue(ActivityLayoutPolicy.editDeleteBadgeRequiresConfirmation)
 
         let period = PayPeriod(
             id: "period-july",

@@ -248,7 +248,7 @@ enum FinanceEngine {
     }
 
     static func getDailySafeToSpendPence(spendablePence: Int, today: String, endDate: String) -> Int {
-        spendablePence / getDaysInclusive(startDate: today, endDate: endDate)
+        max(0, spendablePence) / getDaysInclusive(startDate: today, endDate: endDate)
     }
 
     static func isIsoDate(_ value: String) -> Bool {

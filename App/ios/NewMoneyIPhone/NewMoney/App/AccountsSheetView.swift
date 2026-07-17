@@ -1,3 +1,4 @@
+import Charts
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -30,8 +31,10 @@ struct AccountsLayoutPolicy {
     static let editMenuPresentation = "nativeSwiftUIMenu"
     static let avatarSourcePresentation = "nativeSwiftUIMenu"
     static let carouselInteraction = "directionalSwipeAutoAdvance"
-    static let profileGraphMetric = "savedSpentTotals"
+    static let profileGraphMetric = "monthlySavedSpentActivity"
     static let profileGraphShowsMetricPills = false
+    static let profileGraphUsesContinuousAnimation = false
+    static let carouselUsesVerticalLift = false
     static var profilePulseCardCornerRadius: CGFloat { AppTheme.Radius.md }
 }
 
@@ -122,6 +125,7 @@ struct AccountsSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Accounts")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -198,9 +202,7 @@ struct AccountsSheetView: View {
     }
 
     private func selectAccount(_ accountId: String) {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-            selectedAccountId = accountId
-        }
+        selectedAccountId = accountId
     }
 
     private func switchToAccountIfNeeded(_ accountId: String?) {
@@ -514,24 +516,97 @@ private struct AccountProfileDisplayData {
         canCreateMoreAccounts ? "\(PlannerAccountCollection.maxAccounts - accountCount) spaces open" : "3 profiles live"
     }
 
-    var savedTotalPence: Int {
-        account.snapshot.pots
-            .filter { !$0.archived && $0.deletedAt == nil }
-            .reduce(0) { total, pot in
-                total + max(0, pot.balancePence)
-            }
+    var chartMonthLabels: [String] {
+        chartMonths.map { $0.label }
     }
 
-    var spentTotalPence: Int {
-        account.snapshot.transactions
-            .filter { $0.deletedAt == nil && $0.type == .spending }
-            .reduce(0) { total, transaction in
-                total + abs(transaction.amountPence)
-            }
+    var monthlySavedPence: [Int] {
+        let activePotIDs = Set(
+            account.snapshot.pots
+                .filter { !$0.archived && $0.deletedAt == nil }
+                .map(\.id)
+        )
+        let payPeriodDates = account.snapshot.payPeriods.reduce(into: [String: String]()) { dates, period in
+            dates[period.id] = period.payday
+        }
+
+        let allocationValues = chartMonths.map { month in
+            account.snapshot.potAllocations
+                .filter { allocation in
+                    allocation.deletedAt == nil &&
+                        activePotIDs.contains(allocation.potId) &&
+                        monthKey(
+                            allocation.transactionDate ??
+                                payPeriodDates[allocation.payPeriodId] ??
+                                allocation.createdAt
+                        ) == month.key
+                }
+                .reduce(0) { $0 + max(0, $1.amountPence) }
+        }
+
+        guard allocationValues.allSatisfy({ $0 == 0 }) else {
+            return allocationValues
+        }
+
+        return chartMonths.map { month in
+            account.snapshot.transactions
+                .filter {
+                    $0.deletedAt == nil &&
+                        $0.type == .allocation &&
+                        monthKey($0.date) == month.key
+                }
+                .reduce(0) { $0 + max(0, abs($1.amountPence)) }
+        }
     }
 
-    var hasSavedOrSpentTotal: Bool {
-        savedTotalPence > 0 || spentTotalPence > 0
+    var monthlySpentPence: [Int] {
+        chartMonths.map { month in
+            account.snapshot.transactions
+                .filter {
+                    $0.deletedAt == nil &&
+                        $0.type == .spending &&
+                        monthKey($0.date) == month.key
+                }
+                .reduce(0) { $0 + abs($1.amountPence) }
+        }
+    }
+
+    var chartHasActivity: Bool {
+        monthlySavedPence.contains(where: { $0 > 0 }) || monthlySpentPence.contains(where: { $0 > 0 })
+    }
+
+    var chartSavedTotalPence: Int {
+        monthlySavedPence.reduce(0, +)
+    }
+
+    var chartSpentTotalPence: Int {
+        monthlySpentPence.reduce(0, +)
+    }
+
+    private var chartMonths: [(key: String, label: String)] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let today = FinanceEngine.parseDate(FinanceEngine.getAppTodayIso(settings: account.snapshot.settings))
+        let components = calendar.dateComponents([.year, .month], from: today)
+
+        guard let currentMonth = calendar.date(from: components) else {
+            return []
+        }
+
+        return (-5...0).compactMap { offset in
+            guard let date = calendar.date(byAdding: .month, value: offset, to: currentMonth) else {
+                return nil
+            }
+
+            return (
+                key: String(FinanceEngine.toIsoDate(date).prefix(7)),
+                label: date.formatted(.dateTime.month(.abbreviated))
+            )
+        }
+    }
+
+    private func monthKey(_ isoString: String) -> String {
+        String(isoString.prefix(7))
     }
 
     private enum AccountDateFormat {
@@ -614,7 +689,7 @@ private struct AccountProfilePulseCard: View {
                         .font(.headline.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.primaryText)
 
-                    Text(profile.hasSavedOrSpentTotal ? "This account's live totals" : "Created \(profile.createdDateLabel)")
+                    Text(profile.chartHasActivity ? "Monthly account activity · last 6 months" : "Your six-month trend will build here")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
@@ -622,8 +697,22 @@ private struct AccountProfilePulseCard: View {
                 Spacer(minLength: AppTheme.Spacing.sm)
             }
 
+            HStack(spacing: AppTheme.Spacing.lg) {
+                AccountProfileGraphMetric(
+                    label: "Put aside",
+                    value: MoneyParser.formatPence(profile.chartSavedTotalPence),
+                    color: AppTheme.Colors.neonMoneyUp
+                )
+
+                AccountProfileGraphMetric(
+                    label: "Spent",
+                    value: MoneyParser.formatPence(profile.chartSpentTotalPence),
+                    color: AppTheme.Colors.neonMoneyDown
+                )
+            }
+
             AccountProfileLineGraph(profile: profile)
-                .frame(height: 112)
+                .frame(height: 164)
 
             AccountProfileMiniTimeline(profile: profile)
         }
@@ -650,112 +739,115 @@ private struct AccountProfilePulseCard: View {
 
 private struct AccountProfileLineGraph: View {
     let profile: AccountProfileDisplayData
-    @State private var drawProgress: CGFloat = 0
-
-    private var savedValues: [Double] {
-        normalizedValues(for: profile.savedTotalPence)
-    }
-
-    private var spentValues: [Double] {
-        normalizedValues(for: profile.spentTotalPence)
-    }
-
-    private var dominantValues: [Double] {
-        profile.savedTotalPence >= profile.spentTotalPence ? savedValues : spentValues
-    }
 
     var body: some View {
-        VStack(spacing: AppTheme.Spacing.sm) {
-            GeometryReader { proxy in
-                let size = proxy.size
-                let savedEndPoint = linePoint(for: savedValues.count - 1, value: savedValues.last ?? 0, values: savedValues, size: size)
-                let spentEndPoint = linePoint(for: spentValues.count - 1, value: spentValues.last ?? 0, values: spentValues, size: size)
+        let monthLabels = profile.chartMonthLabels
+        let savedValues = profile.monthlySavedPence
+        let spentValues = profile.monthlySpentPence
 
-                ZStack {
-                    VStack(spacing: 0) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            AppTheme.Colors.border.opacity(0.32)
-                                .frame(height: 1)
-                            Spacer()
-                        }
-                    }
-                    .padding(.vertical, 12)
+        Chart {
+            ForEach(Array(monthLabels.indices), id: \.self) { index in
+                AreaMark(
+                    x: .value("Month", index),
+                    yStart: .value("Baseline", 0),
+                    yEnd: .value("Put aside", savedValues[index])
+                )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            AppTheme.Colors.neonMoneyUp.opacity(0.2),
+                            AppTheme.Colors.neonMoneyUp.opacity(0.02)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
 
-                    if profile.hasSavedOrSpentTotal {
-                        AccountProfileLineAreaShape(values: dominantValues)
-                            .trim(from: 0, to: drawProgress)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        dominantColor.opacity(0.18),
-                                        dominantColor.opacity(0.08),
-                                        AppTheme.Colors.cardBackground.opacity(0)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                    }
+                LineMark(
+                    x: .value("Month", index),
+                    y: .value("Put aside", savedValues[index])
+                )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(AppTheme.Colors.neonMoneyUp)
+                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
 
-                    AccountProfileLineShape(values: savedValues)
-                        .trim(from: 0, to: drawProgress)
-                        .stroke(
-                            AppTheme.Colors.neonMoneyUp,
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
-                        )
-                        .shadow(color: profile.savedTotalPence > 0 ? AppTheme.Colors.neonMoneyUp.opacity(0.34) : .clear, radius: 10, y: 5)
+                LineMark(
+                    x: .value("Month", index),
+                    y: .value("Spent", spentValues[index])
+                )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(AppTheme.Colors.neonMoneyDown)
+                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
 
-                    AccountProfileLineShape(values: spentValues)
-                        .trim(from: 0, to: drawProgress)
-                        .stroke(
-                            AppTheme.Colors.neonMoneyDown,
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
-                        )
-                        .shadow(color: profile.spentTotalPence > 0 ? AppTheme.Colors.neonMoneyDown.opacity(0.34) : .clear, radius: 10, y: 5)
+                PointMark(
+                    x: .value("Month", index),
+                    y: .value("Put aside", savedValues[index])
+                )
+                .foregroundStyle(AppTheme.Colors.neonMoneyUp)
+                .symbolSize(index == monthLabels.indices.last ? 34 : 16)
 
-                    if drawProgress > 0.96 {
-                        if profile.savedTotalPence > 0 {
-                            AccountProfilePulseMarker(color: AppTheme.Colors.neonMoneyUp)
-                                .position(savedEndPoint)
-                        }
-                        if profile.spentTotalPence > 0 {
-                            AccountProfilePulseMarker(color: AppTheme.Colors.neonMoneyDown)
-                                .position(spentEndPoint)
-                        }
+                PointMark(
+                    x: .value("Month", index),
+                    y: .value("Spent", spentValues[index])
+                )
+                .foregroundStyle(AppTheme.Colors.neonMoneyDown)
+                .symbolSize(index == monthLabels.indices.last ? 34 : 16)
+            }
+        }
+        .chartLegend(.hidden)
+        .chartYScale(domain: 0...chartUpperBoundPence(savedValues: savedValues, spentValues: spentValues))
+        .chartXAxis {
+            AxisMarks(values: Array(monthLabels.indices)) { value in
+                AxisTick(stroke: StrokeStyle(lineWidth: 1))
+                    .foregroundStyle(AppTheme.Colors.border.opacity(0.75))
+                AxisValueLabel {
+                    if let index = value.as(Int.self), monthLabels.indices.contains(index) {
+                        Text(monthLabels[index])
+                            .font(.caption2.weight(index == monthLabels.indices.last ? .bold : .medium))
+                            .foregroundStyle(index == monthLabels.indices.last ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
                     }
                 }
             }
         }
-        .onAppear {
-            drawProgress = 0
-
-            withAnimation(.easeOut(duration: 1.05).delay(0.08)) {
-                drawProgress = 1
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.75, dash: [3, 4]))
+                    .foregroundStyle(AppTheme.Colors.border.opacity(0.45))
+                AxisValueLabel {
+                    if let amountPence = value.as(Int.self) {
+                        Text(compactMoney(amountPence))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    }
+                }
             }
         }
-    }
-
-    private var dominantColor: Color {
-        profile.savedTotalPence >= profile.spentTotalPence ? AppTheme.Colors.neonMoneyUp : AppTheme.Colors.neonMoneyDown
-    }
-
-    private func normalizedValues(for amountPence: Int) -> [Double] {
-        let maxPence = max(profile.savedTotalPence, profile.spentTotalPence, 1)
-        let ratio = Double(amountPence) / Double(maxPence)
-        return [0, 0.18, 0.38, 0.62, 0.82, 1].map { progress in
-            min(1, max(0, ratio * progress))
+        .chartPlotStyle { plotArea in
+            plotArea
+                .background(AppTheme.Colors.elevatedSurface.opacity(0.3))
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
         }
+        .accessibilityLabel("Money put aside and spent over the last six months")
+        .accessibilityValue(
+            "Put aside \(MoneyParser.formatPence(profile.chartSavedTotalPence)); spent \(MoneyParser.formatPence(profile.chartSpentTotalPence))"
+        )
     }
 
-    private func linePoint(for index: Int, value: Double, values: [Double], size: CGSize) -> CGPoint {
-        let horizontalPadding: CGFloat = 24
-        let verticalPadding: CGFloat = 12
-        let usableWidth = max(size.width - (horizontalPadding * 2), 1)
-        let usableHeight = max(size.height - (verticalPadding * 2), 1)
-        let denominator = max(values.count - 1, 1)
-        let x = horizontalPadding + (CGFloat(index) / CGFloat(denominator) * usableWidth)
-        let y = verticalPadding + ((1 - CGFloat(value)) * usableHeight)
-        return CGPoint(x: x, y: y)
+    private func chartUpperBoundPence(savedValues: [Int], spentValues: [Int]) -> Int {
+        let largestValue = max(
+            savedValues.max() ?? 0,
+            spentValues.max() ?? 0
+        )
+        return max(100, Int((Double(largestValue) * 1.18).rounded(.up)))
+    }
+
+    private func compactMoney(_ amountPence: Int) -> String {
+        let pounds = Double(amountPence) / 100
+        if pounds >= 1_000 {
+            return String(format: "£%.1fk", pounds / 1_000)
+        }
+        return String(format: "£%.0f", pounds)
     }
 }
 
@@ -781,137 +873,7 @@ private struct AccountProfileGraphMetric: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
-        .padding(.horizontal, AppTheme.Spacing.sm)
-        .padding(.vertical, 7)
         .frame(maxWidth: .infinity)
-        .background(color.opacity(0.1), in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(color.opacity(0.18), lineWidth: 1)
-        )
-    }
-}
-
-private struct AccountProfileLineShape: Shape {
-    let values: [Double]
-
-    func path(in rect: CGRect) -> Path {
-        guard let firstValue = values.first else {
-            return Path()
-        }
-
-        let points = chartPoints(in: rect)
-        var path = Path()
-        path.move(to: points.first ?? CGPoint(x: rect.minX, y: rect.midY))
-
-        for index in points.indices.dropFirst() {
-            let previous = points[index - 1]
-            let current = points[index]
-            let controlX = previous.x + ((current.x - previous.x) * 0.5)
-            path.addCurve(
-                to: current,
-                control1: CGPoint(x: controlX, y: previous.y),
-                control2: CGPoint(x: controlX, y: current.y)
-            )
-        }
-
-        if values.count == 1 {
-            path.addLine(to: CGPoint(x: rect.maxX, y: yPosition(for: firstValue, in: rect)))
-        }
-
-        return path
-    }
-
-    private func chartPoints(in rect: CGRect) -> [CGPoint] {
-        let horizontalPadding: CGFloat = 24
-        let usableWidth = max(rect.width - (horizontalPadding * 2), 1)
-        let denominator = max(values.count - 1, 1)
-
-        return values.enumerated().map { index, value in
-            CGPoint(
-                x: rect.minX + horizontalPadding + (CGFloat(index) / CGFloat(denominator) * usableWidth),
-                y: yPosition(for: value, in: rect)
-            )
-        }
-    }
-
-    private func yPosition(for value: Double, in rect: CGRect) -> CGFloat {
-        let verticalPadding: CGFloat = 12
-        let usableHeight = max(rect.height - (verticalPadding * 2), 1)
-        return rect.minY + verticalPadding + ((1 - CGFloat(value)) * usableHeight)
-    }
-}
-
-private struct AccountProfileLineAreaShape: Shape {
-    let values: [Double]
-
-    func path(in rect: CGRect) -> Path {
-        let points = chartPoints(in: rect)
-        guard let first = points.first, let last = points.last else {
-            return Path()
-        }
-
-        var path = Path()
-        path.move(to: CGPoint(x: first.x, y: rect.maxY - 10))
-        path.addLine(to: first)
-
-        for index in points.indices.dropFirst() {
-            let previous = points[index - 1]
-            let current = points[index]
-            let controlX = previous.x + ((current.x - previous.x) * 0.5)
-            path.addCurve(
-                to: current,
-                control1: CGPoint(x: controlX, y: previous.y),
-                control2: CGPoint(x: controlX, y: current.y)
-            )
-        }
-
-        path.addLine(to: CGPoint(x: last.x, y: rect.maxY - 10))
-        path.closeSubpath()
-        return path
-    }
-
-    private func chartPoints(in rect: CGRect) -> [CGPoint] {
-        let horizontalPadding: CGFloat = 24
-        let verticalPadding: CGFloat = 12
-        let usableWidth = max(rect.width - (horizontalPadding * 2), 1)
-        let usableHeight = max(rect.height - (verticalPadding * 2), 1)
-        let denominator = max(values.count - 1, 1)
-
-        return values.enumerated().map { index, value in
-            CGPoint(
-                x: rect.minX + horizontalPadding + (CGFloat(index) / CGFloat(denominator) * usableWidth),
-                y: rect.minY + verticalPadding + ((1 - CGFloat(value)) * usableHeight)
-            )
-        }
-    }
-}
-
-private struct AccountProfilePulseMarker: View {
-    let color: Color
-    @State private var isPulsing = false
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(color.opacity(0.28), lineWidth: 1)
-                .frame(width: isPulsing ? 34 : 16, height: isPulsing ? 34 : 16)
-                .opacity(isPulsing ? 0 : 1)
-
-            Circle()
-                .fill(color)
-                .frame(width: 11, height: 11)
-                .shadow(color: color.opacity(0.64), radius: 10, y: 3)
-
-            Circle()
-                .fill(AppTheme.Colors.controlText.opacity(0.9))
-                .frame(width: 4, height: 4)
-        }
-        .onAppear {
-            withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
-                isPulsing = true
-            }
-        }
     }
 }
 
@@ -1064,7 +1026,7 @@ private struct AccountsCarouselView: View {
                     .frame(width: 138)
                     .scaleEffect(0.84 + (0.24 * prominence))
                     .opacity(0.42 + (0.58 * prominence))
-                    .offset(x: relativePosition * step, y: 12 - (16 * prominence))
+                    .offset(x: relativePosition * step)
                     .zIndex(Double(prominence))
                     .allowsHitTesting(abs(relativePosition) < 1.15)
                 }
@@ -1072,7 +1034,7 @@ private struct AccountsCarouselView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .contentShape(Rectangle())
             .simultaneousGesture(carouselSwipeGesture(step: step), including: .all)
-            .animation(.spring(response: 0.34, dampingFraction: 0.82), value: selectedAccountId)
+            .animation(.snappy(duration: 0.28), value: selectedAccountId)
         }
     }
 

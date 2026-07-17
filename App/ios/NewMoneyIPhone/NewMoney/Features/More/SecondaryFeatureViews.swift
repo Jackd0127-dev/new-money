@@ -2,13 +2,14 @@ import SwiftUI
 
 enum SpendingFormLayoutPolicy {
     static let accountPickerStyle = "selectionFieldBox"
+    static let paymentMethods: [PaymentMethod] = [.income, .pot, .creditCard]
 }
 
 struct SpendingView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
-    @State private var paymentMethod: PaymentMethod = .pot
+    @State private var paymentMethod: PaymentMethod = .income
     @State private var selectedPotId = ""
     @State private var selectedCardId = ""
     @State private var amount = ""
@@ -18,18 +19,23 @@ struct SpendingView: View {
     var body: some View {
         ScreenScaffold(
             title: "Spending",
-            subtitle: "Record pot or credit-card spend with period links.",
+            subtitle: "",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
             AppCard(glow: true) {
                 Picker("Route", selection: $paymentMethod) {
+                    Text(PaymentMethod.income.displayName).tag(PaymentMethod.income)
                     Text("Pot").tag(PaymentMethod.pot)
-                    Text("Card").tag(PaymentMethod.creditCard)
+                    Text("Credit card").tag(PaymentMethod.creditCard)
                 }
                 .pickerStyle(.segmented)
 
-                if paymentMethod == .pot {
+                if paymentMethod == .income {
+                    Text("Deduct this debit-card spend directly from money left in the current pay period.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                } else if paymentMethod == .pot {
                     SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
                         ForEach(store.activePots) { pot in
                             Button(pot.name) { selectedPotId = pot.id }
@@ -69,7 +75,15 @@ struct SpendingView: View {
     }
 
     private var canSubmit: Bool {
-        MoneyParser.parsePoundsToPence(amount) > 0 && (paymentMethod == .pot ? !selectedPotId.isEmpty : !selectedCardId.isEmpty)
+        guard MoneyParser.parsePoundsToPence(amount) > 0 else { return false }
+        return switch paymentMethod {
+        case .income:
+            true
+        case .pot:
+            !selectedPotId.isEmpty
+        case .creditCard:
+            !selectedCardId.isEmpty
+        }
     }
 
     private var selectedPotName: String {
@@ -261,12 +275,17 @@ private struct SpendingTransactionDetailView: View {
                 AppCard(glow: true) {
                     SectionTitle("Spending details")
                     Picker("Route", selection: $paymentMethod) {
+                        Text(PaymentMethod.income.displayName).tag(PaymentMethod.income)
                         Text("Pot").tag(PaymentMethod.pot)
-                        Text("Card").tag(PaymentMethod.creditCard)
+                        Text("Credit card").tag(PaymentMethod.creditCard)
                     }
                     .pickerStyle(.segmented)
 
-                    if paymentMethod == .pot {
+                    if paymentMethod == .income {
+                        Text("This spend is deducted directly from money left in its pay period.")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    } else if paymentMethod == .pot {
                         Picker("Pot", selection: $selectedPotId) {
                             Text("No pot").tag("")
                             ForEach(selectablePots) { pot in
@@ -310,7 +329,7 @@ private struct SpendingTransactionDetailView: View {
         }
         .premiumScreenBackground()
         .navigationTitle("Edit spending")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if selectedPotId.isEmpty {
                 selectedPotId = selectablePots.first?.id ?? ""
@@ -349,12 +368,24 @@ private struct SpendingTransactionDetailView: View {
     }
 
     private var canSave: Bool {
-        MoneyParser.parsePoundsToPence(amount) > 0 && (paymentMethod == .pot ? !selectedPotId.isEmpty : !selectedCardId.isEmpty)
+        guard MoneyParser.parsePoundsToPence(amount) > 0 else { return false }
+        return switch paymentMethod {
+        case .income:
+            true
+        case .pot:
+            !selectedPotId.isEmpty
+        case .creditCard:
+            !selectedCardId.isEmpty
+        }
     }
 
 }
 
 private func spendingRouteLabel(for transaction: Transaction, snapshot: PlannerSnapshot) -> String {
+    if transaction.paymentMethod == .income {
+        return PaymentMethod.income.displayName
+    }
+
     if transaction.paymentMethod == .creditCard || transaction.creditCardId != nil {
         guard let cardId = transaction.creditCardId else { return "Credit card" }
         return snapshot.creditCards.first { $0.id == cardId }?.name ?? "Credit card"
@@ -364,7 +395,7 @@ private func spendingRouteLabel(for transaction: Transaction, snapshot: PlannerS
         return snapshot.pots.first { $0.id == potId }?.name ?? "Pot"
     }
 
-    return "Unlinked"
+    return "Money left"
 }
 
 struct SpendingSheetView: View {
@@ -721,6 +752,14 @@ enum BillsLayoutPolicy {
     static let fundingChecklistUsesExistingDerivedItems = true
     static let yourBillsPresentation = "collapsibleDropdown"
     static let takingSoonPresentation = "collapsibleDropdown"
+    static let overviewUpcomingPresentation = "collapsibleProgressiveLazyList"
+    static let overviewGroupsPresentation = "collapsibleDropdown"
+    static let upcomingSchedulePageMonths = 12
+    static let upcomingScheduleLoadsOnlyWhenExpanded = true
+    static let collapsibleHeaderStyle = "compactBorderlessDisclosure"
+    static let collapsibleHeaderMinimumHeight: CGFloat = 52
+    static let collapsibleToggleDuration = 0.16
+    static let collapsibleUsesReduceMotionSafeAnimation = true
     static let yourBillsAppearsAboveTakingSoon = true
     static let billRowsOpenEditScreen = true
     static let editBillTitle = "Edit Bill"
@@ -750,7 +789,7 @@ struct BillsView: View {
     @State private var selectedGroupId: String?
     @State private var selectedBillIdForEdit: String?
     @State private var isYourBillsExpanded = true
-    @State private var isTakingSoonExpanded = true
+    @State private var isUpcomingExpanded = false
     @State private var isNewGroupPresented = false
     @State private var newGroupName = ""
     @State private var selectedOccurrenceForAdjustment: RecurringPaymentOccurrence?
@@ -1035,25 +1074,16 @@ struct BillsView: View {
 
     private var upcomingSection: some View {
         BillsCollapsibleSection(
-            title: "Taking soon",
+            title: "Upcoming",
             subtitle: upcomingSectionSubtitle,
-            isExpanded: $isTakingSoonExpanded
+            isExpanded: $isUpcomingExpanded
         ) {
-            if upcomingOccurrences.isEmpty {
-                AppCard {
-                    EmptyStateView(title: "No upcoming bills", message: "Bills with due dates will appear here.", systemImage: "calendar")
-                }
-            } else {
-                AppCard {
-                    ForEach(Array(upcomingOccurrences.prefix(6).enumerated()), id: \.element.id) { index, occurrence in
-                        BillsUpcomingRow(occurrence: occurrence, snapshot: store.snapshot) {
-                            selectedOccurrenceForAdjustment = occurrence
-                        }
-                        if index != min(upcomingOccurrences.count, 6) - 1 {
-                            AppDivider()
-                        }
-                    }
-                }
+            BillsProgressiveUpcomingList(
+                snapshot: store.snapshot,
+                payments: sortedBills,
+                todayIso: store.todayIso
+            ) { occurrence in
+                selectedOccurrenceForAdjustment = occurrence
             }
         }
     }
@@ -1096,12 +1126,7 @@ struct BillsView: View {
     }
 
     private var upcomingSectionSubtitle: String {
-        if upcomingOccurrences.isEmpty {
-            return "Nothing scheduled in the next 30 days"
-        }
-
-        let visibleCount = min(upcomingOccurrences.count, 6)
-        return "\(visibleCount) due soon"
+        "Next payments in date order"
     }
 
     private var activeBillCount: Int {
@@ -1382,58 +1407,66 @@ private struct BillsFundingChecklistRow: View {
     var action: () -> Void
     var excludeAction: () -> Void
     var adjustAction: () -> Void
+    @State private var isBreakdownExpanded = false
 
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            Button(action: action) {
-                HStack(spacing: AppTheme.Spacing.md) {
-                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(iconColor)
-                        .frame(width: 32, height: 32)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Button(action: action) {
+                    HStack(spacing: AppTheme.Spacing.md) {
+                        Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(iconColor)
+                            .frame(width: 32, height: 32)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(titleColor)
-                            .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
-                            .lineLimit(2)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(titleColor)
+                                .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
+                                .lineLimit(2)
 
-                        Text(detailText)
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                            .lineLimit(2)
+                            Text(detailText)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(2)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.sm)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                FundingChecklistBreakdownToggle(isExpanded: $isBreakdownExpanded, itemName: item.name)
+
+                if !isReadOnly {
+                    if canAdjustOccurrence {
+                        Button(action: adjustAction) {
+                            Image(systemName: "calendar.badge.exclamationmark")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                                .frame(width: 30, height: 30)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Check \(item.name) occurrence")
                     }
 
-                    Spacer(minLength: AppTheme.Spacing.sm)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isReadOnly)
-
-            if !isReadOnly {
-                if canAdjustOccurrence {
-                    Button(action: adjustAction) {
-                        Image(systemName: "calendar.badge.exclamationmark")
+                    Button(action: excludeAction) {
+                        Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                            .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
                             .frame(width: 30, height: 30)
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Check \(item.name) occurrence")
+                    .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
                 }
+            }
 
-                Button(action: excludeAction) {
-                    Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
+            if isBreakdownExpanded {
+                FundingChecklistBreakdownList(items: item.breakdown)
             }
         }
         .opacity(isReadOnly ? 0.72 : 1)
@@ -1502,11 +1535,13 @@ private struct BillsFundingChecklistRow: View {
 
 private struct BillsOverviewDetailView: View {
     @ObservedObject var store: PlannerStore
+    @State private var isUpcomingExpanded = false
+    @State private var isGroupsExpanded = false
 
     var body: some View {
         ScreenScaffold(
             title: "Bills",
-            subtitle: "Detailed view of bill totals, links, groups, and upcoming dates.",
+            subtitle: "",
             navigationMode: .inline,
             toolbarMode: .none
         ) {
@@ -1525,26 +1560,33 @@ private struct BillsOverviewDetailView: View {
                 MetricRow(label: "Ungrouped", value: "\(ungroupedBills.count)", valueColor: AppTheme.Colors.secondaryText)
             }
 
-            if !upcomingOccurrences.isEmpty {
-                SectionTitle("Upcoming")
-                AppCard {
-                    ForEach(Array(upcomingOccurrences.prefix(10).enumerated()), id: \.element.id) { index, occurrence in
-                        BillsUpcomingRow(occurrence: occurrence, snapshot: store.snapshot)
-                        if index != min(upcomingOccurrences.count, 10) - 1 {
-                            AppDivider()
-                        }
-                    }
-                }
+            BillsCollapsibleSection(
+                title: "Upcoming",
+                subtitle: upcomingSectionSubtitle,
+                isExpanded: $isUpcomingExpanded
+            ) {
+                BillsProgressiveUpcomingList(
+                    snapshot: store.snapshot,
+                    payments: sortedBills,
+                    todayIso: store.todayIso
+                )
             }
 
-            SectionTitle("Groups")
-            if groupSections.isEmpty {
-                AppCard {
-                    EmptyStateView(title: "No groups yet", message: "Create groups to organise subscriptions, home bills, card bills, and savings transfers.", systemImage: "folder")
-                }
-            } else {
-                ForEach(groupSections) { section in
-                    BillsOverviewGroupCard(section: section)
+            BillsCollapsibleSection(
+                title: "Groups",
+                subtitle: groupsSectionSubtitle,
+                isExpanded: $isGroupsExpanded
+            ) {
+                if groupSections.isEmpty {
+                    AppCard {
+                        EmptyStateView(title: "No groups yet", message: "Create groups to organise subscriptions, home bills, card bills, and savings transfers.", systemImage: "folder")
+                    }
+                } else {
+                    LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                        ForEach(groupSections) { section in
+                            BillsOverviewGroupCard(section: section)
+                        }
+                    }
                 }
             }
         }
@@ -1626,6 +1668,23 @@ private struct BillsOverviewDetailView: View {
 
     private var nextBillOccurrence: RecurringPaymentOccurrence? {
         upcomingOccurrences.first
+    }
+
+    private var upcomingSectionSubtitle: String {
+        guard let nextBillOccurrence else {
+            return "Future payments in date order"
+        }
+
+        return "Next \(billsFriendlyDate(nextBillOccurrence.dueDate)) · loads as you scroll"
+    }
+
+    private var groupsSectionSubtitle: String {
+        guard !groupSections.isEmpty else {
+            return "No groups yet"
+        }
+
+        let billCount = groupSections.reduce(0) { $0 + $1.payments.count }
+        return "\(groupSections.count) group\(groupSections.count == 1 ? "" : "s") · \(billCount) bill\(billCount == 1 ? "" : "s")"
     }
 
     private var upcomingOccurrences: [RecurringPaymentOccurrence] {
@@ -1725,26 +1784,24 @@ private struct BillsDisplaySection: Identifiable {
 }
 
 private struct BillsCollapsibleSection<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var title: String
     var subtitle: String
     @Binding var isExpanded: Bool
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            Button {
-                withAnimation(AppTheme.Animation.standard) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: AppTheme.Spacing.md) {
+        VStack(alignment: .leading, spacing: isExpanded ? AppTheme.Spacing.md : 0) {
+            Button(action: toggleExpansion) {
+                HStack(spacing: AppTheme.Spacing.sm) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title)
-                            .font(.headline.weight(.bold))
+                            .font(.title3)
+                            .bold()
                             .foregroundStyle(AppTheme.Colors.primaryText)
 
                         Text(subtitle)
-                            .font(.caption.weight(.semibold))
+                            .font(.subheadline)
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                             .lineLimit(1)
                     }
@@ -1752,29 +1809,38 @@ private struct BillsCollapsibleSection<Content: View>: View {
                     Spacer(minLength: AppTheme.Spacing.sm)
 
                     Image(systemName: "chevron.down")
-                        .font(.footnote.weight(.black))
-                        .foregroundStyle(AppTheme.Colors.accent)
-                        .frame(width: 32, height: 32)
-                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                        .font(.caption)
+                        .bold()
+                        .foregroundStyle(isExpanded ? AppTheme.Colors.accent : AppTheme.Colors.secondaryText)
+                        .frame(width: 44, height: 44)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
-                .padding(.horizontal, AppTheme.Spacing.md)
-                .frame(minHeight: 64)
-                .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+                .frame(minHeight: BillsLayoutPolicy.collapsibleHeaderMinimumHeight)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
-                    .stroke(AppTheme.Colors.border, lineWidth: 1)
-            )
+            .accessibilityLabel(title)
+            .accessibilityValue("\(isExpanded ? "Expanded" : "Collapsed"). \(subtitle)")
+            .accessibilityHint(isExpanded ? "Closes this section" : "Opens this section")
+            .overlay(alignment: .bottom) {
+                AppDivider()
+            }
 
             if isExpanded {
                 content
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
             }
         }
-        .animation(AppTheme.Animation.standard, value: isExpanded)
+    }
+
+    private func toggleExpansion() {
+        let animation = reduceMotion
+            ? Animation.linear(duration: BillsLayoutPolicy.collapsibleToggleDuration)
+            : Animation.easeOut(duration: BillsLayoutPolicy.collapsibleToggleDuration)
+
+        withAnimation(animation) {
+            isExpanded.toggle()
+        }
     }
 }
 
@@ -1874,6 +1940,105 @@ private struct BillsUpcomingRow: View {
                 .accessibilityLabel("Check (occurrence.payment.name) occurrence")
             }
         }
+    }
+}
+
+private struct BillsProgressiveUpcomingList: View {
+    var snapshot: PlannerSnapshot
+    var payments: [RecurringPayment]
+    var todayIso: String
+    var adjustAction: ((RecurringPaymentOccurrence) -> Void)? = nil
+    @State private var loadedPageCount = 1
+
+    var body: some View {
+        let occurrences = loadedOccurrences
+
+        if occurrences.isEmpty {
+            AppCard {
+                EmptyStateView(
+                    title: "No upcoming bills",
+                    message: "Active bills with future due dates will appear here.",
+                    systemImage: "calendar"
+                )
+            }
+        } else {
+            AppCard {
+                LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    ForEach(occurrences) { occurrence in
+                        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                            BillsUpcomingRow(
+                                occurrence: occurrence,
+                                snapshot: snapshot,
+                                adjustAction: adjustmentAction(for: occurrence)
+                            )
+
+                            if occurrence.id != occurrences.last?.id {
+                                AppDivider()
+                            }
+                        }
+                        .onAppear {
+                            loadNextPageIfNeeded(after: occurrence, visibleOccurrences: occurrences)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var loadedOccurrences: [RecurringPaymentOccurrence] {
+        PlannerDerivedData.resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: activePayments,
+            startDate: todayIso,
+            endDate: loadedThroughDate
+        )
+        .sorted { lhs, rhs in
+            if lhs.dueDate == rhs.dueDate {
+                return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
+            }
+            return lhs.dueDate < rhs.dueDate
+        }
+    }
+
+    private var activePayments: [RecurringPayment] {
+        payments.filter { $0.deletedAt == nil && $0.active }
+    }
+
+    private var loadedThroughDate: String {
+        let pagedEndDate = PlannerDerivedData.addIsoMonthsClamped(
+            date: todayIso,
+            months: loadedPageCount * BillsLayoutPolicy.upcomingSchedulePageMonths
+        )
+        let finalOneOffDate = activePayments
+            .filter { $0.frequency == .once }
+            .compactMap(\.dueDate)
+            .filter { $0 >= todayIso }
+            .max()
+
+        return max(pagedEndDate, finalOneOffDate ?? pagedEndDate)
+    }
+
+    private var hasOpenEndedSchedule: Bool {
+        activePayments.contains { $0.frequency != .once }
+    }
+
+    private func adjustmentAction(for occurrence: RecurringPaymentOccurrence) -> (() -> Void)? {
+        guard let adjustAction else { return nil }
+        return {
+            adjustAction(occurrence)
+        }
+    }
+
+    private func loadNextPageIfNeeded(
+        after occurrence: RecurringPaymentOccurrence,
+        visibleOccurrences: [RecurringPaymentOccurrence]
+    ) {
+        guard hasOpenEndedSchedule,
+              occurrence.id == visibleOccurrences.last?.id else {
+            return
+        }
+
+        loadedPageCount += 1
     }
 }
 
@@ -2269,6 +2434,7 @@ struct AddDebtSheetView: View {
             }
             .premiumScreenBackground()
             .navigationTitle("Add debt")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationTopDividerHidden()
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
@@ -2364,7 +2530,7 @@ struct DebtsView: View {
     var body: some View {
         ScreenScaffold(
             title: "Debts",
-            subtitle: "Balances, reserves, minimums, and payoff progress.",
+            subtitle: "",
             navigationMode: .inline,
             toolbarMode: DebtsLayoutPolicy.toolbarMode {
                 isAddDebtPresented = true
@@ -2500,6 +2666,7 @@ private struct DebtDetailView: View {
             }
             .premiumScreenBackground()
             .navigationTitle(debt.name)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
             .appPlaceholderToolbar(.modalSingle)
         }
@@ -3395,6 +3562,10 @@ struct AssistantView: View {
     @FocusState private var isPromptFocused: Bool
     private let assistantCoordinateSpace = "assistantScrollSpace"
 
+    private var assistantName: String {
+        store.snapshot.settings.assistantName?.nilIfBlank ?? "Assistant"
+    }
+
     @ViewBuilder
     var body: some View {
         switch presentationMode {
@@ -3455,7 +3626,8 @@ struct AssistantView: View {
                 }
                 .coordinateSpace(name: assistantCoordinateSpace)
                 .premiumScreenBackground()
-                .navigationTitle("Assistant")
+                .navigationTitle(assistantName)
+                .navigationBarTitleDisplayMode(.inline)
                 .navigationTopDividerHidden()
                 .toolbar {
                     if presentationMode == .modal {
@@ -3471,7 +3643,7 @@ struct AssistantView: View {
                             }
 
                             Button(AssistantMenuPresentationPolicy.actions[1]) {
-                                assistantNameDraft = store.snapshot.settings.assistantName?.nilIfBlank ?? "Assistant"
+                                assistantNameDraft = assistantName
                                 isRenameAssistantPresented = true
                             }
                         }
@@ -3482,9 +3654,7 @@ struct AssistantView: View {
 
                     Button("Cancel", role: .cancel) {}
                     Button("Save") {
-                        var settings = store.snapshot.settings
-                        settings.assistantName = assistantNameDraft.nilIfBlank ?? "Assistant"
-                        store.updateSettings(settings)
+                        saveAssistantName()
                     }
                 } message: {
                     Text("Choose the name shown in assistant replies.")
@@ -3564,9 +3734,22 @@ struct AssistantView: View {
         messages.append(AssistantMessage(role: "You", text: text))
         prompt = ""
         let period = store.selectedPayPeriod
-        let name = store.snapshot.settings.assistantName?.nilIfBlank ?? "Assistant"
         let reply = "Local summary: \(MoneyParser.formatPence(period?.incomePence ?? 0)) income in the current plan, \(MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots))) spendable, and \(store.snapshot.recurringPayments.filter(\.active).count) active bills. Authenticated AI actions are waiting on native Firebase ID tokens."
-        messages.append(AssistantMessage(role: name, text: reply))
+        messages.append(AssistantMessage(role: assistantName, text: reply))
+    }
+
+    private func saveAssistantName() {
+        let previousName = assistantName
+        let newName = assistantNameDraft.nilIfBlank ?? "Assistant"
+        var settings = store.snapshot.settings
+        settings.assistantName = newName
+        store.updateSettings(settings)
+        messages = messages.map { message in
+            guard message.role == previousName || message.role == "Assistant" else { return message }
+            var renamedMessage = message
+            renamedMessage.role = newName
+            return renamedMessage
+        }
     }
 }
 

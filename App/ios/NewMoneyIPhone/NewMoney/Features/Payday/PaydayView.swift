@@ -116,7 +116,7 @@ struct PaydayView: View {
     private var selectedPeriodTransactions: [Transaction] {
         guard let selectedPeriod else { return [] }
         return snapshot.transactions
-            .filter { $0.type == .spending && $0.deletedAt == nil && transactionBelongsToPeriod($0, selectedPeriod) }
+            .filter { $0.type == .spending && $0.deletedAt == nil && !$0.isRefunded && transactionBelongsToPeriod($0, selectedPeriod) }
             .sorted { $0.date > $1.date }
     }
 
@@ -144,7 +144,7 @@ struct PaydayView: View {
             )
         }
 
-        for transaction in snapshot.transactions where transaction.type == .spending && transaction.deletedAt == nil {
+        for transaction in snapshot.transactions where transaction.type == .spending && transaction.deletedAt == nil && !transaction.isRefunded {
             let period = period(for: transaction)
             let id = period?.id ?? "outside-periods"
             var group = groups[id] ?? SpendingPeriodGroup(

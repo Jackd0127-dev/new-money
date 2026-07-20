@@ -222,7 +222,7 @@ enum FinanceEngine {
         let paidFromBalances = max(0, original - current)
         let activeDebtIds = Set(activeDebts.map(\.id))
         let paidFromPayments = payments
-            .filter { activeDebtIds.contains($0.debtId) }
+            .filter { activeDebtIds.contains($0.debtId) && !$0.isRefunded }
             .reduce(0) { $0 + $1.amountPence }
         let due = activeDebts.reduce(0) { total, debt in
             total + getDebtDueAmountAfterReservesAndLinkedPotsPence(debt: debt, reserves: reserves, pots: pots)

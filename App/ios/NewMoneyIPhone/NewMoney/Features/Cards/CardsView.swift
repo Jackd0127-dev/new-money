@@ -1357,6 +1357,30 @@ struct CardPaymentFlowSheetView: View {
             ScrollView {
                 VStack(spacing: AppTheme.Spacing.lg) {
                     repaymentCard
+                    if !cardRepayments.isEmpty {
+                        AppCard {
+                            SectionTitle("Recorded payments")
+                            ForEach(cardRepayments) { repayment in
+                                NavigationLink {
+                                    CardRepaymentDetailView(store: store, repayment: repayment)
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(repayment.note.isBlank ? "Card payment" : repayment.note)
+                                                .foregroundStyle(AppTheme.Colors.primaryText)
+                                            Text(repayment.date)
+                                                .font(.caption)
+                                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                        }
+                                        Spacer()
+                                        Text(MoneyParser.formatPence(repayment.amountPence))
+                                            .foregroundStyle(repayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                 }
                 .padding(AppTheme.Spacing.lg)
             }
@@ -1404,6 +1428,46 @@ struct CardPaymentFlowSheetView: View {
                 repaymentNote = ""
             }
         }
+    }
+
+    private var cardRepayments: [CreditCardRepayment] {
+        store.snapshot.creditCardRepayments
+            .filter { $0.deletedAt == nil && (repaymentCardId.isEmpty || $0.creditCardId == repaymentCardId) }
+            .sorted { $0.date > $1.date }
+    }
+}
+
+private struct CardRepaymentDetailView: View {
+    @ObservedObject var store: PlannerStore
+    var repayment: CreditCardRepayment
+
+    private var currentRepayment: CreditCardRepayment {
+        store.snapshot.creditCardRepayments.first(where: { $0.id == repayment.id }) ?? repayment
+    }
+
+    var body: some View {
+        ScrollView {
+            AppCard(glow: true) {
+                SectionTitle("Card payment")
+                MetricRow(label: "Amount", value: MoneyParser.formatPence(currentRepayment.amountPence), valueColor: currentRepayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
+                MetricRow(label: "Date", value: currentRepayment.date)
+                MetricRow(label: "Note", value: currentRepayment.note.isBlank ? "Card payment" : currentRepayment.note)
+                Toggle("This payment was refunded", isOn: Binding(
+                    get: { currentRepayment.isRefunded },
+                    set: { store.setCardRepaymentRefunded(id: repayment.id, refunded: $0) }
+                ))
+                .tint(AppTheme.Colors.primaryOrange)
+                if currentRepayment.isRefunded {
+                    Text("This payment is retained in history but no longer reduces the card balance or statement due.")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.Colors.success)
+                }
+            }
+            .padding(AppTheme.Spacing.lg)
+        }
+        .premiumScreenBackground()
+        .navigationTitle("Card payment")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

@@ -230,15 +230,15 @@ private struct SpendingHistoryRow: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.Colors.primaryText)
                     .lineLimit(1)
-                Text("\(dateLabel) · \(routeLabel)")
+                Text("\(dateLabel) · \(routeLabel)\(transaction.isRefunded ? " · Refunded" : "")")
                     .font(.caption)
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .foregroundStyle(transaction.isRefunded ? AppTheme.Colors.success : AppTheme.Colors.secondaryText)
                     .lineLimit(2)
             }
             Spacer()
-            Text("-\(MoneyParser.formatPence(transaction.amountPence))")
+            Text(transaction.isRefunded ? MoneyParser.formatPence(transaction.amountPence) : "-\(MoneyParser.formatPence(transaction.amountPence))")
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.orangeHighlight)
+                .foregroundStyle(transaction.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.orangeHighlight)
                 .multilineTextAlignment(.trailing)
         }
         .contentShape(Rectangle())
@@ -307,6 +307,16 @@ private struct SpendingTransactionDetailView: View {
                     TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                         .tint(AppTheme.Colors.primaryOrange)
+                    Toggle("This payment was refunded", isOn: Binding(
+                        get: { currentTransaction.isRefunded },
+                        set: { store.setTransactionRefunded(id: transaction.id, refunded: $0) }
+                    ))
+                    .tint(AppTheme.Colors.primaryOrange)
+                    if currentTransaction.isRefunded {
+                        Text("Refunded payments remain in your history but no longer affect money left, pots, or card balances.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.success)
+                    }
                     PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
                         store.updateTransaction(
                             id: transaction.id,
@@ -358,6 +368,10 @@ private struct SpendingTransactionDetailView: View {
         return active + [currentPot]
     }
 
+    private var currentTransaction: Transaction {
+        store.snapshot.transactions.first(where: { $0.id == transaction.id }) ?? transaction
+    }
+
     private var selectableCards: [CreditCard] {
         let active = store.activeCards
         guard let currentCardId = transaction.creditCardId,
@@ -368,6 +382,7 @@ private struct SpendingTransactionDetailView: View {
     }
 
     private var canSave: Bool {
+        guard !currentTransaction.isRefunded else { return false }
         guard MoneyParser.parsePoundsToPence(amount) > 0 else { return false }
         return switch paymentMethod {
         case .income:
@@ -1078,6 +1093,30 @@ struct BillsView: View {
             subtitle: upcomingSectionSubtitle,
             isExpanded: $isUpcomingExpanded
         ) {
+            if !refundedOccurrences.isEmpty {
+                AppCard {
+                    SectionTitle("Refunded")
+                    ForEach(refundedOccurrences) { occurrence in
+                        Button {
+                            selectedOccurrenceForAdjustment = occurrence
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(occurrence.payment.name)
+                                        .foregroundStyle(AppTheme.Colors.primaryText)
+                                    Text("Refunded · (billsFriendlyDate(occurrence.scheduledDueDate))")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.Colors.success)
+                                }
+                                Spacer()
+                                Text(MoneyParser.formatPence(occurrence.amountPence))
+                                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
             BillsProgressiveUpcomingList(
                 snapshot: store.snapshot,
                 payments: sortedBills,
@@ -1155,6 +1194,21 @@ struct BillsView: View {
 
     private var upcomingOccurrences: [RecurringPaymentOccurrence] {
         tabPresentation.upcomingOccurrences
+    }
+
+    private var refundedOccurrences: [RecurringPaymentOccurrence] {
+        store.snapshot.recurringPaymentOccurrenceOverrides
+            .filter { $0.deletedAt == nil && $0.state == .refunded }
+            .compactMap { override in
+                guard let payment = store.snapshot.recurringPayments.first(where: { $0.id == override.paymentId }) else { return nil }
+                return RecurringPaymentOccurrence(
+                    payment: payment,
+                    scheduledDueDate: override.scheduledDueDate,
+                    dueDate: override.scheduledDueDate,
+                    amountPence: payment.amountPence
+                )
+            }
+            .sorted { $0.scheduledDueDate > $1.scheduledDueDate }
     }
 
     private var sortedBills: [RecurringPayment] {
@@ -1309,6 +1363,7 @@ private enum RecurringBillOccurrenceDateChoice: String, CaseIterable, Identifiab
     case asExpected = "As expected"
     case awaiting = "Not yet"
     case actualDate = "Choose date"
+    case refunded = "Refunded"
 
     var id: String { rawValue }
 }
@@ -1329,7 +1384,7 @@ private struct RecurringBillOccurrenceAdjustmentSheet: View {
             $0.paymentId == occurrence.payment.id &&
             $0.scheduledDueDate == occurrence.scheduledDueDate
         }
-        _choice = State(initialValue: override?.state == .awaitingPayment ? .awaiting : (override?.state == .confirmed ? .actualDate : .asExpected))
+        _choice = State(initialValue: override?.state == .awaitingPayment ? .awaiting : (override?.state == .confirmed ? .actualDate : (override?.state == .refunded ? .refunded : .asExpected)))
         _actualDate = State(initialValue: FinanceEngine.parseDate(override?.actualDueDate ?? occurrence.dueDate))
     }
 
@@ -1364,6 +1419,12 @@ private struct RecurringBillOccurrenceAdjustmentSheet: View {
                             .font(.footnote)
                             .foregroundStyle(AppTheme.Colors.warning)
                     }
+
+                    if choice == .refunded {
+                        Text("This keeps the bill in history but removes this occurrence from costs and card balances. Future occurrences are unchanged.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.success)
+                    }
                 }
             }
             .navigationTitle("Check this bill")
@@ -1393,6 +1454,8 @@ private struct RecurringBillOccurrenceAdjustmentSheet: View {
                 scheduledDueDate: occurrence.scheduledDueDate,
                 actualDueDate: FinanceEngine.toIsoDate(actualDate)
             )
+        case .refunded:
+            store.setRecurringBillOccurrenceRefunded(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate, refunded: true)
         }
     }
 

@@ -915,7 +915,7 @@ struct DashboardMonthlySpendChartData: Equatable {
         let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
 
         var buckets: [Int: Int] = [:]
-        for transaction in transactions where transaction.type == .spending && transaction.deletedAt == nil {
+        for transaction in transactions where transaction.type == .spending && transaction.deletedAt == nil && !transaction.isRefunded {
             let transactionDate = FinanceEngine.parseDate(transaction.date)
             let transactionComponents = calendar.dateComponents([.year, .month, .day], from: transactionDate)
             guard transactionComponents.year == todayComponents.year,
@@ -3002,6 +3002,16 @@ private struct DebtPaymentEditSheetView: View {
             DatePicker("Payment date", selection: $paymentDate, displayedComponents: .date)
                 .tint(AppTheme.Colors.primaryOrange)
             TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+            Toggle("This payment was refunded", isOn: Binding(
+                get: { currentPayment.isRefunded },
+                set: { store.setDebtPaymentRefunded(id: payment.id, refunded: $0) }
+            ))
+            .tint(AppTheme.Colors.primaryOrange)
+            if currentPayment.isRefunded {
+                Text("The debt balance and repayment plan have been restored. This record remains for your history.")
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.Colors.success)
+            }
             PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
                 store.updateDebtPayment(
                     id: payment.id,
@@ -3028,7 +3038,8 @@ private struct DebtPaymentEditSheetView: View {
     }
 
     private var canSave: Bool {
-        !debtId.isEmpty && MoneyParser.parsePoundsToPence(amount) > 0
+        guard !currentPayment.isRefunded else { return false }
+        return !debtId.isEmpty && MoneyParser.parsePoundsToPence(amount) > 0
     }
 
     private func debtName(for id: String) -> String {

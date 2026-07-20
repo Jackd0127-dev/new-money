@@ -694,6 +694,7 @@ final class PlannerStore: ObservableObject {
         guard amount > 0,
               let index = snapshot.transactions.firstIndex(where: { $0.id == id }),
               snapshot.transactions[index].type == .spending,
+              !snapshot.transactions[index].isRefunded,
               hasValidFundingSource
         else { return }
 
@@ -732,6 +733,34 @@ final class PlannerStore: ObservableObject {
             return
         }
         restorePotBalanceAfterRemovingTransaction(transaction, now: now)
+        persist()
+    }
+
+    /// Keeps the payment in history, but reverses every derived financial effect.
+    /// Toggling it off reapplies the original payment without creating a duplicate.
+    func setTransactionRefunded(id: String, refunded: Bool) {
+        guard let index = snapshot.transactions.firstIndex(where: { $0.id == id }),
+              snapshot.transactions[index].type == .spending,
+              snapshot.transactions[index].isRefunded != refunded
+        else { return }
+
+        let now = DateUtilities.nowIsoString()
+        if refunded {
+            let transaction = snapshot.transactions[index]
+            guard let fundingPayPeriodIds = removeCardSpendFundingAllocations(transactionId: transaction.id, now: now) else { return }
+            restorePotBalanceAfterRemovingTransaction(transaction, now: now)
+            snapshot.transactions[index].refundedAt = now
+            snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds = fundingPayPeriodIds
+            snapshot.transactions[index].updatedAt = now
+        } else {
+            let fundingPayPeriodIds = snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds ?? []
+            snapshot.transactions[index].refundedAt = nil
+            snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds = nil
+            snapshot.transactions[index].updatedAt = now
+            let transaction = snapshot.transactions[index]
+            applyPotBalanceForTransaction(transaction)
+            restoreCardSpendFundingAllocations(transactionId: transaction.id, payPeriodIds: fundingPayPeriodIds)
+        }
         persist()
     }
 
@@ -808,6 +837,24 @@ final class PlannerStore: ObservableObject {
             fromDueDate: previousEffectiveDate,
             toDueDate: scheduledDueDate
         )
+        persist()
+    }
+
+    func setRecurringBillOccurrenceRefunded(paymentId: String, scheduledDueDate: String, refunded: Bool) {
+        guard FinanceEngine.isIsoDate(scheduledDueDate) else { return }
+        if refunded {
+            let reversedIds = reverseGeneratedRecurringBillTransactions(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+                $0.state = .refunded
+                $0.actualDueDate = nil
+                $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
+            }
+        } else {
+            upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+                $0.state = .normal
+                $0.actualDueDate = nil
+            }
+        }
         persist()
     }
 
@@ -1217,6 +1264,43 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func setCardRepaymentRefunded(id: String, refunded: Bool) {
+        guard let index = snapshot.creditCardRepayments.firstIndex(where: { $0.id == id }),
+              snapshot.creditCardRepayments[index].isRefunded != refunded
+        else { return }
+        let now = DateUtilities.nowIsoString()
+        let repayment = snapshot.creditCardRepayments[index]
+        guard adjustPotBalancesForCardRepaymentRefund(repayment, refunded: refunded, now: now) else { return }
+        snapshot.creditCardRepayments[index].refundedAt = refunded ? now : nil
+        snapshot.creditCardRepayments[index].updatedAt = now
+        persist()
+    }
+
+    private func adjustPotBalancesForCardRepaymentRefund(_ repayment: CreditCardRepayment, refunded: Bool, now: String) -> Bool {
+        let contributions = repayment.potContributions ?? repayment.potId.map {
+            [CreditCardPotContribution(potId: $0, amountPence: repayment.potContributionPence ?? repayment.amountPence)]
+        } ?? []
+        let amountsByPot = contributions.reduce(into: [String: Int]()) { result, contribution in
+            result[contribution.potId, default: 0] += max(0, contribution.amountPence)
+        }
+        if !refunded {
+            for (potId, amount) in amountsByPot {
+                guard let index = snapshot.pots.firstIndex(where: { $0.id == potId }),
+                      snapshot.pots[index].balancePence >= amount
+                else {
+                    errorMessage = "Unable to restore this card payment because its source pot no longer has enough money."
+                    return false
+                }
+            }
+        }
+        for (potId, amount) in amountsByPot {
+            guard let index = snapshot.pots.firstIndex(where: { $0.id == potId }) else { continue }
+            snapshot.pots[index].balancePence += refunded ? amount : -amount
+            snapshot.pots[index].updatedAt = now
+        }
+        return true
+    }
+
     func addCustomPayment(name: String, amountPence: Int, dueDate: String, creditCardId: String?) {
         let now = DateUtilities.nowIsoString()
         snapshot.customPayments.insert(
@@ -1544,6 +1628,23 @@ final class PlannerStore: ObservableObject {
         let now = DateUtilities.nowIsoString()
         let payment = snapshot.debtPayments.remove(at: paymentIndex)
         restoreDebtPaymentAmount(payment, now: now)
+        persist()
+    }
+
+    func setDebtPaymentRefunded(id: String, refunded: Bool) {
+        guard let index = snapshot.debtPayments.firstIndex(where: { $0.id == id }),
+              snapshot.debtPayments[index].isRefunded != refunded
+        else { return }
+        let now = DateUtilities.nowIsoString()
+        let payment = snapshot.debtPayments[index]
+        if refunded {
+            restoreDebtPaymentAmount(payment, now: now)
+            snapshot.debtPayments[index].refundedAt = now
+        } else {
+            applyDebtPaymentAmount(debtId: payment.debtId, amountPence: payment.amountPence, now: now)
+            snapshot.debtPayments[index].refundedAt = nil
+        }
+        snapshot.debtPayments[index].updatedAt = now
         persist()
     }
 

@@ -357,6 +357,7 @@ enum RecurringPaymentOccurrenceState: String, Codable, Equatable, Sendable {
     case normal
     case awaitingPayment
     case confirmed
+    case refunded
 }
 
 /// A one-off correction to a recurring bill. The scheduled date stays immutable so
@@ -476,9 +477,17 @@ struct Transaction: Codable, Equatable, Identifiable, Sendable {
     var recurringPaymentId: String?
     var date: String
     var note: String
+    /// A refund preserves the original record for audit/history while removing
+    /// its cash, pot, and card-balance effect.
+    var refundedAt: String? = nil
+    /// Funding allocations removed with a refunded card spend, retained so an
+    /// accidental refund toggle can put the exact checklist funding back.
+    var refundedCardSpendFundingPayPeriodIds: [String]? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
+
+    var isRefunded: Bool { refundedAt != nil }
 }
 
 struct Debt: Codable, Equatable, Identifiable, Sendable {
@@ -654,9 +663,13 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     var interestPaidPence: Int
     var feePaidPence: Int
     var recalculationMode: DebtRecalculationMode?
+    /// Nil on existing snapshots; populated when the payment is reversed by a refund.
+    var refundedAt: String? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
+
+    var isRefunded: Bool { refundedAt != nil }
 
     init(
         id: String,
@@ -696,7 +709,7 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, debtId, amountPence, date, note, sourcePotId, paymentType, scheduleItemId, principalPaidPence, interestPaidPence, feePaidPence, recalculationMode, createdAt, updatedAt, deletedAt
+        case id, debtId, amountPence, date, note, sourcePotId, paymentType, scheduleItemId, principalPaidPence, interestPaidPence, feePaidPence, recalculationMode, refundedAt, createdAt, updatedAt, deletedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -719,6 +732,7 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
             feePaidPence: try container.decodeIfPresent(Int.self, forKey: .feePaidPence) ?? 0,
             recalculationMode: try container.decodeIfPresent(DebtRecalculationMode.self, forKey: .recalculationMode)
         )
+        self.refundedAt = try container.decodeIfPresent(String.self, forKey: .refundedAt)
     }
 }
 
@@ -845,9 +859,14 @@ struct CreditCardRepayment: Codable, Equatable, Identifiable, Sendable {
     var potContributionPence: Int? = nil
     var potContributions: [CreditCardPotContribution]? = nil
     var paycheckContributionPence: Int? = nil
+    /// Nil on existing snapshots; a refund leaves the repayment visible but no
+    /// longer reduces the card balance or statement due.
+    var refundedAt: String? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
+
+    var isRefunded: Bool { refundedAt != nil }
 }
 
 struct CreditCardPotContribution: Codable, Equatable, Sendable {

@@ -945,6 +945,7 @@ enum PlannerDerivedData {
         return snapshot.transactions
             .filter {
                 $0.deletedAt == nil &&
+                !$0.isRefunded &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.recurringPaymentId == nil &&
@@ -1805,6 +1806,7 @@ enum PlannerDerivedData {
         var presentKeys = Set(scheduledOccurrences.map { "\($0.payment.id)-\($0.scheduledDueDate)" })
 
         for override in overrides {
+            guard override.state != .refunded else { continue }
             let effectiveDate = override.state == .confirmed ? override.actualDueDate : override.scheduledDueDate
             guard let payment = paymentsById[override.paymentId],
                   let effectiveDate,
@@ -1839,6 +1841,8 @@ enum PlannerDerivedData {
                 case .confirmed:
                     guard let actualDueDate = override.actualDueDate, FinanceEngine.isIsoDate(actualDueDate) else { return occurrence }
                     resolved.dueDate = actualDueDate
+                case .refunded:
+                    return nil
                 }
                 return resolved
             }
@@ -1854,10 +1858,10 @@ enum PlannerDerivedData {
     static func cardBalance(card: CreditCard, snapshot: PlannerSnapshot) -> Int {
         let opening = card.openingBalancePence ?? 0
         let cardSpending = snapshot.transactions
-            .filter { $0.deletedAt == nil && $0.creditCardId == card.id && $0.paymentMethod == .creditCard }
+            .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id && $0.paymentMethod == .creditCard }
             .reduce(0) { $0 + abs($1.amountPence) }
         let repayments = snapshot.creditCardRepayments
-            .filter { $0.deletedAt == nil && $0.creditCardId == card.id }
+            .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id }
             .reduce(0) { $0 + $1.amountPence }
 
         return max(0, opening + cardSpending - repayments)
@@ -1939,7 +1943,7 @@ enum PlannerDerivedData {
             }
 
         let manualSpendItems = snapshot.transactions
-            .filter { $0.type == .spending && $0.recurringPaymentId == nil && isIsoDate($0.date, in: payPeriod) }
+            .filter { !$0.isRefunded && $0.type == .spending && $0.recurringPaymentId == nil && isIsoDate($0.date, in: payPeriod) }
             .map {
                 PeriodCostItem(
                     id: "transaction-\($0.id)",
@@ -2946,6 +2950,7 @@ private extension PlannerDerivedData {
         components += snapshot.transactions
             .filter {
                 $0.deletedAt == nil &&
+                !$0.isRefunded &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
@@ -3417,6 +3422,7 @@ private extension PlannerDerivedData {
 
             let hasConsumedTransaction = snapshot.transactions.contains {
                 $0.deletedAt == nil &&
+                !$0.isRefunded &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == cardId &&
@@ -3958,6 +3964,7 @@ private extension PlannerDerivedData {
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
                 $0.deletedAt == nil &&
+                !$0.isRefunded &&
                 $0.date <= asOfDate
             }
             .map {
@@ -3970,7 +3977,7 @@ private extension PlannerDerivedData {
             }
 
         let repayments = repayments
-            .filter { $0.deletedAt == nil && $0.creditCardId == card.id && $0.date <= asOfDate }
+            .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id && $0.date <= asOfDate }
             .map {
                 CreditCardAllocationItem(
                     creditCardId: card.id,
@@ -4059,6 +4066,7 @@ private extension PlannerDerivedData {
         let actualRecurringKeys = Set(snapshot.transactions
             .filter {
                 $0.type == .spending &&
+                !$0.isRefunded &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
                 $0.recurringPaymentId != nil &&
@@ -4149,6 +4157,7 @@ private extension PlannerDerivedData {
         transactions
             .filter {
                 $0.type == .spending &&
+                !$0.isRefunded &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
                 (includesCycleStart ? $0.date >= cycleStart : $0.date > cycleStart) &&

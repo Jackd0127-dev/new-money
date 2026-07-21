@@ -36,9 +36,9 @@ jobs:
         working-directory: App
         run: npm ci
 
-      - name: Build
+      - name: Validate and build
         working-directory: App
-        run: npm run build
+        run: npm run check
         env:
           VITE_BASE_PATH: /new-money/
           VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}

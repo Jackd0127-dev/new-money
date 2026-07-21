@@ -15,9 +15,9 @@ Current UI screenshots were requested for these screens:
 - Settings
 
 No current UI screenshot files were available in Linear attachments, Linear
-documents, project resources, or the repository at the time this folder was
-created.
+documents, project resources, or the repository when this inventory was made.
 
 The app is also protected by Firebase authentication, so page screenshots could
 not be captured from the local or deployed app without an authenticated browser
-session. Add the screenshots here when available, using the screen names above.
+session. If screenshots become available, keep them together under
+`docs/current-ui-screenshots/` using the screen names above.

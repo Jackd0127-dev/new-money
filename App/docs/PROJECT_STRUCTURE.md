@@ -1,6 +1,19 @@
 # Project Structure
 
-This project is now organized around one locked finance backend and one active UI layer.
+This workspace contains the deployable web client and a native iOS companion. The web project is organized around one locked finance backend and one active UI layer.
+
+## Top-Level Areas
+
+- `src/`: web client source and colocated tests.
+- `api/` and `server/`: Vercel functions and server-only helpers.
+- `ai/`: AI behavior documentation and runtime prompt instructions.
+- `ios/`: SwiftUI app, Xcode project, shared schemes, resources, and tests.
+- `docs/`: maintained architecture, safety, design-reference, and handoff documentation.
+- `public/`: web assets copied into the Vite build.
+- `outputs/`: checked-in finance simulation evidence.
+- `tools/`: scripts that generate and compare simulation outputs.
+
+Configuration and package files stay at this `App/` root because it is the configured Vercel project root and the working directory used by repository automation.
 
 ## Runtime Code
 
@@ -24,6 +37,7 @@ Tests live beside the area they protect, inside `__tests__` folders where useful
 - `src/domain/*.test.ts`: financial calculation regression tests.
 - `src/storage/*.test.ts`: repository and data mutation regression tests.
 - `api/*.test.ts`: server function behavior.
+- `ios/NewMoneyIPhone/NewMoneyTests/`: iOS unit, navigation, fixture, and finance-regression tests.
 
 ## UI Work Rule
 

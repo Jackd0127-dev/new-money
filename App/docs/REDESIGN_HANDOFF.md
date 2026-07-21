@@ -86,7 +86,7 @@ Manual QA result:
 ## Known Limitations And Follow-Ups
 
 - Deployment process was not specified in the source prompt. Release readiness below assumes the normal deploy pipeline runs after this handoff.
-- Current pre-redesign screenshots were not available in Linear attachments, Linear documents, project resources, or the repository. See `current-ui/README.md`.
+- Current pre-redesign screenshots were not available in Linear attachments, Linear documents, project resources, or the repository. See `docs/CURRENT_UI.md`.
 - Manual authenticated-page QA used a safe local harness because the app entry point is Firebase-auth gated.
 - The Vite chunk-size warning remains. Consider code-splitting after release if bundle size becomes a performance concern.
 - No production backend/calculation changes were intentionally made. Future money-behavior changes should follow `docs/BACKEND_LOCK.md` and run `npm run check:backend`.
@@ -102,4 +102,3 @@ Rationale:
 - Automated checks pass.
 - Protected financial/backend production code was not changed.
 - No known broken primary workflows remain from the final QA sweep.
-

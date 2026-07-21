@@ -532,6 +532,15 @@ final class PlannerStore: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func permanentlyDeleteOneOffIncome(id: String) -> Bool {
+        let originalCount = snapshot.oneOffIncomes.count
+        snapshot.oneOffIncomes.removeAll { $0.id == id }
+        guard snapshot.oneOffIncomes.count != originalCount else { return false }
+        persist()
+        return true
+    }
+
     func updatePaycheck(id: String, payday: String, hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?, payFrequency: PayFrequency? = nil) {
         guard let paycheckIndex = snapshot.paychecks.firstIndex(where: { $0.id == id }) else { return }
         let payPeriodId = snapshot.paychecks[paycheckIndex].payPeriodId
@@ -736,6 +745,52 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func permanentlyDeleteActivityTransaction(id: String) {
+        guard let transaction = snapshot.transactions.first(where: { $0.id == id && $0.deletedAt == nil }),
+              transaction.type == .spending
+        else { return }
+
+        guard let paymentId = transaction.recurringPaymentId,
+              let scheduledDueDate = recurringScheduledDueDate(for: transaction, paymentId: paymentId)
+        else {
+            deleteTransaction(id: id)
+            return
+        }
+
+        let reversedIds = reverseGeneratedRecurringBillTransactions(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate
+        )
+        removeRecurringBillFundingAllocations(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate,
+            now: DateUtilities.nowIsoString()
+        )
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.state = .refunded
+            $0.actualDueDate = nil
+            $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
+        }
+        snapshot.transactions.removeAll { reversedIds.contains($0.id) }
+        persist()
+    }
+
+    func deletePotHistoryTransaction(id: String) {
+        guard let index = snapshot.transactions.firstIndex(where: { $0.id == id && $0.deletedAt == nil }),
+              snapshot.transactions[index].potId != nil
+        else { return }
+
+        if snapshot.transactions[index].type == .spending {
+            permanentlyDeleteActivityTransaction(id: id)
+            return
+        }
+
+        guard snapshot.transactions[index].type == .allocation else { return }
+        let transaction = snapshot.transactions.remove(at: index)
+        restorePotBalanceAfterRemovingTransaction(transaction, now: DateUtilities.nowIsoString())
+        persist()
+    }
+
     /// Keeps the payment in history, but reverses every derived financial effect.
     /// Toggling it off reapplies the original payment without creating a duplicate.
     func setTransactionRefunded(id: String, refunded: Bool) {
@@ -915,6 +970,23 @@ final class PlannerStore: ObservableObject {
             snapshot.transactions[index].updatedAt = now
         }
         return indices.map { snapshot.transactions[$0].id }
+    }
+
+    private func removeRecurringBillFundingAllocations(paymentId: String, scheduledDueDate: String, now: String) {
+        let linkedAllocations = snapshot.potAllocations.filter {
+            $0.deletedAt == nil &&
+            $0.recurringPaymentId == paymentId &&
+            $0.recurringDueDate == scheduledDueDate
+        }
+
+        for allocation in linkedAllocations {
+            guard let potIndex = snapshot.pots.firstIndex(where: { $0.id == allocation.potId }) else { continue }
+            snapshot.pots[potIndex].balancePence -= abs(allocation.amountPence)
+            snapshot.pots[potIndex].updatedAt = now
+        }
+
+        let linkedIds = Set(linkedAllocations.map(\.id))
+        snapshot.potAllocations.removeAll { linkedIds.contains($0.id) }
     }
 
     private func moveRecurringBillFundingReferences(paymentId: String, fromDueDate: String, toDueDate: String) {
@@ -1735,6 +1807,28 @@ final class PlannerStore: ObservableObject {
     }
 
     @discardableResult
+    func deleteManualPotAllocation(id: String) -> Bool {
+        guard let index = snapshot.potAllocations.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else {
+            return false
+        }
+
+        let allocation = snapshot.potAllocations[index]
+        guard (allocation.source ?? .manual) == .manual,
+              allocation.fundingPotId == nil,
+              allocation.recurringPaymentId == nil,
+              allocation.debtId == nil
+        else { return false }
+
+        snapshot.potAllocations.remove(at: index)
+        if let potIndex = snapshot.pots.firstIndex(where: { $0.id == allocation.potId }) {
+            snapshot.pots[potIndex].balancePence -= abs(allocation.amountPence)
+            snapshot.pots[potIndex].updatedAt = DateUtilities.nowIsoString()
+        }
+        persist()
+        return true
+    }
+
+    @discardableResult
     func setCardBillFundingCompleted(paymentId: String, dueDate: String, payPeriodId: String, completed: Bool) -> Bool {
         setRecurringBillFundingCompleted(
             paymentId: paymentId,
@@ -2335,6 +2429,22 @@ final class PlannerStore: ObservableObject {
 
     private func cardRecurringTransactionId(paymentId: String, scheduledDueDate: String) -> String {
         "card-recurring-\(paymentId)-\(scheduledDueDate)"
+    }
+
+    private func recurringScheduledDueDate(for transaction: Transaction, paymentId: String) -> String? {
+        let prefixes = [
+            "card-recurring-\(paymentId)-",
+            "recurring-\(paymentId)-"
+        ]
+
+        for prefix in prefixes where transaction.id.hasPrefix(prefix) {
+            let candidate = String(transaction.id.dropFirst(prefix.count))
+            if FinanceEngine.isIsoDate(candidate) {
+                return candidate
+            }
+        }
+
+        return nil
     }
 
     private func cardBillFundingAllocationId(paymentId: String, dueDate: String, payPeriodId: String) -> String {

@@ -36,6 +36,9 @@ enum PotHistoryLayoutPolicy {
     static let usesNativeToolbarContentSwap = true
     static let showsPlaceholderOptions = false
     static let showsTopDividerAboveModePicker = false
+    static let editRequiresDeletableRows = true
+    static let deleteControlStyle = "destructiveBadge"
+    static let deleteRequiresConfirmation = true
 }
 
 enum PotFormLayoutPolicy {
@@ -1211,7 +1214,10 @@ struct PotHistorySheetView: View {
                     } else {
                         VStack(spacing: AppTheme.Spacing.md) {
                             ForEach(rows) { row in
-                                PotHistoryRowView(row: row)
+                                PotHistoryRowView(
+                                    row: row,
+                                    onDelete: deleteAction(for: row)
+                                )
                             }
                         }
                     }
@@ -1225,7 +1231,7 @@ struct PotHistorySheetView: View {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    AppEditDoneToolbarButton(isEditing: editMode.isEditing) {
+                    AppEditDoneToolbarButton(isEditing: editMode.isEditing, canEdit: hasEditableRows) {
                         toggleEditMode()
                     }
                 }
@@ -1233,6 +1239,12 @@ struct PotHistorySheetView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .environment(\.editMode, $editMode)
+        .onChange(of: selectedMode) { _, _ in
+            exitEditModeIfNeeded()
+        }
+        .onChange(of: editableRowIds) { _, _ in
+            exitEditModeIfNeeded()
+        }
     }
 
     private var rows: [PotHistoryRow] {
@@ -1247,8 +1259,40 @@ struct PotHistorySheetView: View {
     }
 
     private func toggleEditMode() {
+        guard editMode.isEditing || hasEditableRows else { return }
         withAnimation(appToolbarMorphAnimation) {
             editMode = editMode.isEditing ? .inactive : .active
+        }
+    }
+
+    private var hasEditableRows: Bool {
+        rows.contains { $0.isDeletable }
+    }
+
+    private var editableRowIds: [String] {
+        rows.filter { $0.isDeletable }.map(\.id)
+    }
+
+    private func exitEditModeIfNeeded() {
+        guard editMode.isEditing, !hasEditableRows else { return }
+        withAnimation(appToolbarMorphAnimation) {
+            editMode = .inactive
+        }
+    }
+
+    private func deleteAction(for row: PotHistoryRow) -> (() -> Void)? {
+        guard editMode.isEditing, row.isDeletable else { return nil }
+        return {
+            delete(row)
+        }
+    }
+
+    private func delete(_ row: PotHistoryRow) {
+        switch row.source {
+        case .allocation(let id, _):
+            _ = store.deleteManualPotAllocation(id: id)
+        case .transaction(let id):
+            store.deletePotHistoryTransaction(id: id)
         }
     }
 
@@ -1264,7 +1308,14 @@ struct PotHistorySheetView: View {
                     date: period?.payday ?? String(allocation.createdAt.prefix(10)),
                     detail: allocationSourceLabel(allocation.source),
                     amountPence: allocation.amountPence,
-                    kind: .topUp
+                    kind: .topUp,
+                    source: .allocation(
+                        id: allocation.id,
+                        canDelete: (allocation.source ?? .manual) == .manual &&
+                            allocation.fundingPotId == nil &&
+                            allocation.recurringPaymentId == nil &&
+                            allocation.debtId == nil
+                    )
                 )
             }
 
@@ -1278,7 +1329,8 @@ struct PotHistorySheetView: View {
                     date: transaction.date,
                     detail: transaction.note.potTrimmed.isEmpty ? "Pot top-up" : transaction.note,
                     amountPence: transaction.amountPence,
-                    kind: .topUp
+                    kind: .topUp,
+                    source: .transaction(transaction.id)
                 )
             }
 
@@ -1296,7 +1348,8 @@ struct PotHistorySheetView: View {
                     date: transaction.date,
                     detail: transaction.note.potTrimmed.isEmpty ? "Recorded payment" : transaction.note,
                     amountPence: transaction.amountPence,
-                    kind: .payment
+                    kind: .payment,
+                    source: .transaction(transaction.id)
                 )
             }
             .sorted(by: sortRows)
@@ -1410,6 +1463,20 @@ private enum PotHistoryKind {
     }
 }
 
+private enum PotHistoryRowSource {
+    case allocation(id: String, canDelete: Bool)
+    case transaction(String)
+
+    var isDeletable: Bool {
+        switch self {
+        case .allocation(_, let canDelete):
+            canDelete
+        case .transaction:
+            true
+        }
+    }
+}
+
 private struct PotHistoryRow: Identifiable {
     let id: String
     let potName: String
@@ -1417,10 +1484,16 @@ private struct PotHistoryRow: Identifiable {
     let detail: String
     let amountPence: Int
     let kind: PotHistoryKind
+    let source: PotHistoryRowSource
+
+    var isDeletable: Bool {
+        source.isDeletable
+    }
 }
 
 private struct PotHistoryRowView: View {
     var row: PotHistoryRow
+    var onDelete: (() -> Void)?
 
     var body: some View {
         AppCard {
@@ -1442,6 +1515,15 @@ private struct PotHistoryRowView: View {
                         .font(.headline.weight(.bold))
                         .foregroundStyle(row.kind.color)
                     Pill(text: row.kind.title, systemImage: row.kind.symbol, color: row.kind.color)
+                }
+
+                if let onDelete {
+                    DestructiveBadgeButton(
+                        accessibilityLabel: "Delete \(row.detail)",
+                        confirmationTitle: "Delete this pot history entry?",
+                        confirmationMessage: "Are you sure? This entry will be permanently removed and the pot balance will be updated.",
+                        action: onDelete
+                    )
                 }
             }
         }

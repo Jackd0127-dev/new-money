@@ -908,14 +908,15 @@ enum ActivityDetailPresentation: Equatable {
 struct ActivityLayoutPolicy {
     static let sections: [ActivitySection] = [
         .recentActivity,
-        .monthBalance,
-        .income,
-        .spending
+        .monthBalance
     ]
     static let recentActivityMarkerStyle = "coloredDot"
     static let recentActivityDateFormat = "EEE, d MMM yyyy"
     static let recentActivityDetailPresentation: ActivityDetailPresentation = .navigationPush
     static let recentActivityDetailUsesInlineTitle = true
+    static let recentActivityDetailToolbarActions = ["trash", "edit"]
+    static let recentActivityDeleteRequiresConfirmation = true
+    static let recentActivityDeleteIsPermanent = true
     static let recentActivityShowsGeneratedPayPeriodSummaries = false
     static let recentActivityShowsGeneratedAutomaticPaychecks = false
     static let recentActivityShowsZeroValuePaychecks = false
@@ -1121,10 +1122,8 @@ struct ActivityView: View {
             activityFeed
         case .monthBalance:
             activityMonthBalance
-        case .income:
-            activityRoute(.income)
-        case .spending:
-            activityRoute(.spending)
+        case .income, .spending:
+            EmptyView()
         }
     }
 
@@ -1141,28 +1140,6 @@ struct ActivityView: View {
                 TextField("Search activity", text: $searchText)
                     .textFieldStyle(AppTextFieldStyle())
             }
-        }
-    }
-
-    @ViewBuilder
-    private func activityRoute(_ section: ActivitySection) -> some View {
-        switch section {
-        case .income:
-            NavigationLink {
-                IncomeBreakdownView(store: store)
-            } label: {
-                activityRouteCard(title: "Income", subtitle: "Paycheck inputs, pay periods, and money left.", symbol: "sterlingsign.circle")
-            }
-            .buttonStyle(.plain)
-        case .spending:
-            NavigationLink {
-                ActivitySpendingDetailView(store: store)
-            } label: {
-                activityRouteCard(title: "Spending", subtitle: "Spent this period and spending by pay period.", symbol: "receipt")
-            }
-            .buttonStyle(.plain)
-        case .recentActivity, .monthBalance:
-            EmptyView()
         }
     }
 
@@ -1193,7 +1170,7 @@ struct ActivityView: View {
                     let visibleEntries = Array(filteredEntries.prefix(18))
                     ForEach(Array(visibleEntries.enumerated()), id: \.offset) { index, entry in
                         NavigationLink {
-                            ActivityEntryDetailView(entry: entry)
+                            ActivityEntryDetailView(store: store, entry: entry)
                         } label: {
                             ActivityEntryRow(entry: entry)
                         }
@@ -1262,7 +1239,7 @@ struct ActivityView: View {
         )
     }
 
-    private static func makeActivityEntries(snapshot: PlannerSnapshot) -> [ActivityEntry] {
+    fileprivate static func makeActivityEntries(snapshot: PlannerSnapshot) -> [ActivityEntry] {
         let potsById = snapshot.pots.reduce(into: [String: Pot]()) { result, pot in
             result[pot.id] = pot
         }
@@ -1277,7 +1254,7 @@ struct ActivityView: View {
         }
 
         let spending = snapshot.transactions
-            .filter { $0.type == .spending }
+            .filter { $0.type == .spending && $0.deletedAt == nil }
             .map { transaction in
                 let amount = "-\(MoneyParser.formatPence(transaction.amountPence))"
                 let date = activityDisplayDate(transaction.date)
@@ -1316,7 +1293,8 @@ struct ActivityView: View {
                     color: AppTheme.Colors.orangeHighlight,
                     sortDate: transaction.date,
                     detailRows: detailRows,
-                    recordRows: activityRecordRows(createdAt: transaction.createdAt, updatedAt: transaction.updatedAt)
+                    recordRows: activityRecordRows(createdAt: transaction.createdAt, updatedAt: transaction.updatedAt),
+                    source: .transaction(transaction.id)
                 )
             }
 
@@ -1355,7 +1333,8 @@ struct ActivityView: View {
                     color: AppTheme.Colors.success,
                     sortDate: activityDate,
                     detailRows: detailRows,
-                    recordRows: activityRecordRows(createdAt: paycheck.createdAt, updatedAt: paycheck.updatedAt)
+                    recordRows: activityRecordRows(createdAt: paycheck.createdAt, updatedAt: paycheck.updatedAt),
+                    source: .paycheck(paycheck.id)
                 )
             }
 
@@ -1385,7 +1364,8 @@ struct ActivityView: View {
                     color: AppTheme.Colors.success,
                     sortDate: income.date,
                     detailRows: detailRows,
-                    recordRows: activityRecordRows(createdAt: income.createdAt, updatedAt: income.updatedAt)
+                    recordRows: activityRecordRows(createdAt: income.createdAt, updatedAt: income.updatedAt),
+                    source: .oneOffIncome(income.id)
                 )
             }
 
@@ -1418,7 +1398,8 @@ struct ActivityView: View {
                 color: AppTheme.Colors.primaryOrange,
                 sortDate: period.startDate,
                 detailRows: detailRows,
-                recordRows: activityRecordRows(createdAt: period.createdAt, updatedAt: period.updatedAt)
+                recordRows: activityRecordRows(createdAt: period.createdAt, updatedAt: period.updatedAt),
+                source: .payPeriod(period.id)
             )
         }
     }
@@ -1453,29 +1434,6 @@ struct ActivityView: View {
             .capitalized
     }
 
-    private func activityRouteCard(title: String, subtitle: String, symbol: String) -> some View {
-        AppCard {
-            HStack(spacing: AppTheme.Spacing.md) {
-                Image(systemName: symbol)
-                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-                    .frame(width: 40, height: 40)
-                    .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                    .clipShape(Circle())
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
-            }
-        }
-    }
 }
 
 struct ActivityAccountTimelineView: View {
@@ -2304,7 +2262,7 @@ private func timelineDateLabel(_ isoDate: String) -> String {
     FinanceEngine.parseDate(isoDate.prefixDateLabel).formatted(.dateTime.day().month(.abbreviated).year())
 }
 
-private struct ActivitySpendingDetailView: View {
+struct ActivitySpendingDetailView: View {
     @ObservedObject var store: PlannerStore
     @State private var editMode: EditMode = .inactive
 
@@ -2348,6 +2306,13 @@ private enum ActivityFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private enum ActivityEntrySource: Equatable {
+    case transaction(String)
+    case paycheck(String)
+    case oneOffIncome(String)
+    case payPeriod(String)
+}
+
 private struct ActivityEntry: Identifiable {
     var id: String
     var kind: ActivityFilter
@@ -2359,6 +2324,7 @@ private struct ActivityEntry: Identifiable {
     var sortDate: String
     var detailRows: [ActivityDetailRow]
     var recordRows: [ActivityDetailRow]
+    var source: ActivityEntrySource
 }
 
 private struct ActivityDetailRow: Identifiable {
@@ -2406,30 +2372,46 @@ private struct ActivityEntryRow: View {
 }
 
 private struct ActivityEntryDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
     var entry: ActivityEntry
+    @State private var isDeleteConfirmationPresented = false
+    @State private var isEditPresented = false
 
     var body: some View {
         ScreenScaffold(
             title: "Activity detail",
-            subtitle: entry.title,
+            subtitle: currentEntry.title,
             navigationMode: .inline,
-            toolbarMode: .none,
+            toolbarMode: .actions(toolbarActions),
             titleDisplayMode: .inline
         ) {
             activityHero
 
             SectionTitle("Details")
-            ActivityDetailRowsCard(rows: entry.detailRows)
+            ActivityDetailRowsCard(rows: currentEntry.detailRows)
 
-            if !entry.recordRows.isEmpty {
+            if !currentEntry.recordRows.isEmpty {
                 SectionTitle("Record")
-                ActivityDetailRowsCard(rows: entry.recordRows)
+                ActivityDetailRowsCard(rows: currentEntry.recordRows)
             }
+        }
+        .navigationDestination(isPresented: $isEditPresented) {
+            editDestination
+        }
+        .alert(deleteConfirmationTitle, isPresented: $isDeleteConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                deleteEntry()
+            }
+        } message: {
+            Text(deleteConfirmationMessage)
         }
     }
 
     private var activityHero: some View {
-        AppCard(glow: true) {
+        let entry = currentEntry
+        return AppCard(glow: true) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
                 HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -2470,16 +2452,119 @@ private struct ActivityEntryDetailView: View {
     }
 
     private var detailParts: [String] {
-        entry.detail.components(separatedBy: " · ")
+        currentEntry.detail.components(separatedBy: " · ")
     }
 
     private var heroDate: String {
-        detailParts.first ?? entry.detail
+        detailParts.first ?? currentEntry.detail
     }
 
     private var heroSource: String {
-        guard detailParts.count > 1 else { return entry.typeLabel }
+        guard detailParts.count > 1 else { return currentEntry.typeLabel }
         return detailParts.dropFirst().joined(separator: " · ")
+    }
+
+    private var currentEntry: ActivityEntry {
+        ActivityView.makeActivityEntries(snapshot: store.snapshot)
+            .first(where: { $0.source == entry.source }) ?? entry
+    }
+
+    private var toolbarActions: [AppToolbarAction] {
+        [
+            AppToolbarAction(
+                id: "activity-detail-delete",
+                symbol: "trash",
+                accessibilityLabel: "Delete activity"
+            ) {
+                isDeleteConfirmationPresented = true
+            },
+            AppToolbarAction(
+                id: "activity-detail-edit",
+                symbol: "pencil",
+                title: "Edit",
+                accessibilityLabel: "Edit activity"
+            ) {
+                isEditPresented = true
+            }
+        ]
+    }
+
+    @ViewBuilder
+    private var editDestination: some View {
+        switch entry.source {
+        case .transaction(let id):
+            if let transaction = store.snapshot.transactions.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                SpendingTransactionDetailView(store: store, transaction: transaction)
+            } else {
+                missingRecordView
+            }
+        case .paycheck(let id):
+            if let paycheck = store.snapshot.paychecks.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                PaycheckDetailView(store: store, paycheck: paycheck, presentation: .push)
+            } else {
+                missingRecordView
+            }
+        case .oneOffIncome(let id):
+            if let income = store.snapshot.oneOffIncomes.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                OneOffIncomeDetailView(store: store, income: income)
+            } else {
+                missingRecordView
+            }
+        case .payPeriod(let id):
+            if let paycheck = store.snapshot.paychecks.first(where: { $0.payPeriodId == id && $0.deletedAt == nil }) {
+                PaycheckDetailView(store: store, paycheck: paycheck, presentation: .push)
+            } else {
+                missingRecordView
+            }
+        }
+    }
+
+    private var missingRecordView: some View {
+        ScreenScaffold(
+            title: "Activity",
+            subtitle: "",
+            navigationMode: .inline,
+            toolbarMode: .none
+        ) {
+            AppCard {
+                EmptyStateView(
+                    title: "Activity no longer available",
+                    message: "This record has already been deleted.",
+                    systemImage: "trash"
+                )
+            }
+        }
+    }
+
+    private var deleteConfirmationTitle: String {
+        "Permanently delete this activity?"
+    }
+
+    private var deleteConfirmationMessage: String {
+        switch entry.source {
+        case .transaction:
+            "Are you sure? This payment will be permanently removed and all linked balances will be updated."
+        case .paycheck:
+            "Are you sure? This paycheck, its pay period, and linked allocations will be permanently removed."
+        case .oneOffIncome:
+            "Are you sure? This income will be permanently removed from your totals."
+        case .payPeriod:
+            "Are you sure? This pay period and its linked paycheck and allocations will be permanently removed."
+        }
+    }
+
+    private func deleteEntry() {
+        switch entry.source {
+        case .transaction(let id):
+            store.permanentlyDeleteActivityTransaction(id: id)
+        case .paycheck(let id):
+            store.deletePaycheck(id: id)
+        case .oneOffIncome(let id):
+            _ = store.permanentlyDeleteOneOffIncome(id: id)
+        case .payPeriod(let id):
+            store.deletePayPeriod(id: id)
+        }
+        dismiss()
     }
 }
 

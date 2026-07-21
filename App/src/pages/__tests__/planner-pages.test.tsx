@@ -6910,6 +6910,10 @@ describe('debts page', () => {
     render(
       <DebtsPage
         snapshot={createSnapshot({
+          settings: createSettings({
+            appDateMode: 'manual',
+            manualTodayIso: '2026-05-30',
+          }),
           payPeriods: [
             {
               id: 'period-next',

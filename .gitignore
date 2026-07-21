@@ -29,8 +29,13 @@ public/figma-assets/*/noise.png
 !.vscode/extensions.json
 .idea
 .DS_Store
+._*
 xcuserdata/
 *.xcuserstate
+DerivedData/
+*.xcresult
+*.xcarchive
+*.ipa
 *.suo
 *.ntvs*
 *.njsproj

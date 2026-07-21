@@ -5,6 +5,7 @@ enum DashboardHomeSection: String, Equatable {
     case accounts
     case paydayPlanning
     case spendingSnapshot
+    case quickRoutes
     case monthlySpendChart
     case upcomingBeforePayday
     case alerts
@@ -17,9 +18,12 @@ enum DashboardDetailPresentation: Equatable {
 }
 
 struct DashboardHomeLayoutPolicy {
+    static let quickRouteTitles = ["Income", "Spending"]
+    static let quickRoutesPlacement = "aboveManualSpends"
     static let homeSections: [DashboardHomeSection] = [
         .hero,
         .accounts,
+        .quickRoutes,
         .monthlySpendChart,
         .upcomingBeforePayday,
         .alerts,
@@ -107,6 +111,8 @@ struct DashboardView: View {
             heroCard
         case .accounts:
             accountButton
+        case .quickRoutes:
+            quickActivityRoutes
         case .monthlySpendChart:
             monthlySpendChart
         case .upcomingBeforePayday:
@@ -375,6 +381,36 @@ struct DashboardView: View {
             manualData: tabPresentation.manualMonthlySpendData,
             outgoingsData: tabPresentation.outgoingsMonthlySpendData
         )
+    }
+
+    private var quickActivityRoutes: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+            NavigationLink {
+                IncomeBreakdownView(store: store)
+            } label: {
+                DashboardQuickRouteCard(
+                    title: "Income",
+                    subtitle: "Pay and money left",
+                    symbol: "sterlingsign.circle.fill",
+                    color: AppTheme.Colors.success
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .accessibilityLabel("Open Income")
+
+            NavigationLink {
+                ActivitySpendingDetailView(store: store)
+            } label: {
+                DashboardQuickRouteCard(
+                    title: "Spending",
+                    subtitle: "Period spending",
+                    symbol: "receipt.fill",
+                    color: AppTheme.Colors.primaryOrange
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .accessibilityLabel("Open Spending")
+        }
     }
 
     private var heroSubtitle: String {
@@ -647,6 +683,46 @@ private struct HomeAlertRow: Identifiable {
     var color: Color
 }
 
+private struct DashboardQuickRouteCard: View {
+    var title: String
+    var subtitle: String
+    var symbol: String
+    var color: Color
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 34, height: 34)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+        .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                .stroke(color.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: color.opacity(0.07), radius: 10, y: 5)
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+    }
+}
+
 private struct DashboardMoneyLeftDetailView: View {
     @ObservedObject var store: PlannerStore
 
@@ -687,7 +763,7 @@ private struct DashboardMoneyLeftDetailView: View {
                 periodLabel: spendingPeriodLabel,
                 entryCount: selectedPeriodTransactions.count
             )
-        case .accounts, .paydayPlanning, .monthlySpendChart, .upcomingBeforePayday, .alerts, .fundingChecklist, .recentActivity:
+        case .accounts, .paydayPlanning, .quickRoutes, .monthlySpendChart, .upcomingBeforePayday, .alerts, .fundingChecklist, .recentActivity:
             EmptyView()
         }
     }
@@ -1819,7 +1895,7 @@ private struct OneOffIncomeRow: View {
     }
 }
 
-private struct OneOffIncomeDetailView: View {
+struct OneOffIncomeDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var income: OneOffIncome
@@ -3137,12 +3213,12 @@ private func shortMonthLabel(_ month: Int) -> String {
     return months[month - 1]
 }
 
-private enum PaycheckDetailPresentation: Equatable {
+enum PaycheckDetailPresentation: Equatable {
     case sheet
     case push
 }
 
-private struct PaycheckDetailView: View {
+struct PaycheckDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var paycheck: Paycheck

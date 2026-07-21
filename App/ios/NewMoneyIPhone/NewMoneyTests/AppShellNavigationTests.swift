@@ -387,6 +387,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(PotFormLayoutPolicy.linkedPickerStyle, "selectionFieldBox")
         XCTAssertEqual(PotFormLayoutPolicy.colorHexes.count, 8)
         XCTAssertEqual(Set(PotFormLayoutPolicy.colorHexes).count, 8)
+        XCTAssertEqual(DebtFormLayoutPolicy.dropdownFields, ["debtType", "strategy", "linkedPot"])
+        XCTAssertEqual(DebtFormLayoutPolicy.dropdownPresentation, "selectionFieldBox")
         XCTAssertEqual(CardFormLayoutPolicy.directDebitDayTitle, "Direct debit")
         XCTAssertEqual(CardFormLayoutPolicy.statementDayTitle, "Statement")
         XCTAssertLessThanOrEqual(CardFormLayoutPolicy.dayFieldTitleMinimumScaleFactor, CGFloat(0.55))
@@ -402,7 +404,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(CardsLayoutPolicy.activeCardExpandedColumnCount, 2)
         XCTAssertTrue(CardsLayoutPolicy.activeCardExpandedUsesLazyGrid)
         XCTAssertTrue(CardsLayoutPolicy.activeCardViewAllPillEnabled)
-        XCTAssertEqual(CardsLayoutPolicy.activeCardStackAnimation, "matchedGeometrySpring")
+        XCTAssertEqual(CardsLayoutPolicy.activeCardStackAnimation, "shortEaseInOut")
+        XCTAssertEqual(CardsLayoutPolicy.activeCardCollapsedRenderLimit, 5)
+        XCTAssertFalse(CardsLayoutPolicy.activeCardUsesMatchedGeometry)
         XCTAssertTrue(CardsLayoutPolicy.statementSummarySeparatesCurrentAndNextStatement)
         XCTAssertFalse(CardsLayoutPolicy.statementSummaryShowsPaycheckImpact)
         XCTAssertEqual(DebtsLayoutPolicy.sections, [.summary, .activeDebts])
@@ -531,6 +535,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(PotHistoryLayoutPolicy.usesNativeToolbarContentSwap)
         XCTAssertFalse(PotHistoryLayoutPolicy.showsPlaceholderOptions)
         XCTAssertFalse(PotHistoryLayoutPolicy.showsTopDividerAboveModePicker)
+        XCTAssertTrue(PotHistoryLayoutPolicy.editRequiresDeletableRows)
+        XCTAssertEqual(PotHistoryLayoutPolicy.deleteControlStyle, "destructiveBadge")
+        XCTAssertTrue(PotHistoryLayoutPolicy.deleteRequiresConfirmation)
     }
 
     func testProfileHistoryScreenHasNoPlaceholderToolbar() {
@@ -602,6 +609,7 @@ final class DashboardSpendingChartTests: XCTestCase {
             [
                 .hero,
                 .accounts,
+                .quickRoutes,
                 .monthlySpendChart,
                 .upcomingBeforePayday,
                 .alerts,
@@ -611,6 +619,8 @@ final class DashboardSpendingChartTests: XCTestCase {
         XCTAssertFalse(DashboardHomeLayoutPolicy.homeSections.contains(.paydayPlanning))
         XCTAssertFalse(DashboardHomeLayoutPolicy.homeSections.contains(.spendingSnapshot))
         XCTAssertFalse(DashboardHomeLayoutPolicy.homeSections.contains(.recentActivity))
+        XCTAssertEqual(DashboardHomeLayoutPolicy.quickRouteTitles, ["Income", "Spending"])
+        XCTAssertEqual(DashboardHomeLayoutPolicy.quickRoutesPlacement, "aboveManualSpends")
         XCTAssertTrue(DashboardHomeLayoutPolicy.moneyLeftDetailSections.contains(.spendingSnapshot))
         XCTAssertEqual(DashboardHomeLayoutPolicy.moneyLeftDetailPresentation, .navigationPush)
     }
@@ -780,11 +790,16 @@ final class PlanLayoutTests: XCTestCase {
 }
 
 final class ActivityLayoutTests: XCTestCase {
-    func testActivityLayoutShowsRecentActivityBeforeIncomeAndSpending() {
-        XCTAssertEqual(ActivityLayoutPolicy.sections, [.recentActivity, .monthBalance, .income, .spending])
+    func testActivityLayoutKeepsIncomeAndSpendingRoutesOnDashboard() {
+        XCTAssertEqual(ActivityLayoutPolicy.sections, [.recentActivity, .monthBalance])
+        XCTAssertFalse(ActivityLayoutPolicy.sections.contains(.income))
+        XCTAssertFalse(ActivityLayoutPolicy.sections.contains(.spending))
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceChartMetric, "currentMonthIncomeMinusSpending")
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceDetailPresentation, .navigationPush)
         XCTAssertTrue(ActivityLayoutPolicy.monthBalanceDetailUsesInlineTitle)
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityDetailToolbarActions, ["trash", "edit"])
+        XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteRequiresConfirmation)
+        XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteIsPermanent)
     }
 }
 

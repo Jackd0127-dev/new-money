@@ -2100,13 +2100,12 @@ enum PlannerDerivedData {
     }
 
     static func oneOffIncomePence(snapshot: PlannerSnapshot, payPeriod: PayPeriod) -> Int {
+        // The recorded date is the source of truth. The stored period ID is denormalized
+        // metadata and can become stale when periods are edited or regenerated.
         snapshot.oneOffIncomes
             .filter {
                 $0.deletedAt == nil &&
-                (
-                    $0.payPeriodId == payPeriod.id ||
-                    ($0.payPeriodId == nil && isIsoDate($0.date, in: payPeriod))
-                )
+                isIsoDate($0.date, in: payPeriod)
             }
             .reduce(0) { $0 + max(0, $1.amountPence) }
     }

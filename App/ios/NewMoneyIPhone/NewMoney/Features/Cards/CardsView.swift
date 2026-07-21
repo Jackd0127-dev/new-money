@@ -19,7 +19,9 @@ struct CardsLayoutPolicy {
     static let activeCardExpandedColumnCount = 2
     static let activeCardExpandedUsesLazyGrid = true
     static let activeCardViewAllPillEnabled = true
-    static let activeCardStackAnimation = "matchedGeometrySpring"
+    static let activeCardStackAnimation = "shortEaseInOut"
+    static let activeCardCollapsedRenderLimit = 5
+    static let activeCardUsesMatchedGeometry = false
     static let statementSummarySeparatesCurrentAndNextStatement = true
     static let statementSummaryShowsPaycheckImpact = false
     static let sections: [CardsSection] = [
@@ -109,7 +111,6 @@ struct CardsView: View {
     @State private var selectedCard: CreditCard?
     @State private var isAddCardPresented = false
     @State private var areCardsExpanded = false
-    @Namespace private var cardStackNamespace
 
     var body: some View {
         let cardModels = creditCardPreviewModels(
@@ -175,15 +176,11 @@ struct CardsView: View {
                     LazyVGrid(columns: activeCardGridColumns, alignment: .center, spacing: AppTheme.Spacing.xl) {
                         ForEach(cardModels) { model in
                             cardButton(card: model.card) {
-                                CreditCardGridTile(
-                                    model: model,
-                                    matchedNamespace: cardStackNamespace,
-                                    matchedID: matchedCardID(for: model.card)
-                                )
+                                CreditCardGridTile(model: model)
                             }
                         }
                     }
-                    .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)), removal: .opacity))
+                    .transition(.opacity)
                 } else {
                     collapsedCardStack(cardModels: cardModels)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -208,7 +205,7 @@ struct CardsView: View {
             Spacer()
 
             Button {
-                withAnimation(.spring(response: 0.62, dampingFraction: 0.82)) {
+                withAnimation(.easeInOut(duration: 0.2)) {
                     areCardsExpanded.toggle()
                 }
             } label: {
@@ -229,16 +226,16 @@ struct CardsView: View {
     }
 
     private func collapsedCardStack(cardModels: [CreditCardPreviewModel]) -> some View {
-        ZStack {
-            ForEach(Array(cardModels.enumerated()).reversed(), id: \.element.id) { index, model in
+        let visibleModels = Array(cardModels.prefix(CardsLayoutPolicy.activeCardCollapsedRenderLimit))
+        return ZStack {
+            ForEach(Array(visibleModels.enumerated()).reversed(), id: \.element.id) { index, model in
                 cardButton(card: model.card) {
                     FloatingCreditCardPreview(model: model)
-                    .equatable()
-                    .matchedGeometryEffect(id: matchedCardID(for: model.card), in: cardStackNamespace)
-                    .scaleEffect(stackScale(for: index))
-                    .offset(x: stackOffset(for: index).width, y: stackOffset(for: index).height)
-                    .opacity(stackOpacity(for: index))
-                    .zIndex(Double(cardModels.count - index))
+                        .equatable()
+                        .scaleEffect(stackScale(for: index))
+                        .offset(x: stackOffset(for: index).width, y: stackOffset(for: index).height)
+                        .opacity(stackOpacity(for: index))
+                        .zIndex(Double(visibleModels.count - index))
                 }
             }
         }
@@ -256,21 +253,17 @@ struct CardsView: View {
         .accessibilityLabel("Open \(card.name)")
     }
 
-    private func matchedCardID(for card: CreditCard) -> String {
-        "card-\(card.id)"
-    }
-
     private func stackOffset(for index: Int) -> CGSize {
-        let visibleIndex = CGFloat(min(index, 4))
+        let visibleIndex = CGFloat(index)
         return CGSize(width: visibleIndex * 13, height: visibleIndex * -8)
     }
 
     private func stackScale(for index: Int) -> CGFloat {
-        max(0.82, 1 - CGFloat(min(index, 4)) * 0.045)
+        max(0.82, 1 - CGFloat(index) * 0.045)
     }
 
     private func stackOpacity(for index: Int) -> Double {
-        index > 4 ? 0 : max(0.32, 1 - Double(index) * 0.14)
+        max(0.32, 1 - Double(index) * 0.14)
     }
 
     private func summary(cardModels: [CreditCardPreviewModel]) -> some View {
@@ -498,14 +491,13 @@ private struct StaticCreditCardPreviewFace: View, Equatable {
     }
 }
 
-private struct CreditCardGridTile: View {
-    var model: CreditCardPreviewModel
-    var matchedNamespace: Namespace.ID?
-    var matchedID: String?
+private struct CreditCardGridTile: View, Equatable {
+    let model: CreditCardPreviewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            preview
+            FloatingCreditCardPreview(model: model, maxWidth: nil)
+                .equatable()
                 .frame(maxWidth: .infinity, alignment: .center)
 
             VStack(alignment: .leading, spacing: 5) {
@@ -533,19 +525,6 @@ private struct CreditCardGridTile: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var preview: some View {
-        let cardPreview = FloatingCreditCardPreview(model: model, maxWidth: nil)
-
-        if let matchedNamespace, let matchedID {
-            cardPreview
-                .equatable()
-                .matchedGeometryEffect(id: matchedID, in: matchedNamespace)
-        } else {
-            cardPreview.equatable()
-        }
     }
 
     private var actualAvailablePence: Int {

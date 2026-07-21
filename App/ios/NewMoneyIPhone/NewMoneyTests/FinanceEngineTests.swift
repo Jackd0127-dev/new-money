@@ -171,6 +171,54 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(summary.moneyLeftPence, 75000)
     }
 
+    func testOneOffIncomeDateKeepsItInCurrentMoneyLeftWhenStoredPeriodIdIsStale() {
+        let currentPeriod = makePayPeriod(
+            id: "period-july-current",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        let stalePeriod = makePayPeriod(
+            id: "period-july-stale",
+            startDate: "2026-06-01",
+            endDate: "2026-06-30",
+            payday: "2026-06-01",
+            incomePence: 50000
+        )
+        let oneOffIncome = OneOffIncome(
+            id: "one-off-income-bonus",
+            payPeriodId: stalePeriod.id,
+            name: "Bonus",
+            amountPence: 25000,
+            date: "2026-07-21",
+            note: "",
+            createdAt: "2026-07-21T10:00:00Z",
+            updatedAt: "2026-07-21T10:00:00Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            payPeriods: [currentPeriod, stalePeriod],
+            oneOffIncomes: [oneOffIncome]
+        )
+
+        let currentSummary = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: snapshot,
+            payPeriod: currentPeriod,
+            asOfDate: "2026-07-21"
+        )
+        XCTAssertEqual(currentSummary.payReceivedPence, 125000)
+        XCTAssertEqual(currentSummary.currentMoneyLeftPence, 125000)
+        XCTAssertEqual(currentSummary.projectedMoneyLeftPence, 125000)
+
+        let staleSummary = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: snapshot,
+            payPeriod: stalePeriod,
+            asOfDate: "2026-07-21"
+        )
+        XCTAssertEqual(staleSummary.payReceivedPence, 50000)
+    }
+
     @MainActor
     func testIncomeFundedSpendReducesMoneyLeftWithoutChangingPotsOrCreditCards() async throws {
         let settings = makeManualSettings(today: "2026-06-10")
@@ -550,6 +598,125 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertNotNil(deletedIncome.deletedAt)
         let deletedSummary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: julyPeriod, asOfDate: "2026-07-05")
         XCTAssertEqual(deletedSummary.payReceivedPence, 50000)
+    }
+
+    @MainActor
+    func testActivityPermanentlyDeletesOneOffIncomeInsteadOfLeavingATombstone() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, payPeriods: [period])))
+
+        await store.load()
+        XCTAssertTrue(store.addOneOffIncome(name: "Gift", amountPence: 25000, date: "2026-06-10", note: ""))
+        let incomeId = try! XCTUnwrap(store.snapshot.oneOffIncomes.first?.id)
+
+        XCTAssertTrue(store.permanentlyDeleteOneOffIncome(id: incomeId))
+        XCTAssertFalse(store.snapshot.oneOffIncomes.contains { $0.id == incomeId })
+        XCTAssertFalse(store.permanentlyDeleteOneOffIncome(id: incomeId))
+    }
+
+    @MainActor
+    func testPotsHistoryDeletesOnlyManualAllocationAndReversesItsBalance() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
+        let pot = makePot(id: "pot-bills", name: "Bills", balancePence: 15000, targetPence: nil)
+        let manualAllocation = makePotAllocation(
+            id: "allocation-manual",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 10000,
+            source: .manual,
+            recurringPaymentId: nil,
+            recurringDueDate: nil
+        )
+        let automaticAllocation = makePotAllocation(
+            id: "allocation-recurring",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 5000,
+            source: .recurring,
+            recurringPaymentId: "bill-rent",
+            recurringDueDate: "2026-06-10"
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [period],
+            potAllocations: [manualAllocation, automaticAllocation]
+        )))
+
+        await store.load()
+
+        XCTAssertTrue(store.deleteManualPotAllocation(id: manualAllocation.id))
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 5000)
+        XCTAssertEqual(store.snapshot.potAllocations.map(\.id), [automaticAllocation.id])
+        XCTAssertFalse(store.deleteManualPotAllocation(id: automaticAllocation.id))
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 5000)
+    }
+
+    @MainActor
+    func testActivityDeletingRecurringBillOccurrenceRestoresPotAndPreventsRegeneration() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
+        let pot = makePot(id: "pot-bills", name: "Bills", balancePence: 4000, targetPence: nil)
+        let bill = makeRecurringPayment(
+            id: "bill-streaming",
+            name: "Streaming",
+            amountPence: 1000,
+            dueDay: 10,
+            potId: pot.id,
+            createdAt: "2026-06-01T00:00:00.000Z"
+        )
+        let transactionId = "recurring-\(bill.id)-2026-06-10"
+        let fundingAllocation = makePotAllocation(
+            id: "allocation-streaming",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: bill.amountPence,
+            source: .recurringBillFunding,
+            recurringPaymentId: bill.id,
+            recurringDueDate: "2026-06-10"
+        )
+        let transaction = Transaction(
+            id: transactionId,
+            potId: pot.id,
+            payPeriodId: period.id,
+            amountPence: bill.amountPence,
+            type: .spending,
+            paymentMethod: .pot,
+            creditCardId: nil,
+            recurringPaymentId: bill.id,
+            date: "2026-06-10",
+            note: bill.name,
+            createdAt: "2026-06-10T09:00:00.000Z",
+            updatedAt: "2026-06-10T09:00:00.000Z",
+            deletedAt: nil
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [bill],
+            payPeriods: [period],
+            potAllocations: [fundingAllocation],
+            transactions: [transaction]
+        )))
+
+        await store.load()
+        store.permanentlyDeleteActivityTransaction(id: transactionId)
+
+        XCTAssertFalse(store.snapshot.transactions.contains { $0.id == transactionId })
+        XCTAssertFalse(store.snapshot.potAllocations.contains { $0.id == fundingAllocation.id })
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 4000)
+        XCTAssertEqual(
+            store.snapshot.recurringPaymentOccurrenceOverrides.first(where: {
+                $0.paymentId == bill.id && $0.scheduledDueDate == "2026-06-10"
+            })?.state,
+            .refunded
+        )
+
+        XCTAssertFalse(store.applyDueLinkedPotObligations(asOf: "2026-06-10"))
+        XCTAssertFalse(store.snapshot.transactions.contains { $0.id == transactionId })
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 4000)
     }
 
     @MainActor

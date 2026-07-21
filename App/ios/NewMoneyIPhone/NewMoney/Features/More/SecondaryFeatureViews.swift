@@ -245,7 +245,7 @@ private struct SpendingHistoryRow: View {
     }
 }
 
-private struct SpendingTransactionDetailView: View {
+struct SpendingTransactionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var transaction: Transaction
@@ -2408,12 +2408,23 @@ struct AddDebtSheetView: View {
                     TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
                     TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
                     MoneyField(title: "Current balance", text: $balance)
-                    Picker("Debt type", selection: $debtType) {
+                    DebtSelectionMenu(
+                        title: "Debt type",
+                        value: debtTypeLabel(debtType),
+                        systemImage: "tag"
+                    ) {
                         ForEach(DebtType.allCases) { type in
-                            Text(debtTypeLabel(type)).tag(type)
+                            Button {
+                                debtType = type
+                            } label: {
+                                if debtType == type {
+                                    Label(debtTypeLabel(type), systemImage: "checkmark")
+                                } else {
+                                    Text(debtTypeLabel(type))
+                                }
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
                     Picker("Interest", selection: $interestType) {
                         ForEach(DebtInterestType.allCases) { type in
                             Text(debtInterestLabel(type)).tag(type)
@@ -2431,12 +2442,23 @@ struct AddDebtSheetView: View {
                         DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
                             .tint(AppTheme.Colors.primaryOrange)
                     }
-                    Picker("Strategy", selection: $repaymentStrategy) {
+                    DebtSelectionMenu(
+                        title: "Strategy",
+                        value: debtStrategyLabel(repaymentStrategy),
+                        systemImage: "arrow.triangle.branch"
+                    ) {
                         ForEach(DebtRepaymentStrategy.allCases) { strategy in
-                            Text(debtStrategyLabel(strategy)).tag(strategy)
+                            Button {
+                                repaymentStrategy = strategy
+                            } label: {
+                                if repaymentStrategy == strategy {
+                                    Label(debtStrategyLabel(strategy), systemImage: "checkmark")
+                                } else {
+                                    Text(debtStrategyLabel(strategy))
+                                }
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
                     Picker("Frequency", selection: $paymentFrequency) {
                         ForEach(DebtPaymentFrequency.allCases) { frequency in
                             Text(debtFrequencyLabel(frequency)).tag(frequency)
@@ -2458,13 +2480,32 @@ struct AddDebtSheetView: View {
                         }
                         .pickerStyle(.segmented)
                     }
-                    Picker("Linked pot", selection: $linkedPotId) {
-                        Text("No linked pot").tag("")
+                    DebtSelectionMenu(
+                        title: "Linked pot",
+                        value: selectedLinkedPotName,
+                        systemImage: "wallet.pass"
+                    ) {
+                        Button {
+                            linkedPotId = ""
+                        } label: {
+                            if linkedPotId.isEmpty {
+                                Label("No linked pot", systemImage: "checkmark")
+                            } else {
+                                Text("No linked pot")
+                            }
+                        }
                         ForEach(eligibleDebtPots(in: store.snapshot, debtId: nil)) { pot in
-                            Text(pot.name).tag(pot.id)
+                            Button {
+                                linkedPotId = pot.id
+                            } label: {
+                                if linkedPotId == pot.id {
+                                    Label(pot.name, systemImage: "checkmark")
+                                } else {
+                                    Text(pot.name)
+                                }
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
                     TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
                     previewCard
                     PrimaryButton(title: "Add debt", systemImage: "plus", isDisabled: name.isBlank || MoneyParser.parsePoundsToPence(balance) <= 0) {
@@ -2509,6 +2550,12 @@ struct AddDebtSheetView: View {
             MetricRow(label: "Estimated payoff", value: schedule.last?.dueDate ?? (hasFixedDueDate ? dueDate.isoDateString : "Manual"))
             MetricRow(label: "Projected interest", value: MoneyParser.formatPence(schedule.reduce(0) { $0 + $1.interestAmountPence }))
         }
+    }
+
+    private var selectedLinkedPotName: String {
+        guard !linkedPotId.isEmpty else { return "No linked pot" }
+        return eligibleDebtPots(in: store.snapshot, debtId: nil)
+            .first(where: { $0.id == linkedPotId })?.name ?? "No linked pot"
     }
 
     private var previewSchedule: [DebtPaymentScheduleItem] {
@@ -2561,6 +2608,72 @@ struct AddDebtSheetView: View {
         payFirstTiming = .nextPayday
         hasFixedDueDate = true
         note = ""
+    }
+}
+
+enum DebtFormLayoutPolicy {
+    static let dropdownFields = ["debtType", "strategy", "linkedPot"]
+    static let dropdownPresentation = "selectionFieldBox"
+}
+
+private struct DebtSelectionMenu<Content: View>: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let content: Content
+
+    init(
+        title: String,
+        value: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.value = value
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Image(systemName: systemImage)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .frame(width: 30, height: 30)
+                    .background(AppTheme.Colors.primaryOrange.opacity(0.11), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                    Text(value)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+            .padding(.horizontal, AppTheme.Spacing.sm)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
     }
 }
 

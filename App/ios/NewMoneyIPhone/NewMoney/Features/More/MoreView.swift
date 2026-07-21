@@ -1167,8 +1167,8 @@ struct ActivityView: View {
                 }
             } else {
                 AppCard {
-                    let visibleEntries = Array(filteredEntries.prefix(18))
-                    ForEach(Array(visibleEntries.enumerated()), id: \.offset) { index, entry in
+                    let visibleEntries = filteredEntries.prefix(18)
+                    ForEach(visibleEntries) { entry in
                         NavigationLink {
                             ActivityEntryDetailView(store: store, entry: entry)
                         } label: {
@@ -1176,7 +1176,7 @@ struct ActivityView: View {
                         }
                         .buttonStyle(.plain)
 
-                        if index < visibleEntries.count - 1 {
+                        if entry.id != visibleEntries.last?.id {
                             AppDivider()
                         }
                     }
@@ -1186,14 +1186,15 @@ struct ActivityView: View {
     }
 
     private var filteredEntries: [ActivityEntry] {
-        activityEntries
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return activityEntries
             .filter { entry in
                 filter == .all || entry.kind == filter
             }
             .filter { entry in
-                let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !query.isEmpty else { return true }
-                return entry.title.localizedCaseInsensitiveContains(query) || entry.detail.localizedCaseInsensitiveContains(query)
+                return entry.title.localizedStandardContains(query) || entry.detail.localizedStandardContains(query)
             }
     }
 

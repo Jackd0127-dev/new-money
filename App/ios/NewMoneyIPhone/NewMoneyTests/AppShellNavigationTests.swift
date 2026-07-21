@@ -407,6 +407,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(CardsLayoutPolicy.activeCardStackAnimation, "shortEaseInOut")
         XCTAssertEqual(CardsLayoutPolicy.activeCardCollapsedRenderLimit, 5)
         XCTAssertFalse(CardsLayoutPolicy.activeCardUsesMatchedGeometry)
+        XCTAssertTrue(CardsLayoutPolicy.activeCardModelsAreRevisionCached)
         XCTAssertTrue(CardsLayoutPolicy.statementSummarySeparatesCurrentAndNextStatement)
         XCTAssertFalse(CardsLayoutPolicy.statementSummaryShowsPaycheckImpact)
         XCTAssertEqual(DebtsLayoutPolicy.sections, [.summary, .activeDebts])

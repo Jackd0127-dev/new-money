@@ -22,6 +22,7 @@ struct CardsLayoutPolicy {
     static let activeCardStackAnimation = "shortEaseInOut"
     static let activeCardCollapsedRenderLimit = 5
     static let activeCardUsesMatchedGeometry = false
+    static let activeCardModelsAreRevisionCached = true
     static let statementSummarySeparatesCurrentAndNextStatement = true
     static let statementSummaryShowsPaycheckImpact = false
     static let sections: [CardsSection] = [
@@ -111,15 +112,20 @@ struct CardsView: View {
     @State private var selectedCard: CreditCard?
     @State private var isAddCardPresented = false
     @State private var areCardsExpanded = false
+    @State private var cardModels: [CreditCardPreviewModel]
+
+    init(
+        store: PlannerStore,
+        navigationMode: ScreenNavigationMode = .root,
+        toolbarMode: AppToolbarMode = .primaryDouble
+    ) {
+        self.store = store
+        self.navigationMode = navigationMode
+        self.toolbarMode = toolbarMode
+        _cardModels = State(initialValue: Self.makeCardModels(store: store))
+    }
 
     var body: some View {
-        let cardModels = creditCardPreviewModels(
-            cards: store.activeCards,
-            snapshot: store.snapshot,
-            payPeriod: store.selectedPayPeriod,
-            asOfDate: store.todayIso
-        )
-
         ScreenScaffold(
             title: "Cards",
             subtitle: "",
@@ -136,6 +142,9 @@ struct CardsView: View {
         }
         .sheet(isPresented: $isAddCardPresented) {
             CardFormView(store: store)
+        }
+        .onChange(of: store.snapshotRevision) { _, _ in
+            cardModels = Self.makeCardModels(store: store)
         }
     }
 
@@ -177,6 +186,7 @@ struct CardsView: View {
                         ForEach(cardModels) { model in
                             cardButton(card: model.card) {
                                 CreditCardGridTile(model: model)
+                                    .equatable()
                             }
                         }
                     }
@@ -226,9 +236,10 @@ struct CardsView: View {
     }
 
     private func collapsedCardStack(cardModels: [CreditCardPreviewModel]) -> some View {
-        let visibleModels = Array(cardModels.prefix(CardsLayoutPolicy.activeCardCollapsedRenderLimit))
+        let visibleModels = cardModels.prefix(CardsLayoutPolicy.activeCardCollapsedRenderLimit)
         return ZStack {
-            ForEach(Array(visibleModels.enumerated()).reversed(), id: \.element.id) { index, model in
+            ForEach(visibleModels.indices.reversed(), id: \.self) { index in
+                let model = visibleModels[index]
                 cardButton(card: model.card) {
                     FloatingCreditCardPreview(model: model)
                         .equatable()
@@ -241,6 +252,15 @@ struct CardsView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: CreditCardVisualLayoutPolicy.rowPreviewHeight + 54)
+    }
+
+    private static func makeCardModels(store: PlannerStore) -> [CreditCardPreviewModel] {
+        creditCardPreviewModels(
+            cards: store.activeCards,
+            snapshot: store.snapshot,
+            payPeriod: store.selectedPayPeriod,
+            asOfDate: store.todayIso
+        )
     }
 
     private func cardButton<Content: View>(card: CreditCard, @ViewBuilder content: () -> Content) -> some View {

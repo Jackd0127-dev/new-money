@@ -116,6 +116,7 @@ struct FundingChecklistPresentationItem: Identifiable, Equatable, Sendable {
     var name: String
     var title: String
     var detail: String
+    var amountPence: Int
     var dueDate: String
     var breakdown: [FundingChecklistBreakdownItem]
     var isCompleted: Bool
@@ -185,6 +186,7 @@ struct CardBillFundingChecklistItem: Identifiable, Equatable, Sendable {
     var paymentName: String
     var amountPence: Int
     var dueDate: String
+    var fundingDueDate: String
     var payPeriodId: String
     var cardId: String
     var cardName: String
@@ -198,7 +200,12 @@ struct RecurringBillFundingChecklistItem: Identifiable, Equatable, Sendable {
     var paymentId: String
     var paymentName: String
     var amountPence: Int
+    /// The charge date identifies the recurring occurrence and remains stable for
+    /// allocations, refunds, and one-off occurrence corrections.
     var dueDate: String
+    /// The date this amount must be funded. For card-linked bills this is the
+    /// statement direct-debit date; for direct bills it is the charge date.
+    var fundingDueDate: String
     var payPeriodId: String
     var cardId: String?
     var cardName: String?
@@ -840,7 +847,11 @@ enum PlannerDerivedData {
         )
     }
 
-    static func recurringBillFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [RecurringBillFundingChecklistItem] {
+    static func recurringBillFundingChecklistItems(
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod?,
+        groupByFundingDueDate: Bool = false
+    ) -> [RecurringBillFundingChecklistItem] {
         guard let payPeriod else { return [] }
 
         let activeCards = snapshot.creditCards
@@ -857,7 +868,9 @@ enum PlannerDerivedData {
         return resolvedRecurringOccurrences(
             snapshot: snapshot,
             payments: snapshot.recurringPayments,
-            startDate: payPeriod.startDate,
+            startDate: groupByFundingDueDate
+                ? FinanceEngine.addIsoDays(date: payPeriod.startDate, days: -62)
+                : payPeriod.startDate,
             endDate: payPeriod.endDate
         )
         .compactMap { occurrence -> RecurringBillFundingChecklistItem? in
@@ -868,17 +881,33 @@ enum PlannerDerivedData {
 
             let cardId = occurrence.payment.creditCardId
             let cardName: String?
+            let fundingDueDate: String
             if let cardId {
                 guard let card = activeCards[cardId] else { return nil }
+                let directDebitDate = creditCardDirectDebitDate(
+                    for: card,
+                    snapshot: snapshot,
+                    chargeDate: occurrence.dueDate
+                )
+                if groupByFundingDueDate {
+                    guard let directDebitDate,
+                          isIsoDate(directDebitDate, in: payPeriod)
+                    else { return nil }
+                    fundingDueDate = directDebitDate
+                } else {
+                    fundingDueDate = directDebitDate ?? occurrence.dueDate
+                }
                 cardName = card.name
             } else {
+                guard isIsoDate(occurrence.dueDate, in: payPeriod) else { return nil }
                 cardName = nil
+                fundingDueDate = occurrence.dueDate
             }
 
             let fundedPence = snapshot.potAllocations
                 .filter {
                     $0.deletedAt == nil &&
-                    $0.payPeriodId == payPeriod.id &&
+                    (groupByFundingDueDate || $0.payPeriodId == payPeriod.id) &&
                     $0.potId == potId &&
                     isRecurringBillFundingSource($0.source) &&
                     $0.recurringPaymentId == occurrence.payment.id &&
@@ -892,6 +921,7 @@ enum PlannerDerivedData {
                 paymentName: occurrence.payment.name,
                 amountPence: occurrence.amountPence,
                 dueDate: occurrence.dueDate,
+                fundingDueDate: fundingDueDate,
                 payPeriodId: payPeriod.id,
                 cardId: cardId,
                 cardName: cardName,
@@ -906,8 +936,16 @@ enum PlannerDerivedData {
         "recurring-bill-funding-\(paymentId)-\(dueDate)"
     }
 
-    static func cardBillFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [CardBillFundingChecklistItem] {
-        recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+    static func cardBillFundingChecklistItems(
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod?,
+        groupByFundingDueDate: Bool = false
+    ) -> [CardBillFundingChecklistItem] {
+        recurringBillFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            groupByFundingDueDate: groupByFundingDueDate
+        )
             .compactMap { item in
                 guard let cardId = item.cardId,
                       let cardName = item.cardName
@@ -919,6 +957,7 @@ enum PlannerDerivedData {
                     paymentName: item.paymentName,
                     amountPence: item.amountPence,
                     dueDate: item.dueDate,
+                    fundingDueDate: item.fundingDueDate,
                     payPeriodId: item.payPeriodId,
                     cardId: cardId,
                     cardName: cardName,
@@ -933,7 +972,11 @@ enum PlannerDerivedData {
         "card-bill-funding-\(paymentId)-\(dueDate)"
     }
 
-    static func cardSpendFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [CardSpendFundingChecklistItem] {
+    static func cardSpendFundingChecklistItems(
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod?,
+        groupByFundingDueDate: Bool = false
+    ) -> [CardSpendFundingChecklistItem] {
         guard let payPeriod else { return [] }
 
         let activeCards = snapshot.creditCards
@@ -949,7 +992,9 @@ enum PlannerDerivedData {
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.recurringPaymentId == nil &&
-                isIsoDate($0.date, in: payPeriod)
+                (groupByFundingDueDate
+                    ? $0.date <= payPeriod.endDate
+                    : isIsoDate($0.date, in: payPeriod))
             }
             .sorted { lhs, rhs in
                 if lhs.date == rhs.date {
@@ -962,6 +1007,9 @@ enum PlannerDerivedData {
                       let card = activeCards[cardId],
                       let dueDate = creditCardDirectDebitDate(for: card, snapshot: snapshot, chargeDate: transaction.date)
                 else { return nil }
+                if groupByFundingDueDate, !isIsoDate(dueDate, in: payPeriod) {
+                    return nil
+                }
 
                 let linkedPots = activeLinkedCreditCardPots(snapshot: snapshot, creditCardId: cardId)
                 guard let fundingPot = linkedPots.first else { return nil }
@@ -969,7 +1017,7 @@ enum PlannerDerivedData {
                 let matchingFundingPence = snapshot.potAllocations
                     .filter {
                         $0.deletedAt == nil &&
-                        $0.payPeriodId == payPeriod.id &&
+                        (groupByFundingDueDate || $0.payPeriodId == payPeriod.id) &&
                         $0.source == .cardSpendFunding &&
                         $0.transactionId == transaction.id
                     }
@@ -978,7 +1026,7 @@ enum PlannerDerivedData {
                 let linkedPotIds = Set(linkedPots.map(\.id))
                 let otherChecklistFundingPence = linkedCreditCardChecklistFundingPence(
                     snapshot: snapshot,
-                    payPeriodId: payPeriod.id,
+                    payPeriodId: groupByFundingDueDate ? nil : payPeriod.id,
                     linkedPotIds: linkedPotIds
                 ) { allocation in
                     allocation.source == .cardSpendFunding && allocation.transactionId == transaction.id
@@ -1104,7 +1152,8 @@ enum PlannerDerivedData {
     static func cardPaymentFundingChecklistItems(
         snapshot: PlannerSnapshot,
         payPeriod: PayPeriod?,
-        asOfDate: String
+        asOfDate: String,
+        groupByFundingDueDate: Bool = false
     ) -> [CreditCardPaymentFundingChecklistItem] {
         guard let payPeriod else { return [] }
 
@@ -1121,15 +1170,35 @@ enum PlannerDerivedData {
 
                 let matchingAllocations = snapshot.potAllocations.filter {
                     $0.deletedAt == nil &&
-                    $0.payPeriodId == payPeriod.id &&
+                    (groupByFundingDueDate
+                        ? $0.creditCardDirectDebitDate.map { isIsoDate($0, in: payPeriod) } == true
+                        : $0.payPeriodId == payPeriod.id) &&
                     $0.potId == pot.id &&
                     $0.source == .cardPaymentFunding &&
                     $0.creditCardId == card.id
                 }
                 let matchingFundingPence = matchingAllocations.reduce(0) { $0 + max(0, $1.amountPence) }
                 let progress = potProgress(pot: pot, snapshot: snapshot, today: asOfDate)
+                let periodStatementPayments = groupByFundingDueDate
+                    ? creditCardStatementPayments(
+                        card: card,
+                        snapshot: snapshot,
+                        startDate: payPeriod.startDate,
+                        endDate: payPeriod.endDate,
+                        asOfDate: asOfDate
+                    )
+                    : []
+                let fundingTargetPence = groupByFundingDueDate
+                    ? periodStatementPayments.reduce(0) {
+                        $0 + max(max(0, $1.actualDuePence), max(0, $1.forecastDuePence))
+                    }
+                    : progress.targetPence
                 let balanceBeforeThisFundingPence = max(0, pot.balancePence - matchingFundingPence)
-                let pendingRecurringPence = recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+                let pendingRecurringPence = recurringBillFundingChecklistItems(
+                    snapshot: snapshot,
+                    payPeriod: payPeriod,
+                    groupByFundingDueDate: groupByFundingDueDate
+                )
                     .filter {
                         $0.potId == pot.id &&
                         !$0.isCompleted &&
@@ -1138,11 +1207,16 @@ enum PlannerDerivedData {
                             kind: $0.cardId == nil ? .recurringBill : .cardBill,
                             sourceId: $0.paymentId,
                             occurrenceDate: $0.dueDate,
-                            payPeriodId: $0.payPeriodId
+                            payPeriodId: $0.payPeriodId,
+                            matchAcrossPayPeriods: groupByFundingDueDate
                         )
                     }
                     .reduce(0) { $0 + max(0, $1.amountPence) }
-                let pendingCardSpendPence = cardSpendFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+                let pendingCardSpendPence = cardSpendFundingChecklistItems(
+                    snapshot: snapshot,
+                    payPeriod: payPeriod,
+                    groupByFundingDueDate: groupByFundingDueDate
+                )
                     .filter {
                         $0.potId == pot.id &&
                         !$0.isCompleted &&
@@ -1151,7 +1225,8 @@ enum PlannerDerivedData {
                             kind: .cardSpend,
                             sourceId: $0.transactionId,
                             occurrenceDate: $0.transactionDate,
-                            payPeriodId: $0.payPeriodId
+                            payPeriodId: $0.payPeriodId,
+                            matchAcrossPayPeriods: groupByFundingDueDate
                         )
                     }
                     .reduce(0) { $0 + max(0, $1.amountPence) }
@@ -1164,7 +1239,8 @@ enum PlannerDerivedData {
                             kind: .cardOpeningBalance,
                             sourceId: $0.cardId,
                             occurrenceDate: $0.directDebitDate,
-                            payPeriodId: $0.payPeriodId
+                            payPeriodId: $0.payPeriodId,
+                            matchAcrossPayPeriods: groupByFundingDueDate
                         )
                     }
                     .reduce(0) { $0 + max(0, $1.amountPence) }
@@ -1172,7 +1248,7 @@ enum PlannerDerivedData {
                     + pendingRecurringPence
                     + pendingCardSpendPence
                     + pendingOpeningPence
-                let requiredFundingPence = max(0, progress.targetPence - balanceAfterSpecificChecklistFundingPence)
+                let requiredFundingPence = max(0, fundingTargetPence - balanceAfterSpecificChecklistFundingPence)
                 let amountPence = max(matchingFundingPence, requiredFundingPence)
 
                 guard amountPence > 0 else { return nil }
@@ -1186,7 +1262,7 @@ enum PlannerDerivedData {
                         $0.deletedAt == nil &&
                         $0.status == .unpaid &&
                         $0.creditCardId == card.id &&
-                        $0.amountPence == progress.targetPence &&
+                        $0.amountPence == fundingTargetPence &&
                         $0.dueDate >= asOfDate
                     }
                     .sorted { $0.dueDate < $1.dueDate }
@@ -1211,15 +1287,23 @@ enum PlannerDerivedData {
                     return nextDueDate >= asOfDate ? nextDueDate : nil
                 }()
                 let matchingTargetPayment = progress.linkedCardPayments.first {
-                    $0.amountPence == progress.targetPence
+                    $0.amountPence == fundingTargetPence
                 }
+                let periodStatementDueDate = periodStatementPayments
+                    .map(\.directDebitDate)
+                    .sorted()
+                    .first
                 guard let directDebitDate = storedDueDate
                     ?? explicitCardPaymentDueDate
+                    ?? periodStatementDueDate
                     ?? nextCycleDirectDebitDate
                     ?? matchingTargetPayment?.dueIso
                     ?? progress.linkedCardPayments.first?.dueIso
                     ?? progress.dueIso
                 else { return nil }
+                if groupByFundingDueDate, !isIsoDate(directDebitDate, in: payPeriod) {
+                    return nil
+                }
 
                 return CreditCardPaymentFundingChecklistItem(
                     id: cardPaymentFundingChecklistId(cardId: card.id, potId: pot.id, directDebitDate: directDebitDate),
@@ -1242,15 +1326,21 @@ enum PlannerDerivedData {
     static func fundingChecklistPresentationItems(
         snapshot: PlannerSnapshot,
         payPeriod: PayPeriod?,
-        asOfDate: String
+        asOfDate: String,
+        groupByFundingDueDate: Bool = false
     ) -> [FundingChecklistPresentationItem] {
-        let recurringItems = recurringBillFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod).map {
+        let recurringItems = recurringBillFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            groupByFundingDueDate: groupByFundingDueDate
+        ).map {
             let isExcluded = isFundingChecklistExcluded(
                 snapshot: snapshot,
                 kind: $0.cardId == nil ? .recurringBill : .cardBill,
                 sourceId: $0.paymentId,
                 occurrenceDate: $0.dueDate,
-                payPeriodId: $0.payPeriodId
+                payPeriodId: $0.payPeriodId,
+                matchAcrossPayPeriods: groupByFundingDueDate
             )
             let chargePaidDate = paidDateForRecurringBillFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
             // A card charge and a pot funding tick only reserve money for a later
@@ -1276,7 +1366,9 @@ enum PlannerDerivedData {
             }
             let detail: String
             if let cardName = $0.cardName {
-                detail = "\($0.paymentName) bill · \(cardName) · due \(shortDate($0.dueDate))"
+                detail = groupByFundingDueDate
+                    ? "\($0.paymentName) bill · \(cardName) · charged \(shortDate($0.dueDate)) · due \(shortDate($0.fundingDueDate))"
+                    : "\($0.paymentName) bill · \(cardName) · due \(shortDate($0.dueDate))"
             } else {
                 detail = "\($0.paymentName) bill · due \(shortDate($0.dueDate))"
             }
@@ -1285,12 +1377,15 @@ enum PlannerDerivedData {
                 name: $0.paymentName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: detail,
-                dueDate: $0.dueDate,
+                amountPence: $0.amountPence,
+                dueDate: groupByFundingDueDate ? $0.fundingDueDate : $0.dueDate,
                 breakdown: [
                     FundingChecklistBreakdownItem(
                         id: "recurring-\($0.id)",
                         title: $0.paymentName,
-                        detail: "Bill due \(shortDate($0.dueDate))",
+                        detail: $0.cardId == nil || !groupByFundingDueDate
+                            ? "Bill due \(shortDate($0.dueDate))"
+                            : "Card charge \(shortDate($0.dueDate)) · payment due \(shortDate($0.fundingDueDate))",
                         amountPence: $0.amountPence
                     )
                 ],
@@ -1302,13 +1397,18 @@ enum PlannerDerivedData {
             )
         }
 
-        let cardSpendItems = cardSpendFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod).map {
+        let cardSpendItems = cardSpendFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            groupByFundingDueDate: groupByFundingDueDate
+        ).map {
             let isExcluded = isFundingChecklistExcluded(
                 snapshot: snapshot,
                 kind: .cardSpend,
                 sourceId: $0.transactionId,
                 occurrenceDate: $0.transactionDate,
-                payPeriodId: $0.payPeriodId
+                payPeriodId: $0.payPeriodId,
+                matchAcrossPayPeriods: groupByFundingDueDate
             )
             let paidDate = paidDateForCardSpendFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
             return FundingChecklistPresentationItem(
@@ -1316,6 +1416,7 @@ enum PlannerDerivedData {
                 name: $0.transactionName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.transactionName) spend · \($0.cardName) · due \(shortDate($0.dueDate))",
+                amountPence: $0.amountPence,
                 dueDate: $0.dueDate,
                 breakdown: [
                     FundingChecklistBreakdownItem(
@@ -1339,7 +1440,8 @@ enum PlannerDerivedData {
                 kind: .cardOpeningBalance,
                 sourceId: $0.cardId,
                 occurrenceDate: $0.directDebitDate,
-                payPeriodId: $0.payPeriodId
+                payPeriodId: $0.payPeriodId,
+                matchAcrossPayPeriods: groupByFundingDueDate
             )
             let paidDate = paidDateForOpeningBalanceFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
             return FundingChecklistPresentationItem(
@@ -1347,6 +1449,7 @@ enum PlannerDerivedData {
                 name: "\($0.cardName) opening balance",
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.cardName) opening balance · due \(shortDate($0.directDebitDate))",
+                amountPence: $0.amountPence,
                 dueDate: $0.directDebitDate,
                 breakdown: [
                     FundingChecklistBreakdownItem(
@@ -1373,14 +1476,16 @@ enum PlannerDerivedData {
         let cardPaymentItems = cardPaymentFundingChecklistItems(
             snapshot: snapshot,
             payPeriod: payPeriod,
-            asOfDate: asOfDate
+            asOfDate: asOfDate,
+            groupByFundingDueDate: groupByFundingDueDate
         ).map {
             let isExcluded = isFundingChecklistExcluded(
                 snapshot: snapshot,
                 kind: .cardPayment,
                 sourceId: $0.cardId,
                 occurrenceDate: $0.directDebitDate,
-                payPeriodId: $0.payPeriodId
+                payPeriodId: $0.payPeriodId,
+                matchAcrossPayPeriods: groupByFundingDueDate
             )
             let paidDate = paidDateForCardPaymentFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
             return FundingChecklistPresentationItem(
@@ -1388,6 +1493,7 @@ enum PlannerDerivedData {
                 name: "\($0.cardName) card payment",
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.cardName) card payment · due \(shortDate($0.directDebitDate))",
+                amountPence: $0.amountPence,
                 dueDate: $0.directDebitDate,
                 breakdown: cardPaymentFundingBreakdown(item: $0, snapshot: snapshot, asOfDate: asOfDate),
                 isCompleted: $0.isCompleted,
@@ -1404,7 +1510,8 @@ enum PlannerDerivedData {
                 kind: .debt,
                 sourceId: $0.debtId,
                 occurrenceDate: $0.dueDate,
-                payPeriodId: $0.payPeriodId
+                payPeriodId: $0.payPeriodId,
+                matchAcrossPayPeriods: groupByFundingDueDate
             )
             let paidDate = paidDateForDebtFunding(item: $0, snapshot: snapshot, asOfDate: asOfDate)
             return FundingChecklistPresentationItem(
@@ -1412,6 +1519,7 @@ enum PlannerDerivedData {
                 name: $0.debtName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.debtName) debt · \($0.lenderName) · due \(shortDate($0.dueDate))",
+                amountPence: $0.amountPence,
                 dueDate: $0.dueDate,
                 breakdown: [
                     FundingChecklistBreakdownItem(
@@ -1872,6 +1980,63 @@ enum PlannerDerivedData {
             .filter { date >= $0.startDate && date <= $0.endDate }
             .sorted { $0.startDate > $1.startDate }
             .first
+    }
+
+    static func projectedFundingPayPeriods(
+        snapshot: PlannerSnapshot,
+        startingAt payPeriod: PayPeriod?,
+        count: Int = 12
+    ) -> [PayPeriod] {
+        guard var current = payPeriod, count > 0 else { return [] }
+
+        let frequency = current.payFrequency ?? snapshot.settings.payFrequency
+        let monthlyAnchorDay = frequency == .monthly
+            ? current.monthlyAnchorDay ?? FinanceEngine.dayOfMonth(current.payday)
+            : nil
+        let savedPeriodsByPayday = snapshot.payPeriods
+            .filter { $0.deletedAt == nil }
+            .reduce(into: [String: PayPeriod]()) { result, period in
+                result[period.payday] = period
+            }
+        var periods: [PayPeriod] = []
+
+        for index in 0..<count {
+            let dates = FinanceEngine.createNextPayPeriod(
+                payday: current.payday,
+                frequency: frequency,
+                monthlyAnchorDay: monthlyAnchorDay
+            )
+            current.startDate = dates.startDate
+            current.endDate = dates.endDate
+            current.nextPayday = dates.nextPayday
+            current.payFrequency = frequency
+            current.monthlyAnchorDay = monthlyAnchorDay
+            periods.append(current)
+
+            guard index + 1 < count else { break }
+            if var savedNext = savedPeriodsByPayday[dates.nextPayday] {
+                savedNext.payFrequency = frequency
+                savedNext.monthlyAnchorDay = monthlyAnchorDay
+                current = savedNext
+            } else {
+                current = PayPeriod(
+                    id: "pay-period-\(dates.nextPayday)",
+                    startDate: dates.nextPayday,
+                    endDate: dates.nextPayday,
+                    payday: dates.nextPayday,
+                    nextPayday: dates.nextPayday,
+                    payFrequency: frequency,
+                    incomePence: current.incomePence,
+                    status: .planned,
+                    createdAt: current.createdAt,
+                    updatedAt: current.updatedAt,
+                    deletedAt: nil,
+                    monthlyAnchorDay: monthlyAnchorDay
+                )
+            }
+        }
+
+        return periods
     }
 
     static func payPeriodCostSummary(
@@ -2636,14 +2801,14 @@ enum PlannerDerivedData {
 
     private static func linkedCreditCardChecklistFundingPence(
         snapshot: PlannerSnapshot,
-        payPeriodId: String,
+        payPeriodId: String?,
         linkedPotIds: Set<String>,
         excluding isExcluded: (PotAllocation) -> Bool
     ) -> Int {
         snapshot.potAllocations
             .filter {
                 $0.deletedAt == nil &&
-                $0.payPeriodId == payPeriodId &&
+                (payPeriodId == nil || $0.payPeriodId == payPeriodId) &&
                 linkedPotIds.contains($0.potId) &&
                 isCreditCardChecklistFundingSource($0.source) &&
                 !isExcluded($0)
@@ -2718,6 +2883,7 @@ enum PlannerDerivedData {
                     paymentName: payment.name,
                     amountPence: payment.amountPence,
                     dueDate: dueDate,
+                    fundingDueDate: dueDate,
                     payPeriodId: "",
                     cardId: nil,
                     cardName: nil,
@@ -3170,6 +3336,7 @@ private extension PlannerDerivedData {
                     name: "\(card.name) opening balance",
                     title: "Add \(MoneyParser.formatPence(allocation.amountPence)) to \(pot.name)",
                     detail: "\(card.name) opening balance · due \(shortDate(directDebitDate))",
+                    amountPence: allocation.amountPence,
                     dueDate: directDebitDate,
                     breakdown: [
                         FundingChecklistBreakdownItem(
@@ -3501,14 +3668,15 @@ private extension PlannerDerivedData {
         kind: FundingChecklistExclusionKind,
         sourceId: String,
         occurrenceDate: String,
-        payPeriodId: String
+        payPeriodId: String,
+        matchAcrossPayPeriods: Bool = false
     ) -> Bool {
         snapshot.fundingChecklistExclusions.contains {
             $0.deletedAt == nil &&
             $0.kind == kind &&
             $0.sourceId == sourceId &&
             $0.occurrenceDate == occurrenceDate &&
-            $0.payPeriodId == payPeriodId
+            (matchAcrossPayPeriods || $0.payPeriodId == payPeriodId)
         }
     }
 
@@ -3600,6 +3768,7 @@ private extension PlannerDerivedData {
                 paymentName: item.paymentName,
                 amountPence: item.amountPence,
                 dueDate: item.dueDate,
+                fundingDueDate: item.fundingDueDate,
                 payPeriodId: item.payPeriodId,
                 cardId: item.cardId,
                 cardName: item.cardName,

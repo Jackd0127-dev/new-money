@@ -1182,10 +1182,47 @@ enum DefaultData {
             return true
         }
 
+        normalizeMonthlyPayPeriods(in: &migrated)
         repairUnsettledRecurringCardBillReserves(in: &migrated)
         repairKnownAutomaticCardBillFunding(in: &migrated)
 
         return (migrated, migrated != snapshot)
+    }
+
+    private static func normalizeMonthlyPayPeriods(in snapshot: inout PlannerSnapshot) {
+        let recordedPeriodIds = Set(snapshot.paychecks
+            .filter { $0.deletedAt == nil }
+            .map(\.payPeriodId))
+        let orderedIndices = snapshot.payPeriods.indices.sorted {
+            snapshot.payPeriods[$0].payday < snapshot.payPeriods[$1].payday
+        }
+        var currentMonthlyAnchorDay: Int?
+
+        for index in orderedIndices {
+            let frequency = snapshot.payPeriods[index].payFrequency ?? snapshot.settings.payFrequency
+            guard frequency == .monthly else { continue }
+
+            let enteredDay = FinanceEngine.dayOfMonth(snapshot.payPeriods[index].payday)
+            if recordedPeriodIds.contains(snapshot.payPeriods[index].id) {
+                currentMonthlyAnchorDay = snapshot.payPeriods[index].monthlyAnchorDay ?? enteredDay
+            } else if let storedAnchor = snapshot.payPeriods[index].monthlyAnchorDay {
+                currentMonthlyAnchorDay = storedAnchor
+            } else if currentMonthlyAnchorDay == nil {
+                currentMonthlyAnchorDay = enteredDay
+            }
+
+            let anchorDay = currentMonthlyAnchorDay ?? enteredDay
+            let dates = FinanceEngine.createNextPayPeriod(
+                payday: snapshot.payPeriods[index].payday,
+                frequency: .monthly,
+                monthlyAnchorDay: anchorDay
+            )
+            snapshot.payPeriods[index].startDate = dates.startDate
+            snapshot.payPeriods[index].endDate = dates.endDate
+            snapshot.payPeriods[index].nextPayday = dates.nextPayday
+            snapshot.payPeriods[index].payFrequency = .monthly
+            snapshot.payPeriods[index].monthlyAnchorDay = anchorDay
+        }
     }
 
     /// Removes the single, confirmed automatic funding record created for the

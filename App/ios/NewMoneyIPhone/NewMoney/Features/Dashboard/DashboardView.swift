@@ -1755,16 +1755,14 @@ private struct IncomeExpandableSection<Content: View>: View {
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
-                    Image(systemName: "chevron.down")
+                    Image(systemName: ExpandableSectionLayoutPolicy.symbol(isExpanded: isExpanded))
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(AppTheme.Colors.appBackground)
             .zIndex(1)
             .accessibilityLabel(title)
             .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")

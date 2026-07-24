@@ -141,16 +141,27 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     func testPlannerSnapshotDecodesMissingOneOffIncomeAndChecklistExclusions() throws {
-        let encoded = try JSONEncoder().encode(makeSnapshot())
+        let period = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        let encoded = try JSONEncoder().encode(makeSnapshot(payPeriods: [period]))
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         object.removeValue(forKey: "oneOffIncomes")
         object.removeValue(forKey: "fundingChecklistExclusions")
+        var periods = try XCTUnwrap(object["payPeriods"] as? [[String: Any]])
+        periods[0].removeValue(forKey: "monthlyAnchorDay")
+        object["payPeriods"] = periods
         let legacyData = try JSONSerialization.data(withJSONObject: object)
 
         let decoded = try JSONDecoder().decode(PlannerSnapshot.self, from: legacyData)
 
         XCTAssertTrue(decoded.oneOffIncomes.isEmpty)
         XCTAssertTrue(decoded.fundingChecklistExclusions.isEmpty)
+        XCTAssertNil(decoded.payPeriods.first?.monthlyAnchorDay)
     }
 
     @MainActor
@@ -265,10 +276,10 @@ final class FinanceEngineTests: XCTestCase {
     func testChargedLinkedCardRecurringBillStaysInFundingChecklistUntilPotIsFunded() {
         let settings = makeManualSettings(today: "2026-07-11")
         let period = makePayPeriod(
-            id: "period-july",
-            startDate: "2026-07-01",
-            endDate: "2026-07-31",
-            payday: "2026-07-01",
+            id: "period-august",
+            startDate: "2026-08-01",
+            endDate: "2026-08-31",
+            payday: "2026-08-01",
             incomePence: 100000
         )
         let zablePot = makePot(
@@ -292,12 +303,13 @@ final class FinanceEngineTests: XCTestCase {
             amountPence: 2212,
             dueDay: 11,
             potId: zablePot.id,
-            creditCardId: zableCard.id
+            creditCardId: zableCard.id,
+            createdAt: "2026-07-01T00:00:00.000Z"
         )
         let chargedBill = Transaction(
             id: "charge-zable-11th",
             potId: zablePot.id,
-            payPeriodId: period.id,
+            payPeriodId: nil,
             amountPence: 2212,
             type: .spending,
             paymentMethod: .creditCard,
@@ -322,17 +334,294 @@ final class FinanceEngineTests: XCTestCase {
             PlannerDerivedData.fundingChecklistPresentationItems(
                 snapshot: snapshot,
                 payPeriod: period,
-                asOfDate: "2026-07-11"
+                asOfDate: "2026-07-11",
+                groupByFundingDueDate: true
             )
             .first { $0.name == bill.name }
         )
-        let progress = PlannerDerivedData.potProgress(pot: zablePot, snapshot: snapshot, today: "2026-07-11")
-
         XCTAssertFalse(checklistItem.isCompleted)
         XCTAssertEqual(checklistItem.status, .needsFunding)
         XCTAssertNil(checklistItem.paidDate)
-        XCTAssertEqual(progress.coveredPence, 0)
-        XCTAssertEqual(progress.shortfallPence, 2212)
+        XCTAssertEqual(checklistItem.amountPence, 2212)
+    }
+
+    func testCardChargesAreGroupedInTheIncomePeriodContainingTheirDirectDebitDate() {
+        let settings = makeManualSettings(today: "2026-07-21")
+        let july = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        let august = makePayPeriod(
+            id: "period-august",
+            startDate: "2026-08-01",
+            endDate: "2026-08-31",
+            payday: "2026-08-01",
+            incomePence: 100000
+        )
+        let card = makeCreditCard(
+            id: "card-main",
+            name: "Main card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-25",
+            dueDay: 5
+        )
+        let pot = makePot(
+            id: "pot-main-card",
+            name: "Main card",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let bill = makeRecurringPayment(
+            id: "bill-mobile",
+            name: "Mobile",
+            amountPence: 2500,
+            dueDay: 21,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let cardSpend = makeTransaction(
+            id: "transaction-groceries",
+            cardId: card.id,
+            amountPence: 4200,
+            date: "2026-07-21",
+            note: "Groceries"
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [bill],
+            payPeriods: [july, august],
+            transactions: [cardSpend],
+            creditCards: [card]
+        )
+
+        XCTAssertTrue(PlannerDerivedData.recurringBillFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: july,
+            groupByFundingDueDate: true
+        ).isEmpty)
+        XCTAssertTrue(PlannerDerivedData.cardSpendFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: july,
+            groupByFundingDueDate: true
+        ).isEmpty)
+
+        let augustBill = try! XCTUnwrap(
+            PlannerDerivedData.recurringBillFundingChecklistItems(
+                snapshot: snapshot,
+                payPeriod: august,
+                groupByFundingDueDate: true
+            )
+                .first { $0.paymentId == bill.id }
+        )
+        let augustSpend = try! XCTUnwrap(
+            PlannerDerivedData.cardSpendFundingChecklistItems(
+                snapshot: snapshot,
+                payPeriod: august,
+                groupByFundingDueDate: true
+            )
+                .first { $0.transactionId == cardSpend.id }
+        )
+        XCTAssertEqual(augustBill.dueDate, "2026-07-21")
+        XCTAssertEqual(augustBill.fundingDueDate, "2026-08-05")
+        XCTAssertEqual(augustSpend.transactionDate, "2026-07-21")
+        XCTAssertEqual(augustSpend.dueDate, "2026-08-05")
+
+        let augustPresentation = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: august,
+            asOfDate: "2026-08-01",
+            groupByFundingDueDate: true
+        )
+        let presentedBill = try! XCTUnwrap(augustPresentation.first { $0.name == bill.name })
+        let presentedSpend = try! XCTUnwrap(augustPresentation.first { $0.name == cardSpend.note })
+        XCTAssertEqual(presentedBill.dueDate, "2026-08-05")
+        XCTAssertTrue(presentedBill.detail.contains("charged 21 Jul"))
+        XCTAssertTrue(presentedBill.detail.contains("due 5 Aug"))
+        XCTAssertEqual(presentedSpend.dueDate, "2026-08-05")
+    }
+
+    func testCashDueGroupingRecognizesLegacyCardFundingAndExclusion() {
+        let settings = makeManualSettings(today: "2026-07-21")
+        let july = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        let august = makePayPeriod(
+            id: "period-august",
+            startDate: "2026-08-01",
+            endDate: "2026-08-31",
+            payday: "2026-08-01",
+            incomePence: 100000
+        )
+        let card = makeCreditCard(
+            id: "card-main",
+            name: "Main card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-25",
+            dueDay: 5
+        )
+        let pot = makePot(
+            id: "pot-main-card",
+            name: "Main card",
+            balancePence: 2500,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let bill = makeRecurringPayment(
+            id: "bill-phone",
+            name: "Phone",
+            amountPence: 2500,
+            dueDay: 21,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        var allocation = makePotAllocation(
+            id: "legacy-phone-funding",
+            payPeriodId: july.id,
+            potId: pot.id,
+            amountPence: 2500,
+            source: .recurringBillFunding,
+            recurringPaymentId: bill.id,
+            recurringDueDate: "2026-07-21"
+        )
+        allocation.creditCardId = card.id
+        let exclusion = FundingChecklistExclusion(
+            id: "legacy-phone-exclusion",
+            kind: .cardBill,
+            sourceId: bill.id,
+            occurrenceDate: "2026-07-21",
+            payPeriodId: july.id,
+            createdAt: "2026-07-21T00:00:00.000Z",
+            updatedAt: "2026-07-21T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [bill],
+            payPeriods: [july, august],
+            potAllocations: [allocation],
+            creditCards: [card],
+            fundingChecklistExclusions: [exclusion]
+        )
+
+        let julyItems = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: july,
+            asOfDate: "2026-07-21",
+            groupByFundingDueDate: true
+        )
+        let augustItem = try! XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: august,
+            asOfDate: "2026-08-01",
+            groupByFundingDueDate: true
+        ).first { $0.name == bill.name })
+
+        XCTAssertTrue(julyItems.isEmpty)
+        XCTAssertEqual(augustItem.dueDate, "2026-08-05")
+        XCTAssertTrue(augustItem.isCompleted)
+        XCTAssertTrue(augustItem.isExcluded)
+        XCTAssertEqual(snapshot.potAllocations.first?.payPeriodId, july.id)
+        XCTAssertEqual(snapshot.fundingChecklistExclusions.first?.payPeriodId, july.id)
+        XCTAssertEqual(snapshot.pots.first?.balancePence, 2500)
+    }
+
+    @MainActor
+    func testProjectedCashDuePeriodChecklistCanBeTickedAndUnticked() async throws {
+        var settings = makeManualSettings(today: "2026-07-20")
+        settings.payFrequency = .monthly
+        var july = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100000
+        )
+        july.payFrequency = .monthly
+        let card = makeCreditCard(
+            id: "card-main",
+            name: "Main card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-25",
+            dueDay: 5
+        )
+        let pot = makePot(
+            id: "pot-main-card",
+            name: "Main card",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let bill = makeRecurringPayment(
+            id: "bill-mobile",
+            name: "Mobile",
+            amountPence: 2500,
+            dueDay: 21,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [bill],
+            payPeriods: [july],
+            creditCards: [card]
+        )))
+
+        await store.load()
+        let august = try XCTUnwrap(PlannerDerivedData.projectedFundingPayPeriods(
+            snapshot: store.snapshot,
+            startingAt: store.selectedPayPeriod,
+            count: 2
+        ).last)
+        XCTAssertEqual(august.id, "pay-period-2026-08-01")
+        XCTAssertEqual(august.startDate, "2026-08-01")
+        XCTAssertEqual(august.endDate, "2026-08-31")
+        let dueItems = PlannerDerivedData.recurringBillFundingChecklistItems(
+            snapshot: store.snapshot,
+            payPeriod: august,
+            groupByFundingDueDate: true
+        )
+        XCTAssertEqual(dueItems.map(\.paymentName), [bill.name])
+        let item = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: store.snapshot,
+            payPeriod: august,
+            asOfDate: "2026-08-01",
+            groupByFundingDueDate: true
+        ).first { $0.name == bill.name })
+
+        XCTAssertEqual(item.dueDate, "2026-08-05")
+        XCTAssertTrue(store.setFundingChecklistCompleted(action: item.action, completed: true))
+        XCTAssertEqual(store.snapshot.potAllocations.first?.payPeriodId, august.id)
+        XCTAssertEqual(store.snapshot.potAllocations.first?.creditCardDirectDebitDate, "2026-08-05")
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 2500)
+
+        let completedItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: store.snapshot,
+            payPeriod: august,
+            asOfDate: "2026-08-01",
+            groupByFundingDueDate: true
+        ).first { $0.name == bill.name })
+        XCTAssertTrue(completedItem.isCompleted)
+
+        XCTAssertTrue(store.setFundingChecklistCompleted(action: completedItem.action, completed: false))
+        XCTAssertTrue(store.snapshot.potAllocations.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
     }
 
     func testCardPaymentFundingBreakdownListsEveryStatementCharge() {
@@ -1005,7 +1294,97 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(FinanceEngine.createNextPayPeriod(payday: "2026-06-12", frequency: .biweekly),
                        NextPayPeriod(startDate: "2026-06-12", endDate: "2026-06-25", nextPayday: "2026-06-26"))
         XCTAssertEqual(FinanceEngine.createNextPayPeriod(payday: "2026-06-30", frequency: .monthly),
-                       NextPayPeriod(startDate: "2026-06-30", endDate: "2026-07-30", nextPayday: "2026-07-31"))
+                       NextPayPeriod(startDate: "2026-06-30", endDate: "2026-07-29", nextPayday: "2026-07-30"))
+    }
+
+    func testMonthlyPayPeriodsPreserveTheSelectedDayAndClampShorterMonths() {
+        XCTAssertEqual(
+            FinanceEngine.createNextPayPeriod(
+                payday: "2027-01-31",
+                frequency: .monthly,
+                monthlyAnchorDay: 31
+            ),
+            NextPayPeriod(startDate: "2027-01-31", endDate: "2027-02-27", nextPayday: "2027-02-28")
+        )
+        XCTAssertEqual(
+            FinanceEngine.createNextPayPeriod(
+                payday: "2027-02-28",
+                frequency: .monthly,
+                monthlyAnchorDay: 31
+            ),
+            NextPayPeriod(startDate: "2027-02-28", endDate: "2027-03-30", nextPayday: "2027-03-31")
+        )
+        XCTAssertEqual(
+            FinanceEngine.createNextPayPeriod(payday: "2026-07-16", frequency: .monthly),
+            NextPayPeriod(startDate: "2026-07-16", endDate: "2026-08-15", nextPayday: "2026-08-16")
+        )
+    }
+
+    func testProjectedFundingPeriodsKeepAThirtyFirstAnchorAcrossShortMonths() {
+        var july = makePayPeriod(
+            id: "period-july-31",
+            startDate: "2026-07-31",
+            endDate: "2026-08-30",
+            payday: "2026-07-31",
+            incomePence: 100000
+        )
+        july.payFrequency = .monthly
+        july.monthlyAnchorDay = 31
+        let snapshot = makeSnapshot(payPeriods: [july])
+
+        let periods = PlannerDerivedData.projectedFundingPayPeriods(
+            snapshot: snapshot,
+            startingAt: july,
+            count: 4
+        )
+
+        XCTAssertEqual(periods.map(\.startDate), ["2026-07-31", "2026-08-31", "2026-09-30", "2026-10-31"])
+        XCTAssertEqual(periods.map(\.endDate), ["2026-08-30", "2026-09-29", "2026-10-30", "2026-11-29"])
+        XCTAssertEqual(periods.map(\.monthlyAnchorDay), [31, 31, 31, 31])
+    }
+
+    @MainActor
+    func testUpdatingAClampedMonthlyPaycheckKeepsTheOriginalThirtyFirstAnchor() async {
+        var settings = makeManualSettings(today: "2027-02-28")
+        settings.payFrequency = .monthly
+        var period = makePayPeriod(
+            id: "period-february",
+            startDate: "2027-02-28",
+            endDate: "2027-03-30",
+            payday: "2027-02-28",
+            incomePence: 100000
+        )
+        period.nextPayday = "2027-03-31"
+        period.payFrequency = .monthly
+        period.monthlyAnchorDay = 31
+        let paycheck = Paycheck(
+            id: "paycheck-february",
+            payPeriodId: period.id,
+            hoursWorked: 0,
+            hourlyRatePence: 0,
+            calculatedAmountPence: 100000,
+            actualAmountPence: 100000,
+            createdAt: "2027-02-28T00:00:00.000Z",
+            updatedAt: "2027-02-28T00:00:00.000Z",
+            deletedAt: nil
+        )
+        var snapshot = makeSnapshot(settings: settings, payPeriods: [period])
+        snapshot.paychecks = [paycheck]
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+
+        await store.load()
+        store.updatePaycheck(
+            id: paycheck.id,
+            payday: "2027-02-28",
+            hoursWorked: 0,
+            hourlyRatePence: 0,
+            actualAmountPence: 100000,
+            payFrequency: .monthly
+        )
+
+        XCTAssertEqual(store.snapshot.payPeriods.first?.monthlyAnchorDay, 31)
+        XCTAssertEqual(store.snapshot.payPeriods.first?.nextPayday, "2027-03-31")
+        XCTAssertEqual(store.snapshot.payPeriods.first?.endDate, "2027-03-30")
     }
 
     func testSeedsTheSameDefaultPlannerPotsAsTheWebApp() {

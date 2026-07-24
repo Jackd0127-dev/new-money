@@ -765,6 +765,7 @@ enum BillsLayoutPolicy {
     static let fundingChecklistPlacement = "belowOverview"
     static let fundingChecklistAlwaysVisible = true
     static let fundingChecklistUsesExistingDerivedItems = true
+    static let fundingChecklistProjectedPeriodCount = 12
     static let yourBillsPresentation = "collapsibleDropdown"
     static let takingSoonPresentation = "collapsibleDropdown"
     static let overviewUpcomingPresentation = "collapsibleProgressiveLazyList"
@@ -787,11 +788,17 @@ private struct BillsTabPresentation {
     var ungroupedBills: [RecurringPayment]
     var billsByGroupId: [String: [RecurringPayment]]
     var upcomingOccurrences: [RecurringPaymentOccurrence]
-    var fundingChecklistItems: [FundingChecklistPresentationItem]
+    var fundingChecklistGroups: [BillsFundingChecklistPeriodGroup]
     var nextDueLabelsByPaymentId: [String: String]
     var activeBillCount: Int
     var activeTemplateTotalPence: Int
     var linkedBillCount: Int
+}
+
+private struct BillsFundingChecklistPeriodGroup: Identifiable {
+    var id: String { payPeriod.id }
+    var payPeriod: PayPeriod
+    var items: [FundingChecklistPresentationItem]
 }
 
 struct BillsView: View {
@@ -930,81 +937,30 @@ struct BillsView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Funding checklist")
 
-            if fundingChecklistItems.isEmpty {
+            if fundingChecklistGroups.isEmpty {
                 AppCard {
                     EmptyStateView(
                         title: "Nothing to tick off",
-                        message: "Linked bills, card payments, and debt funding for this pay period will appear here.",
+                        message: "Linked bills, card payments, and debt funding will be grouped by income period here.",
                         systemImage: "checklist"
                     )
                 }
             } else {
-                let activeItems = fundingChecklistItems.filter { $0.status != .paidCompleted }
-                let paidItems = fundingChecklistItems.filter { $0.status == .paidCompleted }
-                let fundedCount = fundingChecklistItems.filter(\.isCompleted).count
-                let hasPendingFunding = activeItems.contains { !$0.isCompleted && !$0.isExcluded }
-
-                AppCard(glow: hasPendingFunding) {
-                    HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(billsFundingChecklistProgressText(
-                                fundedCount: fundedCount,
-                                totalCount: fundingChecklistItems.count,
-                                hasPendingFunding: hasPendingFunding
-                            ))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                        }
-
-                        Spacer(minLength: AppTheme.Spacing.sm)
-
-                        Image(systemName: "checklist.checked")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.success)
-                            .frame(width: 36, height: 36)
-                            .background(AppTheme.Colors.success.opacity(0.12))
-                            .clipShape(Circle())
-                    }
-
-                    AppDivider()
-
-                    billsChecklistSection(title: "Active funding", items: activeItems, isReadOnly: false)
-
-                    if !paidItems.isEmpty {
-                        AppDivider()
-                        billsChecklistSection(title: "Paid / completed", items: paidItems, isReadOnly: true)
+                ForEach(fundingChecklistGroups) { group in
+                    BillsFundingChecklistPeriodCard(group: group) { item in
+                        applyFundingChecklistAction(item)
+                    } excludeAction: { item in
+                        applyFundingChecklistExclusion(item)
+                    } adjustAction: { item in
+                        selectedOccurrenceForAdjustment = recurringOccurrence(for: item)
                     }
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private func billsChecklistSection(title: String, items: [FundingChecklistPresentationItem], isReadOnly: Bool) -> some View {
-        if !items.isEmpty {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-                .textCase(.uppercase)
-
-            ForEach(items) { item in
-                BillsFundingChecklistRow(item: item, isReadOnly: isReadOnly) {
-                    applyFundingChecklistAction(item)
-                } excludeAction: {
-                    applyFundingChecklistExclusion(item)
-                } adjustAction: {
-                    selectedOccurrenceForAdjustment = recurringOccurrence(for: item)
-                }
-
-                if item.id != items.last?.id {
-                    AppDivider()
-                }
-            }
-        }
-    }
-
-    private var fundingChecklistItems: [FundingChecklistPresentationItem] {
-        tabPresentation.fundingChecklistItems
+    private var fundingChecklistGroups: [BillsFundingChecklistPeriodGroup] {
+        tabPresentation.fundingChecklistGroups
     }
 
     private func recurringOccurrence(for item: FundingChecklistPresentationItem) -> RecurringPaymentOccurrence? {
@@ -1029,11 +985,6 @@ struct BillsView: View {
     private func applyFundingChecklistExclusion(_ item: FundingChecklistPresentationItem) {
         guard item.status != .paidCompleted else { return }
         _ = store.setFundingChecklistExcluded(action: item.action, excluded: !item.isExcluded)
-    }
-
-    private func billsFundingChecklistProgressText(fundedCount: Int, totalCount: Int, hasPendingFunding: Bool) -> String {
-        let countText = "\(fundedCount)/\(totalCount) funded"
-        return hasPendingFunding ? "Funding pending · \(countText)" : countText
     }
 
     private var groupsSection: some View {
@@ -1305,11 +1256,21 @@ struct BillsView: View {
             ungroupedBills: ungroupedBills,
             billsByGroupId: billsByGroupId,
             upcomingOccurrences: upcomingOccurrences,
-            fundingChecklistItems: PlannerDerivedData.fundingChecklistPresentationItems(
+            fundingChecklistGroups: PlannerDerivedData.projectedFundingPayPeriods(
                 snapshot: snapshot,
-                payPeriod: context.selectedPayPeriod,
-                asOfDate: todayIso
-            ),
+                startingAt: context.selectedPayPeriod,
+                count: BillsLayoutPolicy.fundingChecklistProjectedPeriodCount
+            )
+            .compactMap { payPeriod in
+                let items = PlannerDerivedData.fundingChecklistPresentationItems(
+                    snapshot: snapshot,
+                    payPeriod: payPeriod,
+                    asOfDate: max(todayIso, payPeriod.startDate),
+                    groupByFundingDueDate: true
+                )
+                guard !items.isEmpty else { return nil }
+                return BillsFundingChecklistPeriodGroup(payPeriod: payPeriod, items: items)
+            },
             nextDueLabelsByPaymentId: nextDueLabelsByPaymentId,
             activeBillCount: sortedBills.filter(\.active).count,
             activeTemplateTotalPence: sortedBills.filter(\.active).reduce(0) { $0 + $1.amountPence },
@@ -1461,6 +1422,111 @@ private struct RecurringBillOccurrenceAdjustmentSheet: View {
 
     private func displayDate(_ isoDate: String) -> String {
         FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct BillsFundingChecklistPeriodCard: View {
+    var group: BillsFundingChecklistPeriodGroup
+    var action: (FundingChecklistPresentationItem) -> Void
+    var excludeAction: (FundingChecklistPresentationItem) -> Void
+    var adjustAction: (FundingChecklistPresentationItem) -> Void
+
+    var body: some View {
+        AppCard(glow: hasPendingFunding) {
+            HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(periodTitle)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(progressText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Spacer(minLength: AppTheme.Spacing.sm)
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("Amount due")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                        .textCase(.uppercase)
+                    Text(MoneyParser.formatPence(totalAmountPence))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                }
+            }
+
+            AppDivider()
+            checklistSection(title: "Active funding", items: activeItems, isReadOnly: false)
+
+            if !paidItems.isEmpty {
+                AppDivider()
+                checklistSection(title: "Paid / completed", items: paidItems, isReadOnly: true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Funding period \(periodTitle), \(MoneyParser.formatPence(totalAmountPence)) due")
+    }
+
+    @ViewBuilder
+    private func checklistSection(
+        title: String,
+        items: [FundingChecklistPresentationItem],
+        isReadOnly: Bool
+    ) -> some View {
+        if !items.isEmpty {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .textCase(.uppercase)
+
+            ForEach(items) { item in
+                BillsFundingChecklistRow(item: item, isReadOnly: isReadOnly) {
+                    action(item)
+                } excludeAction: {
+                    excludeAction(item)
+                } adjustAction: {
+                    adjustAction(item)
+                }
+
+                if item.id != items.last?.id {
+                    AppDivider()
+                }
+            }
+        }
+    }
+
+    private var activeItems: [FundingChecklistPresentationItem] {
+        group.items.filter { $0.status != .paidCompleted }
+    }
+
+    private var paidItems: [FundingChecklistPresentationItem] {
+        group.items.filter { $0.status == .paidCompleted }
+    }
+
+    private var fundedCount: Int {
+        group.items.count(where: \.isCompleted)
+    }
+
+    private var hasPendingFunding: Bool {
+        activeItems.contains { !$0.isCompleted && !$0.isExcluded }
+    }
+
+    private var totalAmountPence: Int {
+        group.items.reduce(0) { $0 + max(0, $1.amountPence) }
+    }
+
+    private var progressText: String {
+        let countText = "\(fundedCount)/\(group.items.count) funded"
+        return hasPendingFunding ? "Funding pending · \(countText)" : countText
+    }
+
+    private var periodTitle: String {
+        let start = FinanceEngine.parseDate(group.payPeriod.startDate)
+            .formatted(.dateTime.day().month(.abbreviated).year())
+        let end = FinanceEngine.parseDate(group.payPeriod.endDate)
+            .formatted(.dateTime.day().month(.abbreviated).year())
+        return "\(start) – \(end)"
     }
 }
 
@@ -1861,16 +1927,14 @@ private struct BillsCollapsibleSection<Content: View>: View {
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
-                    Image(systemName: "chevron.down")
+                    Image(systemName: ExpandableSectionLayoutPolicy.symbol(isExpanded: isExpanded))
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .frame(minHeight: BillsLayoutPolicy.collapsibleHeaderMinimumHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(AppTheme.Colors.appBackground)
             .zIndex(1)
             .accessibilityLabel(title)
             .accessibilityValue("\(isExpanded ? "Expanded" : "Collapsed"). \(subtitle)")

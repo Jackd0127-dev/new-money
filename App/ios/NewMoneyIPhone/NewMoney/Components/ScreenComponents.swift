@@ -10,6 +10,20 @@ enum AppEditDoneToolbarPolicy {
     static let springDampingFraction = 0.86
 }
 
+enum AppToolbarLayoutPolicy {
+    static let separatesAdjacentActions = true
+}
+
+enum ExpandableSectionLayoutPolicy {
+    static let collapsedSymbol = "chevron.right"
+    static let expandedSymbol = "chevron.down"
+    static let usesOpaqueHeaderBackground = false
+
+    static func symbol(isExpanded: Bool) -> String {
+        isExpanded ? expandedSymbol : collapsedSymbol
+    }
+}
+
 let appToolbarMorphAnimation = Animation.spring(
     response: AppEditDoneToolbarPolicy.springResponse,
     dampingFraction: AppEditDoneToolbarPolicy.springDampingFraction
@@ -235,6 +249,12 @@ private struct PlaceholderToolbarModifier: ViewModifier {
                     ToolbarItem(id: secondaryAction.id, placement: .topBarTrailing) {
                         toolbarButton(secondaryAction)
                     }
+                }
+                if #available(iOS 26.0, *),
+                   AppToolbarLayoutPolicy.separatesAdjacentActions,
+                   secondaryAction != nil,
+                   primaryAction != nil {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 }
                 if let primaryAction {
                     ToolbarItem(id: primaryAction.id, placement: .topBarTrailing) {

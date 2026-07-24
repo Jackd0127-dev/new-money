@@ -427,6 +427,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(BillsLayoutPolicy.fundingChecklistPlacement, "belowOverview")
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistAlwaysVisible)
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistUsesExistingDerivedItems)
+        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistProjectedPeriodCount, 12)
         XCTAssertEqual(BillsLayoutPolicy.yourBillsPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.takingSoonPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.overviewUpcomingPresentation, "collapsibleProgressiveLazyList")
@@ -476,6 +477,12 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(CreditLayoutPolicy.cardRowWidth, CreditCardVisualLayoutPolicy.rowCardMaxWidth, accuracy: 0.001)
         XCTAssertEqual(CreditLayoutPolicy.cardRowCornerRadius, AppTheme.Radius.md, accuracy: 0.001)
         XCTAssertLessThan(CreditLayoutPolicy.cardRowCornerRadius, AppTheme.Radius.lg)
+        XCTAssertEqual(CreditLayoutPolicy.dueSoonPresentation, "stackedFourItemPreviews")
+        XCTAssertEqual(CreditLayoutPolicy.dueSoonCards, ["directDebits", "nextStatements"])
+        XCTAssertEqual(CreditLayoutPolicy.dueSoonPreviewItemLimit, 4)
+        XCTAssertTrue(CreditLayoutPolicy.dueSoonPreviewOpensFullList)
+        XCTAssertTrue(CreditLayoutPolicy.directDebitFullListIsUntruncated)
+        XCTAssertTrue(CreditLayoutPolicy.nextStatementsIncludeEveryActiveCard)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.cardAspectRatio, 1.58, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.cardCornerRadius, 12, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.canonicalRenderer, "PremiumCardView")
@@ -801,6 +808,16 @@ final class ActivityLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDetailToolbarActions, ["trash", "edit"])
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteRequiresConfirmation)
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteIsPermanent)
+    }
+
+    func testExpandableSectionsUseCleanRightAndDownDisclosureSymbols() {
+        XCTAssertEqual(ExpandableSectionLayoutPolicy.collapsedSymbol, "chevron.right")
+        XCTAssertEqual(ExpandableSectionLayoutPolicy.expandedSymbol, "chevron.down")
+        XCTAssertFalse(ExpandableSectionLayoutPolicy.usesOpaqueHeaderBackground)
+    }
+
+    func testAdjacentToolbarActionsRenderAsSeparateControls() {
+        XCTAssertTrue(AppToolbarLayoutPolicy.separatesAdjacentActions)
     }
 }
 

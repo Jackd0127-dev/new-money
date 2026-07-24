@@ -123,6 +123,12 @@ struct CreditLayoutPolicy {
     static let cardRowWidth: CGFloat = CreditCardVisualLayoutPolicy.rowCardMaxWidth
     static let cardRowCornerRadius: CGFloat = AppTheme.Radius.md
     static let cardRowsUseHorizontalScroll = true
+    static let dueSoonPresentation = "stackedFourItemPreviews"
+    static let dueSoonCards = ["directDebits", "nextStatements"]
+    static let dueSoonPreviewItemLimit = 4
+    static let dueSoonPreviewOpensFullList = true
+    static let directDebitFullListIsUntruncated = true
+    static let nextStatementsIncludeEveryActiveCard = true
 }
 
 struct PlanView: View {
@@ -3283,7 +3289,10 @@ struct CreditView: View {
         ) {
             creditSummary(summary: displayData.summary, dueItems: displayData.dueItems)
             activeCardRows(cardModels: displayData.cardModels)
-            paymentDueSummary(dueItems: displayData.dueItems)
+            paymentDueSummary(
+                directDebits: displayData.directDebitItems,
+                nextStatements: displayData.nextStatementItems
+            )
             creditRoutes
         }
         .sheet(item: $selectedCard) { card in
@@ -3356,6 +3365,28 @@ struct CreditView: View {
                     isOverdue: $0.status == .overdue
                 )
             }
+        let nextStatementItems = activeCards.compactMap { card -> CreditNextStatementItem? in
+            guard let statementDate = PlannerDerivedData.creditCardNextStatementDate(
+                card: card,
+                snapshot: snapshot,
+                asOfDate: context.todayIso
+            ) else {
+                return nil
+            }
+
+            return CreditNextStatementItem(
+                id: card.id,
+                cardName: card.name,
+                statementDate: statementDate
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.statementDate == rhs.statementDate {
+                lhs.cardName.localizedStandardCompare(rhs.cardName) == .orderedAscending
+            } else {
+                lhs.statementDate < rhs.statementDate
+            }
+        }
         let debtsById = Dictionary(uniqueKeysWithValues: snapshot.debts.map { ($0.id, $0) })
         let debtDueItems = PlannerDerivedData.debtScheduleItems(snapshot: snapshot, payPeriod: nil)
             .filter { $0.status != .paid && $0.status != .cancelled }
@@ -3382,22 +3413,48 @@ struct CreditView: View {
                 activeDebtCount: snapshot.debts.filter { $0.deletedAt == nil && $0.status.isActiveLike }.count
             ),
             dueItems: (statementDueItems + debtDueItems).sorted { $0.date < $1.date },
+            directDebitItems: statementDueItems.sorted { lhs, rhs in
+                if lhs.date == rhs.date {
+                    lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+                } else {
+                    lhs.date < rhs.date
+                }
+            },
+            nextStatementItems: nextStatementItems,
             cardModels: cardModels
         )
     }
 
-    private func paymentDueSummary(dueItems: [CreditDueItem]) -> some View {
+    private func paymentDueSummary(
+        directDebits: [CreditDueItem],
+        nextStatements: [CreditNextStatementItem]
+    ) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Due soon")
-            AppCard {
-                if dueItems.isEmpty {
-                    EmptyStateView(title: "Nothing due soon", message: "Card statements and debt payments will appear here when scheduled.", systemImage: "checkmark.circle")
-                } else {
-                    ForEach(dueItems.prefix(6)) { item in
-                        MetricRow(label: "\(item.title) · \(shortDate(item.date))", value: MoneyParser.formatPence(item.amountPence), valueColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning)
-                    }
-                }
+
+            NavigationLink {
+                CreditScheduleDetailView(schedule: .directDebits(directDebits))
+            } label: {
+                CreditDirectDebitsCard(
+                    items: directDebits,
+                    previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
+                    showsDisclosure: true
+                )
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open all direct debits")
+
+            NavigationLink {
+                CreditScheduleDetailView(schedule: .nextStatements(nextStatements))
+            } label: {
+                CreditNextStatementsCard(
+                    items: nextStatements,
+                    previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
+                    showsDisclosure: true
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open all next statements")
         }
     }
 
@@ -3483,6 +3540,8 @@ struct CreditView: View {
 private struct CreditDisplayData {
     var summary: CreditSummaryData
     var dueItems: [CreditDueItem]
+    var directDebitItems: [CreditDueItem]
+    var nextStatementItems: [CreditNextStatementItem]
     var cardModels: [CreditCardPreviewModel]
 }
 
@@ -3595,6 +3654,265 @@ private struct CreditDueItem: Identifiable {
     var date: String
     var amountPence: Int
     var isOverdue: Bool
+}
+
+private struct CreditNextStatementItem: Identifiable {
+    var id: String
+    var cardName: String
+    var statementDate: String
+}
+
+private enum CreditScheduleDetail {
+    case directDebits([CreditDueItem])
+    case nextStatements([CreditNextStatementItem])
+}
+
+private struct CreditScheduleDetailView: View {
+    var schedule: CreditScheduleDetail
+
+    var body: some View {
+        ScreenScaffold(
+            title: title,
+            subtitle: subtitle,
+            navigationMode: .inline,
+            toolbarMode: .none,
+            titleDisplayMode: .inline
+        ) {
+            switch schedule {
+            case .directDebits(let items):
+                CreditDirectDebitsCard(items: items)
+            case .nextStatements(let items):
+                CreditNextStatementsCard(items: items)
+            }
+        }
+    }
+
+    private var title: String {
+        switch schedule {
+        case .directDebits:
+            "Direct debits"
+        case .nextStatements:
+            "Next statements"
+        }
+    }
+
+    private var subtitle: String {
+        switch schedule {
+        case .directDebits:
+            "Every open card payment, ordered by collection date."
+        case .nextStatements:
+            "Every active card, ordered by its next statement date."
+        }
+    }
+}
+
+private struct CreditDirectDebitsCard: View {
+    var items: [CreditDueItem]
+    var previewLimit: Int?
+    var showsDisclosure: Bool
+
+    init(items: [CreditDueItem], previewLimit: Int? = nil, showsDisclosure: Bool = false) {
+        self.items = items
+        self.previewLimit = previewLimit
+        self.showsDisclosure = showsDisclosure
+    }
+
+    var body: some View {
+        AppCard {
+            scheduleHeader(
+                title: "Direct debits",
+                subtitle: "Open card payments in collection order",
+                systemImage: "arrow.down.circle"
+            )
+
+            if items.isEmpty {
+                EmptyStateView(
+                    title: "No direct debits due",
+                    message: "Open card statement payments will appear here.",
+                    systemImage: "checkmark.circle"
+                )
+            } else {
+                ForEach(visibleItems) { item in
+                    CreditDirectDebitRow(item: item)
+
+                    if item.id != visibleItems.last?.id {
+                        AppDivider()
+                    }
+                }
+
+                remainingItemsLabel
+            }
+        }
+    }
+
+    private func scheduleHeader(title: String, subtitle: String, systemImage: String) -> some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+            Image(systemName: systemImage)
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                .frame(width: 32, height: 32)
+                .background(AppTheme.Colors.primaryOrange.opacity(0.12))
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var visibleItems: [CreditDueItem] {
+        guard let previewLimit else { return items }
+        return Array(items.prefix(previewLimit))
+    }
+
+    @ViewBuilder
+    private var remainingItemsLabel: some View {
+        let remainingCount = items.count - visibleItems.count
+        if remainingCount > 0 {
+            Text("View \(remainingCount) more")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+        }
+    }
+}
+
+private struct CreditDirectDebitRow: View {
+    var item: CreditDueItem
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(MoneyParser.formatPence(item.amountPence))
+                    .font(.caption)
+                    .foregroundStyle(item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(item.isOverdue ? "Overdue" : "Taken")
+                    .font(.caption)
+                    .foregroundStyle(item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.tertiaryText)
+                Text(shortDate(item.date))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct CreditNextStatementsCard: View {
+    var items: [CreditNextStatementItem]
+    var previewLimit: Int?
+    var showsDisclosure: Bool
+
+    init(items: [CreditNextStatementItem], previewLimit: Int? = nil, showsDisclosure: Bool = false) {
+        self.items = items
+        self.previewLimit = previewLimit
+        self.showsDisclosure = showsDisclosure
+    }
+
+    var body: some View {
+        AppCard {
+            HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+                Image(systemName: "doc.text")
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .frame(width: 32, height: 32)
+                    .background(AppTheme.Colors.primaryOrange.opacity(0.12))
+                    .clipShape(Circle())
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Next statements")
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text("Every active card's next statement date")
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: AppTheme.Spacing.sm)
+
+                if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityHidden(true)
+                }
+            }
+
+            if items.isEmpty {
+                EmptyStateView(
+                    title: "No statements scheduled",
+                    message: "Next statement dates will appear after they are set on your cards.",
+                    systemImage: "doc.text"
+                )
+            } else {
+                ForEach(visibleItems) { item in
+                    HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
+                        Text(item.cardName)
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+
+                        Spacer(minLength: AppTheme.Spacing.sm)
+
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Statement")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            Text(shortDate(item.statementDate))
+                                .font(.subheadline.bold())
+                                .foregroundStyle(AppTheme.Colors.warning)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+
+                    if item.id != visibleItems.last?.id {
+                        AppDivider()
+                    }
+                }
+
+                remainingItemsLabel
+            }
+        }
+    }
+
+    private var visibleItems: [CreditNextStatementItem] {
+        guard let previewLimit else { return items }
+        return Array(items.prefix(previewLimit))
+    }
+
+    @ViewBuilder
+    private var remainingItemsLabel: some View {
+        let remainingCount = items.count - visibleItems.count
+        if remainingCount > 0 {
+            Text("View \(remainingCount) more")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+        }
+    }
 }
 
 struct StatementsLayoutPolicy {

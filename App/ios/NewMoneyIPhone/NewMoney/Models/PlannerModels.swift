@@ -395,6 +395,9 @@ struct PayPeriod: Codable, Equatable, Identifiable, Sendable {
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
+    /// Preserves the payday the user selected for monthly income when a shorter
+    /// month temporarily clamps that date (for example, 31 January -> 28 February).
+    var monthlyAnchorDay: Int? = nil
 }
 
 struct Paycheck: Codable, Equatable, Identifiable, Sendable {

@@ -435,7 +435,12 @@ final class PlannerStore: ObservableObject {
 
     func createPayPeriod(payday: String, hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?, payFrequency: PayFrequency? = nil) {
         let frequency = payFrequency ?? snapshot.settings.payFrequency
-        let dates = FinanceEngine.createNextPayPeriod(payday: payday, frequency: frequency)
+        let monthlyAnchorDay = frequency == .monthly ? FinanceEngine.dayOfMonth(payday) : nil
+        let dates = FinanceEngine.createNextPayPeriod(
+            payday: payday,
+            frequency: frequency,
+            monthlyAnchorDay: monthlyAnchorDay
+        )
         let amount = FinanceEngine.calculatePaycheckAmount(
             hoursWorked: hoursWorked,
             hourlyRatePence: hourlyRatePence,
@@ -460,7 +465,8 @@ final class PlannerStore: ObservableObject {
             status: .active,
             createdAt: now,
             updatedAt: now,
-            deletedAt: nil
+            deletedAt: nil,
+            monthlyAnchorDay: monthlyAnchorDay
         )
         let paycheck = Paycheck(
             id: "paycheck-\(UUID().uuidString.lowercased())",
@@ -550,8 +556,22 @@ final class PlannerStore: ObservableObject {
             hourlyRatePence: hourlyRatePence,
             actualAmountPence: actualAmountPence
         )
-        let periodFrequency = payFrequency ?? snapshot.payPeriods.first(where: { $0.id == payPeriodId })?.payFrequency ?? snapshot.settings.payFrequency
-        let dates = FinanceEngine.createNextPayPeriod(payday: payday, frequency: periodFrequency)
+        let existingPeriod = snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+        let periodFrequency = payFrequency ?? existingPeriod?.payFrequency ?? snapshot.settings.payFrequency
+        let monthlyAnchorDay: Int? = if periodFrequency == .monthly {
+            if existingPeriod?.payday == payday, let existingAnchor = existingPeriod?.monthlyAnchorDay {
+                existingAnchor
+            } else {
+                FinanceEngine.dayOfMonth(payday)
+            }
+        } else {
+            nil
+        }
+        let dates = FinanceEngine.createNextPayPeriod(
+            payday: payday,
+            frequency: periodFrequency,
+            monthlyAnchorDay: monthlyAnchorDay
+        )
 
         snapshot.paychecks[paycheckIndex].hoursWorked = hoursWorked
         snapshot.paychecks[paycheckIndex].hourlyRatePence = hourlyRatePence
@@ -565,6 +585,7 @@ final class PlannerStore: ObservableObject {
             snapshot.payPeriods[periodIndex].payday = payday
             snapshot.payPeriods[periodIndex].nextPayday = dates.nextPayday
             snapshot.payPeriods[periodIndex].payFrequency = periodFrequency
+            snapshot.payPeriods[periodIndex].monthlyAnchorDay = monthlyAnchorDay
             snapshot.payPeriods[periodIndex].incomePence = amount
             snapshot.payPeriods[periodIndex].updatedAt = now
         }
@@ -1840,11 +1861,18 @@ final class PlannerStore: ObservableObject {
 
     @discardableResult
     func setRecurringBillFundingCompleted(paymentId: String, dueDate: String, payPeriodId: String, completed: Bool) -> Bool {
-        let items = PlannerDerivedData.recurringBillFundingChecklistItems(
+        let payPeriod = fundingChecklistPayPeriod(id: payPeriodId)
+        let duePeriodItems = PlannerDerivedData.recurringBillFundingChecklistItems(
             snapshot: snapshot,
-            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+            payPeriod: payPeriod,
+            groupByFundingDueDate: true
         )
-        guard let item = items.first(where: { $0.paymentId == paymentId && $0.dueDate == dueDate }) else {
+        let item = duePeriodItems.first(where: { $0.paymentId == paymentId && $0.dueDate == dueDate })
+            ?? PlannerDerivedData.recurringBillFundingChecklistItems(
+                snapshot: snapshot,
+                payPeriod: payPeriod
+            ).first(where: { $0.paymentId == paymentId && $0.dueDate == dueDate })
+        guard let item else {
             return false
         }
 
@@ -1857,11 +1885,18 @@ final class PlannerStore: ObservableObject {
 
     @discardableResult
     func setCardSpendFundingCompleted(transactionId: String, payPeriodId: String, completed: Bool) -> Bool {
-        let items = PlannerDerivedData.cardSpendFundingChecklistItems(
+        let payPeriod = fundingChecklistPayPeriod(id: payPeriodId)
+        let duePeriodItems = PlannerDerivedData.cardSpendFundingChecklistItems(
             snapshot: snapshot,
-            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+            payPeriod: payPeriod,
+            groupByFundingDueDate: true
         )
-        guard let item = items.first(where: { $0.transactionId == transactionId }) else {
+        let item = duePeriodItems.first(where: { $0.transactionId == transactionId })
+            ?? PlannerDerivedData.cardSpendFundingChecklistItems(
+                snapshot: snapshot,
+                payPeriod: payPeriod
+            ).first(where: { $0.transactionId == transactionId })
+        guard let item else {
             return false
         }
 
@@ -1876,7 +1911,7 @@ final class PlannerStore: ObservableObject {
     func setCardOpeningBalanceFundingCompleted(cardId: String, directDebitDate: String, payPeriodId: String, completed: Bool) -> Bool {
         let items = PlannerDerivedData.cardOpeningBalanceFundingChecklistItems(
             snapshot: snapshot,
-            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+            payPeriod: fundingChecklistPayPeriod(id: payPeriodId)
         )
         guard let item = items.first(where: { $0.cardId == cardId && $0.directDebitDate == directDebitDate }) else {
             return false
@@ -1897,16 +1932,25 @@ final class PlannerStore: ObservableObject {
         payPeriodId: String,
         completed: Bool
     ) -> Bool {
-        let items = PlannerDerivedData.cardPaymentFundingChecklistItems(
+        let payPeriod = fundingChecklistPayPeriod(id: payPeriodId)
+        let duePeriodItems = PlannerDerivedData.cardPaymentFundingChecklistItems(
             snapshot: snapshot,
-            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId }),
-            asOfDate: todayIso
+            payPeriod: payPeriod,
+            asOfDate: todayIso,
+            groupByFundingDueDate: true
         )
-        guard let item = items.first(where: {
+        let matchesItem: (CreditCardPaymentFundingChecklistItem) -> Bool = {
             $0.cardId == cardId &&
             $0.potId == potId &&
             $0.directDebitDate == directDebitDate
-        }) else { return false }
+        }
+        let item = duePeriodItems.first(where: matchesItem)
+            ?? PlannerDerivedData.cardPaymentFundingChecklistItems(
+                snapshot: snapshot,
+                payPeriod: payPeriod,
+                asOfDate: todayIso
+            ).first(where: matchesItem)
+        guard let item else { return false }
 
         if completed {
             return completeCardPaymentFunding(item)
@@ -1919,7 +1963,7 @@ final class PlannerStore: ObservableObject {
     func setDebtFundingCompleted(debtId: String, dueDate: String, payPeriodId: String, completed: Bool) -> Bool {
         let items = PlannerDerivedData.debtFundingChecklistItems(
             snapshot: snapshot,
-            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+            payPeriod: fundingChecklistPayPeriod(id: payPeriodId)
         )
         guard let item = items.first(where: { $0.debtId == debtId && $0.dueDate == dueDate }) else {
             return false
@@ -1936,7 +1980,7 @@ final class PlannerStore: ObservableObject {
     func setDebtFundingCompleted(scheduleItemId: String, payPeriodId: String, completed: Bool) -> Bool {
         let items = PlannerDerivedData.debtFundingChecklistItems(
             snapshot: snapshot,
-            payPeriod: snapshot.payPeriods.first(where: { $0.id == payPeriodId })
+            payPeriod: fundingChecklistPayPeriod(id: payPeriodId)
         )
         guard let item = items.first(where: { $0.scheduleItemId == scheduleItemId }) else {
             return false
@@ -1988,8 +2032,7 @@ final class PlannerStore: ObservableObject {
         snapshot.fundingChecklistExclusions.removeAll {
             $0.kind == identity.kind &&
             $0.sourceId == identity.sourceId &&
-            $0.occurrenceDate == identity.occurrenceDate &&
-            $0.payPeriodId == identity.payPeriodId
+            $0.occurrenceDate == identity.occurrenceDate
         }
         snapshot.fundingChecklistExclusions.insert(
             FundingChecklistExclusion(
@@ -2006,6 +2049,19 @@ final class PlannerStore: ObservableObject {
         )
         persist()
         return true
+    }
+
+    private func fundingChecklistPayPeriod(id: String) -> PayPeriod? {
+        if let savedPeriod = snapshot.payPeriods.first(where: { $0.id == id && $0.deletedAt == nil }) {
+            return savedPeriod
+        }
+
+        return PlannerDerivedData.projectedFundingPayPeriods(
+            snapshot: snapshot,
+            startingAt: selectedPayPeriod,
+            count: 24
+        )
+        .first { $0.id == id }
     }
 
     @discardableResult
@@ -2491,8 +2547,7 @@ final class PlannerStore: ObservableObject {
         snapshot.fundingChecklistExclusions.removeAll {
             $0.kind == identity.kind &&
             $0.sourceId == identity.sourceId &&
-            $0.occurrenceDate == identity.occurrenceDate &&
-            $0.payPeriodId == identity.payPeriodId
+            $0.occurrenceDate == identity.occurrenceDate
         }
 
         if shouldPersist, snapshot.fundingChecklistExclusions.count != originalCount {
@@ -2664,7 +2719,7 @@ final class PlannerStore: ObservableObject {
                 transactionId: nil,
                 transactionDate: nil,
                 creditCardId: item.cardId,
-                creditCardDirectDebitDate: nil,
+                creditCardDirectDebitDate: item.cardId == nil ? nil : item.fundingDueDate,
                 userConfirmed: item.cardId == nil ? nil : true,
                 createdAt: now,
                 updatedAt: now,
@@ -2681,7 +2736,6 @@ final class PlannerStore: ObservableObject {
     private func reverseRecurringBillFunding(_ item: RecurringBillFundingChecklistItem) -> Bool {
         let matchingAllocationIndices = snapshot.potAllocations.indices.filter {
             snapshot.potAllocations[$0].deletedAt == nil &&
-            snapshot.potAllocations[$0].payPeriodId == item.payPeriodId &&
             snapshot.potAllocations[$0].potId == item.potId &&
             isRecurringBillFundingSource(snapshot.potAllocations[$0].source) &&
             snapshot.potAllocations[$0].recurringPaymentId == item.paymentId &&
@@ -2776,7 +2830,6 @@ final class PlannerStore: ObservableObject {
     private func reverseCardSpendFunding(_ item: CardSpendFundingChecklistItem, shouldPersist: Bool = true) -> Bool {
         let matchingAllocationIndices = snapshot.potAllocations.indices.filter {
             snapshot.potAllocations[$0].deletedAt == nil &&
-            snapshot.potAllocations[$0].payPeriodId == item.payPeriodId &&
             snapshot.potAllocations[$0].source == .cardSpendFunding &&
             snapshot.potAllocations[$0].transactionId == item.transactionId
         }
@@ -2924,7 +2977,6 @@ final class PlannerStore: ObservableObject {
     private func reverseCardPaymentFunding(_ item: CreditCardPaymentFundingChecklistItem) -> Bool {
         let matchingAllocationIndices = snapshot.potAllocations.indices.filter {
             snapshot.potAllocations[$0].deletedAt == nil &&
-            snapshot.potAllocations[$0].payPeriodId == item.payPeriodId &&
             snapshot.potAllocations[$0].potId == item.potId &&
             snapshot.potAllocations[$0].source == .cardPaymentFunding &&
             snapshot.potAllocations[$0].creditCardId == item.cardId &&
@@ -3390,8 +3442,20 @@ final class PlannerStore: ObservableObject {
             .first
         else { return false }
         let frequency = sourcePeriod.payFrequency ?? snapshot.settings.payFrequency
-        let payday = inferredPayday(containing: date, from: sourcePeriod, frequency: frequency)
-        let dates = FinanceEngine.createNextPayPeriod(payday: payday, frequency: frequency)
+        let monthlyAnchorDay = frequency == .monthly
+            ? sourcePeriod.monthlyAnchorDay ?? FinanceEngine.dayOfMonth(sourcePeriod.payday)
+            : nil
+        let payday = inferredPayday(
+            containing: date,
+            from: sourcePeriod,
+            frequency: frequency,
+            monthlyAnchorDay: monthlyAnchorDay
+        )
+        let dates = FinanceEngine.createNextPayPeriod(
+            payday: payday,
+            frequency: frequency,
+            monthlyAnchorDay: monthlyAnchorDay
+        )
         guard dates.startDate <= date && dates.endDate >= date else { return false }
 
         let id = "pay-period-\(dates.startDate)"
@@ -3413,7 +3477,8 @@ final class PlannerStore: ObservableObject {
                 status: .active,
                 createdAt: now,
                 updatedAt: now,
-                deletedAt: nil
+                deletedAt: nil,
+                monthlyAnchorDay: monthlyAnchorDay
             )
             snapshot.payPeriods.insert(period, at: 0)
         }
@@ -3456,38 +3521,67 @@ final class PlannerStore: ObservableObject {
         return true
     }
 
-    private func inferredPayday(containing date: String, from sourcePeriod: PayPeriod?, frequency: PayFrequency) -> String {
+    private func inferredPayday(
+        containing date: String,
+        from sourcePeriod: PayPeriod?,
+        frequency: PayFrequency,
+        monthlyAnchorDay: Int?
+    ) -> String {
         guard let sourcePeriod else { return date }
 
         var payday = sourcePeriod.payday
-        var dates = FinanceEngine.createNextPayPeriod(payday: payday, frequency: frequency)
+        var dates = FinanceEngine.createNextPayPeriod(
+            payday: payday,
+            frequency: frequency,
+            monthlyAnchorDay: monthlyAnchorDay
+        )
 
         while dates.endDate < date {
             payday = dates.nextPayday
-            dates = FinanceEngine.createNextPayPeriod(payday: payday, frequency: frequency)
+            dates = FinanceEngine.createNextPayPeriod(
+                payday: payday,
+                frequency: frequency,
+                monthlyAnchorDay: monthlyAnchorDay
+            )
         }
 
         while dates.startDate > date {
-            let previousPayday = previousPayday(before: payday, frequency: frequency)
+            let previousPayday = previousPayday(
+                before: payday,
+                frequency: frequency,
+                monthlyAnchorDay: monthlyAnchorDay
+            )
             guard previousPayday != payday else { break }
             payday = previousPayday
-            dates = FinanceEngine.createNextPayPeriod(payday: payday, frequency: frequency)
+            dates = FinanceEngine.createNextPayPeriod(
+                payday: payday,
+                frequency: frequency,
+                monthlyAnchorDay: monthlyAnchorDay
+            )
         }
 
         return payday
     }
 
-    private func previousPayday(before payday: String, frequency: PayFrequency) -> String {
+    private func previousPayday(
+        before payday: String,
+        frequency: PayFrequency,
+        monthlyAnchorDay: Int?
+    ) -> String {
         let date = FinanceEngine.parseDate(payday)
         switch frequency {
         case .weekly:
             return FinanceEngine.toIsoDate(FinanceEngine.addDays(date, days: -7))
         case .biweekly:
             return FinanceEngine.toIsoDate(FinanceEngine.addDays(date, days: -14))
-        case .monthly, .custom:
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-            return FinanceEngine.toIsoDate(calendar.date(byAdding: .month, value: -1, to: date) ?? date)
+        case .monthly:
+            return FinanceEngine.toIsoDate(FinanceEngine.addMonthsClamped(
+                date,
+                months: -1,
+                preferredDay: monthlyAnchorDay ?? FinanceEngine.dayOfMonth(payday)
+            ))
+        case .custom:
+            return FinanceEngine.toIsoDate(FinanceEngine.addDays(date, days: -14))
         }
     }
 

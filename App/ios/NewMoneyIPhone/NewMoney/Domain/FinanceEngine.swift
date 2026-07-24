@@ -92,10 +92,19 @@ enum FinanceEngine {
         return toIsoDate(Date())
     }
 
-    static func createNextPayPeriod(payday: String, frequency: PayFrequency) -> NextPayPeriod {
+    static func createNextPayPeriod(
+        payday: String,
+        frequency: PayFrequency,
+        monthlyAnchorDay: Int? = nil
+    ) -> NextPayPeriod {
         let start = parseDate(payday)
-        let days = frequencyToDays(frequency)
-        let nextPayday = addDays(start, days: days)
+        let nextPayday: Date
+        if frequency == .monthly {
+            let preferredDay = monthlyAnchorDay ?? utcCalendar.component(.day, from: start)
+            nextPayday = addMonthsClamped(start, months: 1, preferredDay: preferredDay)
+        } else {
+            nextPayday = addDays(start, days: frequencyToDays(frequency))
+        }
         let end = addDays(nextPayday, days: -1)
 
         return NextPayPeriod(
@@ -287,8 +296,22 @@ enum FinanceEngine {
         isoFormatter.date(from: value) ?? Date(timeIntervalSince1970: 0)
     }
 
+    static func dayOfMonth(_ isoDate: String) -> Int {
+        utcCalendar.component(.day, from: parseDate(isoDate))
+    }
+
     static func addDays(_ date: Date, days: Int) -> Date {
         utcCalendar.date(byAdding: .day, value: days, to: date) ?? date
+    }
+
+    static func addMonthsClamped(_ date: Date, months: Int, preferredDay: Int) -> Date {
+        let shifted = utcCalendar.date(byAdding: .month, value: months, to: date) ?? date
+        let target = utcCalendar.dateComponents([.year, .month], from: shifted)
+        return parseDate(monthlyDate(
+            year: target.year ?? 1970,
+            month: target.month ?? 1,
+            day: preferredDay
+        ))
     }
 
     static func frequencyToDays(_ frequency: PayFrequency) -> Int {

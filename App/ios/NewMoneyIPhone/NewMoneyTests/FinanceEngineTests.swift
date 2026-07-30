@@ -288,6 +288,78 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testCurrentTotalMoneyCountsLinkedBalancesAndUnlinkedIncomeExactlyOnce() async throws {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        let pot = makePot(
+            id: "pot-bills",
+            name: "Bills",
+            balancePence: 0,
+            targetPence: nil,
+            fundingBankAccountId: account.id
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            bankAccounts: [account],
+            pots: [pot]
+        )))
+        await store.load()
+
+        store.createPayPeriod(
+            payday: "2026-06-01",
+            hoursWorked: 2_000,
+            hourlyRatePence: 100,
+            actualAmountPence: 200_000,
+            payFrequency: .monthly,
+            bankAccountId: account.id
+        )
+        XCTAssertTrue(
+            store.addOneOffIncome(
+                name: "Cash income",
+                amountPence: 50_000,
+                date: "2026-06-10",
+                note: "",
+                bankAccountId: nil
+            )
+        )
+        XCTAssertTrue(store.addPotAllocation(potId: pot.id, amountPence: 25_000))
+        store.recordTransaction(
+            potId: nil,
+            creditCardId: nil,
+            bankAccountId: account.id,
+            paymentMethod: .bankAccount,
+            amountPence: 2_500,
+            type: .spending,
+            date: "2026-06-10",
+            note: "Groceries"
+        )
+        store.recordTransaction(
+            potId: nil,
+            creditCardId: nil,
+            paymentMethod: .income,
+            amountPence: 5_000,
+            type: .spending,
+            date: "2026-06-10",
+            note: "Cash spend"
+        )
+
+        let currentPeriod = try XCTUnwrap(store.selectedPayPeriod)
+        let currentAccount = try XCTUnwrap(store.activeBankAccounts.first)
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: currentAccount, snapshot: store.snapshot),
+            272_500
+        )
+        XCTAssertEqual(store.activePots.first?.balancePence, 25_000)
+        XCTAssertEqual(
+            PlannerDerivedData.currentTotalMoneyPence(
+                snapshot: store.snapshot,
+                payPeriod: currentPeriod
+            ),
+            342_500
+        )
+    }
+
+    @MainActor
     func testDirectDebitLinkedToBankAccountPostsOnceOnItsDueDate() async {
         var settings = makeManualSettings(today: "2026-06-09")
         settings.lastProcessedDateIso = "2026-06-09"

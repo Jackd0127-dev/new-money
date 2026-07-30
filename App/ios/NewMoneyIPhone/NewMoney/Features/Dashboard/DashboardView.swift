@@ -77,7 +77,7 @@ struct DashboardView: View {
     var body: some View {
         ScreenScaffold(
             title: "Home",
-            subtitle: "Money left and upcoming pressure.",
+            subtitle: "Total money and upcoming pressure.",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode,
             rootTabResetRevision: rootTabResetRevision
@@ -168,6 +168,7 @@ struct DashboardView: View {
             AppCard(glow: true) {
                 DashboardMoneyLeftHeroContent(
                     summary: currentCostSummary,
+                    currentTotalMoneyPence: currentTotalMoneyPence,
                     subtitle: heroSubtitle,
                     paydayLabel: paydayLabel,
                     safeToSpendTodayPence: safeToSpendTodayPence,
@@ -195,6 +196,13 @@ struct DashboardView: View {
             spendablePence: currentCostSummary.projectedMoneyLeftPence,
             today: store.todayIso,
             endDate: period.endDate
+        )
+    }
+
+    private var currentTotalMoneyPence: Int {
+        PlannerDerivedData.currentTotalMoneyPence(
+            snapshot: snapshot,
+            payPeriod: tabPresentation.selectedPayPeriod
         )
     }
 
@@ -390,7 +398,7 @@ struct DashboardView: View {
             } label: {
                 DashboardQuickRouteCard(
                     title: "Income",
-                    subtitle: "Pay and money left",
+                    subtitle: "Pay and total money",
                     symbol: "sterlingsign.circle.fill",
                     color: AppTheme.Colors.success
                 )
@@ -414,13 +422,13 @@ struct DashboardView: View {
     }
 
     private var heroSubtitle: String {
-        guard let period = tabPresentation.selectedPayPeriod else {
+        guard tabPresentation.selectedPayPeriod != nil else {
             return "Add income to create a live period."
         }
         if currentCostSummary.unfundedChecklistPence > 0 {
-            return "\(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) still unfunded. Projected after funding: \(MoneyParser.formatPence(currentCostSummary.projectedMoneyLeftPence))."
+            return "Total cash now. \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
         }
-        return "Income minus committed costs until \(friendlyDate(period.endDate))."
+        return "Current cash across income, bank accounts, and pots."
     }
 
     private var currentCostSummary: PayPeriodCostSummary {
@@ -507,11 +515,15 @@ struct DashboardView: View {
         .filter { $0.status == .overdue }
 
         var alerts: [HomeAlertRow] = []
-        if costSummary.currentMoneyLeftPence < 0 {
+        let currentTotalMoneyPence = PlannerDerivedData.currentTotalMoneyPence(
+            snapshot: snapshot,
+            payPeriod: payPeriod
+        )
+        if currentTotalMoneyPence < 0 {
             alerts.append(
                 HomeAlertRow(
                     title: "Money left is negative",
-                    message: "\(MoneyParser.formatPence(abs(costSummary.currentMoneyLeftPence))) over the current position.",
+                    message: "\(MoneyParser.formatPence(abs(currentTotalMoneyPence))) over the current position.",
                     symbol: "exclamationmark.triangle",
                     color: AppTheme.Colors.danger
                 )
@@ -751,6 +763,7 @@ private struct DashboardMoneyLeftDetailView: View {
             AppCard(glow: true) {
                 DashboardMoneyLeftHeroContent(
                     summary: currentCostSummary,
+                    currentTotalMoneyPence: currentTotalMoneyPence,
                     subtitle: heroSubtitle,
                     paydayLabel: paydayLabel,
                     safeToSpendTodayPence: safeToSpendTodayPence,
@@ -760,6 +773,7 @@ private struct DashboardMoneyLeftDetailView: View {
         case .spendingSnapshot:
             DashboardSpendingSnapshotCard(
                 summary: currentCostSummary,
+                currentTotalMoneyPence: currentTotalMoneyPence,
                 periodLabel: spendingPeriodLabel,
                 entryCount: selectedPeriodTransactions.count
             )
@@ -786,6 +800,13 @@ private struct DashboardMoneyLeftDetailView: View {
         )
     }
 
+    private var currentTotalMoneyPence: Int {
+        PlannerDerivedData.currentTotalMoneyPence(
+            snapshot: snapshot,
+            payPeriod: store.selectedPayPeriod
+        )
+    }
+
     private var selectedPeriodTransactions: [Transaction] {
         guard let period = store.selectedPayPeriod else { return [] }
         return snapshot.transactions.filter {
@@ -802,13 +823,13 @@ private struct DashboardMoneyLeftDetailView: View {
     }
 
     private var heroSubtitle: String {
-        guard let period = store.selectedPayPeriod else {
+        guard store.selectedPayPeriod != nil else {
             return "Add income to create a live period."
         }
         if currentCostSummary.unfundedChecklistPence > 0 {
-            return "\(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) still unfunded. Projected after funding: \(MoneyParser.formatPence(currentCostSummary.projectedMoneyLeftPence))."
+            return "Total cash now. \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
         }
-        return "Income minus committed costs until \(friendlyDate(period.endDate))."
+        return "Current cash across income, bank accounts, and pots."
     }
 
     private func friendlyDate(_ isoDate: String) -> String {
@@ -818,6 +839,7 @@ private struct DashboardMoneyLeftDetailView: View {
 
 private struct DashboardMoneyLeftHeroContent: View {
     var summary: PayPeriodCostSummary
+    var currentTotalMoneyPence: Int
     var subtitle: String
     var paydayLabel: String
     var safeToSpendTodayPence: Int?
@@ -830,9 +852,9 @@ private struct DashboardMoneyLeftHeroContent: View {
                     Text("Money left")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.cardEyebrow)
-                    Text(MoneyParser.formatPence(summary.currentMoneyLeftPence))
+                    Text(MoneyParser.formatPence(currentTotalMoneyPence))
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .foregroundStyle(summary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                        .foregroundStyle(currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
                         .minimumScaleFactor(0.62)
                     Text(subtitle)
                         .font(.subheadline)
@@ -881,6 +903,7 @@ private struct DashboardMoneyLeftHeroContent: View {
 
 private struct DashboardSpendingSnapshotCard: View {
     var summary: PayPeriodCostSummary
+    var currentTotalMoneyPence: Int
     var periodLabel: String
     var entryCount: Int
 
@@ -905,7 +928,7 @@ private struct DashboardSpendingSnapshotCard: View {
                 }
 
                 MetricRow(label: "Spent this period", value: MoneyParser.formatPence(summary.manualSpendingPence), valueColor: summary.manualSpendingPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText)
-                MetricRow(label: "Money left", value: MoneyParser.formatPence(summary.currentMoneyLeftPence), valueColor: summary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                 MetricRow(label: "Projected end", value: MoneyParser.formatPence(summary.projectedMoneyLeftPence), valueColor: summary.projectedMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
             }
         }
@@ -1556,6 +1579,9 @@ struct IncomeBreakdownView: View {
     private var costSummary: PayPeriodCostSummary {
         PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
     }
+    private var currentTotalMoneyPence: Int {
+        PlannerDerivedData.currentTotalMoneyPence(snapshot: snapshot, payPeriod: store.selectedPayPeriod)
+    }
     private var activePaychecks: [Paycheck] {
         snapshot.paychecks
             .filter { $0.deletedAt == nil }
@@ -1578,14 +1604,14 @@ struct IncomeBreakdownView: View {
     var body: some View {
         DashboardBreakdownScaffold(
             title: "Income",
-            subtitle: "Paycheck inputs, pay periods, and period money left.",
+            subtitle: "Paycheck inputs, pay periods, and total money.",
             toolbarMode: .editDone(isEditing: editMode.isEditing, canEdit: hasDeletableIncome) {
                 toggleEditMode()
             }
         ) {
             AppCard(glow: true) {
                 MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod.map { PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: $0) } ?? 0), valueColor: AppTheme.Colors.success)
-                MetricRow(label: "Money left", value: MoneyParser.formatPence(costSummary.currentMoneyLeftPence), valueColor: costSummary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
                 MetricRow(label: "Projected costs", value: MoneyParser.formatPence(costSummary.projectedCostsPence), valueColor: AppTheme.Colors.warning)
                 if costSummary.unfundedChecklistPence > 0 {
                     MetricRow(label: "Unfunded checklist", value: MoneyParser.formatPence(costSummary.unfundedChecklistPence), valueColor: AppTheme.Colors.secondaryText)

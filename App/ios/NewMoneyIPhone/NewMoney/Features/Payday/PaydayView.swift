@@ -11,11 +11,14 @@ struct PaydayView: View {
     private var periodSummary: PayPeriodCostSummary {
         PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: selectedPeriod, asOfDate: store.todayIso)
     }
+    private var currentTotalMoneyPence: Int {
+        PlannerDerivedData.currentTotalMoneyPence(snapshot: snapshot, payPeriod: selectedPeriod)
+    }
 
     var body: some View {
         ScreenScaffold(
             title: "Spending",
-            subtitle: "Spent this period and money left.",
+            subtitle: "Spent this period and total money.",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
@@ -46,7 +49,7 @@ struct PaydayView: View {
 
                 AppDivider()
 
-                MetricRow(label: "Money left", value: MoneyParser.formatPence(periodSummary.currentMoneyLeftPence), valueColor: periodSummary.currentMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                 MetricRow(label: "Projected costs", value: MoneyParser.formatPence(periodSummary.projectedCostsPence), valueColor: AppTheme.Colors.warning)
                 if periodSummary.unfundedChecklistPence > 0 {
                     MetricRow(label: "Unfunded checklist", value: MoneyParser.formatPence(periodSummary.unfundedChecklistPence), valueColor: AppTheme.Colors.secondaryText)

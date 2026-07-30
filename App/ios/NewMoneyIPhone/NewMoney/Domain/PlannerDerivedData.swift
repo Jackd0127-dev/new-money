@@ -682,6 +682,113 @@ enum PlannerDerivedData {
         account.openingBalancePence + bankAccountNetMovementPence(accountId: account.id, snapshot: snapshot)
     }
 
+    /// The cash the user has right now across every tracked balance.
+    ///
+    /// Linked income and spends are already reflected in bank-account balances,
+    /// while pot funding moves cash from its source into the pot. The remaining
+    /// income balance therefore only includes income that is not linked to a bank
+    /// account, less cash movements that came directly from that balance.
+    static func currentTotalMoneyPence(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> Int {
+        let bankBalancePence = snapshot.bankAccounts
+            .filter { !$0.archived && $0.deletedAt == nil }
+            .reduce(0) { $0 + bankAccountBalance(account: $1, snapshot: snapshot) }
+        let potBalancePence = snapshot.pots
+            .filter { !$0.archived }
+            .reduce(0) { $0 + $1.balancePence }
+        let activeCreditCardPots = snapshot.creditCardPots.filter {
+            $0.deletedAt == nil && $0.status == .active
+        }
+        let creditCardPotBalancePence = activeCreditCardPots.reduce(0) {
+            $0 + max(0, $1.amountPence)
+        }
+
+        guard let payPeriod else {
+            return bankBalancePence + potBalancePence + creditCardPotBalancePence
+        }
+
+        let currentPaychecks = snapshot.paychecks.filter {
+            $0.deletedAt == nil && $0.payPeriodId == payPeriod.id
+        }
+        let unlinkedPaycheckIncomePence: Int
+        if currentPaychecks.isEmpty {
+            // Older snapshots and deterministic fixtures can retain period income
+            // without a separate paycheck record.
+            unlinkedPaycheckIncomePence = max(0, payPeriod.incomePence)
+        } else {
+            unlinkedPaycheckIncomePence = currentPaychecks
+                .filter { $0.bankAccountId == nil }
+                .reduce(0) {
+                    $0 + max(0, $1.actualAmountPence ?? $1.calculatedAmountPence)
+                }
+        }
+
+        let unlinkedOneOffIncomePence = snapshot.oneOffIncomes
+            .filter {
+                $0.deletedAt == nil &&
+                $0.bankAccountId == nil &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let incomeFundedSpendingPence = snapshot.transactions
+            .filter {
+                $0.deletedAt == nil &&
+                !$0.isRefunded &&
+                $0.type == .spending &&
+                $0.paymentMethod == .income &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let unlinkedPotFundingPence = snapshot.potAllocations
+            .filter {
+                $0.deletedAt == nil &&
+                $0.payPeriodId == payPeriod.id &&
+                $0.bankAccountId == nil &&
+                $0.fundingPotId == nil
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let paycheckFundedCreditCardPotsPence = activeCreditCardPots
+            .filter {
+                $0.source == .paycheck &&
+                ($0.payPeriodId == payPeriod.id ||
+                    ($0.periodStartDate == payPeriod.startDate && $0.periodEndDate == payPeriod.endDate))
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let unlinkedDebtPaymentsPence = snapshot.debtPayments
+            .filter {
+                $0.deletedAt == nil &&
+                !$0.isRefunded &&
+                $0.sourcePotId == nil &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let paycheckFundedCardRepaymentsPence = snapshot.creditCardRepayments
+            .filter {
+                $0.deletedAt == nil &&
+                !$0.isRefunded &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, creditCardRepaymentPaycheckContribution($1)) }
+
+        let unlinkedIncomeBalancePence =
+            unlinkedPaycheckIncomePence +
+            unlinkedOneOffIncomePence -
+            incomeFundedSpendingPence -
+            unlinkedPotFundingPence -
+            paycheckFundedCreditCardPotsPence -
+            unlinkedDebtPaymentsPence -
+            paycheckFundedCardRepaymentsPence
+
+        return bankBalancePence +
+            potBalancePence +
+            creditCardPotBalancePence +
+            unlinkedIncomeBalancePence
+    }
+
     static func bankAccountNetMovementPence(accountId: String, snapshot: PlannerSnapshot) -> Int {
         let paycheckIncome = snapshot.paychecks.reduce(0) { total, paycheck in
             guard paycheck.deletedAt == nil, paycheck.bankAccountId == accountId else { return total }

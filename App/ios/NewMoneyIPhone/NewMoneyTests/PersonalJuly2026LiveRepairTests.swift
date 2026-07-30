@@ -448,6 +448,12 @@ final class PersonalJuly2026LiveRepairTests: XCTestCase {
         _ = store.applyDueScheduledPaymentsForSimulation(asOf: "2026-07-10")
         var snapshot = store.snapshot
 
+        // Keep the synthesized read aligned with the exact approved live document:
+        // it contains the iCloud allocation but records Barclays at £531.83.
+        if let barclaysIndex = snapshot.pots.firstIndex(where: { normalized($0.name) == "barclays" }) {
+            snapshot.pots[barclaysIndex].balancePence = 53_183
+        }
+
         let livePeriodID = "pay-period-2026-07-01"
         snapshot.payPeriods = [PayPeriod(id: livePeriodID, startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", nextPayday: "2026-08-01", payFrequency: .monthly, incomePence: 340_663, status: .active, createdAt: "2026-07-09T21:06:44Z", updatedAt: "2026-07-09T21:06:44Z", deletedAt: nil)]
         if includeDuplicatePeriod {

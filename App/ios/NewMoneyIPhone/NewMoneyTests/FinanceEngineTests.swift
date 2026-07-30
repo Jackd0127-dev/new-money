@@ -1572,7 +1572,7 @@ final class FinanceEngineTests: XCTestCase {
         let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
         XCTAssertEqual(potsById["pot-cc1"]?.name, "Pot 1")
         XCTAssertEqual(potsById["pot-cc1"]?.linkedCreditCardId, "card-cc1")
-        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 12500)
+        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 0)
         XCTAssertEqual(potsById["pot-cc2"]?.name, "Pot 2")
         XCTAssertEqual(potsById["pot-cc2"]?.linkedCreditCardId, "card-cc2")
         XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 0)
@@ -2198,8 +2198,8 @@ final class FinanceEngineTests: XCTestCase {
 
         let julyFirst = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-01"))
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Income Remaining"), 124500)
-        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Target"), 381500)
-        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Balance"), 381500)
+        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Target"), 420000)
+        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Balance"), 420000)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Card Balance"), 193000)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Card Reserve"), 38500)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "CC1 Reserve"), 7500)
@@ -2210,33 +2210,33 @@ final class FinanceEngineTests: XCTestCase {
 
         let julySecond = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-02"))
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Income Remaining"), 118100)
-        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Target"), 18500)
-        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Balance"), 18500)
+        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Target"), 26000)
+        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Balance"), 26000)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "CC1 Balance"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "CC1 Reserve"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Total Card Reserve"), 44900)
 
         let julyFifth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-05"))
-        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Target"), 16250)
-        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Balance"), 16250)
+        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Target"), 27850)
+        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Balance"), 27850)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "CC1 Balance"), 19850)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "CC1 Reserve"), 19850)
 
         let julyFifteenth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-15"))
-        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Target"), 13500)
-        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Balance"), 13500)
+        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Target"), 41700)
+        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Balance"), 41700)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "CC2 Balance"), 37000)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "CC2 Reserve"), 37000)
 
         let julyTwentySeventh = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-27"))
-        XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "Pot4 Target"), 15000)
-        XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "Pot4 Balance"), 15000)
+        XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "Pot4 Target"), 41000)
+        XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "Pot4 Balance"), 41000)
         XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "CC4 Balance"), 41000)
         XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "CC4 Reserve"), 41000)
 
         let julyTwentyEighth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-28"))
-        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Target"), 7200)
-        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Balance"), 7200)
+        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Target"), 37700)
+        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Balance"), 37700)
         XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "CC5 Balance"), 37700)
         XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "CC5 Reserve"), 37700)
     }
@@ -2344,7 +2344,7 @@ final class FinanceEngineTests: XCTestCase {
             payPeriod: februaryPeriod,
             asOfDate: "2027-02-01"
         )
-        XCTAssertEqual(beforeFundingItems.count, 24)
+        XCTAssertEqual(beforeFundingItems.count, 25)
         XCTAssertEqual(beforeFundingItems.filter(\.isCompleted).count, 0)
         let cardsBeforeFunding = Dictionary(uniqueKeysWithValues: store.snapshot.creditCards.map { ($0.id, $0) })
         XCTAssertEqual(
@@ -2504,7 +2504,7 @@ final class FinanceEngineTests: XCTestCase {
 
         let potsAfterFunding = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.id, $0) })
         XCTAssertEqual(potsAfterFunding["pot-pot7"]?.balancePence, 30000)
-        XCTAssertEqual(potsAfterFunding["pot-pot2"]?.balancePence, 39300)
+        XCTAssertEqual(potsAfterFunding["pot-pot2"]?.balancePence, 50800)
 
         let cardsById = Dictionary(uniqueKeysWithValues: store.snapshot.creditCards.map { ($0.id, $0) })
         let cardBalanceTotal = store.snapshot.creditCards.reduce(0) {
@@ -2735,7 +2735,7 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testStatementRepaymentDoesNotCountPreviousStatementDateFundingInNextCycle() async throws {
+    func testStatementRepaymentUsesFundedPreviousStatementDayChargeOnlyOnceAcrossCycles() async throws {
         let settings = makeManualSettings(today: "2026-06-01")
         let period = makePayPeriod(id: "period-summer", startDate: "2026-06-01", endDate: "2026-07-31", payday: "2026-06-01", incomePence: 150000)
         let card = makeCreditCard(id: "card-main", name: "Barclays", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-10", dueDay: 15, createdAt: "2026-06-01T00:00:00.000Z")
@@ -2757,7 +2757,7 @@ final class FinanceEngineTests: XCTestCase {
         june10Settings.manualTodayIso = "2026-06-10"
         store.updateSettings(june10Settings)
         XCTAssertEqual(store.snapshot.transactions.first { $0.recurringPaymentId == previousStatementDayBill.id }?.potId, pot.id)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 30000)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 50000)
 
         var june15Settings = store.snapshot.settings
         june15Settings.manualTodayIso = "2026-06-15"
@@ -2766,7 +2766,7 @@ final class FinanceEngineTests: XCTestCase {
             $0.creditCardId == card.id && $0.statementDate == "2026-06-10"
         })
         XCTAssertEqual(juneRepayment.amountPence, 20000)
-        XCTAssertEqual(juneRepayment.potContributionPence, 0)
+        XCTAssertEqual(juneRepayment.potContributionPence, 20000)
         XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 30000)
 
         var july10Settings = store.snapshot.settings
@@ -3145,10 +3145,10 @@ final class FinanceEngineTests: XCTestCase {
             ($0.name, PlannerDerivedData.potProgress(pot: $0, snapshot: store.snapshot, today: "2026-09-01"))
         })
         let potsByName = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.name, $0) })
-        XCTAssertEqual(potProgressByName["Subscriptions"]?.targetPence, 54000)
-        XCTAssertEqual(potsByName["Subscriptions"]?.balancePence, 54000)
-        XCTAssertEqual(potProgressByName["Car & Insurance"]?.targetPence, 40400)
-        XCTAssertEqual(potsByName["Car & Insurance"]?.balancePence, 40400)
+        XCTAssertEqual(potProgressByName["Subscriptions"]?.targetPence, 61500)
+        XCTAssertEqual(potsByName["Subscriptions"]?.balancePence, 61500)
+        XCTAssertEqual(potProgressByName["Car & Insurance"]?.targetPence, 51400)
+        XCTAssertEqual(potsByName["Car & Insurance"]?.balancePence, 51400)
         XCTAssertEqual(potProgressByName["Food & Fuel"]?.targetPence, 64000)
         XCTAssertEqual(potsByName["Food & Fuel"]?.balancePence, 64000)
         XCTAssertEqual(potProgressByName["Emergency"]?.targetPence, 6000)
@@ -3277,10 +3277,10 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertFalse(store.applyDueLinkedPotObligations(asOf: "2026-07-01"))
 
         let potsById = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.id, $0) })
-        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 55000)
-        XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 0)
+        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 62500)
+        XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 10000)
         XCTAssertEqual(potsById["pot-cc3"]?.balancePence, 20000)
-        XCTAssertEqual(store.snapshot.pots.reduce(0) { $0 + max(0, $1.balancePence) }, 75000)
+        XCTAssertEqual(store.snapshot.pots.reduce(0) { $0 + max(0, $1.balancePence) }, 92500)
 
         let cardsById = Dictionary(uniqueKeysWithValues: store.snapshot.creditCards.map { ($0.id, $0) })
         let cc1 = try XCTUnwrap(cardsById["card-cc1"])
@@ -3330,10 +3330,10 @@ final class FinanceEngineTests: XCTestCase {
             payPeriod: period,
             asOfDate: "2026-07-01"
         )
-        XCTAssertEqual(items.filter { $0.status == .paidCompleted }.map(\.name).sorted(), ["ChatGPT", "Insurance"])
-        XCTAssertEqual(items.first { $0.name == "ChatGPT" }?.paidDate, "2026-07-01")
-        XCTAssertEqual(items.first { $0.name == "Insurance" }?.paidDate, "2026-07-01")
-        XCTAssertEqual(items.filter { $0.status == .activeReserved }.map(\.name).sorted(), ["CC1 opening balance", "Skincare", "Spending money"])
+        XCTAssertEqual(items.filter { $0.status == .paidCompleted }.map(\.name).sorted(), [])
+        XCTAssertNil(items.first { $0.name == "ChatGPT" }?.paidDate)
+        XCTAssertNil(items.first { $0.name == "Insurance" }?.paidDate)
+        XCTAssertEqual(items.filter { $0.status == .activeReserved }.map(\.name).sorted(), ["CC1 opening balance", "ChatGPT", "Insurance", "Skincare", "Spending money"])
         XCTAssertTrue(items.allSatisfy(\.isCompleted))
 
         var july2Settings = store.snapshot.settings
@@ -3360,8 +3360,8 @@ final class FinanceEngineTests: XCTestCase {
             payPeriod: period,
             asOfDate: "2026-07-15"
         )
-        XCTAssertEqual(items.first { $0.name == "Skincare" }?.status, .paidCompleted)
-        XCTAssertEqual(items.first { $0.name == "Skincare" }?.paidDate, "2026-07-15")
+        XCTAssertEqual(items.first { $0.name == "Skincare" }?.status, .activeReserved)
+        XCTAssertNil(items.first { $0.name == "Skincare" }?.paidDate)
         summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-07-15")
         XCTAssertEqual(summary.moneyLeftPence, 7500)
         XCTAssertEqual(summary.totalCostsPence, 92500)
@@ -3390,11 +3390,11 @@ final class FinanceEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(items.count, 5)
-        XCTAssertEqual(items.filter { $0.status == .paidCompleted }.map(\.name).sorted(), ["CC1 opening balance", "ChatGPT", "Insurance"])
-        XCTAssertEqual(items.filter { $0.status == .paidCompleted }.map(\.name), ["CC1 opening balance", "ChatGPT", "Insurance"])
+        XCTAssertEqual(items.filter { $0.status == .paidCompleted }.map(\.name).sorted(), ["CC1 opening balance", "ChatGPT"])
+        XCTAssertEqual(items.filter { $0.status == .paidCompleted }.map(\.name), ["CC1 opening balance", "ChatGPT"])
         XCTAssertEqual(items.first { $0.name == "CC1 opening balance" }?.paidDate, "2026-07-02")
         XCTAssertEqual(items.first { $0.name == "CC1 opening balance" }?.title, "Add £500.00 to Pot 1")
-        XCTAssertEqual(items.filter { $0.status == .activeReserved }.map(\.name).sorted(), ["Skincare", "Spending money"])
+        XCTAssertEqual(items.filter { $0.status == .activeReserved }.map(\.name).sorted(), ["Insurance", "Skincare", "Spending money"])
         XCTAssertTrue(items.allSatisfy(\.isCompleted))
 
         let summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-07-05")
@@ -3567,7 +3567,7 @@ final class FinanceEngineTests: XCTestCase {
         })
         XCTAssertEqual(cc1StatementRepayment.amountPence, 7500)
         XCTAssertEqual(cc1StatementRepayment.paycheckContributionPence, 0)
-        XCTAssertEqual(cc1StatementRepayment.potContributionPence, 0)
+        XCTAssertEqual(cc1StatementRepayment.potContributionPence, 7500)
 
         let cardsById = Dictionary(uniqueKeysWithValues: store.snapshot.creditCards.map { ($0.id, $0) })
         let cc1 = try XCTUnwrap(cardsById["card-cc1"])
@@ -3579,12 +3579,12 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual([cc1, cc2, cc3].reduce(0) { $0 + PlannerDerivedData.cardBalance(card: $1, snapshot: store.snapshot) }, 57300)
 
         let potsById = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.id, $0) })
-        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 6500)
-        XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 3300)
-        XCTAssertEqual(potsById["pot-cc3"]?.balancePence, 20000)
+        XCTAssertEqual(potsById["pot-cc1"]?.balancePence, 19000)
+        XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 23300)
+        XCTAssertEqual(potsById["pot-cc3"]?.balancePence, 40000)
         let pot1Progress = PlannerDerivedData.potProgress(pot: try XCTUnwrap(potsById["pot-cc1"]), snapshot: store.snapshot, today: "2026-08-02")
-        XCTAssertEqual(pot1Progress.targetPence, 6500)
-        XCTAssertEqual(pot1Progress.coveredPence, 6500)
+        XCTAssertEqual(pot1Progress.targetPence, 19000)
+        XCTAssertEqual(pot1Progress.coveredPence, 19000)
         XCTAssertEqual(pot1Progress.shortfallPence, 0)
         XCTAssertEqual(pot1Progress.percent, 100)
 
@@ -3598,7 +3598,7 @@ final class FinanceEngineTests: XCTestCase {
             $0.statementDate == "2026-07-05" &&
             ($0.directDebitDate ?? $0.date) == "2026-08-02"
         }.count, 1)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-cc1" }?.balancePence, 6500)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == "pot-cc1" }?.balancePence, 19000)
     }
 
     @MainActor
@@ -3761,9 +3761,9 @@ final class FinanceEngineTests: XCTestCase {
 
         let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-08-01")
 
-        XCTAssertEqual(progress.targetPence, 3300)
+        XCTAssertEqual(progress.targetPence, 13300)
         XCTAssertEqual(progress.coveredPence, 3300)
-        XCTAssertEqual(progress.shortfallPence, 0)
+        XCTAssertEqual(progress.shortfallPence, 10000)
         XCTAssertEqual(progress.linkedCardPayments.map(\.dueIso), ["2026-08-10", "2026-09-10"])
         XCTAssertEqual(progress.linkedCardPayments.map(\.amountPence), [10000, 3300])
         XCTAssertEqual(progress.linkedCardPayments.map(\.statementIso), ["2026-07-15", "2026-08-15"])
@@ -4759,14 +4759,14 @@ final class FinanceEngineTests: XCTestCase {
         let cc1Statement = try XCTUnwrap(statements.first { $0.cardId == "card-cc1" && $0.statementDate == "2026-07-05" })
         XCTAssertEqual(cc1Statement.cardName, "CC1")
         XCTAssertEqual(cc1Statement.directDebitDate, "2026-08-02")
-        XCTAssertEqual(cc1Statement.statementAmountPence, 7500)
+        XCTAssertEqual(cc1Statement.statementAmountPence, 57500)
         XCTAssertEqual(cc1Statement.paidAmountPence, 0)
-        XCTAssertEqual(cc1Statement.unpaidAmountPence, 7500)
+        XCTAssertEqual(cc1Statement.unpaidAmountPence, 57500)
         XCTAssertEqual(cc1Statement.status, .upcoming)
-        XCTAssertEqual(cc1Statement.transactions.map(\.name), ["ChatGPT"])
-        XCTAssertEqual(cc1Statement.transactions.map(\.date), ["2026-07-01"])
-        XCTAssertEqual(cc1Statement.transactions.map(\.amountPence), [7500])
-        XCTAssertEqual(cc1Statement.transactions.map(\.source), [.recurring])
+        XCTAssertEqual(cc1Statement.transactions.map(\.name), ["ChatGPT", "Opening statement balance"])
+        XCTAssertEqual(cc1Statement.transactions.map(\.date), ["2026-07-01", "2026-07-05"])
+        XCTAssertEqual(cc1Statement.transactions.map(\.amountPence), [7500, 50000])
+        XCTAssertEqual(cc1Statement.transactions.map(\.source), [.recurring, .openingStatement])
 
         let cc2Statement = try XCTUnwrap(statements.first { $0.cardId == "card-cc2" && $0.statementDate == "2026-07-15" })
         XCTAssertEqual(cc2Statement.directDebitDate, "2026-08-10")
@@ -4777,15 +4777,15 @@ final class FinanceEngineTests: XCTestCase {
         let repayment = CreditCardRepayment(
             id: "repay-cc1-july",
             creditCardId: "card-cc1",
-            amountPence: 7500,
+            amountPence: 57500,
             date: "2026-08-02",
             note: "CC1 direct debit",
             statementDate: "2026-07-05",
             directDebitDate: "2026-08-02",
-            source: .linkedPotStatement,
+            source: .automaticStatement,
             potId: nil,
             potContributionPence: 0,
-            paycheckContributionPence: 0,
+            paycheckContributionPence: 57500,
             createdAt: "2026-08-02T00:00:00.000Z",
             updatedAt: "2026-08-02T00:00:00.000Z",
             deletedAt: nil

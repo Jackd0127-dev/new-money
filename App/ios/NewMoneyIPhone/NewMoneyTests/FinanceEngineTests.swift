@@ -140,7 +140,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(repairedStore.selectedPayPeriod?.id, realPeriod.id)
     }
 
-    func testPlannerSnapshotDecodesMissingOneOffIncomeAndChecklistExclusions() throws {
+    func testPlannerSnapshotDecodesMissingBankAccountsOneOffIncomeAndChecklistExclusions() throws {
         let period = makePayPeriod(
             id: "period-july",
             startDate: "2026-07-01",
@@ -150,6 +150,7 @@ final class FinanceEngineTests: XCTestCase {
         )
         let encoded = try JSONEncoder().encode(makeSnapshot(payPeriods: [period]))
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "bankAccounts")
         object.removeValue(forKey: "oneOffIncomes")
         object.removeValue(forKey: "fundingChecklistExclusions")
         var periods = try XCTUnwrap(object["payPeriods"] as? [[String: Any]])
@@ -159,6 +160,7 @@ final class FinanceEngineTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(PlannerSnapshot.self, from: legacyData)
 
+        XCTAssertTrue(decoded.bankAccounts.isEmpty)
         XCTAssertTrue(decoded.oneOffIncomes.isEmpty)
         XCTAssertTrue(decoded.fundingChecklistExclusions.isEmpty)
         XCTAssertNil(decoded.payPeriods.first?.monthlyAnchorDay)
@@ -180,6 +182,142 @@ final class FinanceEngineTests: XCTestCase {
         let summary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: period, asOfDate: "2026-06-10")
         XCTAssertEqual(summary.payReceivedPence, 75000)
         XCTAssertEqual(summary.moneyLeftPence, 75000)
+    }
+
+    @MainActor
+    func testBankAccountBalanceTracksLinkedIncomeSpendingRefundsAndReconciliation() async {
+        let settings = makeManualSettings(today: "2026-06-01")
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings)))
+        await store.load()
+
+        XCTAssertTrue(
+            store.addBankAccount(
+                name: "Main account",
+                provider: "Test Bank",
+                type: .current,
+                currentBalancePence: 100_000,
+                lastFourDigits: "1234",
+                color: "#2563EB",
+                isPrimary: true
+            )
+        )
+        let account = try! XCTUnwrap(store.activeBankAccounts.first)
+
+        store.createPayPeriod(
+            payday: "2026-06-01",
+            hoursWorked: 2000,
+            hourlyRatePence: 100,
+            actualAmountPence: 200_000,
+            payFrequency: .monthly,
+            bankAccountId: account.id
+        )
+        XCTAssertTrue(store.addOneOffIncome(name: "Refund", amountPence: 5_000, date: "2026-06-01", note: "", bankAccountId: account.id))
+        store.recordTransaction(
+            potId: nil,
+            creditCardId: nil,
+            bankAccountId: account.id,
+            paymentMethod: .bankAccount,
+            amountPence: 2_500,
+            type: .spending,
+            date: "2026-06-01",
+            note: "Groceries"
+        )
+
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
+            302_500
+        )
+
+        let spend = try! XCTUnwrap(store.snapshot.transactions.first { $0.paymentMethod == .bankAccount })
+        store.setTransactionRefunded(id: spend.id, refunded: true)
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
+            305_000
+        )
+
+        var edited = try! XCTUnwrap(store.snapshot.bankAccounts.first { $0.id == account.id })
+        edited.name = "Everyday account"
+        XCTAssertTrue(store.updateBankAccount(edited, currentBalancePence: 400_000))
+        let reconciled = try! XCTUnwrap(store.snapshot.bankAccounts.first { $0.id == account.id })
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: reconciled, snapshot: store.snapshot),
+            400_000
+        )
+    }
+
+    @MainActor
+    func testFundingAPotMovesMoneyOutOfItsLinkedBankAccountOnlyOnce() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(
+            id: "period-june",
+            startDate: "2026-06-01",
+            endDate: "2026-06-30",
+            payday: "2026-06-01",
+            incomePence: 0
+        )
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        let pot = makePot(
+            id: "pot-bills",
+            name: "Bills",
+            balancePence: 0,
+            targetPence: nil,
+            fundingBankAccountId: account.id
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            bankAccounts: [account],
+            pots: [pot],
+            payPeriods: [period]
+        )))
+        await store.load()
+
+        XCTAssertTrue(store.addPotAllocation(potId: pot.id, amountPence: 25_000))
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 25_000)
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
+            75_000
+        )
+
+        let allocation = try! XCTUnwrap(store.snapshot.potAllocations.first)
+        XCTAssertEqual(allocation.bankAccountId, account.id)
+        XCTAssertTrue(store.deleteManualPotAllocation(id: allocation.id))
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
+            100_000
+        )
+    }
+
+    @MainActor
+    func testDirectDebitLinkedToBankAccountPostsOnceOnItsDueDate() async {
+        var settings = makeManualSettings(today: "2026-06-09")
+        settings.lastProcessedDateIso = "2026-06-09"
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        let bill = makeRecurringPayment(
+            id: "bill-phone",
+            name: "Phone",
+            amountPence: 2_999,
+            dueDay: 10,
+            potId: nil,
+            bankAccountId: account.id
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            bankAccounts: [account],
+            recurringPayments: [bill]
+        )))
+        await store.load()
+        store.setManualTodayForSimulation("2026-06-10")
+
+        XCTAssertTrue(store.applyDueScheduledPaymentsForSimulation(asOf: "2026-06-10"))
+        XCTAssertFalse(store.applyDueScheduledPaymentsForSimulation(asOf: "2026-06-10"))
+        let transaction = try! XCTUnwrap(store.snapshot.transactions.first { $0.recurringPaymentId == bill.id })
+        XCTAssertEqual(transaction.paymentMethod, .bankAccount)
+        XCTAssertEqual(transaction.bankAccountId, account.id)
+        XCTAssertEqual(transaction.date, "2026-06-10")
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
+            97_001
+        )
     }
 
     func testOneOffIncomeDateKeepsItInCurrentMoneyLeftWhenStoredPeriodIdIsStale() {
@@ -6259,6 +6397,7 @@ final class FinanceEngineTests: XCTestCase {
 
     private func makeSnapshot(
         settings: Settings = DefaultData.defaultSettings,
+        bankAccounts: [BankAccount] = [],
         pots: [Pot] = [],
         recurringPayments: [RecurringPayment] = [],
         payPeriods: [PayPeriod] = [],
@@ -6292,7 +6431,8 @@ final class FinanceEngineTests: XCTestCase {
             creditCardPots: [],
             dailyBriefs: [],
             oneOffIncomes: oneOffIncomes,
-            fundingChecklistExclusions: fundingChecklistExclusions
+            fundingChecklistExclusions: fundingChecklistExclusions,
+            bankAccounts: bankAccounts
         )
     }
 
@@ -6302,7 +6442,8 @@ final class FinanceEngineTests: XCTestCase {
         balancePence: Int,
         targetPence: Int?,
         linkedCreditCardId: String? = nil,
-        linkedDebtId: String? = nil
+        linkedDebtId: String? = nil,
+        fundingBankAccountId: String? = nil
     ) -> Pot {
         Pot(
             id: id,
@@ -6315,6 +6456,7 @@ final class FinanceEngineTests: XCTestCase {
             color: "#2563eb",
             linkedCreditCardId: linkedCreditCardId,
             linkedDebtId: linkedDebtId,
+            fundingBankAccountId: fundingBankAccountId,
             archived: false,
             createdAt: "2026-05-16T00:00:00.000Z",
             updatedAt: "2026-05-16T00:00:00.000Z",
@@ -6329,6 +6471,7 @@ final class FinanceEngineTests: XCTestCase {
         dueDay: Int?,
         potId: String?,
         creditCardId: String? = nil,
+        bankAccountId: String? = nil,
         dueDate: String? = nil,
         frequency: RecurringFrequency = .monthly,
         createdAt: String = "2026-06-01T00:00:00.000Z"
@@ -6342,10 +6485,33 @@ final class FinanceEngineTests: XCTestCase {
             frequency: frequency,
             potId: potId,
             creditCardId: creditCardId,
+            bankAccountId: bankAccountId,
             priority: .essential,
             active: true,
             createdAt: createdAt,
             updatedAt: createdAt,
+            deletedAt: nil
+        )
+    }
+
+    private func makeBankAccount(
+        id: String,
+        name: String = "Main account",
+        openingBalancePence: Int = 0,
+        isPrimary: Bool = true
+    ) -> BankAccount {
+        BankAccount(
+            id: id,
+            name: name,
+            provider: "Test Bank",
+            type: .current,
+            openingBalancePence: openingBalancePence,
+            lastFourDigits: "1234",
+            color: "#2563EB",
+            isPrimary: isPrimary,
+            archived: false,
+            createdAt: "2026-06-01T00:00:00.000Z",
+            updatedAt: "2026-06-01T00:00:00.000Z",
             deletedAt: nil
         )
     }

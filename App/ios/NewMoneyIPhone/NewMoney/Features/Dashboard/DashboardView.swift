@@ -1901,6 +1901,7 @@ struct OneOffIncomeDetailView: View {
     @State private var amount: String
     @State private var date: Date
     @State private var note: String
+    @State private var bankAccountId: String
     @State private var showDeleteAlert = false
 
     init(store: PlannerStore, income: OneOffIncome) {
@@ -1910,6 +1911,7 @@ struct OneOffIncomeDetailView: View {
         _amount = State(initialValue: Self.formatMoneyInput(income.amountPence))
         _date = State(initialValue: income.date.isoDate)
         _note = State(initialValue: income.note)
+        _bankAccountId = State(initialValue: income.bankAccountId ?? "")
     }
 
     var body: some View {
@@ -1944,6 +1946,11 @@ struct OneOffIncomeDetailView: View {
             if let period = currentPeriod {
                 MetricRow(label: "Pay period", value: "\(FinanceEngine.formatPaydayLabel(period.startDate)) to \(FinanceEngine.formatPaydayLabel(period.endDate))")
             }
+            if let bankAccountName = currentIncome.bankAccountId.flatMap({ id in
+                store.snapshot.bankAccounts.first(where: { $0.id == id })?.name
+            }) {
+                MetricRow(label: "Paid into", value: bankAccountName)
+            }
         }
     }
 
@@ -1965,13 +1972,26 @@ struct OneOffIncomeDetailView: View {
                 .lineLimit(2...4)
                 .textFieldStyle(AppTextFieldStyle())
 
+            SelectionField(
+                title: "Paid into",
+                value: store.snapshot.bankAccounts.first(where: { $0.id == bankAccountId })?.name ?? "",
+                placeholder: "Not linked",
+                systemImage: "building.columns"
+            ) {
+                Button("Not linked") { bankAccountId = "" }
+                ForEach(store.activeBankAccounts) { account in
+                    Button(account.name) { bankAccountId = account.id }
+                }
+            }
+
             PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSaveChanges) {
                 _ = store.updateOneOffIncome(
                     id: income.id,
                     name: name,
                     amountPence: MoneyParser.parsePoundsToPence(amount),
                     date: date.isoDateString,
-                    note: note
+                    note: note,
+                    bankAccountId: bankAccountId
                 )
             }
         }
@@ -2262,6 +2282,7 @@ private func billDueDayLabel(_ dueDay: Int?) -> String {
 private func billLinkedTarget(for payment: RecurringPayment, in snapshot: PlannerSnapshot) -> String {
     let potName = payment.potId.flatMap { potId in snapshot.pots.first { $0.id == potId }?.name }
     let cardName = payment.creditCardId.flatMap { cardId in snapshot.creditCards.first { $0.id == cardId }?.name }
+    let bankAccountName = payment.bankAccountId.flatMap { accountId in snapshot.bankAccounts.first { $0.id == accountId }?.name }
     if let cardName, let potName {
         return "\(cardName) + \(potName)"
     }
@@ -2269,6 +2290,7 @@ private func billLinkedTarget(for payment: RecurringPayment, in snapshot: Planne
     if let cardId = payment.creditCardId {
         return snapshot.creditCards.first { $0.id == cardId }?.name ?? "Linked card"
     }
+    if let bankAccountName { return bankAccountName }
     return "None"
 }
 
@@ -2283,7 +2305,8 @@ private struct BillDetailView: View {
     @State private var priority: RecurringPriority
     @State private var potId: String
     @State private var cardId: String
-    @State private var routeToCard: Bool
+    @State private var bankAccountId: String
+    @State private var paymentRoute: BillPaymentRoute
     @State private var isActive: Bool
     @State private var showDeleteAlert = false
 
@@ -2297,7 +2320,8 @@ private struct BillDetailView: View {
         _priority = State(initialValue: payment.priority)
         _potId = State(initialValue: payment.potId ?? "")
         _cardId = State(initialValue: payment.creditCardId ?? "")
-        _routeToCard = State(initialValue: payment.creditCardId != nil)
+        _bankAccountId = State(initialValue: payment.bankAccountId ?? "")
+        _paymentRoute = State(initialValue: payment.creditCardId != nil ? .creditCard : (payment.bankAccountId != nil ? .bankAccount : .pot))
         _isActive = State(initialValue: payment.active)
     }
 
@@ -2328,10 +2352,13 @@ private struct BillDetailView: View {
                 if cardId.isEmpty {
                     cardId = store.activeCards.first?.id ?? ""
                 }
+                if bankAccountId.isEmpty {
+                    bankAccountId = store.primaryBankAccount?.id ?? store.activeBankAccounts.first?.id ?? ""
+                }
                 normalizeSelectedCardPot()
             }
             .onChange(of: cardId) { _, _ in normalizeSelectedCardPot() }
-            .onChange(of: routeToCard) { _, _ in normalizeSelectedCardPot() }
+            .onChange(of: paymentRoute) { _, _ in normalizeSelectedCardPot() }
             .alert("Delete bill?", isPresented: $showDeleteAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
@@ -2372,9 +2399,13 @@ private struct BillDetailView: View {
             .pickerStyle(.segmented)
             Toggle("Active", isOn: $isActive)
                 .tint(AppTheme.Colors.primaryOrange)
-            Toggle("Linked to card", isOn: $routeToCard)
-                .tint(AppTheme.Colors.primaryOrange)
-            if routeToCard {
+            Picker("Paid from", selection: $paymentRoute) {
+                ForEach(BillPaymentRoute.allCases) { route in
+                    Text(route.title).tag(route)
+                }
+            }
+            .pickerStyle(.segmented)
+            if paymentRoute == .creditCard {
                 SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
                     Button("No card") { cardId = "" }
                     ForEach(store.activeCards) { card in
@@ -2391,11 +2422,18 @@ private struct BillDetailView: View {
                         }
                     }
                 }
-            } else {
+            } else if paymentRoute == .pot {
                 SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
                     Button("No pot") { potId = "" }
                     ForEach(store.activePots) { pot in
                         Button(pot.name) { potId = pot.id }
+                    }
+                }
+            } else {
+                SelectionField(title: "Bank account", value: selectedBankAccountName, placeholder: "No account", systemImage: "building.columns") {
+                    Button("No account") { bankAccountId = "" }
+                    ForEach(store.activeBankAccounts) { account in
+                        Button(account.name) { bankAccountId = account.id }
                     }
                 }
             }
@@ -2407,7 +2445,8 @@ private struct BillDetailView: View {
                 updated.frequency = frequency
                 updated.priority = priority
                 updated.potId = cleanPotId
-                updated.creditCardId = routeToCard ? cardId.nilIfBlank : nil
+                updated.creditCardId = paymentRoute == .creditCard ? cardId.nilIfBlank : nil
+                updated.bankAccountId = paymentRoute == .bankAccount ? bankAccountId.nilIfBlank : nil
                 updated.active = isActive
                 store.updateRecurringPayment(updated)
             }
@@ -2419,7 +2458,9 @@ private struct BillDetailView: View {
     }
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && MoneyParser.parsePoundsToPence(amount) > 0
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && MoneyParser.parsePoundsToPence(amount) > 0
+            && (paymentRoute != .bankAccount || !bankAccountId.isBlank)
     }
 
     private var cardLinkedPots: [Pot] {
@@ -2434,16 +2475,20 @@ private struct BillDetailView: View {
         store.activePots.first { $0.id == potId }?.name ?? ""
     }
 
+    private var selectedBankAccountName: String {
+        store.activeBankAccounts.first { $0.id == bankAccountId }?.name ?? ""
+    }
+
     private var cleanPotId: String? {
-        if routeToCard {
+        if paymentRoute == .creditCard {
             return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
         }
 
-        return potId.nilIfBlank
+        return paymentRoute == .pot ? potId.nilIfBlank : nil
     }
 
     private func normalizeSelectedCardPot() {
-        guard routeToCard else { return }
+        guard paymentRoute == .creditCard else { return }
         if !cardLinkedPots.contains(where: { $0.id == potId }) {
             potId = cardLinkedPots.first?.id ?? ""
         }
@@ -3225,6 +3270,7 @@ struct PaycheckDetailView: View {
     @State private var hoursWorked: String
     @State private var hourlyRate: String
     @State private var payFrequency: PayFrequency
+    @State private var bankAccountId: String
     @State private var showDeleteAlert = false
 
     init(store: PlannerStore, paycheck: Paycheck, presentation: PaycheckDetailPresentation = .sheet) {
@@ -3236,6 +3282,7 @@ struct PaycheckDetailView: View {
         _hoursWorked = State(initialValue: Self.formatHours(paycheck.hoursWorked))
         _hourlyRate = State(initialValue: Self.formatMoneyInput(paycheck.hourlyRatePence))
         _payFrequency = State(initialValue: period?.payFrequency ?? store.snapshot.settings.payFrequency)
+        _bankAccountId = State(initialValue: paycheck.bankAccountId ?? "")
     }
 
     var body: some View {
@@ -3290,6 +3337,11 @@ struct PaycheckDetailView: View {
             MetricRow(label: "Hourly rate", value: MoneyParser.formatPence(currentPaycheck.hourlyRatePence))
             MetricRow(label: "Pay period", value: periodRangeLabel)
             MetricRow(label: "Frequency", value: frequencyLabel(currentPeriod?.payFrequency ?? payFrequency))
+            if let bankAccountName = currentPaycheck.bankAccountId.flatMap({ id in
+                store.snapshot.bankAccounts.first(where: { $0.id == id })?.name
+            }) {
+                MetricRow(label: "Paid into", value: bankAccountName)
+            }
             MetricRow(label: "Allocated", value: MoneyParser.formatPence(allocatedPence), valueColor: AppTheme.Colors.primaryOrange)
         }
     }
@@ -3317,6 +3369,17 @@ struct PaycheckDetailView: View {
                 paidInPreview
                     .frame(width: 132)
             }
+            SelectionField(
+                title: "Paid into",
+                value: store.snapshot.bankAccounts.first(where: { $0.id == bankAccountId })?.name ?? "",
+                placeholder: "Not linked",
+                systemImage: "building.columns"
+            ) {
+                Button("Not linked") { bankAccountId = "" }
+                ForEach(store.activeBankAccounts) { account in
+                    Button(account.name) { bankAccountId = account.id }
+                }
+            }
             PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSaveChanges) {
                 store.updatePaycheck(
                     id: paycheck.id,
@@ -3324,7 +3387,8 @@ struct PaycheckDetailView: View {
                     hoursWorked: Double(hoursWorked) ?? 0,
                     hourlyRatePence: MoneyParser.parsePoundsToPence(hourlyRate),
                     actualAmountPence: nil,
-                    payFrequency: payFrequency
+                    payFrequency: payFrequency,
+                    bankAccountId: bankAccountId
                 )
             }
         }

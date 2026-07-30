@@ -916,6 +916,8 @@ struct ActivityLayoutPolicy {
         .recentActivity,
         .monthBalance
     ]
+    static let recentActivityInitialVisibleCount = 1
+    static let recentActivityRevealIncrement = 2
     static let recentActivityMarkerStyle = "coloredDot"
     static let recentActivityDateFormat = "EEE, d MMM yyyy"
     static let recentActivityDetailPresentation: ActivityDetailPresentation = .navigationPush
@@ -938,6 +940,13 @@ struct ActivityLayoutPolicy {
     static let incomeEditRequiresDeletableItem = true
     static let spendingEditRequiresDeletableItem = true
     static let editDeleteBadgeRequiresConfirmation = true
+
+    static func recentActivityVisibleCount(afterSeeMoreTaps taps: Int, totalCount: Int) -> Int {
+        min(
+            max(0, totalCount),
+            recentActivityInitialVisibleCount + max(0, taps) * recentActivityRevealIncrement
+        )
+    }
 
     static func paycheckActivityDate(paycheck: Paycheck, payPeriod: PayPeriod?) -> String {
         payPeriod?.payday ?? paycheck.createdAt.prefixDateLabel
@@ -1106,6 +1115,7 @@ struct ActivityView: View {
     var presentationContext: PlannerTabPresentationContext?
     @State private var filter: ActivityFilter = .all
     @State private var searchText = ""
+    @State private var recentActivitySeeMoreTapCount = 0
 
     var body: some View {
         ScreenScaffold(
@@ -1118,6 +1128,12 @@ struct ActivityView: View {
             ForEach(ActivityLayoutPolicy.sections, id: \.rawValue) { section in
                 activitySection(section)
             }
+        }
+        .onChange(of: filter) {
+            resetRecentActivityVisibleCount()
+        }
+        .onChange(of: searchText) {
+            resetRecentActivityVisibleCount()
         }
     }
 
@@ -1173,7 +1189,8 @@ struct ActivityView: View {
                 }
             } else {
                 AppCard {
-                    let visibleEntries = filteredEntries.prefix(18)
+                    let entries = filteredEntries
+                    let visibleEntries = Array(entries.prefix(recentActivityVisibleCount))
                     ForEach(visibleEntries) { entry in
                         NavigationLink {
                             ActivityEntryDetailView(store: store, entry: entry)
@@ -1186,9 +1203,37 @@ struct ActivityView: View {
                             AppDivider()
                         }
                     }
+
+                    if visibleEntries.count < entries.count {
+                        AppDivider()
+                        Button(action: revealMoreRecentActivity) {
+                            Label("See more", systemImage: "chevron.down")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 2)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows two more activity items")
+                    }
                 }
             }
         }
+    }
+
+    private var recentActivityVisibleCount: Int {
+        ActivityLayoutPolicy.recentActivityVisibleCount(
+            afterSeeMoreTaps: recentActivitySeeMoreTapCount,
+            totalCount: filteredEntries.count
+        )
+    }
+
+    private func revealMoreRecentActivity() {
+        recentActivitySeeMoreTapCount += 1
+    }
+
+    private func resetRecentActivityVisibleCount() {
+        recentActivitySeeMoreTapCount = 0
     }
 
     private var filteredEntries: [ActivityEntry] {
@@ -1426,6 +1471,8 @@ struct ActivityView: View {
         switch method {
         case .income:
             PaymentMethod.income.displayName
+        case .bankAccount:
+            PaymentMethod.bankAccount.displayName
         case .creditCard:
             PaymentMethod.creditCard.displayName
         case .pot:

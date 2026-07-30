@@ -237,6 +237,7 @@ enum AppTabNavigationStackPolicy {
 
 enum ProfileMenuAction: String, CaseIterable, Identifiable {
     case addIncome
+    case bankAccounts
     case appearance
     case history
     case creditStatements
@@ -246,6 +247,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .addIncome: "Add Income"
+        case .bankAccounts: "Bank Accounts"
         case .appearance: "Appearance"
         case .history: "History"
         case .creditStatements: "Credit Statements"
@@ -255,6 +257,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .addIncome: "Create income and payday setup."
+        case .bankAccounts: "Balances, income destinations, pots, and Direct Debits."
         case .appearance: "Themes and colour presets."
         case .history: "Paycheck and allocation history."
         case .creditStatements: "Card statements and direct debit status."
@@ -264,6 +267,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .addIncome: "sterlingsign.circle"
+        case .bankAccounts: "building.columns"
         case .appearance: "paintpalette"
         case .history: "clock.arrow.circlepath"
         case .creditStatements: "doc.text.magnifyingglass"
@@ -1012,6 +1016,8 @@ private struct ProfileMenuScreenView: View {
         switch action {
         case .addIncome:
             EmptyView()
+        case .bankAccounts:
+            BankAccountsView(store: store)
         case .appearance:
             AppearanceSettingsView(navigationMode: .inline, toolbarMode: .none)
         case .history:

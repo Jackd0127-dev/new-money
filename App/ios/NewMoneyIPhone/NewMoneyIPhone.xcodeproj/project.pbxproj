@@ -64,6 +64,9 @@
 		C10000000000000000000004 /* StartupSplash.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000014 /* StartupSplash.mp4 */; };
 		D40000000000000000000001 /* StatementDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000002 /* StatementDetailView.swift */; };
 		E50000000000000000000001 /* DestructiveBadgeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000002 /* DestructiveBadgeButton.swift */; };
+		F60000000000000000000001 /* BankAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000011 /* BankAccountsView.swift */; };
+		F60000000000000000000002 /* BankAccountFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000012 /* BankAccountFormView.swift */; };
+		F60000000000000000000003 /* BankAccountDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000013 /* BankAccountDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -134,6 +137,9 @@
 		C10000000000000000000014 /* StartupSplash.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = StartupSplash.mp4; sourceTree = "<group>"; };
 		D40000000000000000000002 /* StatementDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementDetailView.swift; sourceTree = "<group>"; };
 		E50000000000000000000002 /* DestructiveBadgeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestructiveBadgeButton.swift; sourceTree = "<group>"; };
+		F60000000000000000000011 /* BankAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccountsView.swift; sourceTree = "<group>"; };
+		F60000000000000000000012 /* BankAccountFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccountFormView.swift; sourceTree = "<group>"; };
+		F60000000000000000000013 /* BankAccountDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccountDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -305,6 +311,7 @@
 				100000000000000000000615 /* Payday */,
 				100000000000000000000616 /* Pots */,
 				100000000000000000000617 /* Cards */,
+				F60000000000000000000020 /* BankAccounts */,
 				100000000000000000000618 /* More */,
 			);
 			path = Features;
@@ -353,6 +360,16 @@
 				100000000000000000000223 /* SecondaryFeatureViews.swift */,
 			);
 			path = More;
+			sourceTree = "<group>";
+		};
+		F60000000000000000000020 /* BankAccounts */ = {
+			isa = PBXGroup;
+			children = (
+				F60000000000000000000011 /* BankAccountsView.swift */,
+				F60000000000000000000012 /* BankAccountFormView.swift */,
+				F60000000000000000000013 /* BankAccountDetailView.swift */,
+			);
+			path = BankAccounts;
 			sourceTree = "<group>";
 		};
 		100000000000000000000619 /* Auth */ = {
@@ -531,6 +548,9 @@
 				100000000000000000000120 /* MoreView.swift in Sources */,
 				D40000000000000000000001 /* StatementDetailView.swift in Sources */,
 				100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */,
+				F60000000000000000000001 /* BankAccountsView.swift in Sources */,
+				F60000000000000000000002 /* BankAccountFormView.swift in Sources */,
+				F60000000000000000000003 /* BankAccountDetailView.swift in Sources */,
 				100000000000000000000125 /* CloudPlannerSync.swift in Sources */,
 				100000000000000000000130 /* FirebaseServices.swift in Sources */,
 				100000000000000000000131 /* FirebaseAuthSession.swift in Sources */,
@@ -696,7 +716,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 27;
 				DEVELOPMENT_TEAM = XK5H4LTL88;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NewMoney/Info.plist;
@@ -726,7 +746,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 27;
 				DEVELOPMENT_TEAM = XK5H4LTL88;
 				EXCLUDED_SOURCE_FILE_NAMES = (
 					PersonalJuly2026Fixture.swift,

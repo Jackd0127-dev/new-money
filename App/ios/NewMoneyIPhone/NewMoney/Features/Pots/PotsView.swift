@@ -1140,6 +1140,7 @@ struct PotFormView: View {
     @State private var color = AppTheme.selectedPalette.accentHex.uppercased()
     @State private var linkType: PotLinkType = .none
     @State private var linkedEntityId = ""
+    @State private var fundingBankAccountId = ""
 
     var body: some View {
         NavigationStack {
@@ -1154,7 +1155,8 @@ struct PotFormView: View {
                         target: $target,
                         color: $color,
                         linkType: $linkType,
-                        linkedEntityId: $linkedEntityId
+                        linkedEntityId: $linkedEntityId,
+                        fundingBankAccountId: $fundingBankAccountId
                     )
 
                     PrimaryButton(title: "Add pot", systemImage: "plus", isDisabled: isSaveDisabled) {
@@ -1166,7 +1168,8 @@ struct PotFormView: View {
                             color: color,
                             balancePence: MoneyParser.parsePoundsToPence(balance),
                             linkedCreditCardId: linkType == .creditCard ? linkedEntityId.potNilIfBlank : nil,
-                            linkedDebtId: linkType == .debt ? linkedEntityId.potNilIfBlank : nil
+                            linkedDebtId: linkType == .debt ? linkedEntityId.potNilIfBlank : nil,
+                            fundingBankAccountId: fundingBankAccountId.potNilIfBlank
                         )
                         dismiss()
                     }
@@ -1177,6 +1180,11 @@ struct PotFormView: View {
             .navigationTitle("Add pot")
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+        .onAppear {
+            if fundingBankAccountId.isEmpty {
+                fundingBankAccountId = store.primaryBankAccount?.id ?? store.activeBankAccounts.first?.id ?? ""
+            }
         }
     }
 
@@ -1635,6 +1643,7 @@ private struct PotEditView: View {
     @State private var color: String
     @State private var linkType: PotLinkType
     @State private var linkedEntityId: String
+    @State private var fundingBankAccountId: String
 
     init(store: PlannerStore, pot: Pot) {
         self.store = store
@@ -1644,6 +1653,7 @@ private struct PotEditView: View {
         _balance = State(initialValue: moneyInputText(for: pot.balancePence))
         _target = State(initialValue: moneyInputText(for: pot.targetPence))
         _color = State(initialValue: pot.color)
+        _fundingBankAccountId = State(initialValue: pot.fundingBankAccountId ?? "")
         if let linkedCreditCardId = pot.linkedCreditCardId {
             _linkType = State(initialValue: .creditCard)
             _linkedEntityId = State(initialValue: linkedCreditCardId)
@@ -1667,7 +1677,8 @@ private struct PotEditView: View {
                     target: $target,
                     color: $color,
                     linkType: $linkType,
-                    linkedEntityId: $linkedEntityId
+                    linkedEntityId: $linkedEntityId,
+                    fundingBankAccountId: $fundingBankAccountId
                 )
 
                 PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: isSaveDisabled) {
@@ -1696,6 +1707,7 @@ private struct PotEditView: View {
         updated.color = color
         updated.linkedCreditCardId = linkType == .creditCard ? linkedEntityId.potNilIfBlank : nil
         updated.linkedDebtId = linkType == .debt ? linkedEntityId.potNilIfBlank : nil
+        updated.fundingBankAccountId = fundingBankAccountId.potNilIfBlank
         store.updatePot(updated)
     }
 }
@@ -1709,6 +1721,7 @@ private struct PotSetupFields: View {
     @Binding var color: String
     @Binding var linkType: PotLinkType
     @Binding var linkedEntityId: String
+    @Binding var fundingBankAccountId: String
 
     private var potColors: [String] {
         PotFormLayoutPolicy.colorHexes
@@ -1727,6 +1740,7 @@ private struct PotSetupFields: View {
             MoneyField(title: "Current balance", text: $balance)
             MoneyField(title: "Target (optional)", text: $target)
             linkControls
+            fundingAccountControl
             colorSwatches
         }
         .onAppear {
@@ -1805,6 +1819,20 @@ private struct PotSetupFields: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
+    private var fundingAccountControl: some View {
+        SelectionField(
+            title: "Funded from",
+            value: selectedFundingAccountName,
+            placeholder: "No bank account",
+            systemImage: "building.columns"
+        ) {
+            Button("No bank account") { fundingBankAccountId = "" }
+            ForEach(store.activeBankAccounts) { account in
+                Button(account.name) { fundingBankAccountId = account.id }
+            }
+        }
+    }
+
     private var linkTypeBinding: Binding<PotLinkType> {
         Binding {
             linkType
@@ -1828,6 +1856,10 @@ private struct PotSetupFields: View {
 
     private var selectedDebtName: String {
         selectableDebts.first { $0.id == linkedEntityId }?.name ?? ""
+    }
+
+    private var selectedFundingAccountName: String {
+        store.activeBankAccounts.first { $0.id == fundingBankAccountId }?.name ?? ""
     }
 
     private func normalizeLinkedSelection() {

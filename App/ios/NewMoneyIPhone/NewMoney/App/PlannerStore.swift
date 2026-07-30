@@ -84,6 +84,24 @@ final class PlannerStore: ObservableObject {
         snapshot.pots.filter { !$0.archived }
     }
 
+    var activeBankAccounts: [BankAccount] {
+        snapshot.bankAccounts
+            .filter { !$0.archived && $0.deletedAt == nil }
+            .sorted {
+                if $0.isPrimary != $1.isPrimary {
+                    return $0.isPrimary
+                }
+                if $0.name == $1.name {
+                    return $0.id < $1.id
+                }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+    }
+
+    var primaryBankAccount: BankAccount? {
+        activeBankAccounts.first(where: \.isPrimary) ?? activeBankAccounts.first
+    }
+
     var activeCards: [CreditCard] {
         snapshot.creditCards.filter { !$0.archived }
     }
@@ -433,7 +451,105 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    func createPayPeriod(payday: String, hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?, payFrequency: PayFrequency? = nil) {
+    func addBankAccount(
+        name: String,
+        provider: String,
+        type: BankAccountType,
+        currentBalancePence: Int,
+        lastFourDigits: String?,
+        color: String,
+        isPrimary: Bool
+    ) -> Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        let shouldBePrimary = isPrimary || activeBankAccounts.isEmpty
+        if shouldBePrimary {
+            clearPrimaryBankAccount(now: now)
+        }
+        snapshot.bankAccounts.insert(
+            BankAccount(
+                id: DateUtilities.newId(prefix: "bank-account"),
+                name: cleanName,
+                provider: provider.trimmingCharacters(in: .whitespacesAndNewlines),
+                type: type,
+                openingBalancePence: currentBalancePence,
+                lastFourDigits: normalizedLastFourDigits(lastFourDigits),
+                color: color,
+                isPrimary: shouldBePrimary,
+                archived: false,
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: nil
+            ),
+            at: 0
+        )
+        persist()
+        return true
+    }
+
+    func updateBankAccount(_ account: BankAccount, currentBalancePence: Int) -> Bool {
+        guard let index = snapshot.bankAccounts.firstIndex(where: { $0.id == account.id }) else { return false }
+        let cleanName = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        if account.isPrimary {
+            clearPrimaryBankAccount(excluding: account.id, now: now)
+        }
+        var updated = account
+        updated.name = cleanName
+        updated.provider = account.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.lastFourDigits = normalizedLastFourDigits(account.lastFourDigits)
+        updated.openingBalancePence = currentBalancePence - PlannerDerivedData.bankAccountNetMovementPence(
+            accountId: account.id,
+            snapshot: snapshot
+        )
+        updated.updatedAt = now
+        snapshot.bankAccounts[index] = updated
+        ensurePrimaryBankAccount(now: now)
+        persist()
+        return true
+    }
+
+    func deleteBankAccount(id: String) {
+        guard let index = snapshot.bankAccounts.firstIndex(where: { $0.id == id }) else { return }
+        let now = DateUtilities.nowIsoString()
+        let hasHistory = snapshot.paychecks.contains { $0.bankAccountId == id }
+            || snapshot.oneOffIncomes.contains { $0.bankAccountId == id }
+            || snapshot.potAllocations.contains { $0.bankAccountId == id }
+            || snapshot.transactions.contains { $0.bankAccountId == id }
+
+        if hasHistory {
+            snapshot.bankAccounts[index].archived = true
+            snapshot.bankAccounts[index].isPrimary = false
+            snapshot.bankAccounts[index].updatedAt = now
+            snapshot.bankAccounts[index].deletedAt = now
+        } else {
+            snapshot.bankAccounts.remove(at: index)
+        }
+
+        for potIndex in snapshot.pots.indices where snapshot.pots[potIndex].fundingBankAccountId == id {
+            snapshot.pots[potIndex].fundingBankAccountId = nil
+            snapshot.pots[potIndex].updatedAt = now
+        }
+        for paymentIndex in snapshot.recurringPayments.indices where snapshot.recurringPayments[paymentIndex].bankAccountId == id {
+            snapshot.recurringPayments[paymentIndex].bankAccountId = nil
+            snapshot.recurringPayments[paymentIndex].updatedAt = now
+        }
+        ensurePrimaryBankAccount(now: now)
+        persist()
+    }
+
+    func createPayPeriod(
+        payday: String,
+        hoursWorked: Double,
+        hourlyRatePence: Int,
+        actualAmountPence: Int?,
+        payFrequency: PayFrequency? = nil,
+        bankAccountId: String? = nil
+    ) {
         let frequency = payFrequency ?? snapshot.settings.payFrequency
         let monthlyAnchorDay = frequency == .monthly ? FinanceEngine.dayOfMonth(payday) : nil
         let dates = FinanceEngine.createNextPayPeriod(
@@ -475,6 +591,7 @@ final class PlannerStore: ObservableObject {
             hourlyRatePence: hourlyRatePence,
             calculatedAmountPence: amount,
             actualAmountPence: actualAmountPence,
+            bankAccountId: normalizedActiveBankAccountId(bankAccountId),
             createdAt: now,
             updatedAt: now,
             deletedAt: nil
@@ -486,7 +603,7 @@ final class PlannerStore: ObservableObject {
     }
 
     @discardableResult
-    func addOneOffIncome(name: String, amountPence: Int, date: String, note: String) -> Bool {
+    func addOneOffIncome(name: String, amountPence: Int, date: String, note: String, bankAccountId: String? = nil) -> Bool {
         let amount = abs(amountPence)
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -500,6 +617,7 @@ final class PlannerStore: ObservableObject {
             amountPence: amount,
             date: date,
             note: trimmedNote,
+            bankAccountId: normalizedActiveBankAccountId(bankAccountId),
             createdAt: now,
             updatedAt: now,
             deletedAt: nil
@@ -511,7 +629,14 @@ final class PlannerStore: ObservableObject {
     }
 
     @discardableResult
-    func updateOneOffIncome(id: String, name: String, amountPence: Int, date: String, note: String) -> Bool {
+    func updateOneOffIncome(
+        id: String,
+        name: String,
+        amountPence: Int,
+        date: String,
+        note: String,
+        bankAccountId: String? = nil
+    ) -> Bool {
         guard let index = snapshot.oneOffIncomes.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else { return false }
         let amount = abs(amountPence)
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -522,6 +647,7 @@ final class PlannerStore: ObservableObject {
         snapshot.oneOffIncomes[index].amountPence = amount
         snapshot.oneOffIncomes[index].date = date
         snapshot.oneOffIncomes[index].note = trimmedNote
+        snapshot.oneOffIncomes[index].bankAccountId = normalizedActiveBankAccountId(bankAccountId)
         snapshot.oneOffIncomes[index].payPeriodId = PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id
         snapshot.oneOffIncomes[index].updatedAt = DateUtilities.nowIsoString()
         persist()
@@ -547,7 +673,15 @@ final class PlannerStore: ObservableObject {
         return true
     }
 
-    func updatePaycheck(id: String, payday: String, hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?, payFrequency: PayFrequency? = nil) {
+    func updatePaycheck(
+        id: String,
+        payday: String,
+        hoursWorked: Double,
+        hourlyRatePence: Int,
+        actualAmountPence: Int?,
+        payFrequency: PayFrequency? = nil,
+        bankAccountId: String? = nil
+    ) {
         guard let paycheckIndex = snapshot.paychecks.firstIndex(where: { $0.id == id }) else { return }
         let payPeriodId = snapshot.paychecks[paycheckIndex].payPeriodId
         let now = DateUtilities.nowIsoString()
@@ -577,6 +711,7 @@ final class PlannerStore: ObservableObject {
         snapshot.paychecks[paycheckIndex].hourlyRatePence = hourlyRatePence
         snapshot.paychecks[paycheckIndex].calculatedAmountPence = amount
         snapshot.paychecks[paycheckIndex].actualAmountPence = actualAmountPence
+        snapshot.paychecks[paycheckIndex].bankAccountId = normalizedActiveBankAccountId(bankAccountId)
         snapshot.paychecks[paycheckIndex].updatedAt = now
 
         if let periodIndex = snapshot.payPeriods.firstIndex(where: { $0.id == payPeriodId }) {
@@ -626,7 +761,8 @@ final class PlannerStore: ObservableObject {
         color: String,
         balancePence: Int = 0,
         linkedCreditCardId: String? = nil,
-        linkedDebtId: String? = nil
+        linkedDebtId: String? = nil,
+        fundingBankAccountId: String? = nil
     ) {
         let now = DateUtilities.nowIsoString()
         let cleanCardId = linkedCreditCardId?.nilIfBlank
@@ -642,6 +778,7 @@ final class PlannerStore: ObservableObject {
             color: color,
             linkedCreditCardId: cleanCardId,
             linkedDebtId: cleanDebtId,
+            fundingBankAccountId: normalizedActiveBankAccountId(fundingBankAccountId),
             archived: false,
             createdAt: now,
             updatedAt: now,
@@ -652,7 +789,9 @@ final class PlannerStore: ObservableObject {
     }
 
     func updatePot(_ pot: Pot) {
-        replace(&snapshot.pots, with: pot.stamped())
+        var updated = pot.stamped()
+        updated.fundingBankAccountId = normalizedActiveBankAccountId(pot.fundingBankAccountId)
+        replace(&snapshot.pots, with: updated)
         persist()
     }
 
@@ -681,7 +820,16 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    func recordTransaction(potId: String?, creditCardId: String?, paymentMethod: PaymentMethod, amountPence: Int, type: TransactionType, date: String, note: String) {
+    func recordTransaction(
+        potId: String?,
+        creditCardId: String?,
+        bankAccountId: String? = nil,
+        paymentMethod: PaymentMethod,
+        amountPence: Int,
+        type: TransactionType,
+        date: String,
+        note: String
+    ) {
         let now = DateUtilities.nowIsoString()
         let transaction = Transaction(
             id: DateUtilities.newId(prefix: "transaction"),
@@ -691,6 +839,7 @@ final class PlannerStore: ObservableObject {
             type: type,
             paymentMethod: paymentMethod,
             creditCardId: paymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil,
+            bankAccountId: paymentMethod == .bankAccount ? normalizedActiveBankAccountId(bankAccountId) : nil,
             recurringPaymentId: nil,
             date: date,
             note: note,
@@ -707,14 +856,26 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    func updateTransaction(id: String, potId: String?, creditCardId: String?, paymentMethod: PaymentMethod, amountPence: Int, date: String, note: String) {
+    func updateTransaction(
+        id: String,
+        potId: String?,
+        creditCardId: String?,
+        bankAccountId: String? = nil,
+        paymentMethod: PaymentMethod,
+        amountPence: Int,
+        date: String,
+        note: String
+    ) {
         let amount = abs(amountPence)
         let cleanPotId = paymentMethod == .pot ? potId?.nilIfBlank : nil
         let cleanCardId = paymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil
+        let cleanBankAccountId = paymentMethod == .bankAccount ? normalizedActiveBankAccountId(bankAccountId) : nil
         let hasValidFundingSource: Bool
         switch paymentMethod {
         case .income:
             hasValidFundingSource = true
+        case .bankAccount:
+            hasValidFundingSource = cleanBankAccountId != nil
         case .pot:
             hasValidFundingSource = cleanPotId != nil
         case .creditCard:
@@ -741,6 +902,7 @@ final class PlannerStore: ObservableObject {
         updated.amountPence = amount
         updated.paymentMethod = paymentMethod
         updated.creditCardId = cleanCardId
+        updated.bankAccountId = cleanBankAccountId
         updated.date = date
         updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.updatedAt = now
@@ -840,7 +1002,17 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    func addRecurringPayment(name: String, amountPence: Int, dueDay: Int?, frequency: RecurringFrequency, potId: String?, creditCardId: String?, priority: RecurringPriority, billGroupId: String? = nil) {
+    func addRecurringPayment(
+        name: String,
+        amountPence: Int,
+        dueDay: Int?,
+        frequency: RecurringFrequency,
+        potId: String?,
+        creditCardId: String?,
+        bankAccountId: String? = nil,
+        priority: RecurringPriority,
+        billGroupId: String? = nil
+    ) {
         let now = DateUtilities.nowIsoString()
         let cleanCardId = creditCardId?.nilIfBlank
         let cleanPotId = normalizedRecurringPaymentPotId(potId: potId, creditCardId: cleanCardId)
@@ -854,6 +1026,7 @@ final class PlannerStore: ObservableObject {
             frequency: frequency,
             potId: cleanPotId,
             creditCardId: cleanCardId,
+            bankAccountId: cleanCardId == nil && cleanPotId == nil ? normalizedActiveBankAccountId(bankAccountId) : nil,
             billGroupId: cleanGroupId,
             priority: priority,
             active: true,
@@ -869,6 +1042,9 @@ final class PlannerStore: ObservableObject {
         var updated = payment.stamped()
         updated.creditCardId = payment.creditCardId?.nilIfBlank
         updated.potId = normalizedRecurringPaymentPotId(potId: payment.potId, creditCardId: updated.creditCardId)
+        updated.bankAccountId = updated.creditCardId == nil && updated.potId == nil
+            ? normalizedActiveBankAccountId(payment.bankAccountId)
+            : nil
         updated.billGroupId = normalizedBillGroupId(payment.billGroupId)
         replace(&snapshot.recurringPayments, with: updated)
         persist()
@@ -1116,6 +1292,45 @@ final class PlannerStore: ObservableObject {
             }
             .first?
             .id
+    }
+
+    private func normalizedActiveBankAccountId(_ bankAccountId: String?) -> String? {
+        guard let cleanId = bankAccountId?.nilIfBlank,
+              snapshot.bankAccounts.contains(where: {
+                  $0.id == cleanId && !$0.archived && $0.deletedAt == nil
+              })
+        else { return nil }
+        return cleanId
+    }
+
+    private func fundingBankAccountId(for potId: String) -> String? {
+        let linkedId = snapshot.pots.first(where: { $0.id == potId && !$0.archived })?.fundingBankAccountId
+        return normalizedActiveBankAccountId(linkedId)
+    }
+
+    private func normalizedLastFourDigits(_ value: String?) -> String? {
+        let digits = value?.filter(\.isNumber) ?? ""
+        guard !digits.isEmpty else { return nil }
+        return String(digits.suffix(4))
+    }
+
+    private func clearPrimaryBankAccount(excluding excludedId: String? = nil, now: String) {
+        for index in snapshot.bankAccounts.indices where
+            snapshot.bankAccounts[index].id != excludedId &&
+            snapshot.bankAccounts[index].isPrimary {
+            snapshot.bankAccounts[index].isPrimary = false
+            snapshot.bankAccounts[index].updatedAt = now
+        }
+    }
+
+    private func ensurePrimaryBankAccount(now: String) {
+        guard !activeBankAccounts.isEmpty,
+              !activeBankAccounts.contains(where: \.isPrimary),
+              let firstActiveId = activeBankAccounts.first?.id,
+              let index = snapshot.bankAccounts.firstIndex(where: { $0.id == firstActiveId })
+        else { return }
+        snapshot.bankAccounts[index].isPrimary = true
+        snapshot.bankAccounts[index].updatedAt = now
     }
 
     func deleteRecurringPayment(id: String) {
@@ -1594,6 +1809,7 @@ final class PlannerStore: ObservableObject {
                     payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id ?? "",
                     potId: snapshot.pots[linkedPotIndex].id,
                     fundingPotId: nil,
+                    bankAccountId: fundingBankAccountId(for: snapshot.pots[linkedPotIndex].id),
                     amountPence: cappedAmountPence,
                     source: .debtFunding,
                     recurringPaymentId: nil,
@@ -1625,6 +1841,7 @@ final class PlannerStore: ObservableObject {
                     payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id ?? "",
                     potId: snapshot.pots[linkedPotIndex].id,
                     fundingPotId: nil,
+                    bankAccountId: fundingBankAccountId(for: snapshot.pots[linkedPotIndex].id),
                     amountPence: cappedAmountPence,
                     source: .debtFunding,
                     recurringPaymentId: nil,
@@ -1781,6 +1998,7 @@ final class PlannerStore: ObservableObject {
                     type: .allocation,
                     paymentMethod: .pot,
                     creditCardId: nil,
+                    bankAccountId: fundingBankAccountId(for: potId),
                     recurringPaymentId: recurringPaymentId,
                     date: todayIso,
                     note: "Pot top-up",
@@ -1805,6 +2023,7 @@ final class PlannerStore: ObservableObject {
                 payPeriodId: period.id,
                 potId: potId,
                 fundingPotId: nil,
+                bankAccountId: fundingBankAccountId(for: potId),
                 amountPence: amount,
                 source: source,
                 recurringPaymentId: recurringPaymentId,
@@ -2068,10 +2287,87 @@ final class PlannerStore: ObservableObject {
     func applyDueLinkedPotObligations(asOf todayIso: String) -> Bool {
         var changed = false
         changed = applyDueRecurringPotPayments(asOf: todayIso) || changed
+        changed = applyDueBankAccountRecurringPayments(asOf: todayIso) || changed
         changed = applyDueCreditCardRecurringPayments(asOf: todayIso) || changed
         changed = applyDueCreditCardOpeningBalanceRepayments(asOf: todayIso) || changed
         changed = applyDueCreditCardStatementRepayments(asOf: todayIso) || changed
         changed = applyDueLinkedDebtPotPayments(asOf: todayIso) || changed
+        return changed
+    }
+
+    private func applyDueBankAccountRecurringPayments(asOf todayIso: String) -> Bool {
+        let now = DateUtilities.nowIsoString()
+        let bankPayments = snapshot.recurringPayments.filter { payment in
+            payment.active &&
+                payment.creditCardId == nil &&
+                payment.potId == nil &&
+                normalizedActiveBankAccountId(payment.bankAccountId) != nil
+        }
+        var changed = false
+
+        for payment in bankPayments {
+            let startDate = recurringApplicationStartDate(payment, todayIso: todayIso)
+            let occurrences = PlannerDerivedData.resolvedRecurringOccurrences(
+                snapshot: snapshot,
+                payments: [payment],
+                startDate: startDate,
+                endDate: todayIso
+            )
+
+            for occurrence in occurrences {
+                guard !occurrence.isAwaitingPayment,
+                      occurrence.amountPence > 0,
+                      let bankAccountId = normalizedActiveBankAccountId(payment.bankAccountId)
+                else { continue }
+
+                let transactionId = recurringTransactionId(
+                    paymentId: payment.id,
+                    scheduledDueDate: occurrence.scheduledDueDate
+                )
+                if let existingIndex = snapshot.transactions.firstIndex(where: {
+                    $0.id == transactionId && $0.deletedAt == nil
+                }) {
+                    if snapshot.transactions[existingIndex].date != occurrence.dueDate ||
+                        snapshot.transactions[existingIndex].bankAccountId != bankAccountId {
+                        snapshot.transactions[existingIndex].date = occurrence.dueDate
+                        snapshot.transactions[existingIndex].payPeriodId = PlannerDerivedData.findPayPeriod(
+                            payPeriods: snapshot.payPeriods,
+                            date: occurrence.dueDate
+                        )?.id
+                        snapshot.transactions[existingIndex].paymentMethod = .bankAccount
+                        snapshot.transactions[existingIndex].bankAccountId = bankAccountId
+                        snapshot.transactions[existingIndex].updatedAt = now
+                        changed = true
+                    }
+                    continue
+                }
+
+                snapshot.transactions.insert(
+                    Transaction(
+                        id: transactionId,
+                        potId: nil,
+                        payPeriodId: PlannerDerivedData.findPayPeriod(
+                            payPeriods: snapshot.payPeriods,
+                            date: occurrence.dueDate
+                        )?.id,
+                        amountPence: occurrence.amountPence,
+                        type: .spending,
+                        paymentMethod: .bankAccount,
+                        creditCardId: nil,
+                        bankAccountId: bankAccountId,
+                        recurringPaymentId: payment.id,
+                        date: occurrence.dueDate,
+                        note: payment.name,
+                        createdAt: now,
+                        updatedAt: now,
+                        deletedAt: nil
+                    ),
+                    at: 0
+                )
+                changed = true
+            }
+        }
+
         return changed
     }
 
@@ -2710,6 +3006,7 @@ final class PlannerStore: ObservableObject {
                 payPeriodId: item.payPeriodId,
                 potId: item.potId,
                 fundingPotId: nil,
+                bankAccountId: fundingBankAccountId(for: item.potId),
                 amountPence: item.amountPence,
                 source: .recurringBillFunding,
                 recurringPaymentId: item.paymentId,
@@ -2803,6 +3100,7 @@ final class PlannerStore: ObservableObject {
                 payPeriodId: item.payPeriodId,
                 potId: item.potId,
                 fundingPotId: nil,
+                bankAccountId: fundingBankAccountId(for: item.potId),
                 amountPence: item.amountPence,
                 source: .cardSpendFunding,
                 recurringPaymentId: nil,
@@ -2868,6 +3166,7 @@ final class PlannerStore: ObservableObject {
                 payPeriodId: item.payPeriodId,
                 potId: item.potId,
                 fundingPotId: nil,
+                bankAccountId: fundingBankAccountId(for: item.potId),
                 amountPence: item.amountPence,
                 source: .cardOpeningBalanceFunding,
                 recurringPaymentId: nil,
@@ -2951,6 +3250,7 @@ final class PlannerStore: ObservableObject {
                     payPeriodId: item.payPeriodId,
                     potId: item.potId,
                     fundingPotId: nil,
+                    bankAccountId: fundingBankAccountId(for: item.potId),
                     amountPence: amountToAdd,
                     source: .cardPaymentFunding,
                     recurringPaymentId: nil,
@@ -3034,6 +3334,7 @@ final class PlannerStore: ObservableObject {
                 payPeriodId: item.payPeriodId,
                 potId: item.potId,
                 fundingPotId: nil,
+                bankAccountId: fundingBankAccountId(for: item.potId),
                 amountPence: item.amountPence,
                 source: .debtFunding,
                 recurringPaymentId: nil,
@@ -3877,6 +4178,7 @@ extension PlannerStore {
         var changed = false
         changed = applyDueRecurringPotPayments(asOf: todayIso) || changed
         changed = applyDueCreditCardRecurringPayments(asOf: todayIso) || changed
+        changed = applyDueBankAccountRecurringPayments(asOf: todayIso) || changed
         changed = applyDueLinkedDebtPotPayments(asOf: todayIso) || changed
         return changed
     }

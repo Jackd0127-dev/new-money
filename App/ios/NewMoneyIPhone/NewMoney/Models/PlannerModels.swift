@@ -69,6 +69,28 @@ enum PotType: String, Codable, Sendable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum BankAccountType: String, Codable, Sendable, CaseIterable, Identifiable {
+    case current
+    case savings
+    case cash
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .current:
+            "Current"
+        case .savings:
+            "Savings"
+        case .cash:
+            "Cash"
+        case .other:
+            "Other"
+        }
+    }
+}
+
 enum RecurringFrequency: String, Codable, Sendable, CaseIterable, Identifiable {
     case once
     case weekly
@@ -240,6 +262,7 @@ enum DebtPayFirstTiming: String, Codable, Sendable, CaseIterable, Identifiable {
 
 enum PaymentMethod: String, Codable, Sendable, CaseIterable {
     case income
+    case bankAccount = "bank_account"
     case pot
     case creditCard = "credit_card"
 
@@ -247,6 +270,8 @@ enum PaymentMethod: String, Codable, Sendable, CaseIterable {
         switch self {
         case .income:
             "Money left"
+        case .bankAccount:
+            "Bank account"
         case .pot:
             "Pot"
         case .creditCard:
@@ -319,6 +344,23 @@ struct Settings: Codable, Equatable, Identifiable, Sendable {
     var deletedAt: String?
 }
 
+struct BankAccount: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var provider: String
+    var type: BankAccountType
+    /// The balance before linked app movements. The current balance is derived so
+    /// edits, refunds, and checklist reversals cannot make the account drift.
+    var openingBalancePence: Int
+    var lastFourDigits: String?
+    var color: String
+    var isPrimary: Bool
+    var archived: Bool
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
 struct Pot: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
@@ -330,6 +372,8 @@ struct Pot: Codable, Equatable, Identifiable, Sendable {
     var color: String
     var linkedCreditCardId: String?
     var linkedDebtId: String?
+    /// The real account that supplies future allocations into this pot.
+    var fundingBankAccountId: String? = nil
     var archived: Bool
     var createdAt: String
     var updatedAt: String
@@ -345,6 +389,9 @@ struct RecurringPayment: Codable, Equatable, Identifiable, Sendable {
     var frequency: RecurringFrequency
     var potId: String?
     var creditCardId: String?
+    /// Used only for bills paid directly from a bank account. Pot/card routes
+    /// keep this nil so funding is never counted twice.
+    var bankAccountId: String? = nil
     var billGroupId: String? = nil
     var priority: RecurringPriority
     var active: Bool
@@ -407,6 +454,7 @@ struct Paycheck: Codable, Equatable, Identifiable, Sendable {
     var hourlyRatePence: Int
     var calculatedAmountPence: Int
     var actualAmountPence: Int?
+    var bankAccountId: String? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -419,6 +467,7 @@ struct OneOffIncome: Codable, Equatable, Identifiable, Sendable {
     var amountPence: Int
     var date: String
     var note: String
+    var bankAccountId: String? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -449,6 +498,9 @@ struct PotAllocation: Codable, Equatable, Identifiable, Sendable {
     var payPeriodId: String
     var potId: String
     var fundingPotId: String?
+    /// Captures the source at allocation time so later pot edits do not rewrite
+    /// historical bank-account movements.
+    var bankAccountId: String? = nil
     var amountPence: Int
     var source: PotAllocationSource?
     var recurringPaymentId: String?
@@ -477,6 +529,7 @@ struct Transaction: Codable, Equatable, Identifiable, Sendable {
     var type: TransactionType
     var paymentMethod: PaymentMethod?
     var creditCardId: String?
+    var bankAccountId: String? = nil
     var recurringPaymentId: String?
     var date: String
     var note: String
@@ -927,6 +980,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var dailyBriefs: [DailyBrief]
     var oneOffIncomes: [OneOffIncome]
     var fundingChecklistExclusions: [FundingChecklistExclusion]
+    var bankAccounts: [BankAccount]
 
     init(
         settings: Settings,
@@ -950,7 +1004,8 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         creditCardCycleOverrides: [CreditCardCycleOverride] = [],
         dailyBriefs: [DailyBrief],
         oneOffIncomes: [OneOffIncome] = [],
-        fundingChecklistExclusions: [FundingChecklistExclusion] = []
+        fundingChecklistExclusions: [FundingChecklistExclusion] = [],
+        bankAccounts: [BankAccount] = []
     ) {
         self.settings = settings
         self.pots = pots
@@ -974,10 +1029,11 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.dailyBriefs = dailyBriefs
         self.oneOffIncomes = oneOffIncomes
         self.fundingChecklistExclusions = fundingChecklistExclusions
+        self.bankAccounts = bankAccounts
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions
+        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions, bankAccounts
     }
 
     init(from decoder: Decoder) throws {
@@ -1004,7 +1060,8 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             creditCardCycleOverrides: try container.decodeIfPresent([CreditCardCycleOverride].self, forKey: .creditCardCycleOverrides) ?? [],
             dailyBriefs: try container.decodeIfPresent([DailyBrief].self, forKey: .dailyBriefs) ?? [],
             oneOffIncomes: try container.decodeIfPresent([OneOffIncome].self, forKey: .oneOffIncomes) ?? [],
-            fundingChecklistExclusions: try container.decodeIfPresent([FundingChecklistExclusion].self, forKey: .fundingChecklistExclusions) ?? []
+            fundingChecklistExclusions: try container.decodeIfPresent([FundingChecklistExclusion].self, forKey: .fundingChecklistExclusions) ?? [],
+            bankAccounts: try container.decodeIfPresent([BankAccount].self, forKey: .bankAccounts) ?? []
         )
     }
 }

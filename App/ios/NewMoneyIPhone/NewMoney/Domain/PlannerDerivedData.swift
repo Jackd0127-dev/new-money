@@ -678,6 +678,42 @@ private extension Array where Element == String {
 }
 
 enum PlannerDerivedData {
+    static func bankAccountBalance(account: BankAccount, snapshot: PlannerSnapshot) -> Int {
+        account.openingBalancePence + bankAccountNetMovementPence(accountId: account.id, snapshot: snapshot)
+    }
+
+    static func bankAccountNetMovementPence(accountId: String, snapshot: PlannerSnapshot) -> Int {
+        let paycheckIncome = snapshot.paychecks.reduce(0) { total, paycheck in
+            guard paycheck.deletedAt == nil, paycheck.bankAccountId == accountId else { return total }
+            return total + max(0, paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+        }
+        let oneOffIncome = snapshot.oneOffIncomes.reduce(0) { total, income in
+            guard income.deletedAt == nil, income.bankAccountId == accountId else { return total }
+            return total + max(0, income.amountPence)
+        }
+        let fundedPots = snapshot.potAllocations.reduce(0) { total, allocation in
+            guard allocation.deletedAt == nil, allocation.bankAccountId == accountId else { return total }
+            return total + max(0, allocation.amountPence)
+        }
+        let bankTransactions = snapshot.transactions.reduce(0) { total, transaction in
+            guard transaction.deletedAt == nil,
+                  !transaction.isRefunded,
+                  transaction.bankAccountId == accountId
+            else { return total }
+
+            switch transaction.type {
+            case .spending:
+                return total + max(0, transaction.amountPence)
+            case .allocation:
+                return total + max(0, transaction.amountPence)
+            case .transfer, .adjustment:
+                return total
+            }
+        }
+
+        return paycheckIncome + oneOffIncome - fundedPots - bankTransactions
+    }
+
     static func creditCardDirectDebitDate(statementDate: String, dueDay: Int) -> String {
         creditCardDirectDebitDateCore(statementDate: statementDate, dueDay: dueDay)
     }

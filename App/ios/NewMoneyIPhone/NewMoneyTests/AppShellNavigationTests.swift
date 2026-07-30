@@ -233,8 +233,8 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     func testProfileMenuIncludesSettingsRoute() {
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Add Income", "Appearance", "History", "Credit Statements"])
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "paintpalette", "clock.arrow.circlepath", "doc.text.magnifyingglass"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Add Income", "Bank Accounts", "Appearance", "History", "Credit Statements"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "paintpalette", "clock.arrow.circlepath", "doc.text.magnifyingglass"])
         XCTAssertTrue(ProfileMenuPresentationPolicy.includesAddIncomeAction)
     }
 
@@ -377,7 +377,7 @@ final class AppShellNavigationTests: XCTestCase {
 
     func testPlusAddFormsUseCleanBoxedLayouts() {
         XCTAssertEqual(SpendingFormLayoutPolicy.accountPickerStyle, "selectionFieldBox")
-        XCTAssertEqual(SpendingFormLayoutPolicy.paymentMethods, [.income, .pot, .creditCard])
+        XCTAssertEqual(SpendingFormLayoutPolicy.paymentMethods, [.income, .bankAccount, .pot, .creditCard])
         XCTAssertTrue(AddBillFormLayoutPolicy.hidesNavigationDivider)
         XCTAssertEqual(AddBillFormLayoutPolicy.allowedFrequencies, [.weekly, .biweekly, .monthly, .yearly])
         XCTAssertFalse(AddBillFormLayoutPolicy.allowedFrequencies.contains(.once))
@@ -802,6 +802,12 @@ final class ActivityLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.sections, [.recentActivity, .monthBalance])
         XCTAssertFalse(ActivityLayoutPolicy.sections.contains(.income))
         XCTAssertFalse(ActivityLayoutPolicy.sections.contains(.spending))
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityInitialVisibleCount, 1)
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityRevealIncrement, 2)
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 0, totalCount: 8), 1)
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 1, totalCount: 8), 3)
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 2, totalCount: 8), 5)
+        XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 3, totalCount: 6), 6)
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceChartMetric, "currentMonthIncomeMinusSpending")
         XCTAssertEqual(ActivityLayoutPolicy.monthBalanceDetailPresentation, .navigationPush)
         XCTAssertTrue(ActivityLayoutPolicy.monthBalanceDetailUsesInlineTitle)

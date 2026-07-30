@@ -198,6 +198,11 @@ struct PaydayView: View {
             return snapshot.creditCards.first { $0.id == cardId }?.name ?? "Credit card"
         }
 
+        if transaction.paymentMethod == .bankAccount || transaction.bankAccountId != nil {
+            guard let bankAccountId = transaction.bankAccountId else { return "Bank account" }
+            return snapshot.bankAccounts.first { $0.id == bankAccountId }?.name ?? "Bank account"
+        }
+
         if let potId = transaction.potId {
             return snapshot.pots.first { $0.id == potId }?.name ?? "Pot"
         }
@@ -267,6 +272,7 @@ struct PaycheckPlanFormCard: View {
     @State private var payday = Date()
     @State private var hoursWorked = ""
     @State private var hourlyRate = ""
+    @State private var bankAccountId = ""
 
     var body: some View {
         AppCard(glow: true) {
@@ -292,6 +298,7 @@ struct PaycheckPlanFormCard: View {
                 paidInPreview
                     .frame(width: 132)
             }
+            bankAccountPicker
 
             PrimaryButton(title: "Save paycheck plan", systemImage: "checkmark", isDisabled: !canSavePaycheckPlan) {
                 store.createPayPeriod(
@@ -299,11 +306,31 @@ struct PaycheckPlanFormCard: View {
                     hoursWorked: Double(hoursWorked) ?? 0,
                     hourlyRatePence: MoneyParser.parsePoundsToPence(hourlyRate),
                     actualAmountPence: nil,
-                    payFrequency: store.snapshot.settings.payFrequency
+                    payFrequency: store.snapshot.settings.payFrequency,
+                    bankAccountId: bankAccountId
                 )
                 hoursWorked = ""
                 hourlyRate = ""
                 onSaved?()
+            }
+        }
+        .onAppear {
+            if bankAccountId.isEmpty {
+                bankAccountId = store.primaryBankAccount?.id ?? ""
+            }
+        }
+    }
+
+    private var bankAccountPicker: some View {
+        SelectionField(
+            title: "Paid into",
+            value: store.activeBankAccounts.first(where: { $0.id == bankAccountId })?.name ?? "",
+            placeholder: "Not linked",
+            systemImage: "building.columns"
+        ) {
+            Button("Not linked") { bankAccountId = "" }
+            ForEach(store.activeBankAccounts) { account in
+                Button(account.name) { bankAccountId = account.id }
             }
         }
     }
@@ -362,6 +389,7 @@ struct OneOffIncomeFormCard: View {
     @State private var name = ""
     @State private var amount = ""
     @State private var note = ""
+    @State private var bankAccountId = ""
 
     var body: some View {
         AppCard(glow: true) {
@@ -379,17 +407,35 @@ struct OneOffIncomeFormCard: View {
             TextField("Note", text: $note)
                 .textFieldStyle(AppTextFieldStyle())
 
+            SelectionField(
+                title: "Paid into",
+                value: store.activeBankAccounts.first(where: { $0.id == bankAccountId })?.name ?? "",
+                placeholder: "Not linked",
+                systemImage: "building.columns"
+            ) {
+                Button("Not linked") { bankAccountId = "" }
+                ForEach(store.activeBankAccounts) { account in
+                    Button(account.name) { bankAccountId = account.id }
+                }
+            }
+
             PrimaryButton(title: "Add income", systemImage: "plus", isDisabled: !canSave) {
                 guard store.addOneOffIncome(
                     name: name,
                     amountPence: MoneyParser.parsePoundsToPence(amount),
                     date: incomeDate.isoDateString,
-                    note: note
+                    note: note,
+                    bankAccountId: bankAccountId
                 ) else { return }
                 name = ""
                 amount = ""
                 note = ""
                 onSaved?()
+            }
+        }
+        .onAppear {
+            if bankAccountId.isEmpty {
+                bankAccountId = store.primaryBankAccount?.id ?? ""
             }
         }
     }

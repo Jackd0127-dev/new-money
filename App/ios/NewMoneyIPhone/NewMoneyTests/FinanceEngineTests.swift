@@ -937,6 +937,87 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertTrue(item.breakdown.allSatisfy { !$0.detail.isEmpty })
     }
 
+    func testCardSpendFundingDoesNotReuseReserveAlreadyAppliedToOpeningBalance() {
+        let settings = makeManualSettings(today: "2026-07-31")
+        let period = makePayPeriod(
+            id: "period-july-august",
+            startDate: "2026-07-31",
+            endDate: "2026-08-30",
+            payday: "2026-07-31",
+            incomePence: 100000
+        )
+        let card = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            openingBalancePence: 61372,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-31",
+            dueDay: 20,
+            createdAt: "2026-07-31T08:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-aqua",
+            name: "Aqua",
+            balancePence: 61372,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        var openingFunding = makePotAllocation(
+            id: "allocation-aqua-opening",
+            payPeriodId: period.id,
+            potId: pot.id,
+            amountPence: 60587,
+            source: .cardOpeningBalanceFunding,
+            recurringPaymentId: nil,
+            recurringDueDate: nil
+        )
+        openingFunding.creditCardId = card.id
+        openingFunding.creditCardDirectDebitDate = "2026-08-20"
+        let amazonShop = makeTransaction(
+            id: "transaction-amazon-shop",
+            cardId: card.id,
+            amountPence: 7767,
+            date: "2026-07-31",
+            note: "Amazon shop"
+        )
+        let amazonPrime = makeTransaction(
+            id: "transaction-amazon-prime",
+            cardId: card.id,
+            amountPence: 449,
+            date: "2026-07-31",
+            note: "Amazon prime student"
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [period],
+            potAllocations: [openingFunding],
+            transactions: [amazonShop, amazonPrime],
+            creditCards: [card]
+        )
+
+        let items = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: period,
+            asOfDate: "2026-07-31",
+            groupByFundingDueDate: true
+        )
+        let cardSpends = items.filter {
+            if case .cardSpend = $0.action { return true }
+            return false
+        }
+
+        XCTAssertEqual(
+            Dictionary(uniqueKeysWithValues: cardSpends.map { ($0.name, $0.amountPence) }),
+            ["Amazon prime student": 449, "Amazon shop": 7767]
+        )
+        XCTAssertFalse(items.contains {
+            if case .cardPayment = $0.action { return true }
+            return false
+        })
+        XCTAssertEqual(cardSpends.reduce(0) { $0 + $1.amountPence }, 8216)
+    }
+
     func testBarclaysCardPaymentBreakdownReconcilesOpeningBalanceICloudAndTemu() {
         let settings = makeManualSettings(today: "2026-07-16")
         let period = makePayPeriod(

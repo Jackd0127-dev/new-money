@@ -1249,7 +1249,21 @@ enum PlannerDerivedData {
                     allocation.source == .cardSpendFunding && allocation.transactionId == transaction.id
                 }
                 let existingNonChecklistBalancePence = max(0, linkedPotBalancePence - matchingFundingPence - otherChecklistFundingPence)
-                let amountPence = max(0, transaction.amountPence - existingNonChecklistBalancePence)
+                // An existing reserve may already have reduced the opening-balance
+                // checklist item. Do not reuse that same money against every later
+                // card-spend row, otherwise one transaction is split into a specific
+                // row and a misleading residual card-payment row.
+                let openingBalanceCoveragePence = openingBalanceGeneralCoveragePence(
+                    snapshot: snapshot,
+                    payPeriod: payPeriod,
+                    cardId: cardId,
+                    potId: fundingPot.id
+                )
+                let availableCardSpendCoveragePence = max(
+                    0,
+                    existingNonChecklistBalancePence - openingBalanceCoveragePence
+                )
+                let amountPence = max(0, transaction.amountPence - availableCardSpendCoveragePence)
                 let transactionName = transaction.note.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 guard amountPence > 0 || matchingFundingPence > 0 else { return nil }
@@ -1273,6 +1287,30 @@ enum PlannerDerivedData {
 
     static func cardSpendFundingChecklistId(transactionId: String) -> String {
         "card-spend-funding-\(transactionId)"
+    }
+
+    private static func openingBalanceGeneralCoveragePence(
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod,
+        cardId: String,
+        potId: String
+    ) -> Int {
+        guard let card = snapshot.creditCards.first(where: { $0.id == cardId && !$0.archived }) else {
+            return 0
+        }
+
+        let openingBalancePence = max(0, card.openingBalancePence ?? 0)
+        let openingStatementPence = max(0, card.openingStatementBalancePence ?? openingBalancePence)
+        let sourceAmountPence = openingStatementPence > 0
+            ? openingStatementPence
+            : (card.openingStatementBalancePence == 0 ? openingBalancePence : 0)
+        guard sourceAmountPence > 0 else { return 0 }
+
+        return cardOpeningBalanceFundingChecklistItems(snapshot: snapshot, payPeriod: payPeriod)
+            .filter { $0.cardId == cardId && $0.potId == potId }
+            .reduce(0) { total, item in
+                total + max(0, sourceAmountPence - item.amountPence)
+            }
     }
 
     static func cardOpeningBalanceFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [CreditCardOpeningBalanceFundingChecklistItem] {

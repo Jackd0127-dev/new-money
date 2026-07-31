@@ -233,8 +233,8 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     func testProfileMenuIncludesSettingsRoute() {
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Add Income", "Bank Accounts", "Appearance", "History", "Credit Statements"])
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "paintpalette", "clock.arrow.circlepath", "doc.text.magnifyingglass"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Add Income", "Bank Accounts", "Appearance", "Settings", "History", "Credit Statements"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "paintpalette", "gearshape", "clock.arrow.circlepath", "doc.text.magnifyingglass"])
         XCTAssertTrue(ProfileMenuPresentationPolicy.includesAddIncomeAction)
     }
 

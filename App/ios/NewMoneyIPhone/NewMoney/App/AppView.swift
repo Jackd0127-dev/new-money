@@ -239,6 +239,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
     case addIncome
     case bankAccounts
     case appearance
+    case settings
     case history
     case creditStatements
 
@@ -249,6 +250,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .addIncome: "Add Income"
         case .bankAccounts: "Bank Accounts"
         case .appearance: "Appearance"
+        case .settings: "Settings"
         case .history: "History"
         case .creditStatements: "Credit Statements"
         }
@@ -259,6 +261,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .addIncome: "Create income and payday setup."
         case .bankAccounts: "Balances, income destinations, pots, and Direct Debits."
         case .appearance: "Themes and colour presets."
+        case .settings: "Money left, pay defaults, dates, AI, and account controls."
         case .history: "Paycheck and allocation history."
         case .creditStatements: "Card statements and direct debit status."
         }
@@ -269,6 +272,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .addIncome: "sterlingsign.circle"
         case .bankAccounts: "building.columns"
         case .appearance: "paintpalette"
+        case .settings: "gearshape"
         case .history: "clock.arrow.circlepath"
         case .creditStatements: "doc.text.magnifyingglass"
         }
@@ -1020,6 +1024,8 @@ private struct ProfileMenuScreenView: View {
             BankAccountsView(store: store)
         case .appearance:
             AppearanceSettingsView(navigationMode: .inline, toolbarMode: .none)
+        case .settings:
+            SettingsView(store: store, navigationMode: .inline, toolbarMode: .none)
         case .history:
             HistoryView(store: store)
         case .creditStatements:

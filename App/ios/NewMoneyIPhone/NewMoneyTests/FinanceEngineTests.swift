@@ -357,6 +357,34 @@ final class FinanceEngineTests: XCTestCase {
             ),
             342_500
         )
+
+        let includedBreakdown = PlannerDerivedData.currentMoneyBreakdown(
+            snapshot: store.snapshot,
+            payPeriod: currentPeriod
+        )
+        XCTAssertTrue(includedBreakdown.includesPots)
+        XCTAssertEqual(includedBreakdown.totalPence, 342_500)
+        XCTAssertEqual(includedBreakdown.components.reduce(0) { $0 + $1.amountPence }, 342_500)
+        XCTAssertTrue(includedBreakdown.components.contains { $0.kind == .pot && $0.amountPence == 25_000 })
+
+        var potsExcludedSettings = store.snapshot.settings
+        potsExcludedSettings.includePotsInMoneyLeft = false
+        store.updateSettings(potsExcludedSettings)
+
+        let excludedBreakdown = PlannerDerivedData.currentMoneyBreakdown(
+            snapshot: store.snapshot,
+            payPeriod: currentPeriod
+        )
+        XCTAssertFalse(excludedBreakdown.includesPots)
+        XCTAssertFalse(excludedBreakdown.components.contains { $0.kind == .pot || $0.kind == .cardReserve })
+        XCTAssertEqual(excludedBreakdown.totalPence, 317_500)
+        XCTAssertEqual(
+            PlannerDerivedData.currentTotalMoneyPence(
+                snapshot: store.snapshot,
+                payPeriod: currentPeriod
+            ),
+            317_500
+        )
     }
 
     @MainActor

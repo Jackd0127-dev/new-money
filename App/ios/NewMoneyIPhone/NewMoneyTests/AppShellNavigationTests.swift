@@ -418,7 +418,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(BillsLayoutPolicy.sections, [.overview, .fundingChecklist, .groups, .billGroups, .upcoming])
         XCTAssertEqual(BillsLayoutPolicy.overviewPresentation, .navigationPush)
         XCTAssertEqual(BillsLayoutPolicy.groupCreationPlacement, "groupsHeader")
-        XCTAssertTrue(BillsLayoutPolicy.showsCreditCardAndPotLinksOnBills)
+        XCTAssertFalse(BillsLayoutPolicy.showsCreditCardAndPotLinksOnBills)
         XCTAssertEqual(BillsLayoutPolicy.billGroupingPersistence, "recurringPayment.billGroupId")
         XCTAssertFalse(BillsLayoutPolicy.groupFilterScrollClipsContent)
         XCTAssertGreaterThan(BillsLayoutPolicy.groupFilterHorizontalContentPadding, 0)
@@ -427,7 +427,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(BillsLayoutPolicy.fundingChecklistPlacement, "belowOverview")
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistAlwaysVisible)
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistUsesExistingDerivedItems)
-        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistProjectedPeriodCount, 12)
+        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistProjectedPeriodCount, 2)
         XCTAssertEqual(BillsLayoutPolicy.yourBillsPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.takingSoonPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.overviewUpcomingPresentation, "collapsibleProgressiveLazyList")
@@ -440,8 +440,40 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(BillsLayoutPolicy.collapsibleUsesReduceMotionSafeAnimation)
         XCTAssertTrue(BillsLayoutPolicy.yourBillsAppearsAboveTakingSoon)
         XCTAssertTrue(BillsLayoutPolicy.billRowsOpenEditScreen)
+        XCTAssertFalse(BillsLayoutPolicy.billRowsShowChevron)
+        XCTAssertFalse(BillsLayoutPolicy.billRowsShowTrailingMenu)
+        XCTAssertEqual(BillsLayoutPolicy.billIconSize, 30)
         XCTAssertEqual(BillsLayoutPolicy.editBillTitle, "Edit Bill")
         XCTAssertTrue(BillsLayoutPolicy.editUsesExistingRecurringPaymentUpdate)
+    }
+
+    func testBillIconsDescribeTheBillRatherThanOnlyItsFundingRoute() {
+        let createdAt = "2026-07-31T00:00:00.000Z"
+        let appleCare = RecurringPayment(
+            id: "applecare",
+            name: "AppleCare",
+            amountPence: 899,
+            dueDay: 19,
+            dueDate: nil,
+            frequency: .monthly,
+            potId: "pot-bills",
+            creditCardId: "card-main",
+            priority: .essential,
+            active: true,
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            deletedAt: nil
+        )
+        var gym = appleCare
+        gym.id = "gym"
+        gym.name = "Gym"
+        var capCut = appleCare
+        capCut.id = "capcut"
+        capCut.name = "CapCut"
+
+        XCTAssertEqual(BillsBillSymbolPolicy.symbol(for: appleCare), "shield.checkered")
+        XCTAssertEqual(BillsBillSymbolPolicy.symbol(for: gym), "figure.run")
+        XCTAssertEqual(BillsBillSymbolPolicy.symbol(for: capCut), "scissors")
     }
 
     func testPotsSummaryOpensGraphTimelineDetail() {

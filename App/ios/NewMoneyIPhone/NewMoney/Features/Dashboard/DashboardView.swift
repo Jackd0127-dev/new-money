@@ -425,10 +425,13 @@ struct DashboardView: View {
         guard tabPresentation.selectedPayPeriod != nil else {
             return "Add income to create a live period."
         }
+        let scope = snapshot.settings.includePotsInMoneyLeft ?? true
+            ? "including pots"
+            : "excluding pots"
         if currentCostSummary.unfundedChecklistPence > 0 {
-            return "Total cash now. \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
+            return "Total cash now, \(scope). \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
         }
-        return "Current cash across income, bank accounts, and pots."
+        return "Current cash across income and bank accounts, \(scope)."
     }
 
     private var currentCostSummary: PayPeriodCostSummary {
@@ -753,6 +756,8 @@ private struct DashboardMoneyLeftDetailView: View {
             ForEach(DashboardHomeLayoutPolicy.moneyLeftDetailSections, id: \.rawValue) { section in
                 detailSection(section)
             }
+
+            DashboardMoneyLeftBreakdownCard(breakdown: currentMoneyBreakdown)
         }
     }
 
@@ -801,7 +806,11 @@ private struct DashboardMoneyLeftDetailView: View {
     }
 
     private var currentTotalMoneyPence: Int {
-        PlannerDerivedData.currentTotalMoneyPence(
+        currentMoneyBreakdown.totalPence
+    }
+
+    private var currentMoneyBreakdown: CurrentMoneyBreakdown {
+        PlannerDerivedData.currentMoneyBreakdown(
             snapshot: snapshot,
             payPeriod: store.selectedPayPeriod
         )
@@ -826,10 +835,13 @@ private struct DashboardMoneyLeftDetailView: View {
         guard store.selectedPayPeriod != nil else {
             return "Add income to create a live period."
         }
+        let scope = currentMoneyBreakdown.includesPots
+            ? "including pots"
+            : "excluding pots"
         if currentCostSummary.unfundedChecklistPence > 0 {
-            return "Total cash now. \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
+            return "Total cash now, \(scope). \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
         }
-        return "Current cash across income, bank accounts, and pots."
+        return "Current cash across income and bank accounts, \(scope)."
     }
 
     private func friendlyDate(_ isoDate: String) -> String {
@@ -931,6 +943,110 @@ private struct DashboardSpendingSnapshotCard: View {
                 MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                 MetricRow(label: "Projected end", value: MoneyParser.formatPence(summary.projectedMoneyLeftPence), valueColor: summary.projectedMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
             }
+        }
+    }
+}
+
+private struct DashboardMoneyLeftBreakdownCard: View {
+    var breakdown: CurrentMoneyBreakdown
+    @State private var isExpanded = false
+
+    var body: some View {
+        AppCard {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    if breakdown.components.isEmpty {
+                        Text("No balances are contributing to Money left yet.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    } else {
+                        ForEach(Array(breakdown.components.enumerated()), id: \.element.id) { index, component in
+                            DashboardMoneyLeftBreakdownRow(component: component)
+
+                            if index != breakdown.components.count - 1 {
+                                AppDivider()
+                            }
+                        }
+                    }
+
+                    AppDivider()
+                    MetricRow(
+                        label: "Total Money left",
+                        value: MoneyParser.formatPence(breakdown.totalPence),
+                        valueColor: breakdown.totalPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
+                    )
+                }
+                .padding(.top, AppTheme.Spacing.md)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What makes up Money left")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(breakdown.includesPots ? "Accounts, pots, reserves, and unlinked income" : "Accounts and unlinked income · pots excluded in Settings")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+            }
+            .tint(AppTheme.Colors.primaryOrange)
+            .accessibilityHint(isExpanded ? "Hides the Money left breakdown" : "Reveals every balance included in Money left")
+        }
+    }
+}
+
+private struct DashboardMoneyLeftBreakdownRow: View {
+    var component: CurrentMoneyComponent
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(component.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(component.detail)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Text(MoneyParser.formatPence(component.amountPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(component.amountPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                .multilineTextAlignment(.trailing)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch component.kind {
+        case .bankAccount:
+            "building.columns.fill"
+        case .pot:
+            "tray.full.fill"
+        case .cardReserve:
+            "creditcard.fill"
+        case .unlinkedIncome:
+            "sterlingsign.circle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch component.kind {
+        case .bankAccount:
+            AppTheme.Colors.success
+        case .pot:
+            AppTheme.Colors.primaryOrange
+        case .cardReserve:
+            AppTheme.Colors.warning
+        case .unlinkedIncome:
+            AppTheme.Colors.accentHighlight
         }
     }
 }

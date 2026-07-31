@@ -14,6 +14,7 @@ enum DefaultData {
         manualTodayIso: nil,
         cardRecurringPotReserveMigrationVersion: 1,
         cardRecurringAutoFundingRepairVersion: 1,
+        includePotsInMoneyLeft: true,
         aiInstructions: "",
         aiProvider: .gemini,
         assistantName: "Assistant",

@@ -677,6 +677,30 @@ private extension Array where Element == String {
     }
 }
 
+enum CurrentMoneyComponentKind: String, Equatable, Sendable {
+    case bankAccount
+    case pot
+    case cardReserve
+    case unlinkedIncome
+}
+
+struct CurrentMoneyComponent: Equatable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    var detail: String
+    var amountPence: Int
+    var kind: CurrentMoneyComponentKind
+}
+
+struct CurrentMoneyBreakdown: Equatable, Sendable {
+    var components: [CurrentMoneyComponent]
+    var includesPots: Bool
+
+    var totalPence: Int {
+        components.reduce(0) { $0 + $1.amountPence }
+    }
+}
+
 enum PlannerDerivedData {
     static func bankAccountBalance(account: BankAccount, snapshot: PlannerSnapshot) -> Int {
         account.openingBalancePence + bankAccountNetMovementPence(accountId: account.id, snapshot: snapshot)
@@ -689,21 +713,62 @@ enum PlannerDerivedData {
     /// income balance therefore only includes income that is not linked to a bank
     /// account, less cash movements that came directly from that balance.
     static func currentTotalMoneyPence(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> Int {
-        let bankBalancePence = snapshot.bankAccounts
+        currentMoneyBreakdown(snapshot: snapshot, payPeriod: payPeriod).totalPence
+    }
+
+    static func currentMoneyBreakdown(
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod?
+    ) -> CurrentMoneyBreakdown {
+        let includesPots = snapshot.settings.includePotsInMoneyLeft ?? true
+        let bankComponents = snapshot.bankAccounts
             .filter { !$0.archived && $0.deletedAt == nil }
-            .reduce(0) { $0 + bankAccountBalance(account: $1, snapshot: snapshot) }
-        let potBalancePence = snapshot.pots
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map { account in
+                CurrentMoneyComponent(
+                    id: "bank-\(account.id)",
+                    title: account.name,
+                    detail: account.provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "\(account.type.displayName) account"
+                        : account.provider,
+                    amountPence: bankAccountBalance(account: account, snapshot: snapshot),
+                    kind: .bankAccount
+                )
+            }
+        let potComponents = snapshot.pots
             .filter { !$0.archived }
-            .reduce(0) { $0 + $1.balancePence }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map { pot in
+                CurrentMoneyComponent(
+                    id: "pot-\(pot.id)",
+                    title: pot.name,
+                    detail: "\(pot.type.rawValue.capitalized) pot",
+                    amountPence: pot.balancePence,
+                    kind: .pot
+                )
+            }
         let activeCreditCardPots = snapshot.creditCardPots.filter {
             $0.deletedAt == nil && $0.status == .active
         }
-        let creditCardPotBalancePence = activeCreditCardPots.reduce(0) {
-            $0 + max(0, $1.amountPence)
+        let cardReserveComponents = activeCreditCardPots
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map { reserve in
+                CurrentMoneyComponent(
+                    id: "card-reserve-\(reserve.id)",
+                    title: reserve.name,
+                    detail: "Card reserve",
+                    amountPence: max(0, reserve.amountPence),
+                    kind: .cardReserve
+                )
+            }
+        var components = bankComponents
+        if includesPots {
+            components += potComponents
+            components += cardReserveComponents
         }
 
         guard let payPeriod else {
-            return bankBalancePence + potBalancePence + creditCardPotBalancePence
+            return CurrentMoneyBreakdown(components: components, includesPots: includesPots)
         }
 
         let currentPaychecks = snapshot.paychecks.filter {
@@ -783,10 +848,19 @@ enum PlannerDerivedData {
             unlinkedDebtPaymentsPence -
             paycheckFundedCardRepaymentsPence
 
-        return bankBalancePence +
-            potBalancePence +
-            creditCardPotBalancePence +
-            unlinkedIncomeBalancePence
+        if unlinkedIncomeBalancePence != 0 {
+            components.append(
+                CurrentMoneyComponent(
+                    id: "unlinked-income-\(payPeriod.id)",
+                    title: "Unlinked income",
+                    detail: "Current period after direct spending and transfers",
+                    amountPence: unlinkedIncomeBalancePence,
+                    kind: .unlinkedIncome
+                )
+            )
+        }
+
+        return CurrentMoneyBreakdown(components: components, includesPots: includesPots)
     }
 
     static func bankAccountNetMovementPence(accountId: String, snapshot: PlannerSnapshot) -> Int {

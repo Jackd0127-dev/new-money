@@ -854,7 +854,7 @@ enum BillsLayoutPolicy {
     static let sections: [BillsSection] = [.overview, .fundingChecklist, .groups, .billGroups, .upcoming]
     static let overviewPresentation: BillsOverviewPresentation = .navigationPush
     static let groupCreationPlacement = "groupsHeader"
-    static let showsCreditCardAndPotLinksOnBills = true
+    static let showsCreditCardAndPotLinksOnBills = false
     static let billGroupingPersistence = "recurringPayment.billGroupId"
     static let groupFilterScrollClipsContent = false
     static let groupFilterHorizontalContentPadding: CGFloat = 3
@@ -863,7 +863,7 @@ enum BillsLayoutPolicy {
     static let fundingChecklistPlacement = "belowOverview"
     static let fundingChecklistAlwaysVisible = true
     static let fundingChecklistUsesExistingDerivedItems = true
-    static let fundingChecklistProjectedPeriodCount = 12
+    static let fundingChecklistProjectedPeriodCount = 2
     static let yourBillsPresentation = "collapsibleDropdown"
     static let takingSoonPresentation = "collapsibleDropdown"
     static let overviewUpcomingPresentation = "collapsibleProgressiveLazyList"
@@ -876,6 +876,9 @@ enum BillsLayoutPolicy {
     static let collapsibleUsesReduceMotionSafeAnimation = true
     static let yourBillsAppearsAboveTakingSoon = true
     static let billRowsOpenEditScreen = true
+    static let billRowsShowChevron = false
+    static let billRowsShowTrailingMenu = false
+    static let billIconSize: CGFloat = 30
     static let editBillTitle = "Edit Bill"
     static let editUsesExistingRecurringPaymentUpdate = true
 }
@@ -1190,16 +1193,11 @@ struct BillsView: View {
                 ForEach(displaySections) { section in
                     BillsGroupSectionCard(
                         section: section,
-                        groups: tabPresentation.activeBillGroups,
-                        snapshot: store.snapshot,
-                        nextDueLabel: nextDueLabel(for:)
-                    ) { paymentId, groupId in
-                        store.assignRecurringPayment(id: paymentId, toBillGroup: groupId)
-                    } archive: { paymentId in
-                        store.archiveRecurringPayment(id: paymentId)
-                    } edit: { payment in
-                        selectedBillIdForEdit = payment.id
-                    }
+                        nextDueLabel: nextDueLabel(for:),
+                        edit: { payment in
+                            selectedBillIdForEdit = payment.id
+                        }
+                    )
                 }
             }
         }
@@ -2130,7 +2128,6 @@ private struct BillsGroupFilterPill: View {
 
 private struct BillsUpcomingRow: View {
     var occurrence: RecurringPaymentOccurrence
-    var snapshot: PlannerSnapshot
     var adjustAction: (() -> Void)? = nil
 
     var body: some View {
@@ -2142,7 +2139,9 @@ private struct BillsUpcomingRow: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.primaryText)
                     .lineLimit(1)
-                BillsLinkChipsView(payment: occurrence.payment, snapshot: snapshot)
+                Text("\(billsFriendlyDate(occurrence.dueDate)) · \(occurrence.payment.frequency.rawValue.capitalized)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
             }
 
             Spacer(minLength: AppTheme.Spacing.sm)
@@ -2190,7 +2189,6 @@ private struct BillsProgressiveUpcomingList: View {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                             BillsUpcomingRow(
                                 occurrence: occurrence,
-                                snapshot: snapshot,
                                 adjustAction: adjustmentAction(for: occurrence)
                             )
 
@@ -2266,11 +2264,7 @@ private struct BillsProgressiveUpcomingList: View {
 
 private struct BillsGroupSectionCard: View {
     var section: BillsDisplaySection
-    var groups: [BillGroup]
-    var snapshot: PlannerSnapshot
     var nextDueLabel: (RecurringPayment) -> String
-    var assignGroup: (String, String?) -> Void
-    var archive: (String) -> Void
     var edit: (RecurringPayment) -> Void
 
     private var totalPence: Int {
@@ -2312,17 +2306,11 @@ private struct BillsGroupSectionCard: View {
                 ForEach(Array(section.payments.enumerated()), id: \.element.id) { index, payment in
                     BillsPaymentRow(
                         payment: payment,
-                        group: section.group,
-                        groups: groups,
-                        snapshot: snapshot,
-                        nextDueLabel: nextDueLabel(payment)
-                    ) { groupId in
-                        assignGroup(payment.id, groupId)
-                    } archive: {
-                        archive(payment.id)
-                    } edit: {
-                        edit(payment)
-                    }
+                        nextDueLabel: nextDueLabel(payment),
+                        edit: {
+                            edit(payment)
+                        }
+                    )
 
                     if index != section.payments.count - 1 {
                         AppDivider()
@@ -2335,83 +2323,95 @@ private struct BillsGroupSectionCard: View {
 
 private struct BillsPaymentRow: View {
     var payment: RecurringPayment
-    var group: BillGroup?
-    var groups: [BillGroup]
-    var snapshot: PlannerSnapshot
     var nextDueLabel: String
-    var assignGroup: (String?) -> Void
-    var archive: () -> Void
     var edit: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-            Button(action: edit) {
-                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                    BillsBillIcon(payment: payment)
+        Button(action: edit) {
+            HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
+                BillsBillIcon(payment: payment)
 
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 8) {
-                            Text(payment.name)
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
-                                .lineLimit(1)
-
-                            if !payment.active {
-                                Pill(text: "Inactive", color: AppTheme.Colors.tertiaryText)
-                            }
-                        }
-
-                        Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(payment.name)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
 
-                        BillsLinkChipsView(payment: payment, snapshot: snapshot)
-                    }
-
-                    Spacer(minLength: AppTheme.Spacing.sm)
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(MoneyParser.formatPence(payment.amountPence))
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.primaryOrange)
-                            .multilineTextAlignment(.trailing)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.black))
-                            .foregroundStyle(AppTheme.Colors.tertiaryText)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Menu {
-                Button("Ungrouped") {
-                    assignGroup(nil)
-                }
-
-                if !groups.isEmpty {
-                    Divider()
-                    ForEach(groups) { group in
-                        Button(group.name) {
-                            assignGroup(group.id)
+                        if !payment.active {
+                            Text("Inactive")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
                         }
                     }
+
+                    Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
-                Divider()
-                Button("Archive bill", role: .destructive, action: archive)
-            } label: {
-                Image(systemName: "folder")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText)
-                    .frame(width: 32, height: 32)
-                    .background((group.map { Color(hex: $0.color) } ?? AppTheme.Colors.tertiaryText).opacity(0.12), in: Circle())
+                Spacer(minLength: AppTheme.Spacing.sm)
+
+                Text(MoneyParser.formatPence(payment.amountPence))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .multilineTextAlignment(.trailing)
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .padding(.vertical, 2)
+        .accessibilityHint("Opens bill details")
+    }
+}
+
+enum BillsBillSymbolPolicy {
+    static func symbol(for payment: RecurringPayment) -> String {
+        let name = payment.name.lowercased()
+
+        if name.contains("insurance") || name.contains("applecare") || name.contains("cover") {
+            return "shield.checkered"
+        }
+        if name.contains("gym") || name.contains("fitness") || name.contains("runna") {
+            return "figure.run"
+        }
+        if name.contains("car") || name.contains("vehicle") || name.contains("fuel") {
+            return "car.fill"
+        }
+        if name.contains("rent") || name.contains("mortgage") || name.contains("home") {
+            return "house.fill"
+        }
+        if name.contains("electric") || name.contains("energy") || name.contains("gas") {
+            return "bolt.fill"
+        }
+        if name.contains("water") {
+            return "drop.fill"
+        }
+        if name.contains("phone") || name.contains("mobile") {
+            return "iphone"
+        }
+        if name.contains("internet") || name.contains("broadband") || name.contains("wifi") {
+            return "wifi"
+        }
+        if name.contains("icloud") || name.contains("cloud") {
+            return "cloud.fill"
+        }
+        if name.contains("capcut") || name.contains("video") {
+            return "scissors"
+        }
+        if name.contains("chatgpt") || name.contains("openai") {
+            return "sparkles"
+        }
+        if name.contains("netflix") || name.contains("stream") || name.contains("tv") {
+            return "play.rectangle.fill"
+        }
+        if name.contains("spotify") || name.contains("music") {
+            return "music.note"
+        }
+
+        return payment.creditCardId != nil ? "creditcard.fill" : "doc.text.fill"
     }
 }
 
@@ -2425,18 +2425,16 @@ private struct BillsBillIcon: View {
     }
 
     private var symbol: String {
-        if payment.creditCardId != nil { return "creditcard" }
-        if payment.potId != nil { return "wallet.pass" }
-        return "calendar"
+        BillsBillSymbolPolicy.symbol(for: payment)
     }
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.subheadline.weight(.bold))
+            .font(.caption.weight(.semibold))
             .foregroundStyle(color)
-            .frame(width: 38, height: 38)
+            .frame(width: BillsLayoutPolicy.billIconSize, height: BillsLayoutPolicy.billIconSize)
             .background(color.opacity(0.12), in: Circle())
-            .overlay(Circle().stroke(color.opacity(0.2), lineWidth: 1))
+            .accessibilityHidden(true)
     }
 }
 
@@ -2458,31 +2456,6 @@ private struct BillsDateTile: View {
             RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
                 .stroke(AppTheme.Colors.border, lineWidth: 1)
         )
-    }
-}
-
-private struct BillsLinkChipsView: View {
-    var payment: RecurringPayment
-    var snapshot: PlannerSnapshot
-
-    var body: some View {
-        let card = payment.creditCardId.flatMap { id in snapshot.creditCards.first { $0.id == id } }
-        let pot = payment.potId.flatMap { id in snapshot.pots.first { $0.id == id } }
-
-        HStack(spacing: 6) {
-            if let card {
-                Pill(text: card.name, systemImage: "creditcard", color: AppTheme.Colors.warning)
-            }
-
-            if let pot {
-                Pill(text: pot.name, systemImage: "wallet.pass", color: AppTheme.Colors.success)
-            }
-
-            if card == nil && pot == nil {
-                Pill(text: "No link", systemImage: "link", color: AppTheme.Colors.tertiaryText)
-            }
-        }
-        .lineLimit(1)
     }
 }
 
@@ -3566,6 +3539,8 @@ struct SettingsView: View {
 
             DateSimulationCard(store: store)
 
+            moneyLeftCard
+
             settingsRoutes
 
             AppCard {
@@ -3628,6 +3603,18 @@ struct SettingsView: View {
 
     private var appearanceCard: some View {
         AppearanceThemeCustomizerCard(selectedThemeRawValue: $selectedThemeRawValue)
+    }
+
+    private var moneyLeftCard: some View {
+        AppCard {
+            SectionTitle("Money left")
+            Toggle("Include pots in Money left", isOn: includePotsInMoneyLeftBinding)
+                .tint(AppTheme.Colors.success)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Text("Turn this off to show only bank-account balances and any current income that is not linked to an account. Pot and card-reserve balances remain tracked but are left out of the total.")
+                .font(.footnote)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
     }
 
     private var settingsRoutes: some View {
@@ -3772,6 +3759,16 @@ struct SettingsView: View {
         } set: {
             var settings = store.snapshot.settings
             settings.aiInstructions = $0
+            store.updateSettings(settings)
+        }
+    }
+
+    private var includePotsInMoneyLeftBinding: Binding<Bool> {
+        Binding {
+            store.snapshot.settings.includePotsInMoneyLeft ?? true
+        } set: { includesPots in
+            var settings = store.snapshot.settings
+            settings.includePotsInMoneyLeft = includesPots
             store.updateSettings(settings)
         }
     }

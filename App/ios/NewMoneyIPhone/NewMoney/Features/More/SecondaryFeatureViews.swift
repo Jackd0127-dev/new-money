@@ -735,6 +735,7 @@ private struct EditBillView: View {
     @State private var paymentRoute: BillPaymentRoute
     @State private var isActive: Bool
     @State private var isDeleteConfirmationPresented = false
+    @State private var selectedOccurrenceForAdjustment: RecurringPaymentOccurrence?
 
     init(store: PlannerStore, payment: RecurringPayment) {
         self.store = store
@@ -776,6 +777,12 @@ private struct EditBillView: View {
                     primaryAction: saveChanges
                 )
 
+                SecondaryButton(title: "Check this cycle", systemImage: "calendar.badge.exclamationmark") {
+                    selectedOccurrenceForAdjustment = cycleAdjustmentOccurrence
+                }
+                .disabled(cycleAdjustmentOccurrence == nil)
+                .opacity(cycleAdjustmentOccurrence == nil ? 0.5 : 1)
+
                 SecondaryButton(title: "Delete bill", systemImage: "trash", role: .destructive) {
                     isDeleteConfirmationPresented = true
                 }
@@ -794,10 +801,21 @@ private struct EditBillView: View {
         } message: {
             Text("This removes the recurring bill from future bill lists and projected costs.")
         }
+        .sheet(item: $selectedOccurrenceForAdjustment) { occurrence in
+            RecurringBillOccurrenceAdjustmentSheet(store: store, occurrence: occurrence)
+        }
     }
 
     private var currentPayment: RecurringPayment {
         store.snapshot.recurringPayments.first(where: { $0.id == payment.id }) ?? payment
+    }
+
+    private var cycleAdjustmentOccurrence: RecurringPaymentOccurrence? {
+        PlannerDerivedData.recurringBillCycleAdjustmentOccurrence(
+            snapshot: store.snapshot,
+            payment: currentPayment,
+            asOfDate: store.todayIso
+        )
     }
 
     private var canSave: Bool {
@@ -881,6 +899,7 @@ enum BillsLayoutPolicy {
     static let billIconSize: CGFloat = 30
     static let editBillTitle = "Edit Bill"
     static let editUsesExistingRecurringPaymentUpdate = true
+    static let billRowsShowCheckThisCycle = true
 }
 
 private struct BillsTabPresentation {
@@ -1156,7 +1175,7 @@ struct BillsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(occurrence.payment.name)
                                         .foregroundStyle(AppTheme.Colors.primaryText)
-                                    Text("Refunded · (billsFriendlyDate(occurrence.scheduledDueDate))")
+                                    Text("Refunded · \(billsFriendlyDate(occurrence.scheduledDueDate))")
                                         .font(.caption)
                                         .foregroundStyle(AppTheme.Colors.success)
                                 }
@@ -1196,6 +1215,13 @@ struct BillsView: View {
                         nextDueLabel: nextDueLabel(for:),
                         edit: { payment in
                             selectedBillIdForEdit = payment.id
+                        },
+                        checkCycle: { payment in
+                            selectedOccurrenceForAdjustment = PlannerDerivedData.recurringBillCycleAdjustmentOccurrence(
+                                snapshot: store.snapshot,
+                                payment: payment,
+                                asOfDate: store.todayIso
+                            )
                         }
                     )
                 }
@@ -1425,7 +1451,7 @@ private enum RecurringBillOccurrenceDateChoice: String, CaseIterable, Identifiab
     var id: String { rawValue }
 }
 
-private struct RecurringBillOccurrenceAdjustmentSheet: View {
+struct RecurringBillOccurrenceAdjustmentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var occurrence: RecurringPaymentOccurrence
@@ -1484,7 +1510,7 @@ private struct RecurringBillOccurrenceAdjustmentSheet: View {
                     }
                 }
             }
-            .navigationTitle("Check this bill")
+            .navigationTitle("Check this cycle")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -1505,7 +1531,6 @@ private struct RecurringBillOccurrenceAdjustmentSheet: View {
         case .awaiting:
             store.markRecurringBillOccurrenceAwaiting(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
         case .actualDate:
-            store.markRecurringBillOccurrenceAwaiting(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
             store.confirmRecurringBillOccurrence(
                 paymentId: occurrence.payment.id,
                 scheduledDueDate: occurrence.scheduledDueDate,
@@ -2158,7 +2183,7 @@ private struct BillsUpcomingRow: View {
                         .foregroundStyle(AppTheme.Colors.primaryOrange)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Check (occurrence.payment.name) occurrence")
+                .accessibilityLabel("Check \(occurrence.payment.name) occurrence")
             }
         }
     }
@@ -2266,6 +2291,7 @@ private struct BillsGroupSectionCard: View {
     var section: BillsDisplaySection
     var nextDueLabel: (RecurringPayment) -> String
     var edit: (RecurringPayment) -> Void
+    var checkCycle: (RecurringPayment) -> Void
 
     private var totalPence: Int {
         section.payments.filter(\.active).reduce(0) { $0 + $1.amountPence }
@@ -2309,7 +2335,10 @@ private struct BillsGroupSectionCard: View {
                         nextDueLabel: nextDueLabel(payment),
                         edit: {
                             edit(payment)
-                        }
+                        },
+                        checkCycle: payment.active ? {
+                            checkCycle(payment)
+                        } : nil
                     )
 
                     if index != section.payments.count - 1 {
@@ -2325,45 +2354,60 @@ private struct BillsPaymentRow: View {
     var payment: RecurringPayment
     var nextDueLabel: String
     var edit: () -> Void
+    var checkCycle: (() -> Void)?
 
     var body: some View {
-        Button(action: edit) {
-            HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
-                BillsBillIcon(payment: payment)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Button(action: edit) {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
+                    BillsBillIcon(payment: payment)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(payment.name)
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
-                            .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 8) {
+                            Text(payment.name)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
+                                .lineLimit(1)
 
-                        if !payment.active {
-                            Text("Inactive")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            if !payment.active {
+                                Text("Inactive")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            }
                         }
+
+                        Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
 
-                    Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    Text(MoneyParser.formatPence(payment.amountPence))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                        .multilineTextAlignment(.trailing)
                 }
-
-                Spacer(minLength: AppTheme.Spacing.sm)
-
-                Text(MoneyParser.formatPence(payment.amountPence))
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-                    .multilineTextAlignment(.trailing)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens bill details")
+
+            Button {
+                checkCycle?()
+            } label: {
+                Label("Check this cycle", systemImage: "calendar.badge.exclamationmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+            }
+            .buttonStyle(.plain)
+            .disabled(checkCycle == nil)
+            .opacity(checkCycle == nil ? 0.45 : 1)
+            .accessibilityHint(checkCycle == nil ? "Activate this bill to check a payment cycle" : "Change this occurrence without changing the normal schedule")
         }
-        .buttonStyle(.plain)
         .padding(.vertical, 2)
-        .accessibilityHint("Opens bill details")
     }
 }
 

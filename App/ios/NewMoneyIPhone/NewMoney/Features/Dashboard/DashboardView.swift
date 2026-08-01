@@ -2451,6 +2451,7 @@ private struct BillDetailView: View {
     @State private var paymentRoute: BillPaymentRoute
     @State private var isActive: Bool
     @State private var showDeleteAlert = false
+    @State private var selectedOccurrenceForAdjustment: RecurringPaymentOccurrence?
 
     init(store: PlannerStore, payment: RecurringPayment) {
         self.store = store
@@ -2473,6 +2474,11 @@ private struct BillDetailView: View {
                 VStack(spacing: AppTheme.Spacing.lg) {
                     summaryCard
                     editCard
+                    SecondaryButton(title: "Check this cycle", systemImage: "calendar.badge.exclamationmark") {
+                        selectedOccurrenceForAdjustment = cycleAdjustmentOccurrence
+                    }
+                    .disabled(cycleAdjustmentOccurrence == nil)
+                    .opacity(cycleAdjustmentOccurrence == nil ? 0.5 : 1)
                     SecondaryButton(title: "Delete bill", systemImage: "trash", role: .destructive) {
                         showDeleteAlert = true
                     }
@@ -2510,6 +2516,9 @@ private struct BillDetailView: View {
             } message: {
                 Text("This removes the recurring bill from future breakdowns.")
             }
+        }
+        .sheet(item: $selectedOccurrenceForAdjustment) { occurrence in
+            RecurringBillOccurrenceAdjustmentSheet(store: store, occurrence: occurrence)
         }
     }
 
@@ -2597,6 +2606,14 @@ private struct BillDetailView: View {
 
     private var currentPayment: RecurringPayment {
         store.snapshot.recurringPayments.first(where: { $0.id == payment.id }) ?? payment
+    }
+
+    private var cycleAdjustmentOccurrence: RecurringPaymentOccurrence? {
+        PlannerDerivedData.recurringBillCycleAdjustmentOccurrence(
+            snapshot: store.snapshot,
+            payment: currentPayment,
+            asOfDate: store.todayIso
+        )
     }
 
     private var canSave: Bool {

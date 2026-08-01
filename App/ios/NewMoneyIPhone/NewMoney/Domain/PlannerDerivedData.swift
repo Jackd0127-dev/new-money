@@ -2218,6 +2218,60 @@ enum PlannerDerivedData {
             }
     }
 
+    static func recurringBillCycleAdjustmentOccurrence(
+        snapshot: PlannerSnapshot,
+        payment: RecurringPayment,
+        asOfDate: String
+    ) -> RecurringPaymentOccurrence? {
+        guard payment.deletedAt == nil,
+              payment.active,
+              FinanceEngine.isIsoDate(asOfDate)
+        else { return nil }
+
+        let startDate = addIsoMonthsClamped(date: asOfDate, months: -13)
+        let endDate = addIsoMonthsClamped(date: asOfDate, months: 13)
+        let occurrences = resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: [payment],
+            startDate: startDate,
+            endDate: endDate
+        )
+
+        if let awaiting = occurrences
+            .filter(\.isAwaitingPayment)
+            .sorted(by: { $0.scheduledDueDate > $1.scheduledDueDate })
+            .first {
+            return awaiting
+        }
+
+        let recentStartDate = FinanceEngine.addIsoDays(date: asOfDate, days: -7)
+        if let recent = occurrences
+            .filter({ $0.dueDate >= recentStartDate && $0.dueDate <= asOfDate })
+            .sorted(by: { $0.dueDate > $1.dueDate })
+            .first {
+            return recent
+        }
+
+        if let upcoming = occurrences
+            .filter({ $0.dueDate >= asOfDate })
+            .sorted(by: { $0.dueDate < $1.dueDate })
+            .first {
+            return upcoming
+        }
+
+        guard payment.frequency == .once,
+              let dueDate = payment.dueDate,
+              FinanceEngine.isIsoDate(dueDate)
+        else { return occurrences.last }
+
+        return resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: [payment],
+            startDate: min(dueDate, asOfDate),
+            endDate: max(dueDate, asOfDate)
+        ).last
+    }
+
     static func cardBalance(card: CreditCard, snapshot: PlannerSnapshot) -> Int {
         let opening = card.openingBalancePence ?? 0
         let cardSpending = snapshot.transactions

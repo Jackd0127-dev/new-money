@@ -445,6 +445,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(BillsLayoutPolicy.billIconSize, 30)
         XCTAssertEqual(BillsLayoutPolicy.editBillTitle, "Edit Bill")
         XCTAssertTrue(BillsLayoutPolicy.editUsesExistingRecurringPaymentUpdate)
+        XCTAssertTrue(BillsLayoutPolicy.billRowsShowCheckThisCycle)
     }
 
     func testBillIconsDescribeTheBillRatherThanOnlyItsFundingRoute() {

@@ -4508,11 +4508,14 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 6_000)
         XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 1)
 
-        store.markRecurringBillOccurrenceAwaiting(paymentId: payment.id, scheduledDueDate: "2026-06-15")
+        store.confirmRecurringBillOccurrence(
+            paymentId: payment.id,
+            scheduledDueDate: "2026-06-15",
+            actualDueDate: "2026-06-18"
+        )
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
         XCTAssertTrue(store.snapshot.transactions.first?.deletedAt != nil)
 
-        store.confirmRecurringBillOccurrence(paymentId: payment.id, scheduledDueDate: "2026-06-15", actualDueDate: "2026-06-18")
         var laterSettings = store.snapshot.settings
         laterSettings.manualTodayIso = "2026-06-19"
         store.updateSettings(laterSettings)
@@ -4532,8 +4535,16 @@ final class FinanceEngineTests: XCTestCase {
         let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, recurringPayments: [payment], creditCards: [card])))
 
         await store.load()
-        store.markRecurringBillOccurrenceAwaiting(paymentId: payment.id, scheduledDueDate: "2026-06-15")
-        store.confirmRecurringBillOccurrence(paymentId: payment.id, scheduledDueDate: "2026-06-15", actualDueDate: "2026-06-18")
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 1_500)
+
+        store.confirmRecurringBillOccurrence(
+            paymentId: payment.id,
+            scheduledDueDate: "2026-06-15",
+            actualDueDate: "2026-06-18"
+        )
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 0)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 0)
+
         var laterSettings = store.snapshot.settings
         laterSettings.manualTodayIso = "2026-06-19"
         store.updateSettings(laterSettings)
@@ -4542,6 +4553,112 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(charge?.id, "card-recurring-rec-streaming-2026-06-15")
         XCTAssertEqual(charge?.date, "2026-06-18")
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 1_500)
+    }
+
+    @MainActor
+    func testRescheduledBankAccountBillRestoresBalanceUntilConfirmedDate() async {
+        let settings = makeManualSettings(today: "2026-08-01")
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        let payment = makeRecurringPayment(
+            id: "rec-broadband",
+            name: "Broadband",
+            amountPence: 12_345,
+            dueDay: 1,
+            potId: nil,
+            bankAccountId: account.id,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            bankAccounts: [account],
+            recurringPayments: [payment]
+        )))
+
+        await store.load()
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 87_655)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 1)
+
+        store.confirmRecurringBillOccurrence(
+            paymentId: payment.id,
+            scheduledDueDate: "2026-08-01",
+            actualDueDate: "2026-08-03"
+        )
+
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 100_000)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 0)
+
+        var augustSecondSettings = store.snapshot.settings
+        augustSecondSettings.manualTodayIso = "2026-08-02"
+        store.updateSettings(augustSecondSettings)
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 100_000)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 0)
+
+        var augustThirdSettings = store.snapshot.settings
+        augustThirdSettings.manualTodayIso = "2026-08-03"
+        store.updateSettings(augustThirdSettings)
+
+        let activeTransaction = store.snapshot.transactions.first { $0.deletedAt == nil }
+        XCTAssertEqual(activeTransaction?.date, "2026-08-03")
+        XCTAssertEqual(activeTransaction?.bankAccountId, account.id)
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 87_655)
+        XCTAssertEqual(store.snapshot.transactions.filter { $0.deletedAt == nil }.count, 1)
+    }
+
+    @MainActor
+    func testLoadRepairsGeneratedBillTransactionLeftOnItsOldExpectedDate() async {
+        let settings = makeManualSettings(today: "2026-08-01")
+        let pot = makePot(id: "pot-bills", name: "Bills", balancePence: 10_000, targetPence: nil)
+        let payment = makeRecurringPayment(
+            id: "rec-phone",
+            name: "Phone",
+            amountPence: 4_000,
+            dueDay: 1,
+            potId: pot.id,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let originalStore = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [payment]
+        )))
+
+        await originalStore.load()
+        XCTAssertEqual(originalStore.snapshot.pots.first?.balancePence, 6_000)
+
+        var staleSnapshot = originalStore.snapshot
+        staleSnapshot.recurringPaymentOccurrenceOverrides = [
+            RecurringPaymentOccurrenceOverride(
+                id: "recurring-occurrence-override-rec-phone-2026-08-01",
+                paymentId: payment.id,
+                scheduledDueDate: "2026-08-01",
+                state: .confirmed,
+                actualDueDate: "2026-08-03",
+                reversedGeneratedTransactionIds: [],
+                createdAt: "2026-08-01T00:00:00.000Z",
+                updatedAt: "2026-08-01T00:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+        let repairedStore = PlannerStore(repository: TestPlannerRepository(snapshot: staleSnapshot))
+
+        await repairedStore.load()
+
+        XCTAssertEqual(repairedStore.snapshot.pots.first?.balancePence, 10_000)
+        XCTAssertEqual(repairedStore.snapshot.transactions.filter { $0.deletedAt == nil }.count, 0)
+        XCTAssertEqual(
+            repairedStore.snapshot.recurringPaymentOccurrenceOverrides.first?.reversedGeneratedTransactionIds,
+            ["recurring-rec-phone-2026-08-01"]
+        )
+
+        var augustThirdSettings = repairedStore.snapshot.settings
+        augustThirdSettings.manualTodayIso = "2026-08-03"
+        repairedStore.updateSettings(augustThirdSettings)
+
+        let activeTransaction = repairedStore.snapshot.transactions.first { $0.deletedAt == nil }
+        XCTAssertEqual(activeTransaction?.id, "recurring-rec-phone-2026-08-01")
+        XCTAssertEqual(activeTransaction?.date, "2026-08-03")
+        XCTAssertEqual(repairedStore.snapshot.pots.first?.balancePence, 6_000)
+        XCTAssertEqual(repairedStore.snapshot.transactions.filter { $0.deletedAt == nil }.count, 1)
     }
 
     func testPlanningOnlyRecurringBillOverrideMovesOnlyTheResolvedOccurrence() {
@@ -4570,6 +4687,46 @@ final class FinanceEngineTests: XCTestCase {
 
         XCTAssertEqual(occurrences.first { $0.scheduledDueDate == "2026-06-15" }?.dueDate, "2026-06-18")
         XCTAssertEqual(occurrences.first { $0.scheduledDueDate == "2026-07-15" }?.dueDate, "2026-07-15")
+    }
+
+    func testRecurringBillCycleAdjustmentSelectsRecentlyMissedOccurrence() {
+        let payment = makeRecurringPayment(
+            id: "rec-rent",
+            name: "Rent",
+            amountPence: 75_000,
+            dueDay: 1,
+            potId: nil,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let snapshot = makeSnapshot(recurringPayments: [payment])
+
+        let occurrence = PlannerDerivedData.recurringBillCycleAdjustmentOccurrence(
+            snapshot: snapshot,
+            payment: payment,
+            asOfDate: "2026-08-03"
+        )
+
+        XCTAssertEqual(occurrence?.scheduledDueDate, "2026-08-01")
+    }
+
+    func testRecurringBillCycleAdjustmentSelectsNextOccurrenceBeforeItIsDue() {
+        let payment = makeRecurringPayment(
+            id: "rec-broadband",
+            name: "Broadband",
+            amountPence: 4_500,
+            dueDay: 20,
+            potId: nil,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let snapshot = makeSnapshot(recurringPayments: [payment])
+
+        let occurrence = PlannerDerivedData.recurringBillCycleAdjustmentOccurrence(
+            snapshot: snapshot,
+            payment: payment,
+            asOfDate: "2026-08-01"
+        )
+
+        XCTAssertEqual(occurrence?.scheduledDueDate, "2026-08-20")
     }
 
     @MainActor
@@ -4782,6 +4939,140 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(activeRepayments.count, 1)
         XCTAssertEqual(activeRepayments.first?.directDebitDate, "2026-06-12")
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
+    }
+
+    @MainActor
+    func testRescheduledDirectDebitImmediatelyReversesAutomaticRepaymentUntilNewDate() async {
+        let settings = makeManualSettings(today: "2026-08-01")
+        let card = makeCreditCard(
+            id: "card-capital-one",
+            name: "Capital One",
+            openingBalancePence: 20_237,
+            openingStatementBalancePence: 20_237,
+            statementDate: "2026-07-09",
+            dueDay: 1,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-capital-one",
+            name: "Capital One",
+            balancePence: 20_237,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            creditCards: [card]
+        )))
+
+        await store.load()
+        XCTAssertEqual(store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }.count, 1)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 0)
+
+        store.confirmCreditCardDirectDebit(
+            cardId: card.id,
+            scheduledStatementDate: "2026-07-09",
+            actualDirectDebitDate: "2026-08-03"
+        )
+
+        XCTAssertEqual(store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }.count, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 20_237)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 20_237)
+
+        var augustSecondSettings = store.snapshot.settings
+        augustSecondSettings.manualTodayIso = "2026-08-02"
+        store.updateSettings(augustSecondSettings)
+        XCTAssertEqual(store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }.count, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 20_237)
+
+        var augustThirdSettings = store.snapshot.settings
+        augustThirdSettings.manualTodayIso = "2026-08-03"
+        store.updateSettings(augustThirdSettings)
+
+        let activeRepayments = store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }
+        XCTAssertEqual(activeRepayments.count, 1)
+        XCTAssertEqual(activeRepayments.first?.directDebitDate, "2026-08-03")
+        XCTAssertEqual(activeRepayments.first?.amountPence, 20_237)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 0)
+    }
+
+    @MainActor
+    func testLoadRepairsAutomaticRepaymentLeftBehindByPreviouslyRescheduledDirectDebit() async {
+        let settings = makeManualSettings(today: "2026-08-01")
+        let card = makeCreditCard(
+            id: "card-capital-one",
+            name: "Capital One",
+            openingBalancePence: 20_237,
+            openingStatementBalancePence: 20_237,
+            statementDate: "2026-07-09",
+            dueDay: 1,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-capital-one",
+            name: "Capital One",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let staleRepayment = CreditCardRepayment(
+            id: "card-statement-repayment-card-capital-one-2026-07-09-2026-08-01",
+            creditCardId: card.id,
+            amountPence: 20_237,
+            date: "2026-08-01",
+            note: "Automatic Capital One statement payment from Capital One pot",
+            statementDate: "2026-07-09",
+            directDebitDate: "2026-08-01",
+            source: .linkedPotStatement,
+            potId: pot.id,
+            potContributionPence: 20_237,
+            potContributions: [CreditCardPotContribution(potId: pot.id, amountPence: 20_237)],
+            paycheckContributionPence: 0,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let cycleOverride = CreditCardCycleOverride(
+            id: "card-cycle-override-card-capital-one-2026-07-09",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-07-09",
+            statementState: .normal,
+            actualStatementDate: nil,
+            directDebitState: .confirmed,
+            actualDirectDebitDate: "2026-08-03",
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            creditCards: [card],
+            creditCardRepayments: [staleRepayment],
+            creditCardCycleOverrides: [cycleOverride]
+        )))
+
+        await store.load()
+
+        XCTAssertEqual(store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }.count, 0)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 20_237)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 20_237)
+        XCTAssertEqual(store.snapshot.creditCardCycleOverrides.first?.reversedAutomaticRepaymentIds, [staleRepayment.id])
+
+        var augustThirdSettings = store.snapshot.settings
+        augustThirdSettings.manualTodayIso = "2026-08-03"
+        store.updateSettings(augustThirdSettings)
+
+        let activeRepayments = store.snapshot.creditCardRepayments.filter { $0.deletedAt == nil }
+        XCTAssertEqual(activeRepayments.count, 1)
+        XCTAssertEqual(activeRepayments.first?.directDebitDate, "2026-08-03")
+        XCTAssertEqual(activeRepayments.first?.amountPence, 20_237)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 0)
     }
 
     @MainActor
@@ -6590,6 +6881,7 @@ final class FinanceEngineTests: XCTestCase {
         creditCards: [CreditCard] = [],
         customPayments: [CustomPayment] = [],
         creditCardRepayments: [CreditCardRepayment] = [],
+        creditCardCycleOverrides: [CreditCardCycleOverride] = [],
         oneOffIncomes: [OneOffIncome] = [],
         fundingChecklistExclusions: [FundingChecklistExclusion] = []
     ) -> PlannerSnapshot {
@@ -6610,6 +6902,7 @@ final class FinanceEngineTests: XCTestCase {
             customPayments: customPayments,
             creditCardRepayments: creditCardRepayments,
             creditCardPots: [],
+            creditCardCycleOverrides: creditCardCycleOverrides,
             dailyBriefs: [],
             oneOffIncomes: oneOffIncomes,
             fundingChecklistExclusions: fundingChecklistExclusions,

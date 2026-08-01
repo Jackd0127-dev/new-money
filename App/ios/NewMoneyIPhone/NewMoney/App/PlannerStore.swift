@@ -1065,9 +1065,16 @@ final class PlannerStore: ObservableObject {
               let previousEffectiveDate = recurringBillOccurrenceEffectiveDate(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
         else { return }
 
+        let reversedIds = reverseGeneratedRecurringBillTransactions(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate
+        )
         upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
             $0.state = .confirmed
             $0.actualDueDate = actualDueDate
+            $0.reversedGeneratedTransactionIds = Array(Set(
+                $0.reversedGeneratedTransactionIds + reversedIds
+            )).sorted()
         }
         moveRecurringBillFundingReferences(
             paymentId: paymentId,
@@ -1150,14 +1157,21 @@ final class PlannerStore: ObservableObject {
         return override?.state == .confirmed ? override?.actualDueDate ?? scheduledDueDate : scheduledDueDate
     }
 
-    private func reverseGeneratedRecurringBillTransactions(paymentId: String, scheduledDueDate: String) -> [String] {
+    private func reverseGeneratedRecurringBillTransactions(
+        paymentId: String,
+        scheduledDueDate: String,
+        keepingDueDate: String? = nil
+    ) -> [String] {
         let now = DateUtilities.nowIsoString()
         let generatedIds = [
             recurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate),
             cardRecurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
         ]
         let indices = snapshot.transactions.indices.filter {
-            snapshot.transactions[$0].deletedAt == nil && generatedIds.contains(snapshot.transactions[$0].id)
+            let transaction = snapshot.transactions[$0]
+            return transaction.deletedAt == nil &&
+                generatedIds.contains(transaction.id) &&
+                (keepingDueDate == nil || transaction.date != keepingDueDate)
         }
 
         for index in indices {
@@ -1167,6 +1181,46 @@ final class PlannerStore: ObservableObject {
             snapshot.transactions[index].updatedAt = now
         }
         return indices.map { snapshot.transactions[$0].id }
+    }
+
+    /// Repairs snapshots saved with a confirmed bill-date override while a
+    /// generated transaction still carries the old expected date.
+    private func reconcileRescheduledGeneratedRecurringBillTransactions() -> Bool {
+        typealias RescheduledBillOccurrence = (
+            id: String,
+            paymentId: String,
+            scheduledDueDate: String,
+            actualDueDate: String
+        )
+        let rescheduledOccurrences: [RescheduledBillOccurrence] = snapshot.recurringPaymentOccurrenceOverrides.compactMap { occurrence in
+            guard occurrence.deletedAt == nil,
+                  occurrence.state == .confirmed,
+                  let actualDueDate = occurrence.actualDueDate,
+                  FinanceEngine.isIsoDate(actualDueDate)
+            else { return nil }
+            return (occurrence.id, occurrence.paymentId, occurrence.scheduledDueDate, actualDueDate)
+        }
+        let now = DateUtilities.nowIsoString()
+        var changed = false
+
+        for occurrence in rescheduledOccurrences {
+            let reversedIds = reverseGeneratedRecurringBillTransactions(
+                paymentId: occurrence.paymentId,
+                scheduledDueDate: occurrence.scheduledDueDate,
+                keepingDueDate: occurrence.actualDueDate
+            )
+            guard !reversedIds.isEmpty,
+                  let overrideIndex = snapshot.recurringPaymentOccurrenceOverrides.firstIndex(where: { $0.id == occurrence.id })
+            else { continue }
+
+            snapshot.recurringPaymentOccurrenceOverrides[overrideIndex].reversedGeneratedTransactionIds = Array(Set(
+                snapshot.recurringPaymentOccurrenceOverrides[overrideIndex].reversedGeneratedTransactionIds + reversedIds
+            )).sorted()
+            snapshot.recurringPaymentOccurrenceOverrides[overrideIndex].updatedAt = now
+            changed = true
+        }
+
+        return changed
     }
 
     private func removeRecurringBillFundingAllocations(paymentId: String, scheduledDueDate: String, now: String) {
@@ -1437,9 +1491,11 @@ final class PlannerStore: ObservableObject {
 
     func confirmCreditCardDirectDebit(cardId: String, scheduledStatementDate: String, actualDirectDebitDate: String) {
         guard FinanceEngine.isIsoDate(actualDirectDebitDate) else { return }
+        let reversedIds = reverseAutomaticStatementRepayments(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
         mutateCreditCardCycleOverride(cardId: cardId, scheduledStatementDate: scheduledStatementDate) {
             $0.directDebitState = .confirmed
             $0.actualDirectDebitDate = actualDirectDebitDate
+            $0.reversedAutomaticRepaymentIds = Array(Set($0.reversedAutomaticRepaymentIds + reversedIds)).sorted()
         }
     }
 
@@ -1494,7 +1550,11 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    private func reverseAutomaticStatementRepayments(cardId: String, scheduledStatementDate: String) -> [String] {
+    private func reverseAutomaticStatementRepayments(
+        cardId: String,
+        scheduledStatementDate: String,
+        keepingDirectDebitDate: String? = nil
+    ) -> [String] {
         let now = DateUtilities.nowIsoString()
         let effectiveStatementDate = snapshot.creditCardCycleOverrides.first {
             $0.deletedAt == nil && $0.creditCardId == cardId && $0.scheduledStatementDate == scheduledStatementDate
@@ -1504,7 +1564,8 @@ final class PlannerStore: ObservableObject {
             return repayment.deletedAt == nil &&
                 repayment.creditCardId == cardId &&
                 (repayment.statementDate == scheduledStatementDate || repayment.statementDate == effectiveStatementDate) &&
-                (repayment.source == .automaticStatement || repayment.source == .linkedPotStatement)
+                (repayment.source == .automaticStatement || repayment.source == .linkedPotStatement) &&
+                (keepingDirectDebitDate == nil || (repayment.directDebitDate ?? repayment.date) != keepingDirectDebitDate)
         }
 
         for index in matchingIndices {
@@ -1522,6 +1583,46 @@ final class PlannerStore: ObservableObject {
         }
 
         return matchingIndices.map { snapshot.creditCardRepayments[$0].id }
+    }
+
+    /// Repairs snapshots saved after a generated repayment ran on the scheduled date
+    /// but the user subsequently confirmed a different direct-debit date.
+    private func reconcileRescheduledAutomaticStatementRepayments() -> Bool {
+        typealias RescheduledCycle = (
+            id: String,
+            cardId: String,
+            scheduledStatementDate: String,
+            actualDirectDebitDate: String
+        )
+        let rescheduledCycles: [RescheduledCycle] = snapshot.creditCardCycleOverrides.compactMap { cycle in
+            guard cycle.deletedAt == nil,
+                  cycle.directDebitState == .confirmed,
+                  let actualDirectDebitDate = cycle.actualDirectDebitDate,
+                  FinanceEngine.isIsoDate(actualDirectDebitDate)
+            else { return nil }
+            return (cycle.id, cycle.creditCardId, cycle.scheduledStatementDate, actualDirectDebitDate)
+        }
+        var changed = false
+        let now = DateUtilities.nowIsoString()
+
+        for cycle in rescheduledCycles {
+            let reversedIds = reverseAutomaticStatementRepayments(
+                cardId: cycle.cardId,
+                scheduledStatementDate: cycle.scheduledStatementDate,
+                keepingDirectDebitDate: cycle.actualDirectDebitDate
+            )
+            guard !reversedIds.isEmpty,
+                  let overrideIndex = snapshot.creditCardCycleOverrides.firstIndex(where: { $0.id == cycle.id })
+            else { continue }
+
+            snapshot.creditCardCycleOverrides[overrideIndex].reversedAutomaticRepaymentIds = Array(Set(
+                snapshot.creditCardCycleOverrides[overrideIndex].reversedAutomaticRepaymentIds + reversedIds
+            )).sorted()
+            snapshot.creditCardCycleOverrides[overrideIndex].updatedAt = now
+            changed = true
+        }
+
+        return changed
     }
 
     func archiveCreditCard(id: String) {
@@ -2286,6 +2387,8 @@ final class PlannerStore: ObservableObject {
     @discardableResult
     func applyDueLinkedPotObligations(asOf todayIso: String) -> Bool {
         var changed = false
+        changed = reconcileRescheduledAutomaticStatementRepayments() || changed
+        changed = reconcileRescheduledGeneratedRecurringBillTransactions() || changed
         changed = applyDueRecurringPotPayments(asOf: todayIso) || changed
         changed = applyDueBankAccountRecurringPayments(asOf: todayIso) || changed
         changed = applyDueCreditCardRecurringPayments(asOf: todayIso) || changed

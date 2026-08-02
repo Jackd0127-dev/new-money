@@ -9,6 +9,40 @@ struct RecurringPaymentOccurrence: Identifiable, Equatable, Sendable {
     var isAwaitingPayment: Bool = false
 }
 
+enum HomeDueEventDirection: String, Equatable, Sendable {
+    case incoming
+    case outgoing
+}
+
+enum HomeDueEventStatus: String, Equatable, Sendable {
+    case scheduled
+    case awaiting
+    case completed
+}
+
+enum HomeDueEventSource: Equatable, Sendable {
+    case payday(payPeriodId: String, paycheckId: String?)
+    case oneOffIncome(incomeId: String)
+    case recurringBill(paymentId: String, scheduledDueDate: String)
+    case savedPayment(paymentId: String)
+    case debtPayment(scheduleItemId: String, debtId: String)
+    case cardStatement(cardId: String, scheduledStatementDate: String)
+    case cardDirectDebit(cardId: String, scheduledStatementDate: String)
+}
+
+struct HomeDueEvent: Identifiable, Equatable, Sendable {
+    var id: String
+    var scheduledDate: String
+    var date: String
+    var title: String
+    var amountPence: Int
+    var direction: HomeDueEventDirection
+    var status: HomeDueEventStatus
+    var sourceLabel: String
+    var cycleLabel: String
+    var source: HomeDueEventSource
+}
+
 struct PotProgress: Equatable, Sendable {
     var targetPence: Int
     var coveredPence: Int
@@ -783,17 +817,31 @@ enum PlannerDerivedData {
             unlinkedPaycheckIncomePence = currentPaychecks
                 .filter { $0.bankAccountId == nil }
                 .reduce(0) {
-                    $0 + max(0, $1.actualAmountPence ?? $1.calculatedAmountPence)
+                    let override = incomeOccurrenceOverride(
+                        snapshot: snapshot,
+                        kind: .paycheck,
+                        sourceId: $1.id,
+                        scheduledDate: payPeriod.payday
+                    )
+                    guard override?.state != .awaiting, override?.state != .cancelled else { return $0 }
+                    return $0 + max(0, override?.amountPenceOverride ?? $1.actualAmountPence ?? $1.calculatedAmountPence)
                 }
         }
 
         let unlinkedOneOffIncomePence = snapshot.oneOffIncomes
             .filter {
-                $0.deletedAt == nil &&
+                let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .oneOffIncome, sourceId: $0.id, scheduledDate: $0.date)
+                let effectiveDate = effectiveIncomeDate(override: override, scheduledDate: $0.date)
+                return $0.deletedAt == nil &&
                 $0.bankAccountId == nil &&
-                isIsoDate($0.date, in: payPeriod)
+                override?.state != .awaiting &&
+                override?.state != .cancelled &&
+                isIsoDate(effectiveDate, in: payPeriod)
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) {
+                let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .oneOffIncome, sourceId: $1.id, scheduledDate: $1.date)
+                return $0 + max(0, override?.amountPenceOverride ?? $1.amountPence)
+            }
 
         let incomeFundedSpendingPence = snapshot.transactions
             .filter {
@@ -866,11 +914,16 @@ enum PlannerDerivedData {
     static func bankAccountNetMovementPence(accountId: String, snapshot: PlannerSnapshot) -> Int {
         let paycheckIncome = snapshot.paychecks.reduce(0) { total, paycheck in
             guard paycheck.deletedAt == nil, paycheck.bankAccountId == accountId else { return total }
-            return total + max(0, paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+            let payday = snapshot.payPeriods.first { $0.id == paycheck.payPeriodId }?.payday ?? String(paycheck.createdAt.prefix(10))
+            let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .paycheck, sourceId: paycheck.id, scheduledDate: payday)
+            guard override?.state != .awaiting, override?.state != .cancelled else { return total }
+            return total + max(0, override?.amountPenceOverride ?? paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
         }
         let oneOffIncome = snapshot.oneOffIncomes.reduce(0) { total, income in
             guard income.deletedAt == nil, income.bankAccountId == accountId else { return total }
-            return total + max(0, income.amountPence)
+            let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .oneOffIncome, sourceId: income.id, scheduledDate: income.date)
+            guard override?.state != .awaiting, override?.state != .cancelled else { return total }
+            return total + max(0, override?.amountPenceOverride ?? income.amountPence)
         }
         let fundedPots = snapshot.potAllocations.reduce(0) { total, allocation in
             guard allocation.deletedAt == nil, allocation.bankAccountId == accountId else { return total }
@@ -2038,13 +2091,18 @@ enum PlannerDerivedData {
                     .filter { $0.source == .openingStatement || $0.source == .spending || $0.source == .repayment }
                     .reduce(0) { $0 + $1.amountPence })
                 let forecastDuePence = max(0, breakdown.reduce(0) { $0 + $1.amountPence })
+                let amountOverride = snapshot.creditCardCycleOverrides.first {
+                    $0.deletedAt == nil &&
+                    $0.creditCardId == card.id &&
+                    $0.scheduledStatementDate == cycle.scheduledStatementDate
+                }?.amountPenceOverride.map { max(0, $0) }
 
                 payments.append(
                     CreditCardStatementPayment(
                         statementDate: cycle.statementDate,
                         directDebitDate: cycle.directDebitDate,
-                        actualDuePence: actualDuePence,
-                        forecastDuePence: forecastDuePence,
+                        actualDuePence: amountOverride ?? actualDuePence,
+                        forecastDuePence: amountOverride ?? forecastDuePence,
                         scheduledStatementDate: cycle.scheduledStatementDate,
                         isHeld: false
                     )
@@ -2207,6 +2265,9 @@ enum PlannerDerivedData {
                 case .refunded:
                     return nil
                 }
+                if let amountPenceOverride = override.amountPenceOverride {
+                    resolved.amountPence = max(0, amountPenceOverride)
+                }
                 return resolved
             }
             .filter { ($0.dueDate >= startDate && $0.dueDate <= endDate) || $0.isAwaitingPayment }
@@ -2215,6 +2276,71 @@ enum PlannerDerivedData {
                     return priorityRank($0.payment.priority) < priorityRank($1.payment.priority)
                 }
                 return $0.dueDate < $1.dueDate
+            }
+    }
+
+    /// Returns a bounded, globally sorted Upcoming list while limiting each
+    /// recurring bill independently. Occurrence overrides remain authoritative,
+    /// so an awaiting past occurrence consumes one of the bill's visible cycles.
+    static func nextRecurringOccurrences(
+        snapshot: PlannerSnapshot,
+        payments: [RecurringPayment],
+        asOfDate: String,
+        limitPerPayment: Int
+    ) -> [RecurringPaymentOccurrence] {
+        guard FinanceEngine.isIsoDate(asOfDate), limitPerPayment > 0 else { return [] }
+
+        let activePayments = payments.filter {
+            $0.deletedAt == nil && $0.active
+        }
+        let recurringSearchEnd = addIsoMonthsClamped(
+            date: asOfDate,
+            months: max(36, (limitPerPayment + 1) * 12)
+        )
+
+        return activePayments
+            .flatMap { payment -> [RecurringPaymentOccurrence] in
+                let searchEnd: String
+                if payment.frequency == .once {
+                    let matchingOverrideDate = snapshot.recurringPaymentOccurrenceOverrides
+                        .filter {
+                            $0.deletedAt == nil &&
+                            $0.paymentId == payment.id &&
+                            $0.state != .refunded
+                        }
+                        .compactMap(\.actualDueDate)
+                        .max()
+                    searchEnd = max(
+                        recurringSearchEnd,
+                        payment.dueDate ?? asOfDate,
+                        matchingOverrideDate ?? asOfDate
+                    )
+                } else {
+                    searchEnd = recurringSearchEnd
+                }
+
+                return Array(
+                    resolvedRecurringOccurrences(
+                        snapshot: snapshot,
+                        payments: [payment],
+                        startDate: asOfDate,
+                        endDate: searchEnd
+                    )
+                    .prefix(limitPerPayment)
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.dueDate != rhs.dueDate {
+                    return lhs.dueDate < rhs.dueDate
+                }
+                let nameOrder = lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name)
+                if nameOrder != .orderedSame {
+                    return nameOrder == .orderedAscending
+                }
+                if lhs.scheduledDueDate != rhs.scheduledDueDate {
+                    return lhs.scheduledDueDate < rhs.scheduledDueDate
+                }
+                return lhs.id < rhs.id
             }
     }
 
@@ -2357,7 +2483,7 @@ enum PlannerDerivedData {
 
         let recurringOccurrencesForPeriod = resolvedRecurringOccurrences(
             snapshot: snapshot,
-            payments: snapshot.recurringPayments,
+            payments: snapshot.recurringPayments.filter { $0.deletedAt == nil },
             startDate: payPeriod.startDate,
             endDate: payPeriod.endDate
         )
@@ -2402,7 +2528,7 @@ enum PlannerDerivedData {
         let creditCardRecurringItems = recurringItems.filter { $0.creditCardId != nil }
 
         let savedPaymentItems = snapshot.customPayments
-            .filter { $0.status != .archived && isIsoDate($0.dueDate, in: payPeriod) }
+            .filter { $0.deletedAt == nil && $0.status != .archived && isIsoDate($0.dueDate, in: payPeriod) }
             .map {
                 PeriodCostItem(
                     id: "custom-\($0.id)",
@@ -2417,7 +2543,7 @@ enum PlannerDerivedData {
             }
 
         let manualSpendItems = snapshot.transactions
-            .filter { !$0.isRefunded && $0.type == .spending && $0.recurringPaymentId == nil && isIsoDate($0.date, in: payPeriod) }
+            .filter { $0.deletedAt == nil && !$0.isRefunded && $0.type == .spending && $0.recurringPaymentId == nil && isIsoDate($0.date, in: payPeriod) }
             .map {
                 PeriodCostItem(
                     id: "transaction-\($0.id)",
@@ -2436,6 +2562,7 @@ enum PlannerDerivedData {
         }
         let potAllocationItems = snapshot.potAllocations
             .filter {
+                $0.deletedAt == nil &&
                 $0.payPeriodId == payPeriod.id &&
                 $0.amountPence > 0 &&
                 $0.source != .recurring &&
@@ -2473,7 +2600,7 @@ enum PlannerDerivedData {
         let plannedFundingItems = plannedFundingCostItems(snapshot: snapshot, payPeriod: payPeriod, asOfDate: asOfDate)
 
         let debtReserveItems = snapshot.debtReserves
-            .filter { $0.status == .planned && $0.amountPence > 0 && isDebtReserve($0, in: payPeriod) }
+            .filter { $0.deletedAt == nil && $0.status == .planned && $0.amountPence > 0 && isDebtReserve($0, in: payPeriod) }
             .map { reserve in
                 let debtName = snapshot.debts.first { $0.id == reserve.debtId }?.name ?? "Debt"
                 return PeriodCostItem(
@@ -2513,7 +2640,7 @@ enum PlannerDerivedData {
             .filter { $0.amountPence > 0 }
 
         let creditCardPotItems = snapshot.creditCardPots
-            .filter { $0.status == .active && $0.source == .paycheck && $0.amountPence > 0 && isCreditCardPot($0, in: payPeriod) }
+            .filter { $0.deletedAt == nil && $0.status == .active && $0.source == .paycheck && $0.amountPence > 0 && isCreditCardPot($0, in: payPeriod) }
             .map {
                 PeriodCostItem(
                     id: "credit-card-pot-\($0.id)",
@@ -2528,7 +2655,7 @@ enum PlannerDerivedData {
             }
 
         let repaymentItems = snapshot.creditCardRepayments
-            .filter { isIsoDate($0.date, in: payPeriod) }
+            .filter { $0.deletedAt == nil && !$0.isRefunded && isIsoDate($0.date, in: payPeriod) }
             .map {
                 let paycheckContributionPence = creditCardRepaymentPaycheckContribution($0)
                 return PeriodCostItem(
@@ -2565,12 +2692,119 @@ enum PlannerDerivedData {
 
         return createPayPeriodCostSummary(
             payReceivedPence: effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: payPeriod),
+            plannedCostsPence: currentCycleOutgoingsPence(
+                snapshot: snapshot,
+                payPeriod: payPeriod,
+                asOfDate: asOfDate
+            ),
             items: allItems
         )
     }
 
+    /// Adds every external outgoing in the selected pay cycle. Funding allocations,
+    /// pot transfers, and reserves are deliberately excluded because the bill,
+    /// purchase, debt payment, or card repayment they fund is counted separately.
+    static func currentCycleOutgoingsPence(
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod,
+        asOfDate: String? = nil
+    ) -> Int {
+        let recurringPence = resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: snapshot.recurringPayments.filter { $0.deletedAt == nil },
+            startDate: payPeriod.startDate,
+            endDate: payPeriod.endDate
+        )
+        .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let savedPaymentsPence = snapshot.customPayments
+            .filter {
+                $0.deletedAt == nil &&
+                $0.status != .archived &&
+                isIsoDate($0.dueDate, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let manualSpendingPence = snapshot.transactions
+            .filter {
+                $0.deletedAt == nil &&
+                !$0.isRefunded &&
+                $0.type == .spending &&
+                $0.recurringPaymentId == nil &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let activeDebtIds = Set(
+            snapshot.debts
+                .filter { $0.deletedAt == nil && $0.status.isActiveLike }
+                .map(\.id)
+        )
+        let scheduledDebtPence = debtScheduleItems(snapshot: snapshot, payPeriod: payPeriod)
+            .filter {
+                $0.deletedAt == nil &&
+                $0.status != .paid &&
+                $0.status != .cancelled &&
+                activeDebtIds.contains($0.debtId) &&
+                isIsoDate($0.dueDate, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.plannedAmountPence - $1.paidAmountPence) }
+        let paidDebtPence = snapshot.debtPayments
+            .filter {
+                $0.deletedAt == nil &&
+                !$0.isRefunded &&
+                activeDebtIds.contains($0.debtId) &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        let calculationDate = asOfDate ?? FinanceEngine.getAppTodayIso(settings: snapshot.settings)
+        let openingCardPaymentPence = cardOpeningBalanceFundingChecklistItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod
+        )
+        .reduce(0) { $0 + max(0, $1.amountPence) }
+        let scheduledCardPaymentPence = snapshot.creditCards
+            .filter { $0.deletedAt == nil && !$0.archived }
+            .flatMap {
+                creditCardStatementPayments(
+                    card: $0,
+                    snapshot: snapshot,
+                    startDate: payPeriod.startDate,
+                    endDate: payPeriod.endDate,
+                    asOfDate: calculationDate
+                )
+            }
+            .reduce(0) { $0 + max(0, $1.forecastDuePence) }
+        let paidCardPence = snapshot.creditCardRepayments
+            .filter {
+                $0.deletedAt == nil &&
+                !$0.isRefunded &&
+                isIsoDate($0.date, in: payPeriod)
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+
+        return recurringPence +
+            savedPaymentsPence +
+            manualSpendingPence +
+            scheduledDebtPence +
+            paidDebtPence +
+            openingCardPaymentPence +
+            scheduledCardPaymentPence +
+            paidCardPence
+    }
+
     static func effectivePayPeriodIncomePence(snapshot: PlannerSnapshot, payPeriod: PayPeriod) -> Int {
-        payPeriod.incomePence + oneOffIncomePence(snapshot: snapshot, payPeriod: payPeriod)
+        let paycheck = snapshot.paychecks.first { $0.deletedAt == nil && $0.payPeriodId == payPeriod.id }
+        let sourceId = paycheck?.id ?? payPeriod.id
+        let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .paycheck, sourceId: sourceId, scheduledDate: payPeriod.payday)
+        let baseIncome: Int
+        if override?.state == .cancelled {
+            baseIncome = 0
+        } else {
+            baseIncome = max(0, override?.amountPenceOverride ?? payPeriod.incomePence)
+        }
+        return baseIncome + oneOffIncomePence(snapshot: snapshot, payPeriod: payPeriod)
     }
 
     static func oneOffIncomePence(snapshot: PlannerSnapshot, payPeriod: PayPeriod) -> Int {
@@ -2578,10 +2812,38 @@ enum PlannerDerivedData {
         // metadata and can become stale when periods are edited or regenerated.
         snapshot.oneOffIncomes
             .filter {
-                $0.deletedAt == nil &&
-                isIsoDate($0.date, in: payPeriod)
+                let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .oneOffIncome, sourceId: $0.id, scheduledDate: $0.date)
+                let effectiveDate = effectiveIncomeDate(override: override, scheduledDate: $0.date)
+                return $0.deletedAt == nil &&
+                override?.state != .cancelled &&
+                isIsoDate(effectiveDate, in: payPeriod)
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) {
+                let override = incomeOccurrenceOverride(snapshot: snapshot, kind: .oneOffIncome, sourceId: $1.id, scheduledDate: $1.date)
+                return $0 + max(0, override?.amountPenceOverride ?? $1.amountPence)
+            }
+    }
+
+    private static func incomeOccurrenceOverride(
+        snapshot: PlannerSnapshot,
+        kind: IncomeOccurrenceSourceKind,
+        sourceId: String,
+        scheduledDate: String
+    ) -> IncomeOccurrenceOverride? {
+        snapshot.incomeOccurrenceOverrides.first {
+            $0.deletedAt == nil &&
+            $0.sourceKind == kind &&
+            $0.sourceId == sourceId &&
+            $0.scheduledDate == scheduledDate
+        }
+    }
+
+    private static func effectiveIncomeDate(override: IncomeOccurrenceOverride?, scheduledDate: String) -> String {
+        guard override?.state == .confirmed,
+              let actualDate = override?.actualDate,
+              FinanceEngine.isIsoDate(actualDate)
+        else { return scheduledDate }
+        return actualDate
     }
 
     private static func plannedFundingCostItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod, asOfDate: String?) -> [PeriodCostItem] {
@@ -2809,6 +3071,193 @@ enum PlannerDerivedData {
             .sorted { $0.date == $1.date ? eventRank($0.type) < eventRank($1.type) : $0.date < $1.date }
     }
 
+    /// Produces the compact Home notification window while keeping each edit
+    /// attached to its immutable scheduled occurrence rather than its moved date.
+    static func homeDueEvents(snapshot: PlannerSnapshot, asOfDate: String) -> [HomeDueEvent] {
+        guard FinanceEngine.isIsoDate(asOfDate) else { return [] }
+        let tomorrow = FinanceEngine.addIsoDays(date: asOfDate, days: 1)
+        let validDates = Set([asOfDate, tomorrow])
+        let activeIncomeOverrides = snapshot.incomeOccurrenceOverrides.filter { $0.deletedAt == nil }
+
+        func incomeOverride(kind: IncomeOccurrenceSourceKind, id: String, scheduledDate: String) -> IncomeOccurrenceOverride? {
+            activeIncomeOverrides.first {
+                $0.sourceKind == kind && $0.sourceId == id && $0.scheduledDate == scheduledDate
+            }
+        }
+
+        func incomeDate(_ override: IncomeOccurrenceOverride?, scheduledDate: String) -> String {
+            guard override?.state == .confirmed,
+                  let actualDate = override?.actualDate,
+                  FinanceEngine.isIsoDate(actualDate)
+            else { return scheduledDate }
+            return actualDate
+        }
+
+        func incomeStatus(_ override: IncomeOccurrenceOverride?) -> HomeDueEventStatus {
+            switch override?.state {
+            case .awaiting: .awaiting
+            case .confirmed: .completed
+            case .normal, .cancelled, .none: .scheduled
+            }
+        }
+
+        var events: [HomeDueEvent] = []
+        for period in snapshot.payPeriods where period.deletedAt == nil {
+            let paycheck = snapshot.paychecks.first { $0.deletedAt == nil && $0.payPeriodId == period.id }
+            let sourceId = paycheck?.id ?? period.id
+            let override = incomeOverride(kind: .paycheck, id: sourceId, scheduledDate: period.payday)
+            guard override?.state != .cancelled else { continue }
+            let date = incomeDate(override, scheduledDate: period.payday)
+            guard validDates.contains(date) else { continue }
+            let baseAmount = paycheck.map { $0.actualAmountPence ?? $0.calculatedAmountPence } ?? period.incomePence
+            events.append(HomeDueEvent(
+                id: "home-payday-\(sourceId)-\(period.payday)",
+                scheduledDate: period.payday,
+                date: date,
+                title: "Payday",
+                amountPence: max(0, override?.amountPenceOverride ?? baseAmount),
+                direction: .incoming,
+                status: incomeStatus(override),
+                sourceLabel: paycheck == nil ? "Pay period" : "Paycheck",
+                cycleLabel: "Scheduled \(period.payday)",
+                source: .payday(payPeriodId: period.id, paycheckId: paycheck?.id)
+            ))
+        }
+
+        for income in snapshot.oneOffIncomes where income.deletedAt == nil {
+            let override = incomeOverride(kind: .oneOffIncome, id: income.id, scheduledDate: income.date)
+            guard override?.state != .cancelled else { continue }
+            let date = incomeDate(override, scheduledDate: income.date)
+            guard validDates.contains(date) else { continue }
+            events.append(HomeDueEvent(
+                id: "home-one-off-\(income.id)-\(income.date)",
+                scheduledDate: income.date,
+                date: date,
+                title: income.name,
+                amountPence: max(0, override?.amountPenceOverride ?? income.amountPence),
+                direction: .incoming,
+                status: incomeStatus(override),
+                sourceLabel: "One-off income",
+                cycleLabel: "Scheduled \(income.date)",
+                source: .oneOffIncome(incomeId: income.id)
+            ))
+        }
+
+        for occurrence in resolvedRecurringOccurrences(
+            snapshot: snapshot,
+            payments: snapshot.recurringPayments.filter { $0.deletedAt == nil },
+            startDate: asOfDate,
+            endDate: tomorrow
+        ) where validDates.contains(occurrence.dueDate) {
+            let occurrenceOverride = snapshot.recurringPaymentOccurrenceOverrides.first {
+                $0.deletedAt == nil &&
+                $0.paymentId == occurrence.payment.id &&
+                $0.scheduledDueDate == occurrence.scheduledDueDate
+            }
+            events.append(HomeDueEvent(
+                id: "home-recurring-\(occurrence.id)",
+                scheduledDate: occurrence.scheduledDueDate,
+                date: occurrence.dueDate,
+                title: occurrence.payment.name,
+                amountPence: occurrence.amountPence,
+                direction: .outgoing,
+                status: occurrence.isAwaitingPayment
+                    ? .awaiting
+                    : (occurrenceOverride?.state == .confirmed ? .completed : .scheduled),
+                sourceLabel: "Recurring bill",
+                cycleLabel: "\(occurrence.payment.frequency.rawValue.capitalized) · scheduled \(occurrence.scheduledDueDate)",
+                source: .recurringBill(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
+            ))
+        }
+
+        for payment in snapshot.customPayments where payment.deletedAt == nil && payment.status != .archived && validDates.contains(payment.dueDate) {
+            events.append(HomeDueEvent(
+                id: "home-saved-\(payment.id)",
+                scheduledDate: payment.dueDate,
+                date: payment.dueDate,
+                title: payment.name,
+                amountPence: max(0, payment.amountPence),
+                direction: .outgoing,
+                status: payment.status == .paid ? .completed : .scheduled,
+                sourceLabel: "Saved payment",
+                cycleLabel: "One-off · \(payment.dueDate)",
+                source: .savedPayment(paymentId: payment.id)
+            ))
+        }
+
+        let debtsById = Dictionary(uniqueKeysWithValues: snapshot.debts.filter { $0.deletedAt == nil }.map { ($0.id, $0) })
+        for item in debtScheduleItems(snapshot: snapshot, payPeriod: nil)
+            where item.deletedAt == nil && item.status != .cancelled {
+            guard let debt = debtsById[item.debtId], debt.status.isActiveLike || item.status == .paid else { continue }
+            let effectiveDate = item.paidDate ?? item.dueDate
+            guard validDates.contains(effectiveDate) else { continue }
+            events.append(HomeDueEvent(
+                id: "home-debt-\(item.id)",
+                scheduledDate: item.dueDate,
+                date: effectiveDate,
+                title: debt.name,
+                amountPence: max(0, item.plannedAmountPence),
+                direction: .outgoing,
+                status: item.status == .paid ? .completed : (item.status == .overdue || item.status == .missed ? .awaiting : .scheduled),
+                sourceLabel: "Debt payment",
+                cycleLabel: "Scheduled \(item.dueDate)",
+                source: .debtPayment(scheduleItemId: item.id, debtId: item.debtId)
+            ))
+        }
+
+        let reminderStart = FinanceEngine.addIsoDays(date: asOfDate, days: -45)
+        for reminder in creditCardCycleReminders(snapshot: snapshot, asOfDate: reminderStart, months: 3) {
+            let card = snapshot.creditCards.first { $0.id == reminder.cardId && !$0.archived && $0.deletedAt == nil }
+            guard let card else { continue }
+            let override = snapshot.creditCardCycleOverrides.first {
+                $0.deletedAt == nil && $0.creditCardId == reminder.cardId && $0.scheduledStatementDate == reminder.scheduledStatementDate
+            }
+            let payment = creditCardStatementPayments(
+                card: card,
+                snapshot: snapshot,
+                startDate: reminder.directDebitDate,
+                endDate: reminder.directDebitDate,
+                asOfDate: asOfDate
+            ).first { $0.scheduledStatementDate == reminder.scheduledStatementDate }
+            let amount = max(0, override?.amountPenceOverride ?? payment?.forecastDuePence ?? 0)
+
+            if validDates.contains(reminder.statementDate) {
+                events.append(HomeDueEvent(
+                    id: "home-card-statement-\(card.id)-\(reminder.scheduledStatementDate)",
+                    scheduledDate: reminder.scheduledStatementDate,
+                    date: reminder.statementDate,
+                    title: "\(card.name) statement",
+                    amountPence: amount,
+                    direction: .outgoing,
+                    status: override?.statementState == .awaitingConfirmation ? .awaiting : (override?.statementState == .confirmed ? .completed : .scheduled),
+                    sourceLabel: "Card statement",
+                    cycleLabel: "Statement cycle \(reminder.scheduledStatementDate)",
+                    source: .cardStatement(cardId: card.id, scheduledStatementDate: reminder.scheduledStatementDate)
+                ))
+            }
+            if validDates.contains(reminder.directDebitDate) {
+                events.append(HomeDueEvent(
+                    id: "home-card-direct-debit-\(card.id)-\(reminder.scheduledStatementDate)",
+                    scheduledDate: reminder.scheduledStatementDate,
+                    date: reminder.directDebitDate,
+                    title: "\(card.name) Direct Debit",
+                    amountPence: amount,
+                    direction: .outgoing,
+                    status: override?.directDebitState == .awaitingPayment ? .awaiting : (override?.directDebitState == .confirmed ? .completed : .scheduled),
+                    sourceLabel: "Card Direct Debit",
+                    cycleLabel: "Statement cycle \(reminder.scheduledStatementDate)",
+                    source: .cardDirectDebit(cardId: card.id, scheduledStatementDate: reminder.scheduledStatementDate)
+                ))
+            }
+        }
+
+        return events.sorted {
+            if $0.date != $1.date { return $0.date < $1.date }
+            if $0.direction != $1.direction { return $0.direction == .incoming }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+    }
+
     private static func potAllocationCalendarTitle(
         allocation: PotAllocation,
         potName: String,
@@ -3005,7 +3454,11 @@ enum PlannerDerivedData {
         )
     }
 
-    private static func createPayPeriodCostSummary(payReceivedPence: Int, items: [PeriodCostItem]) -> PayPeriodCostSummary {
+    private static func createPayPeriodCostSummary(
+        payReceivedPence: Int,
+        plannedCostsPence: Int,
+        items: [PeriodCostItem]
+    ) -> PayPeriodCostSummary {
         func totalCosts(for scopedItems: [PeriodCostItem]) -> Int {
             let directRecurringPence = sumPositive(scopedItems.filter { $0.source == .recurring && $0.creditCardId == nil })
             let savedPaymentsPence = sumPositive(scopedItems.filter { $0.source == .savedPayment && $0.creditCardId == nil })
@@ -3037,7 +3490,7 @@ enum PlannerDerivedData {
         let moneyLeftPence = payReceivedPence - totalCostsPence
         let committedCostsPence = totalCosts(for: items.filter { !$0.isProjected })
         let unfundedChecklistPence = totalCosts(for: items.filter(\.isProjected))
-        let projectedCostsPence = committedCostsPence + unfundedChecklistPence
+        let projectedCostsPence = max(0, plannedCostsPence)
         let currentMoneyLeftPence = payReceivedPence - committedCostsPence
         let projectedMoneyLeftPence = payReceivedPence - projectedCostsPence
 
@@ -3060,7 +3513,7 @@ enum PlannerDerivedData {
             projectedMoneyLeftPence: projectedMoneyLeftPence,
             totalCostsPence: totalCostsPence,
             moneyLeftPence: moneyLeftPence,
-            isOverCommitted: moneyLeftPence < 0,
+            isOverCommitted: projectedMoneyLeftPence < 0,
             items: items
         )
     }

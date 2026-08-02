@@ -21,12 +21,14 @@ enum PotsLayoutPolicy {
     static let summaryPresentation: PotsDetailPresentation = .navigationPush
     static let summaryShowsTopCardSymbol = false
     static let overviewDetailSections: [PotsOverviewDetailSection] = [.graph, .timeline]
-    static let graphStyle = "animatedNeonLine"
-    static let timelineStyle = "branchedPotTimeline"
+    static let graphStyle = "themeAdaptiveLine"
+    static let timelineStyle = "themeAdaptivePotTimeline"
     static let timelinePresentation = "collapsibleDropdown"
     static let timelineDefaultsExpandedWhenEmpty = true
     static let overviewDetailSubtitle = ""
     static let overviewDetailUsesInlineTitle = true
+    static let potOverviewShowsAllocateAction = true
+    static let potOverviewShowsRecordSpendingAction = false
 }
 
 enum PotHistoryLayoutPolicy {
@@ -335,7 +337,7 @@ private struct PotBalanceTrendData: Equatable {
     }
 
     var trendColor: Color {
-        changePence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp
+        changePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange
     }
 
     static func make(snapshot: PlannerSnapshot, todayIso: String) -> PotBalanceTrendData {
@@ -443,11 +445,7 @@ private struct PotBalanceTrendCard: View {
                 PotBalanceLineGraph(data: data)
                     .frame(height: 170)
 
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    PotOverviewMetricPill(label: "Started", value: MoneyParser.formatPence(data.startPence), color: AppTheme.Colors.primaryOrange)
-                    PotOverviewMetricPill(label: "Moved", value: signedMoney(data.movementPence), color: data.trendColor)
-                    PotOverviewMetricPill(label: "Now", value: MoneyParser.formatPence(data.currentPence), color: AppTheme.Colors.success)
-                }
+                PotOverviewMetricStrip(data: data)
             }
         }
         .accessibilityElement(children: .combine)
@@ -462,8 +460,10 @@ private struct PotBalanceTrendCard: View {
 }
 
 private struct PotBalanceLineGraph: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var data: PotBalanceTrendData
     @State private var drawProgress = 0.0
+    @State private var revealOpacity = 1.0
 
     var body: some View {
         GeometryReader { proxy in
@@ -486,7 +486,7 @@ private struct PotBalanceLineGraph: View {
                             endPoint: .bottom
                         )
                     )
-                    .opacity(drawProgress)
+                    .opacity(reduceMotion ? revealOpacity : drawProgress)
 
                 PotBalanceLineShape(points: data.points, minValue: minValue, maxValue: maxValue)
                     .trim(from: 0, to: drawProgress)
@@ -494,12 +494,14 @@ private struct PotBalanceLineGraph: View {
                         lineColor,
                         style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
                     )
-                    .shadow(color: lineColor.opacity(data.hasMovement ? 0.48 : 0.24), radius: 13, y: 7)
+                    .shadow(color: graphShadowColor, radius: data.hasMovement ? 6 : 3, y: 3)
+                    .opacity(revealOpacity)
 
                 if let finalPoint = data.points.last {
                     PotBalancePulseMarker(color: lineColor)
                         .position(pointPosition(index: data.points.count - 1, balancePence: finalPoint.balancePence, size: proxy.size, minValue: minValue, maxValue: maxValue))
                         .opacity(drawProgress > 0.92 ? 1 : 0)
+                        .opacity(revealOpacity)
                 }
 
                 HStack {
@@ -534,6 +536,12 @@ private struct PotBalanceLineGraph: View {
         .padding(.bottom, 8)
     }
 
+    private var graphShadowColor: Color {
+        data.changePence < 0
+            ? AppTheme.Colors.danger.opacity(0.24)
+            : AppTheme.Colors.accentGlow.opacity(0.48)
+    }
+
     private func pointPosition(index: Int, balancePence: Int, size: CGSize, minValue: Int, maxValue: Int) -> CGPoint {
         let drawingHeight = max(size.height - 26, 1)
         let x = CGFloat(index) / CGFloat(max(data.points.count - 1, 1)) * max(size.width, 1)
@@ -544,10 +552,47 @@ private struct PotBalanceLineGraph: View {
     }
 
     private func startAnimation() {
+        guard !reduceMotion else {
+            drawProgress = 1
+            revealOpacity = 0
+            withAnimation(.easeOut(duration: 0.2)) {
+                revealOpacity = 1
+            }
+            return
+        }
+        revealOpacity = 1
         drawProgress = 0
-        withAnimation(.easeOut(duration: 1.1)) {
+        withAnimation(.easeOut(duration: 0.7)) {
             drawProgress = 1
         }
+    }
+}
+
+private struct PotOverviewMetricStrip: View {
+    var data: PotBalanceTrendData
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                metrics
+            }
+            VStack(spacing: AppTheme.Spacing.sm) {
+                metrics
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var metrics: some View {
+        PotOverviewMetricPill(label: "Started", value: MoneyParser.formatPence(data.startPence), color: AppTheme.Colors.primaryOrange)
+        PotOverviewMetricPill(label: "Moved", value: signedMoney(data.movementPence), color: data.trendColor)
+        PotOverviewMetricPill(label: "Now", value: MoneyParser.formatPence(data.currentPence), color: AppTheme.Colors.primaryOrange)
+    }
+
+    private func signedMoney(_ amountPence: Int) -> String {
+        amountPence < 0
+            ? "-\(MoneyParser.formatPence(abs(amountPence)))"
+            : "+\(MoneyParser.formatPence(amountPence))"
     }
 }
 
@@ -624,6 +669,7 @@ private struct PotBalanceAreaShape: Shape {
 }
 
 private struct PotBalancePulseMarker: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var color: Color
     @State private var pulse = false
 
@@ -641,9 +687,17 @@ private struct PotBalancePulseMarker: View {
                 .shadow(color: color.opacity(0.72), radius: 10, y: 4)
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
+            startPulse()
+        }
+    }
+
+    private func startPulse() {
+        guard !reduceMotion else {
+            pulse = false
+            return
+        }
+        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+            pulse = true
         }
     }
 }
@@ -780,9 +834,9 @@ private enum PotTimelineEventKind: Equatable {
         case .created:
             return AppTheme.Colors.primaryOrange
         case .topUp:
-            return AppTheme.Colors.neonMoneyUp
+            return AppTheme.Colors.success
         case .payment:
-            return AppTheme.Colors.neonMoneyDown
+            return AppTheme.Colors.danger
         }
     }
 }
@@ -872,7 +926,7 @@ private struct PotTimelineRow: View {
                     if let amountPence = event.amountPence {
                         Text(signedMoney(amountPence))
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(amountPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp)
+                            .foregroundStyle(event.kind.color)
                             .lineLimit(1)
                     }
                 }
@@ -903,7 +957,7 @@ private struct PotTimelineRow: View {
                     Circle()
                         .stroke(Color(hex: event.potColor).opacity(0.45), lineWidth: 4)
                 )
-                .shadow(color: event.kind.color.opacity(0.35), radius: 8, y: 4)
+                .shadow(color: event.kind.color.opacity(0.2), radius: 4, y: 2)
 
             Rectangle()
                 .fill(isLast ? .clear : AppTheme.Colors.border.opacity(0.68))
@@ -1551,8 +1605,6 @@ private struct PotDetailView: View {
     @ObservedObject var store: PlannerStore
     var pot: Pot
     @State private var allocation = ""
-    @State private var spend = ""
-    @State private var note = ""
     @State private var isEditingSetup = false
     @State private var isDeleteConfirmationPresented = false
 
@@ -1580,14 +1632,6 @@ private struct PotDetailView: View {
                             if store.addPotAllocation(potId: pot.id, amountPence: amountPence) {
                                 allocation = ""
                             }
-                        }
-                        AppDivider()
-                        MoneyField(title: "Spend amount", text: $spend)
-                        TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
-                        SecondaryButton(title: "Record spending", systemImage: "cart") {
-                            store.recordTransaction(potId: pot.id, creditCardId: nil, paymentMethod: .pot, amountPence: MoneyParser.parsePoundsToPence(spend), type: .spending, date: Date().isoDateString, note: note)
-                            spend = ""
-                            note = ""
                         }
                     }
                     SecondaryButton(title: "Delete pot", systemImage: "trash", role: .destructive) {

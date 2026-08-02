@@ -78,14 +78,14 @@ Excluded candidates from Home/current Money Left:
 
 - Home/current total deductions: £162.40
 - Home/current Money Left: £3244.23
-- Projected total deductions: £429.56
+- Projected total deductions: £1010.21
 - Projected Money Left (audit legacy field moneyLeftPence): £2977.07
 
 ## Planned-cost field comparison
 - Funding checklist completed allocations: £162.40
 - Committed costs (non-projected): £162.40
 - Outstanding/projected checklist costs: £267.16
-- All projected costs: £429.56
+- All projected costs: £1010.21
 - Value used by Home Money Left card: currentMoneyLeftPence = £3244.23
 - Value previously inspected by the audit: moneyLeftPence = £2977.07
 

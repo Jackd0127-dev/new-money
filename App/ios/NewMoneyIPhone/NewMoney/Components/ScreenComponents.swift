@@ -111,6 +111,7 @@ enum AppToolbarMode {
     case modalSingle
     case add(action: () -> Void)
     case editDone(isEditing: Bool, canEdit: Bool, action: () -> Void)
+    case editDoneAndAdd(isEditing: Bool, canEdit: Bool, editAction: () -> Void, addAction: () -> Void)
     case actions([AppToolbarAction])
 }
 
@@ -243,6 +244,18 @@ private struct PlaceholderToolbarModifier: ViewModifier {
                     AppEditDoneToolbarButton(isEditing: isEditing, canEdit: canEdit, action: action)
                 }
             }
+        case .editDoneAndAdd(let isEditing, let canEdit, let editAction, let addAction):
+            content.toolbar {
+                ToolbarItem(id: "edit-done", placement: .topBarTrailing) {
+                    AppEditDoneToolbarButton(isEditing: isEditing, canEdit: canEdit, action: editAction)
+                }
+                if #available(iOS 26.0, *), AppToolbarLayoutPolicy.separatesAdjacentActions {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+                ToolbarItem(id: "add", placement: .topBarTrailing) {
+                    toolbarButton(AppToolbarAction(id: "add", symbol: "plus", accessibilityLabel: "Add", action: addAction))
+                }
+            }
         default:
             content.toolbar {
                 if let secondaryAction {
@@ -291,6 +304,8 @@ private struct PlaceholderToolbarModifier: ViewModifier {
                 AppToolbarAction(id: "add", symbol: "plus", accessibilityLabel: "Add", action: action)
             ]
         case .editDone:
+            []
+        case .editDoneAndAdd:
             []
         case .actions(let actions):
             actions

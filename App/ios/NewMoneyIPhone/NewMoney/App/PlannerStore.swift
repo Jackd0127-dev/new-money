@@ -1117,6 +1117,16 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func setRecurringBillOccurrenceAmount(paymentId: String, scheduledDueDate: String, amountPence: Int?) {
+        guard amountPence == nil || amountPence! > 0 else { return }
+        let reversedIds = reverseGeneratedRecurringBillTransactions(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.amountPenceOverride = amountPence
+            $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
+        }
+        persist()
+    }
+
     private func upsertRecurringBillOccurrenceOverride(
         paymentId: String,
         scheduledDueDate: String,
@@ -1499,6 +1509,66 @@ final class PlannerStore: ObservableObject {
         }
     }
 
+    func setCreditCardCycleAmount(cardId: String, scheduledStatementDate: String, amountPence: Int?) {
+        guard amountPence == nil || amountPence! > 0 else { return }
+        let reversedIds = reverseAutomaticStatementRepayments(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+        mutateCreditCardCycleOverride(cardId: cardId, scheduledStatementDate: scheduledStatementDate) {
+            $0.amountPenceOverride = amountPence
+            $0.reversedAutomaticRepaymentIds = Array(Set($0.reversedAutomaticRepaymentIds + reversedIds)).sorted()
+        }
+    }
+
+    func updateIncomeOccurrence(
+        sourceKind: IncomeOccurrenceSourceKind,
+        sourceId: String,
+        scheduledDate: String,
+        state: IncomeOccurrenceState,
+        actualDate: String?,
+        amountPence: Int?
+    ) {
+        guard FinanceEngine.isIsoDate(scheduledDate),
+              amountPence == nil || amountPence! > 0,
+              state != .confirmed || (actualDate.map(FinanceEngine.isIsoDate) ?? false)
+        else { return }
+
+        let sourceExists: Bool
+        switch sourceKind {
+        case .paycheck:
+            sourceExists = snapshot.paychecks.contains { $0.id == sourceId && $0.deletedAt == nil } ||
+                snapshot.payPeriods.contains { $0.id == sourceId && $0.deletedAt == nil }
+        case .oneOffIncome:
+            sourceExists = snapshot.oneOffIncomes.contains { $0.id == sourceId && $0.deletedAt == nil }
+        }
+        guard sourceExists else { return }
+
+        let now = DateUtilities.nowIsoString()
+        if let index = snapshot.incomeOccurrenceOverrides.firstIndex(where: {
+            $0.deletedAt == nil && $0.sourceKind == sourceKind && $0.sourceId == sourceId && $0.scheduledDate == scheduledDate
+        }) {
+            snapshot.incomeOccurrenceOverrides[index].state = state
+            snapshot.incomeOccurrenceOverrides[index].actualDate = state == .confirmed ? actualDate : nil
+            snapshot.incomeOccurrenceOverrides[index].amountPenceOverride = amountPence
+            snapshot.incomeOccurrenceOverrides[index].updatedAt = now
+        } else {
+            snapshot.incomeOccurrenceOverrides.insert(
+                IncomeOccurrenceOverride(
+                    id: "income-occurrence-override-\(sourceKind.rawValue)-\(sourceId)-\(scheduledDate)",
+                    sourceKind: sourceKind,
+                    sourceId: sourceId,
+                    scheduledDate: scheduledDate,
+                    state: state,
+                    actualDate: state == .confirmed ? actualDate : nil,
+                    amountPenceOverride: amountPence,
+                    createdAt: now,
+                    updatedAt: now,
+                    deletedAt: nil
+                ),
+                at: 0
+            )
+        }
+        persist()
+    }
+
     func requestCreditCardCycleReminderPermission() {
         Task {
             let center = UNUserNotificationCenter.current()
@@ -1729,6 +1799,18 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func updateCustomPaymentOccurrence(id: String, amountPence: Int, dueDate: String, status: CustomPaymentStatus) {
+        guard amountPence > 0,
+              FinanceEngine.isIsoDate(dueDate),
+              let index = snapshot.customPayments.firstIndex(where: { $0.id == id && $0.deletedAt == nil })
+        else { return }
+        snapshot.customPayments[index].amountPence = amountPence
+        snapshot.customPayments[index].dueDate = dueDate
+        snapshot.customPayments[index].status = status
+        snapshot.customPayments[index].updatedAt = DateUtilities.nowIsoString()
+        persist()
+    }
+
     func addCreditCardPot(cardId: String, name: String, amountPence: Int, source: CreditCardPotSource) {
         let now = DateUtilities.nowIsoString()
         snapshot.creditCardPots.insert(
@@ -1876,6 +1958,77 @@ final class PlannerStore: ObservableObject {
             recalculationMode: .finishEarlier,
             note: note
         )
+    }
+
+    func updateDebtScheduleOccurrence(
+        scheduleItemId: String,
+        debtId: String,
+        amountPence: Int,
+        dueDate: String,
+        status: DebtPaymentScheduleStatus
+    ) {
+        guard amountPence > 0,
+              FinanceEngine.isIsoDate(dueDate),
+              let debtIndex = snapshot.debts.firstIndex(where: { $0.id == debtId && $0.status.isActiveLike })
+        else { return }
+
+        if !snapshot.debtPaymentScheduleItems.contains(where: { $0.id == scheduleItemId }),
+           let derived = PlannerDerivedData.debtScheduleItems(snapshot: snapshot, payPeriod: nil).first(where: { $0.id == scheduleItemId }) {
+            snapshot.debtPaymentScheduleItems.append(derived)
+        }
+        guard let itemIndex = snapshot.debtPaymentScheduleItems.firstIndex(where: { $0.id == scheduleItemId && $0.debtId == debtId && $0.deletedAt == nil }) else { return }
+        let now = DateUtilities.nowIsoString()
+
+        snapshot.debtPaymentScheduleItems[itemIndex].dueDate = dueDate
+        snapshot.debtPaymentScheduleItems[itemIndex].plannedAmountPence = amountPence
+        snapshot.debtPaymentScheduleItems[itemIndex].principalAmountPence = max(0, amountPence - snapshot.debtPaymentScheduleItems[itemIndex].interestAmountPence - snapshot.debtPaymentScheduleItems[itemIndex].feeAmountPence)
+        snapshot.debtPaymentScheduleItems[itemIndex].updatedAt = now
+
+        guard status == .paid else {
+            snapshot.debtPaymentScheduleItems[itemIndex].status = status
+            persist()
+            return
+        }
+        guard snapshot.debtPaymentScheduleItems[itemIndex].status != .paid else {
+            persist()
+            return
+        }
+
+        let cappedAmount = min(amountPence, max(0, snapshot.debts[debtIndex].currentBalancePence))
+        guard cappedAmount > 0 else { return }
+        let application = DebtPlannerEngine.applyPayment(
+            debt: snapshot.debts[debtIndex],
+            scheduleItem: snapshot.debtPaymentScheduleItems[itemIndex],
+            amountPence: cappedAmount,
+            date: dueDate,
+            sourcePotId: nil,
+            paymentType: .scheduled,
+            note: "Scheduled payment"
+        )
+        snapshot.debts[debtIndex] = application.debt
+        if let updatedItem = application.scheduleItem { replaceDebtScheduleItem(updatedItem) }
+        snapshot.debtPayments.insert(
+            DebtPayment(
+                id: DateUtilities.newId(prefix: "debt-payment"),
+                debtId: application.payment.debtId,
+                amountPence: application.payment.amountPence,
+                date: application.payment.date,
+                note: application.payment.note,
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: nil,
+                sourcePotId: application.payment.sourcePotId,
+                paymentType: application.payment.paymentType,
+                scheduleItemId: application.payment.scheduleItemId,
+                principalPaidPence: application.payment.principalPaidPence,
+                interestPaidPence: application.payment.interestPaidPence,
+                feePaidPence: application.payment.feePaidPence,
+                recalculationMode: .finishEarlier
+            ),
+            at: 0
+        )
+        recalculateDebtAfterPayment(debtId: debtId, date: dueDate, mode: .finishEarlier, now: now)
+        persist()
     }
 
     func recordManualDebtPayment(

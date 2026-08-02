@@ -150,7 +150,7 @@ struct CardsView: View {
 
     private var resolvedToolbarMode: AppToolbarMode {
         switch toolbarMode {
-        case .none, .add(_), .editDone(_, _, _), .actions(_):
+        case .none, .add(_), .editDone(_, _, _), .editDoneAndAdd(_, _, _, _), .actions(_):
             toolbarMode
         case .primaryDouble, .secondarySingle, .modalSingle:
             CardsLayoutPolicy.toolbarMode {

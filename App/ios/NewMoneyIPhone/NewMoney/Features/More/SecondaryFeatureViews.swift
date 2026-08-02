@@ -882,11 +882,14 @@ enum BillsLayoutPolicy {
     static let fundingChecklistAlwaysVisible = true
     static let fundingChecklistUsesExistingDerivedItems = true
     static let fundingChecklistProjectedPeriodCount = 2
+    static let fundingChecklistPresentation = "independentDropdowns"
+    static let fundingChecklistCurrentDefaultsExpanded = true
+    static let fundingChecklistNextDefaultsExpanded = false
     static let yourBillsPresentation = "collapsibleDropdown"
     static let takingSoonPresentation = "collapsibleDropdown"
-    static let overviewUpcomingPresentation = "collapsibleProgressiveLazyList"
+    static let overviewUpcomingPresentation = "collapsibleTwoCyclesPerBill"
     static let overviewGroupsPresentation = "collapsibleDropdown"
-    static let upcomingSchedulePageMonths = 12
+    static let upcomingOccurrencesPerBill = 2
     static let upcomingScheduleLoadsOnlyWhenExpanded = true
     static let collapsibleHeaderStyle = "activityExpandableSection"
     static let collapsibleHeaderMinimumHeight: CGFloat = 44
@@ -900,6 +903,10 @@ enum BillsLayoutPolicy {
     static let editBillTitle = "Edit Bill"
     static let editUsesExistingRecurringPaymentUpdate = true
     static let billRowsShowCheckThisCycle = true
+
+    static func activeBillCountLabel(_ count: Int) -> String {
+        "\(count) active bill\(count == 1 ? "" : "s")"
+    }
 }
 
 private struct BillsTabPresentation {
@@ -1012,7 +1019,7 @@ struct BillsView: View {
                                 .foregroundStyle(AppTheme.Colors.primaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
-                            Text(activeBillCount == 0 ? "No active bills yet" : "\(activeBillCount) active templates")
+                            Text(activeBillCount == 0 ? "No active bills yet" : BillsLayoutPolicy.activeBillCountLabel(activeBillCount))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(AppTheme.Colors.secondaryText)
                         }
@@ -1066,8 +1073,11 @@ struct BillsView: View {
                     )
                 }
             } else {
-                ForEach(fundingChecklistGroups) { group in
-                    BillsFundingChecklistPeriodCard(group: group) { item in
+                ForEach(Array(fundingChecklistGroups.enumerated()), id: \.element.id) { index, group in
+                    BillsFundingChecklistPeriodCard(
+                        group: group,
+                        initiallyExpanded: group.payPeriod.id == store.selectedPayPeriod?.id || (store.selectedPayPeriod == nil && index == 0)
+                    ) { item in
                         applyFundingChecklistAction(item)
                     } excludeAction: { item in
                         applyFundingChecklistExclusion(item)
@@ -1188,10 +1198,11 @@ struct BillsView: View {
                     }
                 }
             }
-            BillsProgressiveUpcomingList(
+            BillsBoundedUpcomingList(
                 snapshot: store.snapshot,
                 payments: sortedBills,
-                todayIso: store.todayIso
+                todayIso: store.todayIso,
+                limitPerPayment: BillsLayoutPolicy.upcomingOccurrencesPerBill
             ) { occurrence in
                 selectedOccurrenceForAdjustment = occurrence
             }
@@ -1238,7 +1249,7 @@ struct BillsView: View {
     }
 
     private var upcomingSectionSubtitle: String {
-        "Next payments in date order"
+        "Next two cycles per active bill"
     }
 
     private var activeBillCount: Int {
@@ -1345,18 +1356,12 @@ struct BillsView: View {
             return (groupId, payment)
         }, by: { $0.0 })
         .mapValues { rows in rows.map(\.1) }
-        let upcomingOccurrences = PlannerDerivedData.resolvedRecurringOccurrences(
+        let upcomingOccurrences = PlannerDerivedData.nextRecurringOccurrences(
             snapshot: snapshot,
             payments: sortedBills,
-            startDate: todayIso,
-            endDate: FinanceEngine.addIsoDays(date: todayIso, days: 30)
+            asOfDate: todayIso,
+            limitPerPayment: BillsLayoutPolicy.upcomingOccurrencesPerBill
         )
-        .sorted { lhs, rhs in
-            if lhs.dueDate == rhs.dueDate {
-                return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
-            }
-            return lhs.dueDate < rhs.dueDate
-        }
         let nextDueEndDate = FinanceEngine.addIsoDays(date: todayIso, days: 180)
         let nextDueLabelsByPaymentId = Dictionary(uniqueKeysWithValues: sortedBills.map { payment in
             let label = PlannerDerivedData.resolvedRecurringOccurrences(
@@ -1547,46 +1552,86 @@ struct RecurringBillOccurrenceAdjustmentSheet: View {
 }
 
 private struct BillsFundingChecklistPeriodCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var group: BillsFundingChecklistPeriodGroup
     var action: (FundingChecklistPresentationItem) -> Void
     var excludeAction: (FundingChecklistPresentationItem) -> Void
     var adjustAction: (FundingChecklistPresentationItem) -> Void
+    @State private var isExpanded: Bool
+
+    init(
+        group: BillsFundingChecklistPeriodGroup,
+        initiallyExpanded: Bool,
+        action: @escaping (FundingChecklistPresentationItem) -> Void,
+        excludeAction: @escaping (FundingChecklistPresentationItem) -> Void,
+        adjustAction: @escaping (FundingChecklistPresentationItem) -> Void
+    ) {
+        self.group = group
+        self.action = action
+        self.excludeAction = excludeAction
+        self.adjustAction = adjustAction
+        _isExpanded = State(initialValue: initiallyExpanded)
+    }
 
     var body: some View {
         AppCard(glow: hasPendingFunding) {
-            HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(periodTitle)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text(progressText)
-                        .font(.caption.weight(.semibold))
+            Button(action: toggleExpansion) {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(periodTitle)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                            .multilineTextAlignment(.leading)
+                        Text(progressText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("Amount due")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            .textCase(.uppercase)
+                        Text(MoneyParser.formatPence(totalAmountPence))
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    }
+
+                    Image(systemName: ExpandableSectionLayoutPolicy.symbol(isExpanded: isExpanded))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .frame(width: 44, height: 44)
+                        .accessibilityHidden(true)
                 }
-
-                Spacer(minLength: AppTheme.Spacing.sm)
-
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("Amount due")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
-                        .textCase(.uppercase)
-                    Text(MoneyParser.formatPence(totalAmountPence))
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
-                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Funding period \(periodTitle)")
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isExpanded ? "Collapses this funding checklist" : "Expands this funding checklist")
 
-            AppDivider()
-            checklistSection(title: "Active funding", items: activeItems, isReadOnly: false)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    AppDivider()
+                    checklistSection(title: "Active funding", items: activeItems, isReadOnly: false)
 
-            if !paidItems.isEmpty {
-                AppDivider()
-                checklistSection(title: "Paid / completed", items: paidItems, isReadOnly: true)
+                    if !paidItems.isEmpty {
+                        AppDivider()
+                        checklistSection(title: "Paid / completed", items: paidItems, isReadOnly: true)
+                    }
+                }
+                .transition(.opacity)
             }
         }
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : AppTheme.Animation.quick, value: isExpanded)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Funding period \(periodTitle), \(MoneyParser.formatPence(totalAmountPence)) due")
+    }
+
+    private func toggleExpansion() {
+        isExpanded.toggle()
     }
 
     @ViewBuilder
@@ -1815,10 +1860,11 @@ private struct BillsOverviewDetailView: View {
                 subtitle: upcomingSectionSubtitle,
                 isExpanded: $isUpcomingExpanded
             ) {
-                BillsProgressiveUpcomingList(
+                BillsBoundedUpcomingList(
                     snapshot: store.snapshot,
                     payments: sortedBills,
-                    todayIso: store.todayIso
+                    todayIso: store.todayIso,
+                    limitPerPayment: BillsLayoutPolicy.upcomingOccurrencesPerBill
                 )
             }
 
@@ -1856,7 +1902,7 @@ private struct BillsOverviewDetailView: View {
                             .foregroundStyle(AppTheme.Colors.primaryText)
                             .lineLimit(1)
                             .minimumScaleFactor(0.62)
-                        Text(activeBillCount == 0 ? "No active bills yet" : "\(activeBillCount) active bills tracked")
+                        Text(activeBillCount == 0 ? "No active bills yet" : BillsLayoutPolicy.activeBillCountLabel(activeBillCount))
                             .font(.subheadline)
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                     }
@@ -1925,7 +1971,7 @@ private struct BillsOverviewDetailView: View {
             return "Future payments in date order"
         }
 
-        return "Next \(billsFriendlyDate(nextBillOccurrence.dueDate)) · loads as you scroll"
+        return "Next \(billsFriendlyDate(nextBillOccurrence.dueDate)) · two cycles per bill"
     }
 
     private var groupsSectionSubtitle: String {
@@ -1938,14 +1984,12 @@ private struct BillsOverviewDetailView: View {
     }
 
     private var upcomingOccurrences: [RecurringPaymentOccurrence] {
-        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 60)
-        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: store.snapshot, payments: sortedBills, startDate: store.todayIso, endDate: endDate)
-            .sorted { lhs, rhs in
-                if lhs.dueDate == rhs.dueDate {
-                    return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
-                }
-                return lhs.dueDate < rhs.dueDate
-            }
+        PlannerDerivedData.nextRecurringOccurrences(
+            snapshot: store.snapshot,
+            payments: sortedBills,
+            asOfDate: store.todayIso,
+            limitPerPayment: BillsLayoutPolicy.upcomingOccurrencesPerBill
+        )
     }
 
     private var sortedBills: [RecurringPayment] {
@@ -2009,7 +2053,7 @@ private struct BillsOverviewGroupCard: View {
                     Text(section.title)
                         .font(.headline)
                         .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text(activePayments.isEmpty ? "No active bills" : "\(activePayments.count) active bills")
+                    Text(activePayments.isEmpty ? "No active bills" : BillsLayoutPolicy.activeBillCountLabel(activePayments.count))
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
@@ -2189,15 +2233,15 @@ private struct BillsUpcomingRow: View {
     }
 }
 
-private struct BillsProgressiveUpcomingList: View {
+private struct BillsBoundedUpcomingList: View {
     var snapshot: PlannerSnapshot
     var payments: [RecurringPayment]
     var todayIso: String
+    var limitPerPayment: Int
     var adjustAction: ((RecurringPaymentOccurrence) -> Void)? = nil
-    @State private var loadedPageCount = 1
 
     var body: some View {
-        let occurrences = loadedOccurrences
+        let occurrences = upcomingOccurrences
 
         if occurrences.isEmpty {
             AppCard {
@@ -2221,50 +2265,19 @@ private struct BillsProgressiveUpcomingList: View {
                                 AppDivider()
                             }
                         }
-                        .onAppear {
-                            loadNextPageIfNeeded(after: occurrence, visibleOccurrences: occurrences)
-                        }
                     }
                 }
             }
         }
     }
 
-    private var loadedOccurrences: [RecurringPaymentOccurrence] {
-        PlannerDerivedData.resolvedRecurringOccurrences(
+    private var upcomingOccurrences: [RecurringPaymentOccurrence] {
+        PlannerDerivedData.nextRecurringOccurrences(
             snapshot: snapshot,
-            payments: activePayments,
-            startDate: todayIso,
-            endDate: loadedThroughDate
+            payments: payments,
+            asOfDate: todayIso,
+            limitPerPayment: limitPerPayment
         )
-        .sorted { lhs, rhs in
-            if lhs.dueDate == rhs.dueDate {
-                return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
-            }
-            return lhs.dueDate < rhs.dueDate
-        }
-    }
-
-    private var activePayments: [RecurringPayment] {
-        payments.filter { $0.deletedAt == nil && $0.active }
-    }
-
-    private var loadedThroughDate: String {
-        let pagedEndDate = PlannerDerivedData.addIsoMonthsClamped(
-            date: todayIso,
-            months: loadedPageCount * BillsLayoutPolicy.upcomingSchedulePageMonths
-        )
-        let finalOneOffDate = activePayments
-            .filter { $0.frequency == .once }
-            .compactMap(\.dueDate)
-            .filter { $0 >= todayIso }
-            .max()
-
-        return max(pagedEndDate, finalOneOffDate ?? pagedEndDate)
-    }
-
-    private var hasOpenEndedSchedule: Bool {
-        activePayments.contains { $0.frequency != .once }
     }
 
     private func adjustmentAction(for occurrence: RecurringPaymentOccurrence) -> (() -> Void)? {
@@ -2274,17 +2287,6 @@ private struct BillsProgressiveUpcomingList: View {
         }
     }
 
-    private func loadNextPageIfNeeded(
-        after occurrence: RecurringPaymentOccurrence,
-        visibleOccurrences: [RecurringPaymentOccurrence]
-    ) {
-        guard hasOpenEndedSchedule,
-              occurrence.id == visibleOccurrences.last?.id else {
-            return
-        }
-
-        loadedPageCount += 1
-    }
 }
 
 private struct BillsGroupSectionCard: View {
@@ -3502,43 +3504,22 @@ struct HistoryView: View {
 
 enum SettingsRoute: String, CaseIterable, Equatable {
     case history
-    case creditStatements
 
     var title: String {
         switch self {
         case .history: "History"
-        case .creditStatements: "Credit Statements"
         }
     }
 
     var subtitle: String {
         switch self {
         case .history: "Paycheck and allocation history."
-        case .creditStatements: "Card statements and direct debit status."
         }
     }
 
     var symbol: String {
         switch self {
         case .history: "clock.arrow.circlepath"
-        case .creditStatements: "doc.text.magnifyingglass"
-        }
-    }
-}
-
-struct AppearanceSettingsView: View {
-    var navigationMode: ScreenNavigationMode = .inline
-    var toolbarMode: AppToolbarMode = .none
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
-
-    var body: some View {
-        ScreenScaffold(
-            title: "Appearance",
-            subtitle: "Choose the colour theme used on this iPhone.",
-            navigationMode: navigationMode,
-            toolbarMode: toolbarMode
-        ) {
-            AppearanceThemeCustomizerCard(selectedThemeRawValue: $selectedThemeRawValue)
         }
     }
 }
@@ -3675,13 +3656,6 @@ struct SettingsView: View {
         case .history:
             NavigationLink {
                 HistoryView(store: store)
-            } label: {
-                settingsRouteCard(route)
-            }
-            .buttonStyle(.plain)
-        case .creditStatements:
-            NavigationLink {
-                StatementsView(store: store)
             } label: {
                 settingsRouteCard(route)
             }

@@ -418,7 +418,37 @@ struct RecurringPaymentOccurrenceOverride: Codable, Equatable, Identifiable, Sen
     var scheduledDueDate: String
     var state: RecurringPaymentOccurrenceState
     var actualDueDate: String?
+    var amountPenceOverride: Int? = nil
     var reversedGeneratedTransactionIds: [String]
+    var createdAt: String
+    var updatedAt: String
+    var deletedAt: String?
+}
+
+enum IncomeOccurrenceSourceKind: String, Codable, Equatable, Sendable {
+    case paycheck
+    case oneOffIncome = "one_off_income"
+}
+
+enum IncomeOccurrenceState: String, Codable, Equatable, Sendable, CaseIterable, Identifiable {
+    case normal
+    case awaiting
+    case confirmed
+    case cancelled
+
+    var id: String { rawValue }
+}
+
+/// A one-off correction to an income event. The scheduled date remains the
+/// stable identity so changing one payday never shifts the normal cadence.
+struct IncomeOccurrenceOverride: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var sourceKind: IncomeOccurrenceSourceKind
+    var sourceId: String
+    var scheduledDate: String
+    var state: IncomeOccurrenceState
+    var actualDate: String?
+    var amountPenceOverride: Int?
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -887,6 +917,7 @@ struct CreditCardCycleOverride: Codable, Equatable, Identifiable, Sendable {
     var actualStatementDate: String?
     var directDebitState: CreditCardCycleDirectDebitState
     var actualDirectDebitDate: String?
+    var amountPenceOverride: Int? = nil
     var reversedAutomaticRepaymentIds: [String]
     var createdAt: String
     var updatedAt: String
@@ -965,6 +996,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var pots: [Pot]
     var recurringPayments: [RecurringPayment]
     var recurringPaymentOccurrenceOverrides: [RecurringPaymentOccurrenceOverride]
+    var incomeOccurrenceOverrides: [IncomeOccurrenceOverride]
     var billGroups: [BillGroup]
     var payPeriods: [PayPeriod]
     var paychecks: [Paycheck]
@@ -990,6 +1022,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         pots: [Pot],
         recurringPayments: [RecurringPayment],
         recurringPaymentOccurrenceOverrides: [RecurringPaymentOccurrenceOverride] = [],
+        incomeOccurrenceOverrides: [IncomeOccurrenceOverride] = [],
         billGroups: [BillGroup] = [],
         payPeriods: [PayPeriod],
         paychecks: [Paycheck],
@@ -1014,6 +1047,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.pots = pots
         self.recurringPayments = recurringPayments
         self.recurringPaymentOccurrenceOverrides = recurringPaymentOccurrenceOverrides
+        self.incomeOccurrenceOverrides = incomeOccurrenceOverrides
         self.billGroups = billGroups
         self.payPeriods = payPeriods
         self.paychecks = paychecks
@@ -1036,7 +1070,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions, bankAccounts
+        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, incomeOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions, bankAccounts
     }
 
     init(from decoder: Decoder) throws {
@@ -1046,6 +1080,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             pots: try container.decodeIfPresent([Pot].self, forKey: .pots) ?? [],
             recurringPayments: try container.decodeIfPresent([RecurringPayment].self, forKey: .recurringPayments) ?? [],
             recurringPaymentOccurrenceOverrides: try container.decodeIfPresent([RecurringPaymentOccurrenceOverride].self, forKey: .recurringPaymentOccurrenceOverrides) ?? [],
+            incomeOccurrenceOverrides: try container.decodeIfPresent([IncomeOccurrenceOverride].self, forKey: .incomeOccurrenceOverrides) ?? [],
             billGroups: try container.decodeIfPresent([BillGroup].self, forKey: .billGroups) ?? [],
             payPeriods: try container.decodeIfPresent([PayPeriod].self, forKey: .payPeriods) ?? [],
             paychecks: try container.decodeIfPresent([Paycheck].self, forKey: .paychecks) ?? [],

@@ -140,7 +140,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(repairedStore.selectedPayPeriod?.id, realPeriod.id)
     }
 
-    func testPlannerSnapshotDecodesMissingBankAccountsOneOffIncomeAndChecklistExclusions() throws {
+    func testPlannerSnapshotDecodesMissingNewCollectionsAndOptionalCycleAmounts() throws {
         let period = makePayPeriod(
             id: "period-july",
             startDate: "2026-07-01",
@@ -153,6 +153,7 @@ final class FinanceEngineTests: XCTestCase {
         object.removeValue(forKey: "bankAccounts")
         object.removeValue(forKey: "oneOffIncomes")
         object.removeValue(forKey: "fundingChecklistExclusions")
+        object.removeValue(forKey: "incomeOccurrenceOverrides")
         var periods = try XCTUnwrap(object["payPeriods"] as? [[String: Any]])
         periods[0].removeValue(forKey: "monthlyAnchorDay")
         object["payPeriods"] = periods
@@ -163,7 +164,30 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertTrue(decoded.bankAccounts.isEmpty)
         XCTAssertTrue(decoded.oneOffIncomes.isEmpty)
         XCTAssertTrue(decoded.fundingChecklistExclusions.isEmpty)
+        XCTAssertTrue(decoded.incomeOccurrenceOverrides.isEmpty)
         XCTAssertNil(decoded.payPeriods.first?.monthlyAnchorDay)
+
+        let recurringOverride = RecurringPaymentOccurrenceOverride(
+            id: "recurring-override",
+            paymentId: "bill",
+            scheduledDueDate: "2026-07-02",
+            state: .normal,
+            reversedGeneratedTransactionIds: [],
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z"
+        )
+        let cardOverride = CreditCardCycleOverride(
+            id: "card-override",
+            creditCardId: "card",
+            scheduledStatementDate: "2026-07-20",
+            statementState: .normal,
+            directDebitState: .normal,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z"
+        )
+        XCTAssertNil(recurringOverride.amountPenceOverride)
+        XCTAssertNil(cardOverride.amountPenceOverride)
     }
 
     @MainActor
@@ -1173,7 +1197,10 @@ final class FinanceEngineTests: XCTestCase {
             asOfDate: "2026-07-16"
         )
         XCTAssertEqual(summary.unfundedChecklistPence, 420)
-        XCTAssertEqual(summary.projectedMoneyLeftPence, summary.currentMoneyLeftPence - 420)
+        XCTAssertEqual(
+            summary.projectedMoneyLeftPence,
+            summary.payReceivedPence - summary.projectedCostsPence
+        )
     }
 
     @MainActor
@@ -2595,7 +2622,7 @@ final class FinanceEngineTests: XCTestCase {
             payPeriod: februaryPeriod,
             asOfDate: "2027-02-05"
         )
-        XCTAssertEqual(februaryFifthSummary.projectedCostsPence, 285100)
+        XCTAssertEqual(februaryFifthSummary.projectedCostsPence, 468400)
 
         let februaryFifthItems = PlannerDerivedData.fundingChecklistPresentationItems(
             snapshot: store.snapshot,
@@ -3618,9 +3645,9 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(summary.moneyLeftPence, 57500)
         XCTAssertEqual(summary.committedCostsPence, 0)
         XCTAssertEqual(summary.unfundedChecklistPence, 42500)
-        XCTAssertEqual(summary.projectedCostsPence, 42500)
+        XCTAssertEqual(summary.projectedCostsPence, 80000)
         XCTAssertEqual(summary.currentMoneyLeftPence, 100000)
-        XCTAssertEqual(summary.projectedMoneyLeftPence, 57500)
+        XCTAssertEqual(summary.projectedMoneyLeftPence, 20000)
 
         let checklist = PlannerDerivedData.fundingChecklistPresentationItems(
             snapshot: store.snapshot,
@@ -3659,9 +3686,9 @@ final class FinanceEngineTests: XCTestCase {
         )
         XCTAssertEqual(fundedAugustSummary.committedCostsPence, 42500)
         XCTAssertEqual(fundedAugustSummary.unfundedChecklistPence, 0)
-        XCTAssertEqual(fundedAugustSummary.projectedCostsPence, 42500)
+        XCTAssertEqual(fundedAugustSummary.projectedCostsPence, 80000)
         XCTAssertEqual(fundedAugustSummary.currentMoneyLeftPence, 57500)
-        XCTAssertEqual(fundedAugustSummary.projectedMoneyLeftPence, 57500)
+        XCTAssertEqual(fundedAugustSummary.projectedMoneyLeftPence, 20000)
 
         var august15Settings = store.snapshot.settings
         august15Settings.manualTodayIso = "2026-08-15"
@@ -5641,7 +5668,7 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testExcludingFundingChecklistItemKeepsItVisibleAndRemovesOnlyThatOccurrenceFromProjectedCosts() async throws {
+    func testExcludingFundingChecklistItemKeepsItVisibleWithoutRemovingTheOutgoingFromPlannedCosts() async throws {
         let settings = makeManualSettings(today: "2026-06-01")
         let junePeriod = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
         let julyPeriod = makePayPeriod(id: "period-july", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 50000)
@@ -5665,7 +5692,8 @@ final class FinanceEngineTests: XCTestCase {
 
         let excludedSummary = PlannerDerivedData.payPeriodCostSummary(snapshot: store.snapshot, payPeriod: junePeriod, asOfDate: "2026-06-01")
         XCTAssertEqual(excludedSummary.unfundedChecklistPence, 0)
-        XCTAssertEqual(excludedSummary.projectedMoneyLeftPence, 50000)
+        XCTAssertEqual(excludedSummary.projectedCostsPence, 2999)
+        XCTAssertEqual(excludedSummary.projectedMoneyLeftPence, 47001)
 
         let julyItem = try XCTUnwrap(PlannerDerivedData.fundingChecklistPresentationItems(snapshot: store.snapshot, payPeriod: julyPeriod, asOfDate: "2026-07-01").first)
         XCTAssertFalse(julyItem.isExcluded)
@@ -6865,6 +6893,364 @@ final class FinanceEngineTests: XCTestCase {
             store.setCardOpeningBalanceFundingCompleted(cardId: cc1Opening.cardId, directDebitDate: cc1Opening.directDebitDate, payPeriodId: payPeriod.id, completed: true) &&
             store.setCardBillFundingCompleted(paymentId: skincare.paymentId, dueDate: skincare.dueDate, payPeriodId: payPeriod.id, completed: true) &&
             store.setCardBillFundingCompleted(paymentId: spendingMoney.paymentId, dueDate: spendingMoney.dueDate, payPeriodId: payPeriod.id, completed: true)
+    }
+
+    func testHomeDueEventsIncludesEveryRequestedSourceAcrossTodayAndTomorrow() {
+        let today = "2026-07-10"
+        let period = makePayPeriod(id: "period-july", startDate: "2026-07-10", endDate: "2026-08-09", payday: today, incomePence: 120000)
+        let snapshot = makeSnapshot(
+            recurringPayments: [makeRecurringPayment(id: "bill", name: "Energy", amountPence: 4200, dueDay: 10, potId: nil)],
+            payPeriods: [period],
+            debts: [makeDebt(id: "debt", name: "Loan", currentBalancePence: 50000, dueDate: today)],
+            debtPaymentScheduleItems: [makeDebtScheduleItem(id: "debt-cycle", debtId: "debt", dueDate: today, amountPence: 3000)],
+            creditCards: [makeCreditCard(id: "card", name: "Main card", openingBalancePence: 25000, openingStatementBalancePence: 25000, statementDate: "2026-06-10", dueDay: 11)],
+            customPayments: [CustomPayment(id: "saved", name: "Dentist", amountPence: 6500, dueDate: "2026-07-11", creditCardId: nil, status: .unpaid, createdAt: today, updatedAt: today, deletedAt: nil)],
+            oneOffIncomes: [OneOffIncome(id: "bonus", payPeriodId: period.id, name: "Bonus", amountPence: 8000, date: "2026-07-11", note: "", createdAt: today, updatedAt: today, deletedAt: nil)]
+        )
+
+        let events = PlannerDerivedData.homeDueEvents(snapshot: snapshot, asOfDate: today)
+
+        XCTAssertTrue(events.contains { if case .payday = $0.source { true } else { false } })
+        XCTAssertTrue(events.contains { if case .oneOffIncome = $0.source { true } else { false } })
+        XCTAssertTrue(events.contains { if case .recurringBill = $0.source { true } else { false } })
+        XCTAssertTrue(events.contains { if case .savedPayment = $0.source { true } else { false } })
+        XCTAssertTrue(events.contains { if case .debtPayment = $0.source { true } else { false } })
+        XCTAssertTrue(events.contains { if case .cardStatement = $0.source { true } else { false } })
+        XCTAssertTrue(events.contains { if case .cardDirectDebit = $0.source { true } else { false } })
+        XCTAssertTrue(events.allSatisfy { $0.date == today || $0.date == "2026-07-11" })
+        XCTAssertEqual(events.map(\.date), events.map(\.date).sorted())
+    }
+
+    func testHomeDueEventsUsesStableOverridesAndFiltersCancelledOrOutOfWindowItems() {
+        let today = "2026-07-10"
+        let period = makePayPeriod(id: "period-july", startDate: today, endDate: "2026-08-09", payday: today, incomePence: 100000)
+        var snapshot = makeSnapshot(
+            payPeriods: [period],
+            customPayments: [CustomPayment(id: "archived", name: "Old", amountPence: 1000, dueDate: today, creditCardId: nil, status: .archived, createdAt: today, updatedAt: today, deletedAt: nil)],
+            oneOffIncomes: [
+                OneOffIncome(id: "moved", payPeriodId: period.id, name: "Moved bonus", amountPence: 5000, date: today, note: "", createdAt: today, updatedAt: today, deletedAt: nil),
+                OneOffIncome(id: "later", payPeriodId: nil, name: "Later", amountPence: 5000, date: "2026-07-12", note: "", createdAt: today, updatedAt: today, deletedAt: nil),
+                OneOffIncome(id: "cancelled", payPeriodId: period.id, name: "Cancelled", amountPence: 5000, date: today, note: "", createdAt: today, updatedAt: today, deletedAt: nil)
+            ]
+        )
+        snapshot.incomeOccurrenceOverrides = [
+            IncomeOccurrenceOverride(id: "move", sourceKind: .oneOffIncome, sourceId: "moved", scheduledDate: today, state: .confirmed, actualDate: "2026-07-11", amountPenceOverride: 7250, createdAt: today, updatedAt: today, deletedAt: nil),
+            IncomeOccurrenceOverride(id: "cancel", sourceKind: .oneOffIncome, sourceId: "cancelled", scheduledDate: today, state: .cancelled, actualDate: nil, amountPenceOverride: nil, createdAt: today, updatedAt: today, deletedAt: nil)
+        ]
+
+        let events = PlannerDerivedData.homeDueEvents(snapshot: snapshot, asOfDate: today)
+        let moved = events.first { $0.title == "Moved bonus" }
+
+        XCTAssertEqual(moved?.scheduledDate, today)
+        XCTAssertEqual(moved?.date, "2026-07-11")
+        XCTAssertEqual(moved?.amountPence, 7250)
+        XCTAssertEqual(moved?.status, .completed)
+        XCTAssertFalse(events.contains { $0.title == "Cancelled" || $0.title == "Later" || $0.title == "Old" })
+    }
+
+    func testIncomeOccurrenceStatesPreserveProjectedIncomeButChangeLiveCashExplicitly() {
+        let period = makePayPeriod(id: "period", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 100000)
+        let paycheck = Paycheck(id: "pay", payPeriodId: period.id, hoursWorked: 0, hourlyRatePence: 0, calculatedAmountPence: 100000, actualAmountPence: nil, createdAt: "2026-07-01", updatedAt: "2026-07-01", deletedAt: nil)
+        var snapshot = makeSnapshot(payPeriods: [period])
+        snapshot.paychecks = [paycheck]
+        snapshot.incomeOccurrenceOverrides = [IncomeOccurrenceOverride(id: "await", sourceKind: .paycheck, sourceId: paycheck.id, scheduledDate: period.payday, state: .awaiting, actualDate: nil, amountPenceOverride: 110000, createdAt: "2026-07-01", updatedAt: "2026-07-01", deletedAt: nil)]
+
+        XCTAssertEqual(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period), 110000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: snapshot, payPeriod: period), 0)
+
+        snapshot.incomeOccurrenceOverrides[0].state = .confirmed
+        snapshot.incomeOccurrenceOverrides[0].actualDate = "2026-07-02"
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: snapshot, payPeriod: period), 110000)
+
+        snapshot.incomeOccurrenceOverrides[0].state = .cancelled
+        XCTAssertEqual(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period), 0)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: snapshot, payPeriod: period), 0)
+    }
+
+    func testRecurringAndCardAmountOverridesApplyOnlyToSelectedScheduledCycle() {
+        var snapshot = makeSnapshot(
+            recurringPayments: [makeRecurringPayment(id: "bill", name: "Energy", amountPence: 4000, dueDay: 10, potId: nil)],
+            creditCards: [makeCreditCard(id: "card", name: "Main", openingBalancePence: 20000, openingStatementBalancePence: 20000, statementDate: "2026-07-10", dueDay: 11)]
+        )
+        snapshot.recurringPaymentOccurrenceOverrides = [RecurringPaymentOccurrenceOverride(id: "bill-override", paymentId: "bill", scheduledDueDate: "2026-07-10", state: .confirmed, actualDueDate: "2026-07-11", amountPenceOverride: 5500, reversedGeneratedTransactionIds: [], createdAt: "2026-07-01", updatedAt: "2026-07-01", deletedAt: nil)]
+        snapshot.creditCardCycleOverrides = [CreditCardCycleOverride(id: "card-override", creditCardId: "card", scheduledStatementDate: "2026-07-10", statementState: .normal, actualStatementDate: nil, directDebitState: .normal, actualDirectDebitDate: nil, amountPenceOverride: 12345, reversedAutomaticRepaymentIds: [], createdAt: "2026-07-01", updatedAt: "2026-07-01", deletedAt: nil)]
+
+        let bills = PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: "2026-07-01", endDate: "2026-08-31")
+        XCTAssertEqual(bills.first { $0.scheduledDueDate == "2026-07-10" }?.dueDate, "2026-07-11")
+        XCTAssertEqual(bills.first { $0.scheduledDueDate == "2026-07-10" }?.amountPence, 5500)
+        XCTAssertEqual(bills.first { $0.scheduledDueDate == "2026-08-10" }?.amountPence, 4000)
+
+        let card = snapshot.creditCards[0]
+        let cardPayments = PlannerDerivedData.creditCardStatementPayments(card: card, snapshot: snapshot, startDate: "2026-07-01", endDate: "2026-09-30", asOfDate: "2026-07-01")
+        XCTAssertEqual(cardPayments.first { $0.scheduledStatementDate == "2026-07-10" }?.actualDuePence, 12345)
+        XCTAssertEqual(cardPayments.first { $0.scheduledStatementDate == "2026-07-10" }?.forecastDuePence, 12345)
+        XCTAssertNotEqual(cardPayments.first { $0.scheduledStatementDate == "2026-08-10" }?.forecastDuePence, 12345)
+    }
+
+    func testNextRecurringOccurrencesLimitsEveryFrequencyAndSortsDeterministically() {
+        let asOfDate = "2026-07-10"
+        let payments = [
+            makeRecurringPayment(id: "weekly", name: "Zulu Weekly", amountPence: 1000, dueDay: nil, potId: nil, dueDate: "2026-07-10", frequency: .weekly),
+            makeRecurringPayment(id: "biweekly", name: "Alpha Biweekly", amountPence: 2000, dueDay: nil, potId: nil, dueDate: "2026-07-10", frequency: .biweekly),
+            makeRecurringPayment(id: "monthly", name: "Monthly", amountPence: 3000, dueDay: 11, potId: nil, frequency: .monthly),
+            makeRecurringPayment(id: "quarterly", name: "Quarterly", amountPence: 4000, dueDay: nil, potId: nil, dueDate: "2026-07-12", frequency: .quarterly),
+            makeRecurringPayment(id: "yearly", name: "Yearly", amountPence: 5000, dueDay: nil, potId: nil, dueDate: "2026-07-13", frequency: .yearly),
+            makeRecurringPayment(id: "once", name: "One off", amountPence: 6000, dueDay: nil, potId: nil, dueDate: "2026-07-14", frequency: .once)
+        ]
+
+        let occurrences = PlannerDerivedData.nextRecurringOccurrences(
+            snapshot: makeSnapshot(recurringPayments: payments),
+            payments: payments,
+            asOfDate: asOfDate,
+            limitPerPayment: 2
+        )
+        let datesByPayment = Dictionary(grouping: occurrences, by: { $0.payment.id })
+            .mapValues { $0.map(\.dueDate) }
+
+        XCTAssertEqual(datesByPayment["weekly"], ["2026-07-10", "2026-07-17"])
+        XCTAssertEqual(datesByPayment["biweekly"], ["2026-07-10", "2026-07-24"])
+        XCTAssertEqual(datesByPayment["monthly"], ["2026-07-11", "2026-08-11"])
+        XCTAssertEqual(datesByPayment["quarterly"], ["2026-07-12", "2026-10-12"])
+        XCTAssertEqual(datesByPayment["yearly"], ["2026-07-13", "2027-07-13"])
+        XCTAssertEqual(datesByPayment["once"], ["2026-07-14"])
+        XCTAssertTrue(datesByPayment.values.allSatisfy { $0.count <= 2 })
+
+        let sortKeys = occurrences.map { "\($0.dueDate)|\($0.payment.name.lowercased())|\($0.scheduledDueDate)|\($0.id)" }
+        XCTAssertEqual(sortKeys, sortKeys.sorted())
+        XCTAssertEqual(Array(occurrences.prefix(2)).map(\.payment.id), ["biweekly", "weekly"])
+    }
+
+    func testNextRecurringOccurrencesCountsAwaitingAndMovedCyclesAndExcludesRefundedInactiveOrDeletedBills() {
+        let recurring = makeRecurringPayment(
+            id: "bill",
+            name: "Energy",
+            amountPence: 4000,
+            dueDay: nil,
+            potId: nil,
+            dueDate: "2026-07-03",
+            frequency: .weekly
+        )
+        var inactive = makeRecurringPayment(id: "inactive", name: "Inactive", amountPence: 1000, dueDay: 10, potId: nil)
+        inactive.active = false
+        var deleted = makeRecurringPayment(id: "deleted", name: "Deleted", amountPence: 1000, dueDay: 10, potId: nil)
+        deleted.deletedAt = "2026-07-01T00:00:00.000Z"
+        let refundedOnce = makeRecurringPayment(id: "refunded-once", name: "Refunded", amountPence: 1000, dueDay: nil, potId: nil, dueDate: "2026-07-11", frequency: .once)
+
+        var snapshot = makeSnapshot(recurringPayments: [recurring, inactive, deleted, refundedOnce])
+        snapshot.recurringPaymentOccurrenceOverrides = [
+            RecurringPaymentOccurrenceOverride(id: "awaiting", paymentId: recurring.id, scheduledDueDate: "2026-07-03", state: .awaitingPayment, actualDueDate: nil, amountPenceOverride: nil, reversedGeneratedTransactionIds: [], createdAt: "2026-07-03", updatedAt: "2026-07-03", deletedAt: nil),
+            RecurringPaymentOccurrenceOverride(id: "moved", paymentId: recurring.id, scheduledDueDate: "2026-07-10", state: .confirmed, actualDueDate: "2026-07-12", amountPenceOverride: 5500, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil),
+            RecurringPaymentOccurrenceOverride(id: "refund", paymentId: recurring.id, scheduledDueDate: "2026-07-17", state: .refunded, actualDueDate: nil, amountPenceOverride: nil, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil),
+            RecurringPaymentOccurrenceOverride(id: "refund-once", paymentId: refundedOnce.id, scheduledDueDate: "2026-07-11", state: .refunded, actualDueDate: nil, amountPenceOverride: nil, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil)
+        ]
+
+        let occurrences = PlannerDerivedData.nextRecurringOccurrences(
+            snapshot: snapshot,
+            payments: snapshot.recurringPayments,
+            asOfDate: "2026-07-10",
+            limitPerPayment: 2
+        )
+
+        XCTAssertEqual(occurrences.map(\.payment.id), ["bill", "bill"])
+        XCTAssertEqual(occurrences.map(\.scheduledDueDate), ["2026-07-03", "2026-07-10"])
+        XCTAssertEqual(occurrences.map(\.dueDate), ["2026-07-03", "2026-07-12"])
+        XCTAssertEqual(occurrences.map(\.amountPence), [4000, 5500])
+        XCTAssertTrue(occurrences[0].isAwaitingPayment)
+        XCTAssertFalse(occurrences.contains { $0.scheduledDueDate == "2026-07-17" })
+    }
+
+    func testActivityYearlyNetDataDeduplicatesIncomeAndUsesOnlyActualYearToDateMovement() {
+        let januaryPeriod = makePayPeriod(id: "period-january", startDate: "2026-01-01", endDate: "2026-01-31", payday: "2026-01-15", incomePence: 100_000)
+        let marchPeriod = makePayPeriod(id: "period-march", startDate: "2026-03-01", endDate: "2026-03-31", payday: "2026-03-15", incomePence: 200_000)
+        let futurePeriod = makePayPeriod(id: "period-september", startDate: "2026-09-01", endDate: "2026-09-30", payday: "2026-09-15", incomePence: 900_000)
+        let januaryPaycheck = Paycheck(
+            id: "paycheck-january",
+            payPeriodId: januaryPeriod.id,
+            hoursWorked: 0,
+            hourlyRatePence: 0,
+            calculatedAmountPence: 120_000,
+            actualAmountPence: 125_000,
+            createdAt: "2026-01-15T00:00:00.000Z",
+            updatedAt: "2026-01-15T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let oneOffs = [
+            OneOffIncome(id: "confirmed", payPeriodId: januaryPeriod.id, name: "Confirmed bonus", amountPence: 5_000, date: "2026-01-20", note: "", createdAt: "2026-01-20", updatedAt: "2026-01-20", deletedAt: nil),
+            OneOffIncome(id: "awaiting", payPeriodId: nil, name: "Awaiting", amountPence: 90_000, date: "2026-05-01", note: "", createdAt: "2026-05-01", updatedAt: "2026-05-01", deletedAt: nil),
+            OneOffIncome(id: "cancelled", payPeriodId: nil, name: "Cancelled", amountPence: 80_000, date: "2026-06-01", note: "", createdAt: "2026-06-01", updatedAt: "2026-06-01", deletedAt: nil)
+        ]
+
+        func transaction(
+            id: String,
+            amountPence: Int,
+            type: TransactionType = .spending,
+            date: String,
+            refundedAt: String? = nil,
+            deletedAt: String? = nil
+        ) -> Transaction {
+            Transaction(
+                id: id,
+                potId: nil,
+                payPeriodId: nil,
+                amountPence: amountPence,
+                type: type,
+                paymentMethod: .income,
+                creditCardId: nil,
+                recurringPaymentId: nil,
+                date: date,
+                note: id,
+                refundedAt: refundedAt,
+                createdAt: "\(date)T00:00:00.000Z",
+                updatedAt: "\(date)T00:00:00.000Z",
+                deletedAt: deletedAt
+            )
+        }
+
+        var snapshot = makeSnapshot(
+            payPeriods: [januaryPeriod, marchPeriod, futurePeriod],
+            transactions: [
+                transaction(id: "january-spend", amountPence: 20_000, date: "2026-01-10"),
+                transaction(id: "march-spend", amountPence: 350_000, date: "2026-03-20"),
+                transaction(id: "future-spend", amountPence: 999_000, date: "2026-09-01"),
+                transaction(id: "refunded", amountPence: 500_000, date: "2026-04-01", refundedAt: "2026-04-02"),
+                transaction(id: "allocation", amountPence: 400_000, type: .allocation, date: "2026-02-01"),
+                transaction(id: "deleted", amountPence: 300_000, date: "2026-02-02", deletedAt: "2026-02-03")
+            ],
+            oneOffIncomes: oneOffs
+        )
+        snapshot.paychecks = [januaryPaycheck]
+        snapshot.incomeOccurrenceOverrides = [
+            IncomeOccurrenceOverride(id: "move-paycheck", sourceKind: .paycheck, sourceId: januaryPaycheck.id, scheduledDate: januaryPeriod.payday, state: .confirmed, actualDate: "2026-02-02", amountPenceOverride: 130_000, createdAt: "2026-01-15", updatedAt: "2026-01-15", deletedAt: nil),
+            IncomeOccurrenceOverride(id: "move-bonus", sourceKind: .oneOffIncome, sourceId: "confirmed", scheduledDate: "2026-01-20", state: .confirmed, actualDate: "2026-04-01", amountPenceOverride: 7_000, createdAt: "2026-01-20", updatedAt: "2026-01-20", deletedAt: nil),
+            IncomeOccurrenceOverride(id: "await", sourceKind: .oneOffIncome, sourceId: "awaiting", scheduledDate: "2026-05-01", state: .awaiting, actualDate: nil, amountPenceOverride: 100_000, createdAt: "2026-05-01", updatedAt: "2026-05-01", deletedAt: nil),
+            IncomeOccurrenceOverride(id: "cancel", sourceKind: .oneOffIncome, sourceId: "cancelled", scheduledDate: "2026-06-01", state: .cancelled, actualDate: nil, amountPenceOverride: nil, createdAt: "2026-06-01", updatedAt: "2026-06-01", deletedAt: nil)
+        ]
+
+        let data = ActivityYearlyNetChartData.make(snapshot: snapshot, todayIso: "2026-08-02")
+
+        XCTAssertEqual(data.year, 2026)
+        XCTAssertEqual(data.currentMonth, 8)
+        XCTAssertEqual(data.points.count, 12)
+        XCTAssertEqual(data.totalIncomePence, 337_000)
+        XCTAssertEqual(data.totalSpentPence, 370_000)
+        XCTAssertEqual(data.currentNetPence, -33_000)
+        XCTAssertEqual(data.points[0].incomePence, 0)
+        XCTAssertEqual(data.points[0].spentPence, 20_000)
+        XCTAssertEqual(data.points[0].cumulativeNetPence, -20_000)
+        XCTAssertEqual(data.points[1].incomePence, 130_000)
+        XCTAssertEqual(data.points[1].cumulativeNetPence, 110_000)
+        XCTAssertEqual(data.points[2].incomePence, 200_000)
+        XCTAssertEqual(data.points[2].spentPence, 350_000)
+        XCTAssertEqual(data.points[2].cumulativeNetPence, -40_000)
+        XCTAssertEqual(data.points[3].incomePence, 7_000)
+        XCTAssertEqual(data.points[3].cumulativeNetPence, -33_000)
+        XCTAssertTrue(data.points[7].isCurrentMonth)
+        XCTAssertTrue(data.points[8].isFuture)
+        XCTAssertEqual(data.points[8].incomePence, 0)
+        XCTAssertEqual(data.points[8].spentPence, 0)
+        XCTAssertEqual(data.activePoints.count, 8)
+    }
+
+    func testPlannedCostsAddEveryCurrentCycleOutgoingAndProjectedEndSubtractsThatExactTotal() {
+        let period = makePayPeriod(
+            id: "period-july",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31",
+            payday: "2026-07-01",
+            incomePence: 100_000
+        )
+        let directBill = makeRecurringPayment(
+            id: "direct-bill",
+            name: "Direct bill",
+            amountPence: 1_000,
+            dueDay: 10,
+            potId: nil
+        )
+        let cardBill = makeRecurringPayment(
+            id: "card-bill",
+            name: "Card bill",
+            amountPence: 2_000,
+            dueDay: 11,
+            potId: nil,
+            creditCardId: "card"
+        )
+        let savedPayment = CustomPayment(
+            id: "saved",
+            name: "Saved payment",
+            amountPence: 3_000,
+            dueDate: "2026-07-12",
+            creditCardId: nil,
+            status: .unpaid,
+            createdAt: "2026-07-01",
+            updatedAt: "2026-07-01",
+            deletedAt: nil
+        )
+        let cashSpend = Transaction(
+            id: "cash-spend",
+            potId: nil,
+            payPeriodId: period.id,
+            amountPence: 4_000,
+            type: .spending,
+            paymentMethod: .income,
+            creditCardId: nil,
+            recurringPaymentId: nil,
+            date: "2026-07-13",
+            note: "Cash spend",
+            createdAt: "2026-07-13",
+            updatedAt: "2026-07-13",
+            deletedAt: nil
+        )
+        let cardSpend = Transaction(
+            id: "card-spend",
+            potId: nil,
+            payPeriodId: period.id,
+            amountPence: 5_000,
+            type: .spending,
+            paymentMethod: .creditCard,
+            creditCardId: "card",
+            recurringPaymentId: nil,
+            date: "2026-07-14",
+            note: "Card spend",
+            createdAt: "2026-07-14",
+            updatedAt: "2026-07-14",
+            deletedAt: nil
+        )
+        let allocation = makePotAllocation(
+            id: "allocation",
+            payPeriodId: period.id,
+            potId: "pot",
+            amountPence: 6_000,
+            source: .manual,
+            recurringPaymentId: nil,
+            recurringDueDate: nil
+        )
+        let snapshot = makeSnapshot(
+            recurringPayments: [directBill, cardBill],
+            payPeriods: [period],
+            potAllocations: [allocation],
+            transactions: [cashSpend, cardSpend],
+            customPayments: [savedPayment]
+        )
+
+        let summary = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: snapshot,
+            payPeriod: period,
+            asOfDate: "2026-07-15"
+        )
+
+        XCTAssertEqual(summary.items.map(\.amountPence).reduce(0, +), 21_000)
+        XCTAssertEqual(
+            PlannerDerivedData.currentCycleOutgoingsPence(
+                snapshot: snapshot,
+                payPeriod: period,
+                asOfDate: "2026-07-15"
+            ),
+            15_000
+        )
+        XCTAssertEqual(summary.projectedCostsPence, 15_000)
+        XCTAssertEqual(summary.projectedMoneyLeftPence, 85_000)
+        XCTAssertEqual(summary.projectedMoneyLeftPence, summary.payReceivedPence - summary.projectedCostsPence)
+        XCTAssertEqual(summary.projectedCostsPence, summary.totalCostsPence + 1_000)
     }
 
     private func makeSnapshot(

@@ -129,6 +129,8 @@ struct CreditLayoutPolicy {
     static let dueSoonPreviewOpensFullList = true
     static let directDebitFullListIsUntruncated = true
     static let nextStatementsIncludeEveryActiveCard = true
+    static let dueSoonHeadersShowLeadingSymbols = false
+    static let dueSoonHeadersShowSubtitles = false
 }
 
 struct PlanView: View {
@@ -902,7 +904,7 @@ private struct PlanDayTrailingToolbarButton: View {
 
 enum ActivitySection: String, Equatable {
     case recentActivity
-    case monthBalance
+    case yearNet
     case income
     case spending
 }
@@ -914,7 +916,7 @@ enum ActivityDetailPresentation: Equatable {
 struct ActivityLayoutPolicy {
     static let sections: [ActivitySection] = [
         .recentActivity,
-        .monthBalance
+        .yearNet
     ]
     static let recentActivityInitialVisibleCount = 1
     static let recentActivityRevealIncrement = 2
@@ -929,12 +931,12 @@ struct ActivityLayoutPolicy {
     static let recentActivityShowsGeneratedAutomaticPaychecks = false
     static let recentActivityShowsZeroValuePaychecks = false
     static let paycheckActivityDateSource = "payday"
-    static let monthBalanceChartMetric = "currentMonthIncomeMinusSpending"
-    static let monthBalanceDetailPresentation: ActivityDetailPresentation = .navigationPush
-    static let monthBalanceDetailUsesInlineTitle = true
+    static let yearNetChartMetric = "currentYearIncomeMinusSpending"
+    static let yearNetDetailPresentation: ActivityDetailPresentation = .navigationPush
+    static let yearNetDetailUsesInlineTitle = true
     static let showsDetailRecordId = false
-    static let incomeDetailToolbarMode = "editDone"
-    static let spendingDetailToolbarMode = "editDone"
+    static let incomeDetailToolbarMode = "editDoneAndAdd"
+    static let spendingDetailToolbarMode = "editDoneAndAdd"
     static let incomeDetailUsesNativeToolbarMorph = true
     static let spendingDetailUsesNativeToolbarMorph = true
     static let incomeEditRequiresDeletableItem = true
@@ -1104,7 +1106,7 @@ enum ActivityTimelineBranchLayoutPolicy {
 }
 
 private struct ActivityTabPresentation {
-    var monthlyBalanceData: ActivityMonthlyBalanceChartData
+    var yearlyNetData: ActivityYearlyNetChartData
     var entries: [ActivityEntry]
 }
 
@@ -1142,8 +1144,8 @@ struct ActivityView: View {
         switch section {
         case .recentActivity:
             activityFeed
-        case .monthBalance:
-            activityMonthBalance
+        case .yearNet:
+            activityYearNet
         case .income, .spending:
             EmptyView()
         }
@@ -1166,13 +1168,13 @@ struct ActivityView: View {
     }
 
     @ViewBuilder
-    private var activityMonthBalance: some View {
-        let data = tabPresentation.monthlyBalanceData
+    private var activityYearNet: some View {
+        let data = tabPresentation.yearlyNetData
 
         NavigationLink {
-            ActivityMonthlyBalanceDetailView(data: data)
+            ActivityYearlyNetDetailView(data: data)
         } label: {
-            ActivityMonthlyBalanceCard(data: data)
+            ActivityYearlyNetCard(data: data)
         }
         .buttonStyle(.plain)
     }
@@ -1283,7 +1285,7 @@ struct ActivityView: View {
 
     private static func makePresentation(context: PlannerTabPresentationContext) -> ActivityTabPresentation {
         ActivityTabPresentation(
-            monthlyBalanceData: ActivityMonthlyBalanceChartData.make(
+            yearlyNetData: ActivityYearlyNetChartData.make(
                 snapshot: context.snapshot,
                 todayIso: context.todayIso
             ),
@@ -2319,16 +2321,23 @@ private func timelineDateLabel(_ isoDate: String) -> String {
 struct ActivitySpendingDetailView: View {
     @ObservedObject var store: PlannerStore
     @State private var editMode: EditMode = .inactive
+    @State private var isAddSpendingPresented = false
 
     var body: some View {
         PaydayView(
             store: store,
             navigationMode: .inline,
-            toolbarMode: .editDone(isEditing: editMode.isEditing, canEdit: hasDeletableSpending) {
-                toggleEditMode()
-            }
+            toolbarMode: .editDoneAndAdd(
+                isEditing: editMode.isEditing,
+                canEdit: hasDeletableSpending,
+                editAction: toggleEditMode,
+                addAction: { isAddSpendingPresented = true }
+            )
         )
         .environment(\.editMode, $editMode)
+        .sheet(isPresented: $isAddSpendingPresented) {
+            SpendingSheetView(store: store)
+        }
     }
 
     private var hasDeletableSpending: Bool {
@@ -2671,198 +2680,244 @@ private struct ActivityDetailRowsCard: View {
     }
 }
 
-private struct ActivityMonthlyBalanceChartPoint: Identifiable, Equatable {
-    var day: Int
-    var dateLabel: String
-    var balancePence: Int
+struct ActivityYearlyNetChartPoint: Identifiable, Equatable {
+    var month: Int
+    var monthLabel: String
+    var cumulativeNetPence: Int
     var incomePence: Int
     var spentPence: Int
-    var isCurrentDay: Bool
+    var isCurrentMonth: Bool
     var isFuture: Bool
 
-    var id: Int { day }
+    var id: Int { month }
 
     var netPence: Int {
         incomePence - spentPence
     }
 }
 
-private struct ActivityMonthlyBalanceChartData: Equatable {
-    var monthLabel: String
-    var startPence: Int
-    var currentPence: Int
-    var incomePence: Int
-    var spentPence: Int
-    var currentDay: Int
-    var daysInMonth: Int
-    var points: [ActivityMonthlyBalanceChartPoint]
+struct ActivityYearlyNetChartData: Equatable {
+    var year: Int
+    var currentMonth: Int
+    var totalIncomePence: Int
+    var totalSpentPence: Int
+    var points: [ActivityYearlyNetChartPoint]
 
     var id: String {
-        "\(monthLabel)-\(startPence)-\(currentPence)-\(incomePence)-\(spentPence)-\(currentDay)-\(daysInMonth)"
+        "\(year)-\(currentMonth)-\(totalIncomePence)-\(totalSpentPence)"
     }
 
     var hasData: Bool {
-        incomePence != 0 || spentPence != 0
+        totalIncomePence != 0 || totalSpentPence != 0
     }
 
-    var netMovementPence: Int {
-        incomePence - spentPence
+    var currentNetPence: Int {
+        totalIncomePence - totalSpentPence
     }
 
-    var activePoints: [ActivityMonthlyBalanceChartPoint] {
+    var activePoints: [ActivityYearlyNetChartPoint] {
         points.filter { !$0.isFuture }
     }
 
-    var movementPoints: [ActivityMonthlyBalanceChartPoint] {
-        activePoints.filter { point in
-            point.incomePence != 0 || point.spentPence != 0 || point.isCurrentDay
-        }
-    }
-
     var graphMinPence: Int {
-        min(0, points.map(\.balancePence).min() ?? 0)
+        min(0, activePoints.map(\.cumulativeNetPence).min() ?? 0)
     }
 
     var graphMaxPence: Int {
-        let maxValue = max(0, points.map(\.balancePence).max() ?? 0)
+        let maxValue = max(0, activePoints.map(\.cumulativeNetPence).max() ?? 0)
         return maxValue == graphMinPence ? maxValue + 1 : maxValue
     }
 
     var progressLabel: String {
-        "\(currentDay)/\(daysInMonth)"
+        "\(currentMonth)/12"
     }
 
-    static func make(snapshot: PlannerSnapshot, todayIso: String) -> ActivityMonthlyBalanceChartData {
+    static func make(snapshot: PlannerSnapshot, todayIso: String) -> ActivityYearlyNetChartData {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
 
         let today = FinanceEngine.parseDate(todayIso)
-        let todayComponents = calendar.dateComponents([.year, .month, .day], from: today)
-        let daysInMonth = calendar.range(of: .day, in: .month, for: today)?.count ?? 1
-        let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
+        let todayComponents = calendar.dateComponents([.year, .month], from: today)
+        let year = todayComponents.year ?? 0
+        let currentMonth = min(max(todayComponents.month ?? 1, 1), 12)
 
         // Cloud/local merges can contain the same record ID more than once. Keep the
         // latest array entry instead of trapping while constructing the lookup.
         let payPeriodsById = snapshot.payPeriods.reduce(into: [String: PayPeriod]()) { result, period in
             result[period.id] = period
         }
-        let paycheckIncomeEvents = snapshot.paychecks.compactMap { paycheck -> ActivityDailyAmount? in
-            guard paycheck.deletedAt == nil else { return nil }
-            let date = payPeriodsById[paycheck.payPeriodId]?.payday ?? paycheck.createdAt.prefixDateLabel
-            guard let day = dayInCurrentMonth(date, calendar: calendar, todayComponents: todayComponents) else { return nil }
-            return ActivityDailyAmount(day: day, amountPence: paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+        let paychecksByPeriodId = snapshot.paychecks.reduce(into: [String: Paycheck]()) { result, paycheck in
+            guard paycheck.deletedAt == nil else { return }
+            result[paycheck.payPeriodId] = paycheck
         }
 
-        let periodIncomeEvents = snapshot.payPeriods.compactMap { period -> ActivityDailyAmount? in
-            guard period.deletedAt == nil,
-                  let day = dayInCurrentMonth(period.payday, calendar: calendar, todayComponents: todayComponents)
-            else {
-                return nil
-            }
-            return ActivityDailyAmount(day: day, amountPence: period.incomePence)
+        let periodIncomeEvents = payPeriodsById.values.compactMap { period -> ActivityYearAmount? in
+            guard period.deletedAt == nil else { return nil }
+            let paycheck = paychecksByPeriodId[period.id]
+            let sourceId = paycheck?.id ?? period.id
+            let override = incomeOverride(
+                snapshot: snapshot,
+                kind: .paycheck,
+                sourceId: sourceId,
+                scheduledDate: period.payday
+            )
+            let amount = override?.amountPenceOverride
+                ?? paycheck?.actualAmountPence
+                ?? paycheck?.calculatedAmountPence
+                ?? period.incomePence
+            return resolvedIncomeAmount(
+                scheduledDate: period.payday,
+                amountPence: amount,
+                override: override,
+                calendar: calendar,
+                year: year,
+                todayIso: todayIso
+            )
         }
 
-        let oneOffIncomeEvents = snapshot.oneOffIncomes.compactMap { income -> ActivityDailyAmount? in
-            guard income.deletedAt == nil,
-                  let day = dayInCurrentMonth(income.date, calendar: calendar, todayComponents: todayComponents),
-                  day <= currentDay
-            else {
-                return nil
-            }
-            return ActivityDailyAmount(day: day, amountPence: income.amountPence)
+        let oneOffIncomeEvents = snapshot.oneOffIncomes.compactMap { income -> ActivityYearAmount? in
+            guard income.deletedAt == nil else { return nil }
+            let override = incomeOverride(
+                snapshot: snapshot,
+                kind: .oneOffIncome,
+                sourceId: income.id,
+                scheduledDate: income.date
+            )
+            return resolvedIncomeAmount(
+                scheduledDate: income.date,
+                amountPence: override?.amountPenceOverride ?? income.amountPence,
+                override: override,
+                calendar: calendar,
+                year: year,
+                todayIso: todayIso
+            )
         }
 
-        let incomeEvents = (paycheckIncomeEvents.isEmpty ? periodIncomeEvents : paycheckIncomeEvents) + oneOffIncomeEvents
-        let spendingEvents = snapshot.transactions.compactMap { transaction -> ActivityDailyAmount? in
+        let incomeEvents = periodIncomeEvents + oneOffIncomeEvents
+        let spendingEvents = snapshot.transactions.compactMap { transaction -> ActivityYearAmount? in
             guard transaction.deletedAt == nil,
+                  !transaction.isRefunded,
                   transaction.type == .spending,
-                  let day = dayInCurrentMonth(transaction.date, calendar: calendar, todayComponents: todayComponents),
-                  day <= currentDay
+                  transaction.date <= todayIso,
+                  let month = monthInYear(transaction.date, calendar: calendar, year: year)
             else {
                 return nil
             }
-            return ActivityDailyAmount(day: day, amountPence: abs(transaction.amountPence))
+            return ActivityYearAmount(month: month, amountPence: abs(transaction.amountPence))
         }
 
-        let incomeByDay = groupedAmounts(incomeEvents.filter { $0.day <= currentDay })
-        let spendByDay = groupedAmounts(spendingEvents)
+        let incomeByMonth = groupedAmounts(incomeEvents)
+        let spendByMonth = groupedAmounts(spendingEvents)
 
         var cumulativeIncome = 0
         var cumulativeSpend = 0
-        var points: [ActivityMonthlyBalanceChartPoint] = []
+        var points: [ActivityYearlyNetChartPoint] = []
 
-        for day in 1...max(daysInMonth, 1) {
-            let dailyIncome = day <= currentDay ? incomeByDay[day, default: 0] : 0
-            let dailySpend = day <= currentDay ? spendByDay[day, default: 0] : 0
+        for month in 1...12 {
+            let monthlyIncome = month <= currentMonth ? incomeByMonth[month, default: 0] : 0
+            let monthlySpend = month <= currentMonth ? spendByMonth[month, default: 0] : 0
 
-            if day <= currentDay {
-                cumulativeIncome += dailyIncome
-                cumulativeSpend += dailySpend
+            if month <= currentMonth {
+                cumulativeIncome += monthlyIncome
+                cumulativeSpend += monthlySpend
             }
 
             points.append(
-                ActivityMonthlyBalanceChartPoint(
-                    day: day,
-                    dateLabel: dateLabel(for: day, calendar: calendar, todayComponents: todayComponents),
-                    balancePence: cumulativeIncome - cumulativeSpend,
-                    incomePence: dailyIncome,
-                    spentPence: dailySpend,
-                    isCurrentDay: day == currentDay,
-                    isFuture: day > currentDay
+                ActivityYearlyNetChartPoint(
+                    month: month,
+                    monthLabel: monthLabel(for: month, year: year, calendar: calendar),
+                    cumulativeNetPence: cumulativeIncome - cumulativeSpend,
+                    incomePence: monthlyIncome,
+                    spentPence: monthlySpend,
+                    isCurrentMonth: month == currentMonth,
+                    isFuture: month > currentMonth
                 )
             )
         }
 
-        let activePoints = points.filter { !$0.isFuture }
-
-        return ActivityMonthlyBalanceChartData(
-            monthLabel: today.formatted(.dateTime.month(.wide).year()),
-            startPence: 0,
-            currentPence: activePoints.last?.balancePence ?? 0,
-            incomePence: cumulativeIncome,
-            spentPence: cumulativeSpend,
-            currentDay: currentDay,
-            daysInMonth: max(daysInMonth, 1),
+        return ActivityYearlyNetChartData(
+            year: year,
+            currentMonth: currentMonth,
+            totalIncomePence: cumulativeIncome,
+            totalSpentPence: cumulativeSpend,
             points: points
         )
     }
 
-    private static func groupedAmounts(_ amounts: [ActivityDailyAmount]) -> [Int: Int] {
+    private static func groupedAmounts(_ amounts: [ActivityYearAmount]) -> [Int: Int] {
         amounts.reduce(into: [:]) { result, amount in
-            result[amount.day, default: 0] += amount.amountPence
+            result[amount.month, default: 0] += amount.amountPence
         }
     }
 
-    private static func dayInCurrentMonth(_ isoDate: String, calendar: Calendar, todayComponents: DateComponents) -> Int? {
+    private static func monthInYear(_ isoDate: String, calendar: Calendar, year: Int) -> Int? {
+        guard FinanceEngine.isIsoDate(isoDate.prefixDateLabel) else { return nil }
         let date = FinanceEngine.parseDate(isoDate.prefixDateLabel)
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        guard components.year == todayComponents.year,
-              components.month == todayComponents.month,
-              let day = components.day
+        let components = calendar.dateComponents([.year, .month], from: date)
+        guard components.year == year,
+              let month = components.month
         else {
             return nil
         }
-        return day
+        return month
     }
 
-    private static func dateLabel(for day: Int, calendar: Calendar, todayComponents: DateComponents) -> String {
-        let components = DateComponents(year: todayComponents.year, month: todayComponents.month, day: day)
+    private static func monthLabel(for month: Int, year: Int, calendar: Calendar) -> String {
+        let components = DateComponents(year: year, month: month, day: 1)
         guard let date = calendar.date(from: components) else {
-            return "Day \(day)"
+            return "Month \(month)"
         }
-        return date.formatted(.dateTime.day().month(.abbreviated))
+        return date.formatted(.dateTime.month(.wide))
+    }
+
+    private static func incomeOverride(
+        snapshot: PlannerSnapshot,
+        kind: IncomeOccurrenceSourceKind,
+        sourceId: String,
+        scheduledDate: String
+    ) -> IncomeOccurrenceOverride? {
+        snapshot.incomeOccurrenceOverrides.first {
+            $0.deletedAt == nil &&
+            $0.sourceKind == kind &&
+            $0.sourceId == sourceId &&
+            $0.scheduledDate == scheduledDate
+        }
+    }
+
+    private static func resolvedIncomeAmount(
+        scheduledDate: String,
+        amountPence: Int,
+        override: IncomeOccurrenceOverride?,
+        calendar: Calendar,
+        year: Int,
+        todayIso: String
+    ) -> ActivityYearAmount? {
+        guard override?.state != .awaiting, override?.state != .cancelled else { return nil }
+        let effectiveDate: String
+        if override?.state == .confirmed,
+           let actualDate = override?.actualDate,
+           FinanceEngine.isIsoDate(actualDate) {
+            effectiveDate = actualDate
+        } else {
+            effectiveDate = scheduledDate
+        }
+        guard effectiveDate <= todayIso,
+              let month = monthInYear(effectiveDate, calendar: calendar, year: year)
+        else { return nil }
+        return ActivityYearAmount(month: month, amountPence: max(0, amountPence))
     }
 }
 
-private struct ActivityDailyAmount {
-    var day: Int
+private struct ActivityYearAmount {
+    var month: Int
     var amountPence: Int
 }
 
-enum ActivityMonthlyBalanceChartLayoutPolicy {
-    static let estimatedLineStyle = "fullMonthProjectedLine"
-    static let actualLineStyle = "dayAnchoredNeonLine"
-    static let todayMarkerFollowsActualLine = true
+enum ActivityYearlyNetChartLayoutPolicy {
+    static let lineStyle = "yearToDateCumulativeNet"
+    static let futurePresentation = "unusedAxisSpace"
+    static let currentMonthMarkerFollowsActualLine = true
+    static let monthCount = 12
 }
 
 private func signedMoney(_ amountPence: Int) -> String {
@@ -2875,54 +2930,72 @@ private func signedMoney(_ amountPence: Int) -> String {
     return MoneyParser.formatPence(0)
 }
 
-private struct ActivityMonthlyBalanceCard: View {
-    var data: ActivityMonthlyBalanceChartData
+private struct ActivityYearlyNetCard: View {
+    var data: ActivityYearlyNetChartData
 
     var body: some View {
         AppCard(glow: data.hasData) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
                 HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("Net left this month")
+                        Text("Overall income this year")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(AppTheme.Colors.cardEyebrow)
                             .textCase(.uppercase)
-                        Text(MoneyParser.formatPence(data.currentPence))
+                        Text(signedMoney(data.currentNetPence))
                             .font(.system(.title, design: .rounded, weight: .bold))
-                            .foregroundStyle(data.currentPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                            .foregroundStyle(data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                        Text(data.hasData ? "Income minus spending in \(data.monthLabel) so far" : "No income or spending recorded in \(data.monthLabel)")
+                        Text(data.hasData ? "Total income minus total spending in \(data.year) so far" : "No income or spending recorded in \(data.year)")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                     }
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
-                    ActivityMonthProgressBadge(progress: Double(data.currentDay) / Double(max(data.daysInMonth, 1)), label: data.progressLabel)
+                    ActivityYearProgressBadge(progress: Double(data.currentMonth) / 12, label: data.progressLabel)
                 }
 
-                ActivityBalanceLineGraph(data: data)
+                ActivityYearNetLineGraph(data: data)
                     .frame(height: 148)
 
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    ActivityChartMetricPill(label: "Opening", value: MoneyParser.formatPence(data.startPence), color: AppTheme.Colors.primaryOrange)
-                    ActivityChartMetricPill(label: "Income", value: MoneyParser.formatPence(data.incomePence), color: AppTheme.Colors.neonMoneyUp)
-                    ActivityChartMetricPill(label: "Spent", value: MoneyParser.formatPence(data.spentPence), color: AppTheme.Colors.neonMoneyDown)
-                }
+                ActivityYearMetricStrip(data: data)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Net left this month \(MoneyParser.formatPence(data.currentPence))")
+        .accessibilityLabel("Overall income this year \(signedMoney(data.currentNetPence))")
     }
 }
 
-private struct ActivityMonthlyBalanceDetailView: View {
-    var data: ActivityMonthlyBalanceChartData
+private struct ActivityYearMetricStrip: View {
+    var data: ActivityYearlyNetChartData
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                metrics
+            }
+            VStack(spacing: AppTheme.Spacing.sm) {
+                metrics
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var metrics: some View {
+        ActivityChartMetricPill(label: "Total income", value: MoneyParser.formatPence(data.totalIncomePence), color: AppTheme.Colors.success)
+        ActivityChartMetricPill(label: "Total spent", value: MoneyParser.formatPence(data.totalSpentPence), color: AppTheme.Colors.danger)
+        ActivityChartMetricPill(label: "Net", value: signedMoney(data.currentNetPence), color: data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+    }
+}
+
+private struct ActivityYearlyNetDetailView: View {
+    var data: ActivityYearlyNetChartData
 
     var body: some View {
         ScreenScaffold(
-            title: "Cash flow",
+            title: "Yearly cash flow",
             subtitle: "",
             navigationMode: .inline,
             toolbarMode: .none,
@@ -2930,20 +3003,20 @@ private struct ActivityMonthlyBalanceDetailView: View {
         ) {
             detailHero
 
-            SectionTitle("Monthly line")
+            SectionTitle("Yearly line")
             AppCard(glow: data.hasData) {
-                ActivityBalanceLineGraph(data: data)
+                ActivityYearNetLineGraph(data: data)
                     .frame(height: 190)
             }
 
             SectionTitle("Breakdown")
             ActivityDetailRowsCard(rows: breakdownRows)
 
-            SectionTitle("Daily movement")
+            SectionTitle("Monthly movement")
             AppCard {
-                let rows = dailyMovementRows
+                let rows = data.activePoints
                 ForEach(rows.indices, id: \.self) { index in
-                    ActivityMonthlyBalanceDayRow(point: rows[index])
+                    ActivityYearlyNetMonthRow(point: rows[index])
 
                     if index < rows.count - 1 {
                         AppDivider()
@@ -2957,60 +3030,48 @@ private struct ActivityMonthlyBalanceDetailView: View {
         AppCard(glow: true) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(data.monthLabel)
+                    Text("\(data.year)")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.cardEyebrow)
                         .textCase(.uppercase)
 
-                    Text(MoneyParser.formatPence(data.currentPence))
+                    Text(signedMoney(data.currentNetPence))
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .foregroundStyle(data.currentPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp)
+                        .foregroundStyle(data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
                         .lineLimit(1)
                         .minimumScaleFactor(0.68)
 
-                    Text("Net income minus spending from the start of the month to now.")
+                    Text("Total income minus total spending from the start of the year to now.")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
 
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    ActivityChartMetricPill(label: "Income", value: MoneyParser.formatPence(data.incomePence), color: AppTheme.Colors.neonMoneyUp)
-                    ActivityChartMetricPill(label: "Spent", value: MoneyParser.formatPence(data.spentPence), color: AppTheme.Colors.neonMoneyDown)
-                    ActivityChartMetricPill(label: "Net", value: signedMoney(data.netMovementPence), color: data.netMovementPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp)
-                }
+                ActivityYearMetricStrip(data: data)
             }
         }
     }
 
     private var breakdownRows: [ActivityDetailRow] {
         [
-            ActivityDetailRow(label: "Opening", value: MoneyParser.formatPence(data.startPence), valueColor: AppTheme.Colors.primaryOrange),
-            ActivityDetailRow(label: "Income recorded", value: MoneyParser.formatPence(data.incomePence), valueColor: AppTheme.Colors.neonMoneyUp),
-            ActivityDetailRow(label: "Spending recorded", value: MoneyParser.formatPence(data.spentPence), valueColor: AppTheme.Colors.neonMoneyDown),
-            ActivityDetailRow(label: "Net left", value: signedMoney(data.currentPence), valueColor: data.currentPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp),
-            ActivityDetailRow(label: "Progress", value: "\(data.currentDay) of \(data.daysInMonth) days")
+            ActivityDetailRow(label: "Total income", value: MoneyParser.formatPence(data.totalIncomePence), valueColor: AppTheme.Colors.success),
+            ActivityDetailRow(label: "Total spending", value: MoneyParser.formatPence(data.totalSpentPence), valueColor: AppTheme.Colors.danger),
+            ActivityDetailRow(label: "Overall income", value: signedMoney(data.currentNetPence), valueColor: data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange),
+            ActivityDetailRow(label: "Year progress", value: "\(data.currentMonth) of 12 months")
         ]
-    }
-
-    private var dailyMovementRows: [ActivityMonthlyBalanceChartPoint] {
-        if data.movementPoints.isEmpty {
-            return Array(data.activePoints.suffix(1))
-        }
-        return data.movementPoints
     }
 }
 
-private struct ActivityMonthlyBalanceDayRow: View {
-    var point: ActivityMonthlyBalanceChartPoint
+private struct ActivityYearlyNetMonthRow: View {
+    var point: ActivityYearlyNetChartPoint
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(point.dateLabel)
+                    Text(point.monthLabel)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text(point.isCurrentDay ? "Today" : "Day \(point.day)")
+                    Text(point.isCurrentMonth ? "Current month" : "Month \(point.month)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.Colors.tertiaryText)
                 }
@@ -3020,29 +3081,31 @@ private struct ActivityMonthlyBalanceDayRow: View {
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(signedMoney(point.netPence))
                         .font(.subheadline.weight(.black))
-                        .foregroundStyle(point.netPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp)
-                    Text("Net day")
+                        .foregroundStyle(point.netPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                    Text("Net month")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.tertiaryText)
                 }
             }
 
             HStack(spacing: AppTheme.Spacing.sm) {
-                ActivityChartMetricPill(label: "In", value: MoneyParser.formatPence(point.incomePence), color: AppTheme.Colors.neonMoneyUp)
-                ActivityChartMetricPill(label: "Out", value: MoneyParser.formatPence(point.spentPence), color: AppTheme.Colors.neonMoneyDown)
-                ActivityChartMetricPill(label: "Left", value: signedMoney(point.balancePence), color: point.balancePence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp)
+                ActivityChartMetricPill(label: "In", value: MoneyParser.formatPence(point.incomePence), color: AppTheme.Colors.success)
+                ActivityChartMetricPill(label: "Out", value: MoneyParser.formatPence(point.spentPence), color: AppTheme.Colors.danger)
+                ActivityChartMetricPill(label: "Year net", value: signedMoney(point.cumulativeNetPence), color: point.cumulativeNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
             }
         }
         .padding(.vertical, 2)
     }
 }
 
-private struct ActivityBalanceLineGraph: View {
-    var data: ActivityMonthlyBalanceChartData
+private struct ActivityYearNetLineGraph: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var data: ActivityYearlyNetChartData
     @State private var drawProgress = 0.0
+    @State private var revealOpacity = 1.0
 
     private var trendColor: Color {
-        data.currentPence < 0 ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp
+        data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange
     }
 
     var body: some View {
@@ -3055,20 +3118,8 @@ private struct ActivityBalanceLineGraph: View {
             ZStack(alignment: .topLeading) {
                 graphGrid
 
-                ActivityBalanceLineShape(
-                    points: data.points,
-                    daysInMonth: data.daysInMonth,
-                    minValue: minValue,
-                    maxValue: maxValue
-                )
-                    .stroke(
-                        AppTheme.Colors.border.opacity(0.62),
-                        style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
-                    )
-
-                ActivityBalanceAreaShape(
+                ActivityYearNetAreaShape(
                     points: activePoints,
-                    daysInMonth: data.daysInMonth,
                     minValue: minValue,
                     maxValue: maxValue
                 )
@@ -3083,11 +3134,10 @@ private struct ActivityBalanceLineGraph: View {
                             endPoint: .bottom
                         )
                     )
-                    .opacity(drawProgress)
+                    .opacity(reduceMotion ? revealOpacity : drawProgress)
 
-                ActivityBalanceLineShape(
+                ActivityYearNetLineShape(
                     points: activePoints,
-                    daysInMonth: data.daysInMonth,
                     minValue: minValue,
                     maxValue: maxValue
                 )
@@ -3096,16 +3146,20 @@ private struct ActivityBalanceLineGraph: View {
                         lineColor,
                         style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
                     )
-                    .shadow(color: data.hasData ? lineColor.opacity(0.44) : .clear, radius: 12, y: 6)
+                    .shadow(color: data.hasData ? AppTheme.Colors.accentGlow.opacity(0.5) : .clear, radius: 7, y: 3)
+                    .opacity(revealOpacity)
 
                 if let currentPoint = activePoints.last {
-                    todayMarker(point: currentPoint, size: proxy.size, minValue: minValue, maxValue: maxValue, color: lineColor)
+                    currentMonthMarker(point: currentPoint, size: proxy.size, minValue: minValue, maxValue: maxValue, color: lineColor)
+                        .opacity(revealOpacity)
                 }
 
                 HStack {
-                    Text("1")
+                    Text("Jan")
                     Spacer()
-                    Text("\(data.daysInMonth)")
+                    Text("Jun")
+                    Spacer()
+                    Text("Dec")
                 }
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(AppTheme.Colors.tertiaryText)
@@ -3119,6 +3173,9 @@ private struct ActivityBalanceLineGraph: View {
                 startAnimation()
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Year to date cumulative income minus spending")
+        .accessibilityValue(signedMoney(data.currentNetPence))
     }
 
     private var graphGrid: some View {
@@ -3134,12 +3191,11 @@ private struct ActivityBalanceLineGraph: View {
         .padding(.bottom, 8)
     }
 
-    private func todayMarker(point: ActivityMonthlyBalanceChartPoint, size: CGSize, minValue: Int, maxValue: Int, color: Color) -> some View {
+    private func currentMonthMarker(point: ActivityYearlyNetChartPoint, size: CGSize, minValue: Int, maxValue: Int, color: Color) -> some View {
         let position = pointPosition(
-            day: point.day,
-            balancePence: point.balancePence,
+            month: point.month,
+            cumulativeNetPence: point.cumulativeNetPence,
             size: size,
-            daysInMonth: data.daysInMonth,
             minValue: minValue,
             maxValue: maxValue
         )
@@ -3165,29 +3221,38 @@ private struct ActivityBalanceLineGraph: View {
                 .shadow(color: color.opacity(0.72), radius: 10, y: 4)
         }
         .position(position)
+        .accessibilityHidden(true)
     }
 
-    private func pointPosition(day: Int, balancePence: Int, size: CGSize, daysInMonth: Int, minValue: Int, maxValue: Int) -> CGPoint {
+    private func pointPosition(month: Int, cumulativeNetPence: Int, size: CGSize, minValue: Int, maxValue: Int) -> CGPoint {
         let drawingHeight = max(size.height - 26, 1)
-        let clampedDay = min(max(day, 1), max(daysInMonth, 1))
-        let x = CGFloat(clampedDay - 1) / CGFloat(max(daysInMonth - 1, 1)) * max(size.width, 1)
+        let clampedMonth = min(max(month, 1), 12)
+        let x = CGFloat(clampedMonth - 1) / 11 * max(size.width, 1)
         let range = CGFloat(max(maxValue - minValue, 1))
-        let normalized = CGFloat(balancePence - minValue) / range
+        let normalized = CGFloat(cumulativeNetPence - minValue) / range
         let y = drawingHeight - (normalized * drawingHeight)
         return CGPoint(x: x, y: max(8, min(drawingHeight, y)))
     }
 
     private func startAnimation() {
+        guard !reduceMotion else {
+            drawProgress = 1
+            revealOpacity = 0
+            withAnimation(.easeOut(duration: 0.2)) {
+                revealOpacity = 1
+            }
+            return
+        }
+        revealOpacity = 1
         drawProgress = 0
-        withAnimation(.easeOut(duration: 1.15)) {
+        withAnimation(.easeOut(duration: 0.75)) {
             drawProgress = 1
         }
     }
 }
 
-private struct ActivityBalanceLineShape: Shape {
-    var points: [ActivityMonthlyBalanceChartPoint]
-    var daysInMonth: Int
+private struct ActivityYearNetLineShape: Shape {
+    var points: [ActivityYearlyNetChartPoint]
     var minValue: Int
     var maxValue: Int
 
@@ -3196,7 +3261,7 @@ private struct ActivityBalanceLineShape: Shape {
         guard !points.isEmpty else { return path }
 
         for (index, point) in points.enumerated() {
-            let position = pointPosition(day: point.day, balancePence: point.balancePence, rect: rect)
+            let position = pointPosition(month: point.month, cumulativeNetPence: point.cumulativeNetPence, rect: rect)
             if index == 0 {
                 path.move(to: position)
             } else {
@@ -3205,27 +3270,26 @@ private struct ActivityBalanceLineShape: Shape {
         }
 
         if points.count == 1 {
-            let position = pointPosition(day: points[0].day, balancePence: points[0].balancePence, rect: rect)
+            let position = pointPosition(month: points[0].month, cumulativeNetPence: points[0].cumulativeNetPence, rect: rect)
             path.addLine(to: CGPoint(x: min(rect.maxX, position.x + 0.5), y: position.y))
         }
 
         return path
     }
 
-    private func pointPosition(day: Int, balancePence: Int, rect: CGRect) -> CGPoint {
+    private func pointPosition(month: Int, cumulativeNetPence: Int, rect: CGRect) -> CGPoint {
         let drawingHeight = max(rect.height - 26, 1)
-        let clampedDay = min(max(day, 1), max(daysInMonth, 1))
-        let x = rect.minX + CGFloat(clampedDay - 1) / CGFloat(max(daysInMonth - 1, 1)) * rect.width
+        let clampedMonth = min(max(month, 1), 12)
+        let x = rect.minX + CGFloat(clampedMonth - 1) / 11 * rect.width
         let range = CGFloat(max(maxValue - minValue, 1))
-        let normalized = CGFloat(balancePence - minValue) / range
+        let normalized = CGFloat(cumulativeNetPence - minValue) / range
         let y = rect.minY + drawingHeight - (normalized * drawingHeight)
         return CGPoint(x: x, y: max(rect.minY + 8, min(rect.minY + drawingHeight, y)))
     }
 }
 
-private struct ActivityBalanceAreaShape: Shape {
-    var points: [ActivityMonthlyBalanceChartPoint]
-    var daysInMonth: Int
+private struct ActivityYearNetAreaShape: Shape {
+    var points: [ActivityYearlyNetChartPoint]
     var minValue: Int
     var maxValue: Int
 
@@ -3234,7 +3298,7 @@ private struct ActivityBalanceAreaShape: Shape {
         guard !points.isEmpty else { return path }
 
         for (index, point) in points.enumerated() {
-            let position = pointPosition(day: point.day, balancePence: point.balancePence, rect: rect)
+            let position = pointPosition(month: point.month, cumulativeNetPence: point.cumulativeNetPence, rect: rect)
             if index == 0 {
                 path.move(to: position)
             } else {
@@ -3242,26 +3306,26 @@ private struct ActivityBalanceAreaShape: Shape {
             }
         }
 
-        let lastX = pointPosition(day: points.last?.day ?? 1, balancePence: points.last?.balancePence ?? 0, rect: rect).x
-        let firstX = pointPosition(day: points[0].day, balancePence: points[0].balancePence, rect: rect).x
+        let lastX = pointPosition(month: points.last?.month ?? 1, cumulativeNetPence: points.last?.cumulativeNetPence ?? 0, rect: rect).x
+        let firstX = pointPosition(month: points[0].month, cumulativeNetPence: points[0].cumulativeNetPence, rect: rect).x
         path.addLine(to: CGPoint(x: lastX, y: rect.maxY - 18))
         path.addLine(to: CGPoint(x: firstX, y: rect.maxY - 18))
         path.closeSubpath()
         return path
     }
 
-    private func pointPosition(day: Int, balancePence: Int, rect: CGRect) -> CGPoint {
+    private func pointPosition(month: Int, cumulativeNetPence: Int, rect: CGRect) -> CGPoint {
         let drawingHeight = max(rect.height - 26, 1)
-        let clampedDay = min(max(day, 1), max(daysInMonth, 1))
-        let x = rect.minX + CGFloat(clampedDay - 1) / CGFloat(max(daysInMonth - 1, 1)) * rect.width
+        let clampedMonth = min(max(month, 1), 12)
+        let x = rect.minX + CGFloat(clampedMonth - 1) / 11 * rect.width
         let range = CGFloat(max(maxValue - minValue, 1))
-        let normalized = CGFloat(balancePence - minValue) / range
+        let normalized = CGFloat(cumulativeNetPence - minValue) / range
         let y = rect.minY + drawingHeight - (normalized * drawingHeight)
         return CGPoint(x: x, y: max(rect.minY + 8, min(rect.minY + drawingHeight, y)))
     }
 }
 
-private struct ActivityMonthProgressBadge: View {
+private struct ActivityYearProgressBadge: View {
     var progress: Double
     var label: String
 
@@ -3280,7 +3344,7 @@ private struct ActivityMonthProgressBadge: View {
                 Text(label)
                     .font(.caption2.weight(.black))
                     .foregroundStyle(AppTheme.Colors.primaryText)
-                Text("days")
+                Text("months")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppTheme.Colors.tertiaryText)
             }
@@ -3766,11 +3830,7 @@ private struct CreditDirectDebitsCard: View {
 
     var body: some View {
         AppCard {
-            scheduleHeader(
-                title: "Direct debits",
-                subtitle: "Open card payments in collection order",
-                systemImage: "arrow.down.circle"
-            )
+            scheduleHeader(title: "Direct debits")
 
             if items.isEmpty {
                 EmptyStateView(
@@ -3792,24 +3852,11 @@ private struct CreditDirectDebitsCard: View {
         }
     }
 
-    private func scheduleHeader(title: String, subtitle: String, systemImage: String) -> some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
-            Image(systemName: systemImage)
-                .foregroundStyle(AppTheme.Colors.primaryOrange)
-                .frame(width: 32, height: 32)
-                .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                .clipShape(Circle())
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
-                    .lineLimit(2)
-            }
+    private func scheduleHeader(title: String) -> some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.primaryText)
 
             Spacer(minLength: AppTheme.Spacing.sm)
 
@@ -3881,23 +3928,10 @@ private struct CreditNextStatementsCard: View {
 
     var body: some View {
         AppCard {
-            HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
-                Image(systemName: "doc.text")
-                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-                    .frame(width: 32, height: 32)
-                    .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                    .clipShape(Circle())
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Next statements")
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text("Every active card's next statement date")
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(2)
-                }
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Text("Next statements")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.Colors.primaryText)
 
                 Spacer(minLength: AppTheme.Spacing.sm)
 

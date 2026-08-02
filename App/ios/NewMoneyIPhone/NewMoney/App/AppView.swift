@@ -236,45 +236,37 @@ enum AppTabNavigationStackPolicy {
 }
 
 enum ProfileMenuAction: String, CaseIterable, Identifiable {
-    case addIncome
-    case bankAccounts
-    case appearance
+    case income
+    case accounts
+    case statements
     case settings
-    case history
-    case creditStatements
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .addIncome: "Add Income"
-        case .bankAccounts: "Bank Accounts"
-        case .appearance: "Appearance"
+        case .income: "Income"
+        case .accounts: "Accounts"
+        case .statements: "Statements"
         case .settings: "Settings"
-        case .history: "History"
-        case .creditStatements: "Credit Statements"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .addIncome: "Create income and payday setup."
-        case .bankAccounts: "Balances, income destinations, pots, and Direct Debits."
-        case .appearance: "Themes and colour presets."
-        case .settings: "Money left, pay defaults, dates, AI, and account controls."
-        case .history: "Paycheck and allocation history."
-        case .creditStatements: "Card statements and direct debit status."
+        case .income: "Paychecks, one-off income, and pay periods."
+        case .accounts: "Balances, income destinations, pots, and Direct Debits."
+        case .statements: "Card statements and direct debit status."
+        case .settings: "Appearance, history, planner defaults, and account controls."
         }
     }
 
     var symbol: String {
         switch self {
-        case .addIncome: "sterlingsign.circle"
-        case .bankAccounts: "building.columns"
-        case .appearance: "paintpalette"
+        case .income: "sterlingsign.circle"
+        case .accounts: "building.columns"
+        case .statements: "doc.text.magnifyingglass"
         case .settings: "gearshape"
-        case .history: "clock.arrow.circlepath"
-        case .creditStatements: "doc.text.magnifyingglass"
         }
     }
 }
@@ -302,8 +294,8 @@ enum ProfileMenuPresentationPolicy {
     static let resetDataConfirmationCount = 2
     static let resetDataKeepsAuthAccount = true
     static let resetDataDeletesCloudPlannerData = true
-    static let includesAddIncomeAction = true
-    static let opensAppearanceDirectly = true
+    static let includesAddIncomeAction = false
+    static let opensAppearanceDirectly = false
     static let usesSystemFullScreenSafeArea = true
     static let usesInlineNavigationTitle = true
     static let showsProfileSubtitle = false
@@ -840,7 +832,6 @@ private struct AddMenuSheetView: View {
 private struct ProfileMenuScreenView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
-    @State private var isAddIncomePresented = false
     @State private var isAccountsPresented = false
     @State private var isLogOutConfirmationPresented = false
     @State private var isFirstResetConfirmationPresented = false
@@ -863,9 +854,6 @@ private struct ProfileMenuScreenView: View {
                     isAccountsPresented = true
                 }
             }
-        }
-        .sheet(isPresented: $isAddIncomePresented) {
-            AddPaycheckSheetView(store: store)
         }
         .sheet(isPresented: $isAccountsPresented) {
             AccountsSheetView(store: store)
@@ -935,23 +923,13 @@ private struct ProfileMenuScreenView: View {
     private var actionsCard: some View {
         AppCard {
             ForEach(Array(ProfileMenuAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
-                if action == .addIncome {
-                    Button {
-                        isAddIncomePresented = true
-                    } label: {
-                        ProfileMenuActionRow(action: action)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("profile-menu-\(action.rawValue)")
-                } else {
-                    NavigationLink {
-                        profileDestination(for: action)
-                    } label: {
-                        ProfileMenuActionRow(action: action)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("profile-menu-\(action.rawValue)")
+                NavigationLink {
+                    profileDestination(for: action)
+                } label: {
+                    ProfileMenuActionRow(action: action)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("profile-menu-\(action.rawValue)")
 
                 if index < ProfileMenuAction.allCases.count - 1 {
                     AppDivider()
@@ -1018,18 +996,14 @@ private struct ProfileMenuScreenView: View {
     @ViewBuilder
     private func profileDestination(for action: ProfileMenuAction) -> some View {
         switch action {
-        case .addIncome:
-            EmptyView()
-        case .bankAccounts:
+        case .income:
+            IncomeBreakdownView(store: store)
+        case .accounts:
             BankAccountsView(store: store)
-        case .appearance:
-            AppearanceSettingsView(navigationMode: .inline, toolbarMode: .none)
+        case .statements:
+            StatementsView(store: store, navigationMode: .inline, toolbarMode: .none)
         case .settings:
             SettingsView(store: store, navigationMode: .inline, toolbarMode: .none)
-        case .history:
-            HistoryView(store: store)
-        case .creditStatements:
-            StatementsView(store: store, navigationMode: .inline, toolbarMode: .none)
         }
     }
 }

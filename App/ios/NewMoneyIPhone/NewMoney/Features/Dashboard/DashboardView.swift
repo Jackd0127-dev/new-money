@@ -1,6 +1,8 @@
+import Charts
 import SwiftUI
 
 enum DashboardHomeSection: String, Equatable {
+    case dueEvents
     case hero
     case accounts
     case paydayPlanning
@@ -9,7 +11,6 @@ enum DashboardHomeSection: String, Equatable {
     case monthlySpendChart
     case upcomingBeforePayday
     case alerts
-    case fundingChecklist
     case recentActivity
 }
 
@@ -21,13 +22,13 @@ struct DashboardHomeLayoutPolicy {
     static let quickRouteTitles = ["Income", "Spending"]
     static let quickRoutesPlacement = "aboveManualSpends"
     static let homeSections: [DashboardHomeSection] = [
+        .dueEvents,
         .hero,
         .accounts,
         .quickRoutes,
         .monthlySpendChart,
         .upcomingBeforePayday,
-        .alerts,
-        .fundingChecklist
+        .alerts
     ]
 
     static let moneyLeftDetailSections: [DashboardHomeSection] = [
@@ -52,7 +53,7 @@ private enum DashboardSheetDestination: Identifiable {
 private struct DashboardTabPresentation {
     var selectedPayPeriod: PayPeriod?
     var currentCostSummary: PayPeriodCostSummary
-    var fundingChecklistItems: [FundingChecklistPresentationItem]
+    var dueEvents: [HomeDueEvent]
     var manualMonthlySpendData: DashboardMonthlySpendChartData
     var outgoingsMonthlySpendData: DashboardMonthlySpendChartData
     var alertRows: [HomeAlertRow]
@@ -71,6 +72,9 @@ struct DashboardView: View {
     var onViewPlan: (() -> Void)?
     var onViewActivity: (() -> Void)?
     @State private var activeDashboardSheet: DashboardSheetDestination?
+    @State private var selectedDueEvent: HomeDueEvent?
+    @State private var isDueEventsExpanded = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var snapshot: PlannerSnapshot { store.snapshot }
 
@@ -102,11 +106,16 @@ struct DashboardView: View {
                 PaycheckDetailView(store: store, paycheck: paycheck)
             }
         }
+        .sheet(item: $selectedDueEvent) { event in
+            HomeDueEventEditorView(store: store, event: event)
+        }
     }
 
     @ViewBuilder
     private func homeSection(_ section: DashboardHomeSection) -> some View {
         switch section {
+        case .dueEvents:
+            dueEventsBanner
         case .hero:
             heroCard
         case .accounts:
@@ -119,8 +128,6 @@ struct DashboardView: View {
             upcomingBeforePayday
         case .alerts:
             homeAlerts
-        case .fundingChecklist:
-            fundingChecklist
         case .recentActivity:
             recentActivity
         case .paydayPlanning, .spendingSnapshot:
@@ -170,9 +177,7 @@ struct DashboardView: View {
                     summary: currentCostSummary,
                     currentTotalMoneyPence: currentTotalMoneyPence,
                     subtitle: heroSubtitle,
-                    paydayLabel: paydayLabel,
-                    safeToSpendTodayPence: safeToSpendTodayPence,
-                    showsDetailAffordance: true
+                    paydayLabel: paydayLabel
                 )
             }
         }
@@ -188,17 +193,6 @@ struct DashboardView: View {
         return FinanceEngine.formatPaydayLabel(period.payday)
     }
 
-    private var safeToSpendTodayPence: Int? {
-        guard let period = tabPresentation.selectedPayPeriod else {
-            return nil
-        }
-        return FinanceEngine.getDailySafeToSpendPence(
-            spendablePence: currentCostSummary.projectedMoneyLeftPence,
-            today: store.todayIso,
-            endDate: period.endDate
-        )
-    }
-
     private var currentTotalMoneyPence: Int {
         PlannerDerivedData.currentTotalMoneyPence(
             snapshot: snapshot,
@@ -207,79 +201,96 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
-    private var fundingChecklist: some View {
-        let items = tabPresentation.fundingChecklistItems
-        let activeItems = items.filter { $0.status != .paidCompleted }
-        let paidItems = items.filter { $0.status == .paidCompleted }
-        let fundedCount = items.filter(\.isCompleted).count
-        let hasPendingFunding = activeItems.contains { !$0.isCompleted && !$0.isExcluded }
-
-        if !items.isEmpty {
-            AppCard(glow: items.contains { !$0.isCompleted }) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        SectionTitle("Funding checklist")
-                        Text(fundingChecklistProgressText(fundedCount: fundedCount, totalCount: items.count, hasPendingFunding: hasPendingFunding))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
+    private var dueEventsBanner: some View {
+        let events = tabPresentation.dueEvents
+        if !events.isEmpty {
+            VStack(spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                        isDueEventsExpanded.toggle()
                     }
-                    Spacer()
-                    Image(systemName: "checklist.checked")
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.success)
-                        .frame(width: 36, height: 36)
-                        .background(AppTheme.Colors.success.opacity(0.12))
-                        .clipShape(Circle())
+                } label: {
+                    HStack(spacing: AppTheme.Spacing.sm) {
+                        Image(systemName: events.contains { $0.direction == .outgoing } ? "bell.badge.fill" : "sparkles")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.controlText)
+                            .frame(width: 38, height: 38)
+                            .background(.white.opacity(0.18), in: Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(dueBannerTitle(events))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.controlText)
+                            Text(dynamicTypeSize.isAccessibilitySize ? "Tap to review or edit" : "Today and tomorrow · tap to review or edit")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.controlText.opacity(0.78))
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.xs)
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.Colors.controlText)
+                            .rotationEffect(.degrees(isDueEventsExpanded ? 180 : 0))
+                    }
+                    .padding(AppTheme.Spacing.md)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .accessibilityLabel("\(dueBannerTitle(events)). \(isDueEventsExpanded ? "Collapse" : "Expand")")
 
-                AppDivider()
+                if isDueEventsExpanded {
+                    VStack(spacing: 0) {
+                        ForEach(events) { event in
+                            Button {
+                                selectedDueEvent = event
+                            } label: {
+                                HomeDueEventRow(event: event, todayIso: store.todayIso)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 52)
+                            .accessibilityHint("Opens this cycle's date, status, and amount editor")
 
-                checklistSection(title: "Active funding", items: activeItems, isReadOnly: false)
-
-                if !paidItems.isEmpty {
-                    AppDivider()
-                    checklistSection(title: "Paid / completed", items: paidItems, isReadOnly: true)
+                            if event.id != events.last?.id {
+                                Rectangle()
+                                    .fill(.white.opacity(0.13))
+                                    .frame(height: 1)
+                                    .padding(.leading, 56)
+                            }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .background(dueBannerGradient(events), in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            }
+            .shadow(color: dueBannerColor(events).opacity(0.25), radius: 18, y: 9)
+            .accessibilityIdentifier("home-due-events-banner")
         }
     }
 
-    private func fundingChecklistProgressText(fundedCount: Int, totalCount: Int, hasPendingFunding: Bool) -> String {
-        let countText = "\(fundedCount)/\(totalCount) funded"
-        return hasPendingFunding ? "Funding pending · \(countText)" : countText
-    }
-
-    @ViewBuilder
-    private func checklistSection(title: String, items: [FundingChecklistPresentationItem], isReadOnly: Bool) -> some View {
-        if !items.isEmpty {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-                .textCase(.uppercase)
-                .accessibilityIdentifier("dashboard-funding-section-\(title.accessibilityIdentifierSlug)")
-
-            ForEach(items) { item in
-                FundingChecklistRow(item: item, isReadOnly: isReadOnly) {
-                    applyFundingChecklistAction(item)
-                } excludeAction: {
-                    applyFundingChecklistExclusion(item)
-                }
-                if item.id != items.last?.id {
-                    AppDivider()
-                }
-            }
+    private func dueBannerTitle(_ events: [HomeDueEvent]) -> String {
+        let todayCount = events.filter { $0.date == store.todayIso }.count
+        let tomorrowCount = events.count - todayCount
+        if todayCount > 0 && tomorrowCount > 0 {
+            return "\(todayCount) today, \(tomorrowCount) tomorrow"
         }
+        if todayCount > 0 {
+            return "\(todayCount) due today"
+        }
+        return "\(tomorrowCount) due tomorrow"
     }
 
-    private func applyFundingChecklistAction(_ item: FundingChecklistPresentationItem) {
-        guard item.status != .paidCompleted else { return }
-
-        _ = store.setFundingChecklistCompleted(action: item.action, completed: item.isExcluded || !item.isCompleted)
+    private func dueBannerColor(_ events: [HomeDueEvent]) -> Color {
+        events.contains { $0.status == .awaiting } ? AppTheme.Colors.warning : AppTheme.Colors.primaryOrange
     }
 
-    private func applyFundingChecklistExclusion(_ item: FundingChecklistPresentationItem) {
-        guard item.status != .paidCompleted else { return }
-        _ = store.setFundingChecklistExcluded(action: item.action, excluded: !item.isExcluded)
+    private func dueBannerGradient(_ events: [HomeDueEvent]) -> LinearGradient {
+        let color = dueBannerColor(events)
+        return LinearGradient(colors: [color, color.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private var recentActivity: some View {
@@ -428,9 +439,6 @@ struct DashboardView: View {
         let scope = snapshot.settings.includePotsInMoneyLeft ?? true
             ? "including pots"
             : "excluding pots"
-        if currentCostSummary.unfundedChecklistPence > 0 {
-            return "Total cash now, \(scope). \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
-        }
         return "Current cash across income and bank accounts, \(scope)."
     }
 
@@ -499,11 +507,6 @@ struct DashboardView: View {
             payPeriod: payPeriod,
             asOfDate: todayIso
         )
-        let checklistItems = PlannerDerivedData.fundingChecklistPresentationItems(
-            snapshot: snapshot,
-            payPeriod: payPeriod,
-            asOfDate: todayIso
-        )
         let debtSummary = FinanceEngine.getDebtSummary(
             debts: snapshot.debts,
             payments: snapshot.debtPayments,
@@ -529,16 +532,6 @@ struct DashboardView: View {
                     message: "\(MoneyParser.formatPence(abs(currentTotalMoneyPence))) over the current position.",
                     symbol: "exclamationmark.triangle",
                     color: AppTheme.Colors.danger
-                )
-            )
-        }
-        if costSummary.unfundedChecklistPence > 0 {
-            alerts.append(
-                HomeAlertRow(
-                    title: "Funding still pending",
-                    message: "\(MoneyParser.formatPence(costSummary.unfundedChecklistPence)) is not marked as funded yet.",
-                    symbol: "checklist.unchecked",
-                    color: AppTheme.Colors.warning
                 )
             )
         }
@@ -619,7 +612,7 @@ struct DashboardView: View {
         return DashboardTabPresentation(
             selectedPayPeriod: payPeriod,
             currentCostSummary: costSummary,
-            fundingChecklistItems: checklistItems,
+            dueEvents: PlannerDerivedData.homeDueEvents(snapshot: snapshot, asOfDate: todayIso),
             manualMonthlySpendData: DashboardMonthlySpendChartData.make(
                 transactions: snapshot.transactions,
                 todayIso: todayIso
@@ -738,6 +731,233 @@ private struct DashboardQuickRouteCard: View {
     }
 }
 
+private struct HomeDueEventRow: View {
+    var event: HomeDueEvent
+    var todayIso: String
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: event.direction == .incoming ? "arrow.down.left" : "arrow.up.right")
+                .font(.caption.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(.white.opacity(0.16), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(event.title)
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                    if event.status == .completed {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                    } else if event.status == .awaiting {
+                        Image(systemName: "clock.badge.exclamationmark.fill")
+                            .font(.caption)
+                    }
+                }
+                Text("\(event.date == todayIso ? "Today" : "Tomorrow") · \(event.sourceLabel) · \(event.cycleLabel)")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(2)
+                    .opacity(0.75)
+            }
+            .foregroundStyle(.white)
+
+            Spacer(minLength: AppTheme.Spacing.xs)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("\(event.direction == .incoming ? "+" : "−")\(MoneyParser.formatPence(event.amountPence))")
+                    .font(.subheadline.weight(.black))
+                Text(event.status.rawValue.capitalized)
+                    .font(.caption2.weight(.bold))
+                    .opacity(0.75)
+            }
+            .foregroundStyle(.white)
+
+            Image(systemName: "slider.horizontal.3")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.vertical, AppTheme.Spacing.sm)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(event.title), \(event.direction.rawValue), \(MoneyParser.formatPence(event.amountPence)), \(event.date), \(event.status.rawValue), \(event.sourceLabel), \(event.cycleLabel)")
+    }
+}
+
+private enum HomeDueEditorStatus: String, CaseIterable, Identifiable {
+    case scheduled
+    case awaiting
+    case completed
+    case cancelled
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+private struct HomeDueEventEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    let event: HomeDueEvent
+    @State private var date: Date
+    @State private var amount: String
+    @State private var status: HomeDueEditorStatus
+
+    init(store: PlannerStore, event: HomeDueEvent) {
+        self.store = store
+        self.event = event
+        _date = State(initialValue: FinanceEngine.parseDate(event.date))
+        _amount = State(initialValue: String(format: "%.2f", Double(event.amountPence) / 100))
+        let initialStatus: HomeDueEditorStatus
+        switch event.status {
+        case .scheduled: initialStatus = .scheduled
+        case .awaiting: initialStatus = .awaiting
+        case .completed: initialStatus = .completed
+        }
+        _status = State(initialValue: initialStatus)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("This cycle") {
+                    LabeledContent("Source", value: event.sourceLabel)
+                    LabeledContent("Scheduled", value: event.scheduledDate)
+                    Text(event.cycleLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Update") {
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    MoneyField(title: "Amount", text: $amount)
+                    Picker("Status", selection: $status) {
+                        ForEach(availableStatuses) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                }
+
+                Section {
+                    Text("Only this scheduled cycle changes. The normal date, recurrence, and following cycles stay untouched.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(event.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                    .disabled(MoneyParser.parsePoundsToPence(amount) <= 0)
+                }
+            }
+        }
+    }
+
+    private var availableStatuses: [HomeDueEditorStatus] {
+        switch event.source {
+        case .cardStatement, .cardDirectDebit:
+            [.scheduled, .awaiting, .completed]
+        default:
+            HomeDueEditorStatus.allCases
+        }
+    }
+
+    private func save() {
+        let dateIso = FinanceEngine.toIsoDate(date)
+        let amountPence = MoneyParser.parsePoundsToPence(amount)
+
+        switch event.source {
+        case .payday(let payPeriodId, let paycheckId):
+            store.updateIncomeOccurrence(
+                sourceKind: .paycheck,
+                sourceId: paycheckId ?? payPeriodId,
+                scheduledDate: event.scheduledDate,
+                state: incomeState,
+                actualDate: status == .completed ? dateIso : nil,
+                amountPence: amountPence
+            )
+        case .oneOffIncome(let incomeId):
+            store.updateIncomeOccurrence(
+                sourceKind: .oneOffIncome,
+                sourceId: incomeId,
+                scheduledDate: event.scheduledDate,
+                state: incomeState,
+                actualDate: status == .completed ? dateIso : nil,
+                amountPence: amountPence
+            )
+        case .recurringBill(let paymentId, let scheduledDueDate):
+            store.setRecurringBillOccurrenceAmount(paymentId: paymentId, scheduledDueDate: scheduledDueDate, amountPence: amountPence)
+            switch status {
+            case .scheduled:
+                store.clearRecurringBillOccurrenceAdjustment(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            case .awaiting:
+                store.markRecurringBillOccurrenceAwaiting(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            case .completed:
+                store.confirmRecurringBillOccurrence(paymentId: paymentId, scheduledDueDate: scheduledDueDate, actualDueDate: dateIso)
+            case .cancelled:
+                store.setRecurringBillOccurrenceRefunded(paymentId: paymentId, scheduledDueDate: scheduledDueDate, refunded: true)
+            }
+        case .savedPayment(let paymentId):
+            store.updateCustomPaymentOccurrence(
+                id: paymentId,
+                amountPence: amountPence,
+                dueDate: dateIso,
+                status: status == .completed ? .paid : (status == .cancelled ? .archived : .unpaid)
+            )
+        case .debtPayment(let scheduleItemId, let debtId):
+            store.updateDebtScheduleOccurrence(
+                scheduleItemId: scheduleItemId,
+                debtId: debtId,
+                amountPence: amountPence,
+                dueDate: dateIso,
+                status: status == .completed ? .paid : (status == .cancelled ? .cancelled : (status == .awaiting ? .overdue : .planned))
+            )
+        case .cardStatement(let cardId, let scheduledStatementDate):
+            store.setCreditCardCycleAmount(cardId: cardId, scheduledStatementDate: scheduledStatementDate, amountPence: amountPence)
+            switch status {
+            case .scheduled:
+                store.clearCreditCardStatementAdjustment(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .awaiting:
+                store.markCreditCardStatementAwaiting(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .completed:
+                store.confirmCreditCardStatement(cardId: cardId, scheduledStatementDate: scheduledStatementDate, actualStatementDate: dateIso)
+            case .cancelled:
+                break
+            }
+        case .cardDirectDebit(let cardId, let scheduledStatementDate):
+            store.setCreditCardCycleAmount(cardId: cardId, scheduledStatementDate: scheduledStatementDate, amountPence: amountPence)
+            switch status {
+            case .scheduled:
+                store.clearCreditCardDirectDebitAdjustment(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .awaiting:
+                store.markCreditCardDirectDebitAwaiting(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .completed:
+                store.confirmCreditCardDirectDebit(cardId: cardId, scheduledStatementDate: scheduledStatementDate, actualDirectDebitDate: dateIso)
+            case .cancelled:
+                break
+            }
+        }
+    }
+
+    private var incomeState: IncomeOccurrenceState {
+        switch status {
+        case .scheduled: .normal
+        case .awaiting: .awaiting
+        case .completed: .confirmed
+        case .cancelled: .cancelled
+        }
+    }
+}
+
 private struct DashboardMoneyLeftDetailView: View {
     @ObservedObject var store: PlannerStore
 
@@ -770,9 +990,7 @@ private struct DashboardMoneyLeftDetailView: View {
                     summary: currentCostSummary,
                     currentTotalMoneyPence: currentTotalMoneyPence,
                     subtitle: heroSubtitle,
-                    paydayLabel: paydayLabel,
-                    safeToSpendTodayPence: safeToSpendTodayPence,
-                    showsDetailAffordance: false
+                    paydayLabel: paydayLabel
                 )
             }
         case .spendingSnapshot:
@@ -782,7 +1000,7 @@ private struct DashboardMoneyLeftDetailView: View {
                 periodLabel: spendingPeriodLabel,
                 entryCount: selectedPeriodTransactions.count
             )
-        case .accounts, .paydayPlanning, .quickRoutes, .monthlySpendChart, .upcomingBeforePayday, .alerts, .fundingChecklist, .recentActivity:
+        case .dueEvents, .accounts, .paydayPlanning, .quickRoutes, .monthlySpendChart, .upcomingBeforePayday, .alerts, .recentActivity:
             EmptyView()
         }
     }
@@ -792,17 +1010,6 @@ private struct DashboardMoneyLeftDetailView: View {
             return "No payday"
         }
         return FinanceEngine.formatPaydayLabel(period.payday)
-    }
-
-    private var safeToSpendTodayPence: Int? {
-        guard let period = store.selectedPayPeriod else {
-            return nil
-        }
-        return FinanceEngine.getDailySafeToSpendPence(
-            spendablePence: currentCostSummary.projectedMoneyLeftPence,
-            today: store.todayIso,
-            endDate: period.endDate
-        )
     }
 
     private var currentTotalMoneyPence: Int {
@@ -838,9 +1045,6 @@ private struct DashboardMoneyLeftDetailView: View {
         let scope = currentMoneyBreakdown.includesPots
             ? "including pots"
             : "excluding pots"
-        if currentCostSummary.unfundedChecklistPence > 0 {
-            return "Total cash now, \(scope). \(MoneyParser.formatPence(currentCostSummary.unfundedChecklistPence)) is still unfunded."
-        }
         return "Current cash across income and bank accounts, \(scope)."
     }
 
@@ -854,61 +1058,58 @@ private struct DashboardMoneyLeftHeroContent: View {
     var currentTotalMoneyPence: Int
     var subtitle: String
     var paydayLabel: String
-    var safeToSpendTodayPence: Int?
-    var showsDetailAffordance: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                    Text("Money left")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.cardEyebrow)
-                    Text(MoneyParser.formatPence(currentTotalMoneyPence))
-                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .foregroundStyle(currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
-                        .minimumScaleFactor(0.62)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 8) {
-                    if showsDetailAffordance {
-                        HStack(spacing: 5) {
-                            Text("Details")
-                            Image(systemName: "chevron.right")
-                        }
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(AppTheme.Colors.primaryOrange.opacity(0.13))
-                        .clipShape(Capsule())
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    moneyLeftBlock
+                    HStack(alignment: .bottom, spacing: AppTheme.Spacing.md) {
+                        Pill(text: paydayLabel, systemImage: "calendar")
+                        Spacer(minLength: 0)
+                        plannedCostsBlock(alignment: .trailing)
                     }
-
-                    Pill(text: paydayLabel, systemImage: "calendar")
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text("Planned costs")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                        Text(MoneyParser.formatPence(summary.projectedCostsPence))
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.warning)
+                }
+            } else {
+                HStack(alignment: .top) {
+                    moneyLeftBlock
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Pill(text: paydayLabel, systemImage: "calendar")
+                        plannedCostsBlock(alignment: .trailing)
                     }
                 }
             }
+        }
+    }
 
-            if let safeToSpendTodayPence {
-                AppDivider()
-                MetricRow(
-                    label: "Safe to spend today",
-                    value: safeToSpendTodayPence == 0
-                        ? "No spending remaining"
-                        : MoneyParser.formatPence(safeToSpendTodayPence),
-                    valueColor: safeToSpendTodayPence == 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
-                )
-            }
+    private var moneyLeftBlock: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Text("Money left")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.cardEyebrow)
+            Text(MoneyParser.formatPence(currentTotalMoneyPence))
+                .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                .foregroundStyle(currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
+    }
+
+    private func plannedCostsBlock(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            Text("Planned costs")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+            Text(MoneyParser.formatPence(summary.projectedCostsPence))
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.warning)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 }
@@ -1065,8 +1266,46 @@ struct DashboardMonthlySpendChartPoint: Equatable, Identifiable {
     var day: Int
     var amountPence: Int
     var isFuture: Bool
+    var segments: [DashboardMonthlySpendChartSegment] = []
 
     var id: Int { day }
+}
+
+enum DashboardOutgoingCategory: String, CaseIterable, Identifiable, Equatable, Hashable {
+    case spending
+    case bills
+    case savedPayments = "Saved payments"
+    case debt
+    case cardPayments = "Card payments"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .spending: "Spending"
+        case .bills: "Bills"
+        case .savedPayments: "Saved payments"
+        case .debt: "Debt"
+        case .cardPayments: "Card payments"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .spending: AppTheme.Colors.primaryOrange
+        case .bills: AppTheme.Colors.warning
+        case .savedPayments: AppTheme.Colors.accentHighlight
+        case .debt: AppTheme.Colors.danger
+        case .cardPayments: AppTheme.Colors.success
+        }
+    }
+}
+
+struct DashboardMonthlySpendChartSegment: Equatable, Identifiable {
+    var category: DashboardOutgoingCategory
+    var amountPence: Int
+
+    var id: String { category.rawValue }
 }
 
 enum DashboardMonthlySpendChartMode: String, Equatable, CaseIterable {
@@ -1144,10 +1383,12 @@ struct DashboardMonthlySpendChartData: Equatable {
         }
 
         let points = (1...max(daysInMonth, 1)).map { day in
-            DashboardMonthlySpendChartPoint(
+            let amount = day <= currentDay ? buckets[day, default: 0] : 0
+            return DashboardMonthlySpendChartPoint(
                 day: day,
-                amountPence: day <= currentDay ? buckets[day, default: 0] : 0,
-                isFuture: day > currentDay
+                amountPence: amount,
+                isFuture: day > currentDay,
+                segments: amount > 0 ? [DashboardMonthlySpendChartSegment(category: .spending, amountPence: amount)] : []
             )
         }
         let totalPence = points.reduce(0) { $0 + ($1.isFuture ? 0 : $1.amountPence) }
@@ -1174,13 +1415,14 @@ struct DashboardMonthlySpendChartData: Equatable {
         let monthStart = monthBoundaryIsoDate(today, calendar: calendar, day: 1)
         let monthEnd = monthBoundaryIsoDate(today, calendar: calendar, day: max(daysInMonth, 1))
 
-        var buckets: [Int: Int] = [:]
+        var buckets: [Int: [DashboardOutgoingCategory: Int]] = [:]
         for event in PlannerDerivedData.calendarEvents(snapshot: snapshot, startDate: monthStart, endDate: monthEnd) {
             // Pot allocations are internal transfers. The bill/card/debt event they
             // fund is already represented in this chart, so including both would
             // inflate "All outgoings" without changing the safe-to-spend calculation.
             guard event.type != .payday,
                   event.type != .allocation,
+                  event.type != .debtReserve,
                   let amountPence = event.amountPence,
                   amountPence > 0
             else {
@@ -1196,14 +1438,34 @@ struct DashboardMonthlySpendChartData: Equatable {
                 continue
             }
 
-            buckets[eventDay, default: 0] += amountPence
+            let category: DashboardOutgoingCategory
+            switch event.type {
+            case .spending:
+                category = .spending
+            case .recurring:
+                category = .bills
+            case .savedPayment:
+                category = .savedPayments
+            case .debtDue, .debtPayment:
+                category = .debt
+            case .cardPayment:
+                category = .cardPayments
+            case .payday, .debtReserve, .allocation:
+                continue
+            }
+            buckets[eventDay, default: [:]][category, default: 0] += amountPence
         }
 
         let points = (1...max(daysInMonth, 1)).map { day in
-            DashboardMonthlySpendChartPoint(
+            let segments = DashboardOutgoingCategory.allCases.compactMap { category -> DashboardMonthlySpendChartSegment? in
+                let amount = buckets[day]?[category, default: 0] ?? 0
+                return amount > 0 ? DashboardMonthlySpendChartSegment(category: category, amountPence: amount) : nil
+            }
+            return DashboardMonthlySpendChartPoint(
                 day: day,
-                amountPence: buckets[day, default: 0],
-                isFuture: day > currentDay
+                amountPence: segments.reduce(0) { $0 + $1.amountPence },
+                isFuture: day > currentDay,
+                segments: segments
             )
         }
         let totalPence = points.reduce(0) { $0 + $1.amountPence }
@@ -1230,6 +1492,8 @@ private struct DashboardMonthlySpendChartView: View {
     var manualData: DashboardMonthlySpendChartData
     var outgoingsData: DashboardMonthlySpendChartData
     @State private var mode: DashboardMonthlySpendChartMode = .manualSpends
+    @State private var selectedDay: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var data: DashboardMonthlySpendChartData {
         switch mode {
@@ -1261,14 +1525,18 @@ private struct DashboardMonthlySpendChartView: View {
 
                     VStack(alignment: .trailing, spacing: AppTheme.Spacing.sm) {
                         Button {
-                            withAnimation(AppTheme.Animation.standard) {
+                            let animation: Animation = reduceMotion
+                                ? .easeInOut(duration: 0.2)
+                                : .spring(response: 0.48, dampingFraction: 0.82)
+                            withAnimation(animation) {
                                 mode = mode.next
+                                selectedDay = nil
                             }
                         } label: {
                             Image(systemName: "arrow.right")
                                 .font(.system(size: 15, weight: .bold))
                                 .foregroundStyle(AppTheme.Colors.primaryOrange)
-                                .frame(width: 34, height: 34)
+                                .frame(width: 44, height: 44)
                                 .background(AppTheme.Colors.primaryOrange.opacity(0.14))
                                 .clipShape(Circle())
                         }
@@ -1279,8 +1547,22 @@ private struct DashboardMonthlySpendChartView: View {
                     }
                 }
 
-                DashboardSpendBarGraph(data: data)
-                    .frame(height: 118)
+                ZStack {
+                    DashboardSpendBarGraph(data: data, selectedDay: $selectedDay)
+                        .id(mode)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                }
+                .frame(height: 218)
+                .clipped()
+
+                DashboardChartLegend(categories: visibleCategories)
+
+                if let selectedPoint {
+                    DashboardSelectedDayBreakdown(point: selectedPoint)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 HStack(spacing: AppTheme.Spacing.sm) {
                     DashboardChartMetricPill(label: "Daily avg", value: MoneyParser.formatPence(data.averageDailyPence), color: AppTheme.Colors.primaryOrange)
@@ -1291,87 +1573,166 @@ private struct DashboardMonthlySpendChartView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mode.title) \(MoneyParser.formatPence(data.totalPence))")
     }
+
+    private var visibleCategories: [DashboardOutgoingCategory] {
+        let available = Set(data.points.flatMap(\.segments).map(\.category))
+        return DashboardOutgoingCategory.allCases.filter { available.contains($0) }
+    }
+
+    private var selectedPoint: DashboardMonthlySpendChartPoint? {
+        selectedDay.flatMap { day in data.points.first { $0.day == day } }
+    }
 }
 
 private struct DashboardSpendBarGraph: View {
     var data: DashboardMonthlySpendChartData
+    @Binding var selectedDay: Int?
 
     var body: some View {
-        GeometryReader { proxy in
-            let maxAmount = max(data.highestDailyPence, 1)
-            let availableHeight = max(proxy.size.height - 24, 1)
+        Chart {
+            RectangleMark(
+                xStart: .value("Future start", Double(data.daysElapsed) + 0.5),
+                xEnd: .value("Month end", Double(data.daysInMonth) + 0.5),
+                yStart: .value("Baseline", 0),
+                yEnd: .value("Maximum", max(data.highestDailyPence, 1))
+            )
+            .foregroundStyle(AppTheme.Colors.elevatedSurface.opacity(0.48))
 
-            ZStack(alignment: .bottomLeading) {
-                VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        AppTheme.Colors.border.opacity(0.45)
-                            .frame(height: 1)
-                        Spacer()
+            ForEach(data.points) { point in
+                ForEach(point.segments) { segment in
+                    BarMark(
+                        x: .value("Day", point.day),
+                        y: .value("Amount", segment.amountPence),
+                        width: .ratio(0.74),
+                        stacking: .standard
+                    )
+                    .foregroundStyle(segment.category.color)
+                    .opacity(point.isFuture ? 0.58 : 1)
+                    .accessibilityLabel("Day \(point.day), \(segment.category.title)")
+                    .accessibilityValue(MoneyParser.formatPence(segment.amountPence))
+                }
+            }
+
+            RuleMark(x: .value("Today", data.daysElapsed))
+                .foregroundStyle(AppTheme.Colors.primaryText.opacity(0.58))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text("Today")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+            if let selectedDay {
+                RuleMark(x: .value("Selected day", selectedDay))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+        .chartXScale(domain: 1...max(data.daysInMonth, 1))
+        .chartYScale(domain: 0...max(data.highestDailyPence, 1))
+        .chartXAxis {
+            AxisMarks(values: dayTicks) { value in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                    .foregroundStyle(AppTheme.Colors.border.opacity(0.45))
+                AxisTick()
+                AxisValueLabel {
+                    if let day = value.as(Int.self) { Text("\(day)") }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine()
+                    .foregroundStyle(AppTheme.Colors.border.opacity(0.5))
+                AxisValueLabel {
+                    if let amount = value.as(Int.self) {
+                        Text(poundsAxisLabel(amount))
                     }
-                    AppTheme.Colors.border.opacity(0.45)
-                        .frame(height: 1)
                 }
+            }
+        }
+        .chartXSelection(value: $selectedDay)
+        .accessibilityLabel("Daily stacked monthly outgoings chart")
+    }
 
-                HStack(alignment: .bottom, spacing: 3) {
-                    ForEach(data.points) { point in
-                        Capsule(style: .continuous)
-                            .fill(barFill(for: point))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: barHeight(for: point, maxAmount: maxAmount, availableHeight: availableHeight))
-                            .opacity(pointOpacity(point))
-                            .shadow(
-                                color: point.amountPence == data.highestDailyPence && data.hasSpending ? AppTheme.Colors.glowOrange.opacity(0.72) : .clear,
-                                radius: 8,
-                                y: 4
-                            )
+    private var dayTicks: [Int] {
+        Array(Set([1, 7, 14, 21, 28, data.daysInMonth])).sorted()
+    }
+
+    private func poundsAxisLabel(_ pence: Int) -> String {
+        let pounds = Double(pence) / 100
+        if pounds >= 1_000 { return "£\(String(format: "%.1fk", pounds / 1_000))" }
+        return "£\(Int(pounds.rounded()))"
+    }
+}
+
+private struct DashboardChartLegend: View {
+    var categories: [DashboardOutgoingCategory]
+
+    var body: some View {
+        if !categories.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                legendRow
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(categories) { category in
+                        legendItem(category)
                     }
                 }
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.top, AppTheme.Spacing.sm)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
-                HStack {
-                    Text("1")
-                    Spacer()
-                    Text("\(data.daysElapsed)")
-                    Spacer()
-                    Text("\(data.daysInMonth)")
-                }
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.tertiaryText)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .offset(y: 18)
+    private var legendRow: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            ForEach(categories) { category in
+                legendItem(category)
             }
         }
     }
 
-    private func barFill(for point: DashboardMonthlySpendChartPoint) -> AnyShapeStyle {
-        if point.isFuture {
-            return AnyShapeStyle(AppTheme.Colors.border.opacity(0.38))
+    private func legendItem(_ category: DashboardOutgoingCategory) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(category.color).frame(width: 7, height: 7)
+            Text(category.title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
         }
-        if point.amountPence == 0 {
-            return AnyShapeStyle(AppTheme.Colors.elevatedSurface)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(category.title) category")
+    }
+}
+
+private struct DashboardSelectedDayBreakdown: View {
+    var point: DashboardMonthlySpendChartPoint
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Day \(point.day) · \(MoneyParser.formatPence(point.amountPence))")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            if point.segments.isEmpty {
+                Text("No outgoings")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            } else {
+                ForEach(point.segments) { segment in
+                    HStack {
+                        Label(segment.category.title, systemImage: "circle.fill")
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(segment.category.color)
+                        Spacer()
+                        Text(MoneyParser.formatPence(segment.amountPence))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                    }
+                }
+            }
         }
-        return AnyShapeStyle(
-            LinearGradient(
-                colors: [
-                    AppTheme.Colors.primaryOrange,
-                    AppTheme.Colors.warning,
-                    AppTheme.Colors.success.opacity(0.78)
-                ],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-        )
-    }
-
-    private func barHeight(for point: DashboardMonthlySpendChartPoint, maxAmount: Int, availableHeight: CGFloat) -> CGFloat {
-        guard point.amountPence > 0 else { return 7 }
-        return max(12, CGFloat(point.amountPence) / CGFloat(maxAmount) * availableHeight)
-    }
-
-    private func pointOpacity(_ point: DashboardMonthlySpendChartPoint) -> Double {
-        if point.isFuture { return 0.42 }
-        return point.amountPence == 0 ? 0.62 : 1
+        .padding(AppTheme.Spacing.sm)
+        .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1721,9 +2082,12 @@ struct IncomeBreakdownView: View {
         DashboardBreakdownScaffold(
             title: "Income",
             subtitle: "Paycheck inputs, pay periods, and total money.",
-            toolbarMode: .editDone(isEditing: editMode.isEditing, canEdit: hasDeletableIncome) {
-                toggleEditMode()
-            }
+            toolbarMode: .editDoneAndAdd(
+                isEditing: editMode.isEditing,
+                canEdit: hasDeletableIncome,
+                editAction: toggleEditMode,
+                addAction: { isAddIncomePresented = true }
+            )
         ) {
             AppCard(glow: true) {
                 MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod.map { PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: $0) } ?? 0), valueColor: AppTheme.Colors.success)

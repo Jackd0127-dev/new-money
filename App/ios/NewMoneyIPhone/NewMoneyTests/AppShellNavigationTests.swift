@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import NewMoneyIPhone
 
 final class AppShellNavigationTests: XCTestCase {
@@ -233,9 +235,10 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     func testProfileMenuIncludesSettingsRoute() {
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Add Income", "Bank Accounts", "Appearance", "Settings", "History", "Credit Statements"])
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "paintpalette", "gearshape", "clock.arrow.circlepath", "doc.text.magnifyingglass"])
-        XCTAssertTrue(ProfileMenuPresentationPolicy.includesAddIncomeAction)
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Income", "Accounts", "Statements", "Settings"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "doc.text.magnifyingglass", "gearshape"])
+        XCTAssertFalse(ProfileMenuPresentationPolicy.includesAddIncomeAction)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.opensAppearanceDirectly)
     }
 
     func testProfileMenuUsesRootNavigationLinkAndSettingsLink() {
@@ -253,7 +256,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ProfileMenuPresentationPolicy.resetDataConfirmationCount, 2)
         XCTAssertTrue(ProfileMenuPresentationPolicy.resetDataKeepsAuthAccount)
         XCTAssertTrue(ProfileMenuPresentationPolicy.resetDataDeletesCloudPlannerData)
-        XCTAssertTrue(ProfileMenuPresentationPolicy.opensAppearanceDirectly)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.opensAppearanceDirectly)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesSystemFullScreenSafeArea)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesInlineNavigationTitle)
         XCTAssertFalse(ProfileMenuPresentationPolicy.showsProfileSubtitle)
@@ -331,8 +334,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(CreditRoute.allCases.map(\.title).contains("Statements"))
     }
 
-    func testSettingsRoutesIncludeCreditStatements() {
-        XCTAssertEqual(SettingsRoute.allCases.map(\.title), ["History", "Credit Statements"])
+    func testSettingsRoutesContainHistoryOnly() {
+        XCTAssertEqual(SettingsRoute.allCases.map(\.title), ["History"])
     }
 
     func testCreditSecondaryScreenToolbarActionsMatchRequestedButtons() {
@@ -428,11 +431,14 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistAlwaysVisible)
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistUsesExistingDerivedItems)
         XCTAssertEqual(BillsLayoutPolicy.fundingChecklistProjectedPeriodCount, 2)
+        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistPresentation, "independentDropdowns")
+        XCTAssertTrue(BillsLayoutPolicy.fundingChecklistCurrentDefaultsExpanded)
+        XCTAssertFalse(BillsLayoutPolicy.fundingChecklistNextDefaultsExpanded)
         XCTAssertEqual(BillsLayoutPolicy.yourBillsPresentation, "collapsibleDropdown")
         XCTAssertEqual(BillsLayoutPolicy.takingSoonPresentation, "collapsibleDropdown")
-        XCTAssertEqual(BillsLayoutPolicy.overviewUpcomingPresentation, "collapsibleProgressiveLazyList")
+        XCTAssertEqual(BillsLayoutPolicy.overviewUpcomingPresentation, "collapsibleTwoCyclesPerBill")
         XCTAssertEqual(BillsLayoutPolicy.overviewGroupsPresentation, "collapsibleDropdown")
-        XCTAssertEqual(BillsLayoutPolicy.upcomingSchedulePageMonths, 12)
+        XCTAssertEqual(BillsLayoutPolicy.upcomingOccurrencesPerBill, 2)
         XCTAssertTrue(BillsLayoutPolicy.upcomingScheduleLoadsOnlyWhenExpanded)
         XCTAssertEqual(BillsLayoutPolicy.collapsibleHeaderStyle, "activityExpandableSection")
         XCTAssertGreaterThanOrEqual(BillsLayoutPolicy.collapsibleHeaderMinimumHeight, 44)
@@ -446,6 +452,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(BillsLayoutPolicy.editBillTitle, "Edit Bill")
         XCTAssertTrue(BillsLayoutPolicy.editUsesExistingRecurringPaymentUpdate)
         XCTAssertTrue(BillsLayoutPolicy.billRowsShowCheckThisCycle)
+        XCTAssertEqual(BillsLayoutPolicy.activeBillCountLabel(1), "1 active bill")
+        XCTAssertEqual(BillsLayoutPolicy.activeBillCountLabel(4), "4 active bills")
     }
 
     func testBillIconsDescribeTheBillRatherThanOnlyItsFundingRoute() {
@@ -482,18 +490,21 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(PotsLayoutPolicy.summaryPresentation, .navigationPush)
         XCTAssertFalse(PotsLayoutPolicy.summaryShowsTopCardSymbol)
         XCTAssertEqual(PotsLayoutPolicy.overviewDetailSections, [.graph, .timeline])
-        XCTAssertEqual(PotsLayoutPolicy.graphStyle, "animatedNeonLine")
-        XCTAssertEqual(PotsLayoutPolicy.timelineStyle, "branchedPotTimeline")
+        XCTAssertEqual(PotsLayoutPolicy.graphStyle, "themeAdaptiveLine")
+        XCTAssertEqual(PotsLayoutPolicy.timelineStyle, "themeAdaptivePotTimeline")
         XCTAssertEqual(PotsLayoutPolicy.timelinePresentation, "collapsibleDropdown")
         XCTAssertTrue(PotsLayoutPolicy.timelineDefaultsExpandedWhenEmpty)
         XCTAssertEqual(PotsLayoutPolicy.overviewDetailSubtitle, "")
         XCTAssertTrue(PotsLayoutPolicy.overviewDetailUsesInlineTitle)
+        XCTAssertTrue(PotsLayoutPolicy.potOverviewShowsAllocateAction)
+        XCTAssertFalse(PotsLayoutPolicy.potOverviewShowsRecordSpendingAction)
     }
 
-    func testActivityMonthlyChartUsesProjectedAndDayAnchoredLines() {
-        XCTAssertEqual(ActivityMonthlyBalanceChartLayoutPolicy.estimatedLineStyle, "fullMonthProjectedLine")
-        XCTAssertEqual(ActivityMonthlyBalanceChartLayoutPolicy.actualLineStyle, "dayAnchoredNeonLine")
-        XCTAssertTrue(ActivityMonthlyBalanceChartLayoutPolicy.todayMarkerFollowsActualLine)
+    func testActivityYearChartUsesCumulativeActualLineAndUnusedFutureAxis() {
+        XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.lineStyle, "yearToDateCumulativeNet")
+        XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.futurePresentation, "unusedAxisSpace")
+        XCTAssertTrue(ActivityYearlyNetChartLayoutPolicy.currentMonthMarkerFollowsActualLine)
+        XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.monthCount, 12)
     }
 
     func testCreditSummaryOpensInlineOverviewDetail() {
@@ -516,6 +527,8 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(CreditLayoutPolicy.dueSoonPreviewOpensFullList)
         XCTAssertTrue(CreditLayoutPolicy.directDebitFullListIsUntruncated)
         XCTAssertTrue(CreditLayoutPolicy.nextStatementsIncludeEveryActiveCard)
+        XCTAssertFalse(CreditLayoutPolicy.dueSoonHeadersShowLeadingSymbols)
+        XCTAssertFalse(CreditLayoutPolicy.dueSoonHeadersShowSubtitles)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.cardAspectRatio, 1.58, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.cardCornerRadius, 12, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.canonicalRenderer, "PremiumCardView")
@@ -595,12 +608,12 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsGeneratedAutomaticPaychecks)
         XCTAssertFalse(ActivityLayoutPolicy.recentActivityShowsZeroValuePaychecks)
         XCTAssertEqual(ActivityLayoutPolicy.paycheckActivityDateSource, "payday")
-        XCTAssertEqual(ActivityLayoutPolicy.monthBalanceChartMetric, "currentMonthIncomeMinusSpending")
-        XCTAssertEqual(ActivityLayoutPolicy.monthBalanceDetailPresentation, .navigationPush)
-        XCTAssertTrue(ActivityLayoutPolicy.monthBalanceDetailUsesInlineTitle)
+        XCTAssertEqual(ActivityLayoutPolicy.yearNetChartMetric, "currentYearIncomeMinusSpending")
+        XCTAssertEqual(ActivityLayoutPolicy.yearNetDetailPresentation, .navigationPush)
+        XCTAssertTrue(ActivityLayoutPolicy.yearNetDetailUsesInlineTitle)
         XCTAssertFalse(ActivityLayoutPolicy.showsDetailRecordId)
-        XCTAssertEqual(ActivityLayoutPolicy.incomeDetailToolbarMode, "editDone")
-        XCTAssertEqual(ActivityLayoutPolicy.spendingDetailToolbarMode, "editDone")
+        XCTAssertEqual(ActivityLayoutPolicy.incomeDetailToolbarMode, "editDoneAndAdd")
+        XCTAssertEqual(ActivityLayoutPolicy.spendingDetailToolbarMode, "editDoneAndAdd")
         XCTAssertTrue(ActivityLayoutPolicy.incomeDetailUsesNativeToolbarMorph)
         XCTAssertTrue(ActivityLayoutPolicy.spendingDetailUsesNativeToolbarMorph)
         XCTAssertTrue(ActivityLayoutPolicy.incomeEditRequiresDeletableItem)
@@ -644,17 +657,44 @@ final class AppShellNavigationTests: XCTestCase {
 }
 
 final class DashboardSpendingChartTests: XCTestCase {
+    @MainActor
+    func testHomeRendersAt390PointsWithLargeDynamicType() async {
+        var snapshot = DefaultData.basicDataSnapshot
+        snapshot.settings.appDateMode = .manual
+        snapshot.settings.manualTodayIso = "2026-07-01"
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: snapshot))
+        await store.load()
+
+        let view = NavigationStack {
+            DashboardView(store: store, navigationMode: .inline, toolbarMode: .none)
+        }
+        .environment(\.dynamicTypeSize, .accessibility3)
+        let host = UIHostingController(rootView: view)
+        host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        host.view.backgroundColor = UIColor.systemBackground
+        host.view.layoutIfNeeded()
+
+        let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        XCTAssertEqual(image.size, CGSize(width: 390, height: 844))
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "home-390-large-type"
+        attachment.lifetime = XCTAttachment.Lifetime.keepAlways
+        add(attachment)
+    }
+
     func testHomeLayoutMovesSpendingSnapshotIntoMoneyLeftDetails() {
         XCTAssertEqual(
             DashboardHomeLayoutPolicy.homeSections,
             [
+                .dueEvents,
                 .hero,
                 .accounts,
                 .quickRoutes,
                 .monthlySpendChart,
                 .upcomingBeforePayday,
-                .alerts,
-                .fundingChecklist
+                .alerts
             ]
         )
         XCTAssertFalse(DashboardHomeLayoutPolicy.homeSections.contains(.paydayPlanning))
@@ -683,6 +723,7 @@ final class DashboardSpendingChartTests: XCTestCase {
         XCTAssertEqual(chartData.points[0].amountPence, 450)
         XCTAssertEqual(chartData.points[1].amountPence, 0)
         XCTAssertEqual(chartData.points[2].amountPence, 2550)
+        XCTAssertEqual(chartData.points.flatMap(\.segments).reduce(0) { $0 + $1.amountPence }, chartData.totalPence)
         XCTAssertTrue(chartData.points[19].isFuture)
     }
 
@@ -749,6 +790,9 @@ final class DashboardSpendingChartTests: XCTestCase {
         XCTAssertEqual(outgoingsData.points[0].amountPence, 0)
         XCTAssertEqual(outgoingsData.points[2].amountPence, 450)
         XCTAssertEqual(outgoingsData.points[9].amountPence, 899)
+        XCTAssertEqual(outgoingsData.points.flatMap(\.segments).reduce(0) { $0 + $1.amountPence }, outgoingsData.totalPence)
+        XCTAssertEqual(outgoingsData.points[2].segments.first?.category, .spending)
+        XCTAssertEqual(outgoingsData.points[9].segments.first?.category, .bills)
         XCTAssertTrue(outgoingsData.points[9].isFuture)
     }
 
@@ -757,8 +801,8 @@ final class DashboardSpendingChartTests: XCTestCase {
         amountPence: Int,
         type: TransactionType,
         date: String
-    ) -> Transaction {
-        Transaction(
+    ) -> NewMoneyIPhone.Transaction {
+        NewMoneyIPhone.Transaction(
             id: id,
             potId: nil,
             payPeriodId: nil,
@@ -832,7 +876,7 @@ final class PlanLayoutTests: XCTestCase {
 
 final class ActivityLayoutTests: XCTestCase {
     func testActivityLayoutKeepsIncomeAndSpendingRoutesOnDashboard() {
-        XCTAssertEqual(ActivityLayoutPolicy.sections, [.recentActivity, .monthBalance])
+        XCTAssertEqual(ActivityLayoutPolicy.sections, [.recentActivity, .yearNet])
         XCTAssertFalse(ActivityLayoutPolicy.sections.contains(.income))
         XCTAssertFalse(ActivityLayoutPolicy.sections.contains(.spending))
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityInitialVisibleCount, 1)
@@ -841,9 +885,9 @@ final class ActivityLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 1, totalCount: 8), 3)
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 2, totalCount: 8), 5)
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityVisibleCount(afterSeeMoreTaps: 3, totalCount: 6), 6)
-        XCTAssertEqual(ActivityLayoutPolicy.monthBalanceChartMetric, "currentMonthIncomeMinusSpending")
-        XCTAssertEqual(ActivityLayoutPolicy.monthBalanceDetailPresentation, .navigationPush)
-        XCTAssertTrue(ActivityLayoutPolicy.monthBalanceDetailUsesInlineTitle)
+        XCTAssertEqual(ActivityLayoutPolicy.yearNetChartMetric, "currentYearIncomeMinusSpending")
+        XCTAssertEqual(ActivityLayoutPolicy.yearNetDetailPresentation, .navigationPush)
+        XCTAssertTrue(ActivityLayoutPolicy.yearNetDetailUsesInlineTitle)
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDetailToolbarActions, ["trash", "edit"])
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteRequiresConfirmation)
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteIsPermanent)

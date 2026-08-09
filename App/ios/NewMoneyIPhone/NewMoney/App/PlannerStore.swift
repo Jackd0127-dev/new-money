@@ -2795,10 +2795,18 @@ final class PlannerStore: ObservableObject {
                     payPeriod: nil,
                     asOfDate: statementPayment.directDebitDate
                 )
-                let repaymentAmountPence = min(
-                    statementPayment.actualDuePence,
-                    cardSummary.actualOwedPence
-                )
+                let repaymentAmountPence: Int
+                switch statementPayment.amountSource {
+                case .confirmedBankAmount:
+                    // A confirmed cycle amount is the bank's cash obligation even
+                    // when the app does not contain every underlying transaction.
+                    repaymentAmountPence = statementPayment.actualDuePence
+                case .calculated:
+                    repaymentAmountPence = min(
+                        statementPayment.actualDuePence,
+                        cardSummary.actualOwedPence
+                    )
+                }
 
                 guard repaymentAmountPence > 0 else { continue }
 

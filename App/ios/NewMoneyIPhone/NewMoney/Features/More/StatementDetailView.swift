@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StatementDetailView: View {
     var statement: CreditCardStatementSummary
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ScreenScaffold(
@@ -11,43 +12,31 @@ struct StatementDetailView: View {
             toolbarMode: .none
         ) {
             AppCard(glow: statement.status == .overdue) {
-                HStack(alignment: .center) {
-                    Label("Statement summary", systemImage: "doc.text")
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.primaryText)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                        Label("Statement summary", systemImage: "doc.text")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.primaryText)
 
-                    Spacer()
+                        statusBadge
+                    }
+                } else {
+                    HStack(alignment: .center) {
+                        Label("Statement summary", systemImage: "doc.text")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.Colors.primaryText)
 
-                    Text(statusLabel)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(statusColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(statusColor.opacity(0.12), in: Capsule())
+                        Spacer()
+
+                        statusBadge
+                    }
                 }
 
                 Text(statusDescription)
                     .font(.footnote)
                     .foregroundStyle(status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText)
 
-                MetricRow(
-                    label: "Statement balance",
-                    value: MoneyParser.formatPence(statement.statementAmountPence),
-                    valueColor: AppTheme.Colors.primaryOrange
-                )
-                MetricRow(label: "Statement date", value: fullDate(statement.statementDate))
-                MetricRow(label: "Direct debit date", value: fullDate(statement.directDebitDate))
-                MetricRow(
-                    label: "Paid",
-                    value: MoneyParser.formatPence(statement.paidAmountPence),
-                    valueColor: statement.paidAmountPence > 0 ? AppTheme.Colors.success : AppTheme.Colors.secondaryText
-                )
-                MetricRow(
-                    label: "Remaining",
-                    value: MoneyParser.formatPence(statement.unpaidAmountPence),
-                    valueColor: remainingColor
-                )
-                MetricRow(label: "Transactions", value: "\(statement.transactions.count)")
+                CreditMetricGrid(items: statementMetrics)
 
                 if statement.statementAmountPence > 0 {
                     ProgressView(value: paymentProgress)
@@ -61,28 +50,18 @@ struct StatementDetailView: View {
                 SectionTitle("Statement breakdown")
 
                 AppCard {
-                    if sourceTotal(.openingStatement) > 0 {
-                        MetricRow(label: "Opening balance", value: MoneyParser.formatPence(sourceTotal(.openingStatement)))
+                    CreditMetricGrid(items: breakdownMetrics)
+
+                    if statement.amountSource == .confirmedBankAmount {
+                        Text("The bank total is kept authoritative. The adjustment reconciles it with the real transactions currently itemised in New Money.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
                     }
-                    if sourceTotal(.spending) > 0 {
-                        MetricRow(label: "Card spending", value: MoneyParser.formatPence(sourceTotal(.spending)))
-                    }
-                    if sourceTotal(.recurring) > 0 {
-                        MetricRow(label: "Bills", value: MoneyParser.formatPence(sourceTotal(.recurring)))
-                    }
-                    if sourceTotal(.custom) > 0 {
-                        MetricRow(label: "One-off payments", value: MoneyParser.formatPence(sourceTotal(.custom)))
-                    }
-                    MetricRow(
-                        label: "Transaction total",
-                        value: MoneyParser.formatPence(transactionTotalPence),
-                        valueColor: AppTheme.Colors.primaryText
-                    )
                 }
             }
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                SectionTitle("Transactions")
+                SectionTitle("Tracked transactions")
                     .accessibilityIdentifier("statement-transactions-\(statement.cardId)-\(statement.statementDate)")
 
                 if statement.transactions.isEmpty {
@@ -138,6 +117,15 @@ struct StatementDetailView: View {
         statement.status
     }
 
+    private var statusBadge: some View {
+        Text(statusLabel)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(statusColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(statusColor.opacity(0.12), in: Capsule())
+    }
+
     private var statusLabel: String {
         switch status {
         case .upcoming:
@@ -180,13 +168,69 @@ struct StatementDetailView: View {
         return status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.warning
     }
 
+    private var statementMetrics: [CreditMetricGrid.Item] {
+        [
+            .init(
+                label: statement.amountSource == .confirmedBankAmount ? "Confirmed statement total" : "Statement total",
+                value: MoneyParser.formatPence(statement.statementAmountPence),
+                valueColor: AppTheme.Colors.primaryOrange
+            ),
+            .init(label: "Statement date", value: fullDate(statement.statementDate)),
+            .init(label: "Direct debit date", value: fullDate(statement.directDebitDate)),
+            .init(
+                label: "Paid",
+                value: MoneyParser.formatPence(statement.paidAmountPence),
+                valueColor: statement.paidAmountPence > 0 ? AppTheme.Colors.success : AppTheme.Colors.secondaryText
+            ),
+            .init(
+                label: "Remaining",
+                value: MoneyParser.formatPence(statement.unpaidAmountPence),
+                valueColor: remainingColor
+            ),
+            .init(label: "Tracked transactions", value: "\(statement.transactions.count)")
+        ]
+    }
+
+    private var breakdownMetrics: [CreditMetricGrid.Item] {
+        var items: [CreditMetricGrid.Item] = []
+        if sourceTotal(.openingStatement) > 0 {
+            items.append(.init(label: "Opening balance", value: MoneyParser.formatPence(sourceTotal(.openingStatement))))
+        }
+        if sourceTotal(.spending) > 0 {
+            items.append(.init(label: "Card spending", value: MoneyParser.formatPence(sourceTotal(.spending))))
+        }
+        if sourceTotal(.recurring) > 0 {
+            items.append(.init(label: "Bills", value: MoneyParser.formatPence(sourceTotal(.recurring))))
+        }
+        if sourceTotal(.custom) > 0 {
+            items.append(.init(label: "One-off payments", value: MoneyParser.formatPence(sourceTotal(.custom))))
+        }
+        items.append(
+            .init(
+                label: "Tracked transaction total",
+                value: MoneyParser.formatPence(statement.calculatedAmountPence)
+            )
+        )
+        if statement.amountSource == .confirmedBankAmount {
+            items.append(
+                .init(
+                    label: "Bank statement adjustment",
+                    value: signedMoney(statement.reconciliationAdjustmentPence),
+                    valueColor: statement.reconciliationAdjustmentPence == 0 ? AppTheme.Colors.secondaryText : AppTheme.Colors.warning
+                )
+            )
+        }
+        return items
+    }
+
+    private func signedMoney(_ pence: Int) -> String {
+        guard pence > 0 else { return MoneyParser.formatPence(pence) }
+        return "+\(MoneyParser.formatPence(pence))"
+    }
+
     private var paymentProgress: Double {
         let total = max(1, statement.statementAmountPence)
         return min(1, max(0, Double(statement.paidAmountPence) / Double(total)))
-    }
-
-    private var transactionTotalPence: Int {
-        statement.transactions.reduce(0) { $0 + $1.amountPence }
     }
 
     private func sourceTotal(_ source: CreditCardStatementTransactionSource) -> Int {

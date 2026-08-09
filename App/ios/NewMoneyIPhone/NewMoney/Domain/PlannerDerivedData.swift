@@ -92,6 +92,26 @@ struct CreditCardAvailabilitySummary: Equatable, Sendable {
     var forecastAvailablePence: Int
 }
 
+enum CreditCardCycleAmountSource: Equatable, Sendable {
+    case calculated
+    case confirmedBankAmount
+}
+
+struct CreditCardCycleAmount: Equatable, Sendable {
+    var cardId: String
+    var scheduledStatementDate: String
+    var calculatedAmountPence: Int
+    var confirmedAmountPence: Int?
+    var effectiveAmountPence: Int
+    var paidAmountPence: Int
+    var remainingAmountPence: Int
+    var source: CreditCardCycleAmountSource
+
+    var reconciliationAdjustmentPence: Int {
+        effectiveAmountPence - calculatedAmountPence
+    }
+}
+
 struct CreditCardStatementPayment: Equatable, Sendable {
     var statementDate: String
     var directDebitDate: String
@@ -99,6 +119,7 @@ struct CreditCardStatementPayment: Equatable, Sendable {
     var forecastDuePence: Int
     var scheduledStatementDate: String? = nil
     var isHeld: Bool = false
+    var amountSource: CreditCardCycleAmountSource = .calculated
 }
 
 struct CreditCardCycleAdjustmentSummary: Equatable, Sendable {
@@ -205,13 +226,21 @@ struct CreditCardStatementSummary: Identifiable, Equatable, Sendable {
     var id: String
     var cardId: String
     var cardName: String
+    var scheduledStatementDate: String
     var statementDate: String
     var directDebitDate: String
+    var calculatedAmountPence: Int
+    var confirmedAmountPence: Int?
     var statementAmountPence: Int
     var paidAmountPence: Int
     var unpaidAmountPence: Int
+    var amountSource: CreditCardCycleAmountSource
     var status: CreditCardStatementStatus
     var transactions: [CreditCardStatementTransaction]
+
+    var reconciliationAdjustmentPence: Int {
+        statementAmountPence - calculatedAmountPence
+    }
 }
 
 struct CardBillFundingChecklistItem: Identifiable, Equatable, Sendable {
@@ -2087,24 +2116,49 @@ enum PlannerDerivedData {
                     directDebitDate: cycle.directDebitDate,
                     asOfDate: asOfDate
                 )
-                let actualDuePence = max(0, breakdown
-                    .filter { $0.source == .openingStatement || $0.source == .spending || $0.source == .repayment }
-                    .reduce(0) { $0 + $1.amountPence })
-                let forecastDuePence = max(0, breakdown.reduce(0) { $0 + $1.amountPence })
-                let amountOverride = snapshot.creditCardCycleOverrides.first {
-                    $0.deletedAt == nil &&
-                    $0.creditCardId == card.id &&
-                    $0.scheduledStatementDate == cycle.scheduledStatementDate
-                }?.amountPenceOverride.map { max(0, $0) }
+                let calculatedActualPence = breakdown
+                    .filter { $0.source == .openingStatement || $0.source == .spending }
+                    .reduce(0) { $0 + max(0, $1.amountPence) }
+                let calculatedForecastPence = breakdown
+                    .filter { $0.source != .repayment }
+                    .reduce(0) { $0 + max(0, $1.amountPence) }
+                let confirmedAmountPence = creditCardCycleConfirmedAmountPence(
+                    snapshot: snapshot,
+                    cardId: card.id,
+                    scheduledStatementDate: cycle.scheduledStatementDate
+                )
+                let paidAmountPence = creditCardCyclePaidAmountPence(
+                    snapshot: snapshot,
+                    cardId: card.id,
+                    scheduledStatementDate: cycle.scheduledStatementDate,
+                    statementDate: cycle.statementDate,
+                    directDebitDate: cycle.directDebitDate,
+                    asOfDate: asOfDate
+                )
+                let actualAmount = creditCardCycleAmount(
+                    cardId: card.id,
+                    scheduledStatementDate: cycle.scheduledStatementDate,
+                    calculatedAmountPence: calculatedActualPence,
+                    confirmedAmountPence: confirmedAmountPence,
+                    paidAmountPence: paidAmountPence
+                )
+                let forecastAmount = creditCardCycleAmount(
+                    cardId: card.id,
+                    scheduledStatementDate: cycle.scheduledStatementDate,
+                    calculatedAmountPence: calculatedForecastPence,
+                    confirmedAmountPence: confirmedAmountPence,
+                    paidAmountPence: paidAmountPence
+                )
 
                 payments.append(
                     CreditCardStatementPayment(
                         statementDate: cycle.statementDate,
                         directDebitDate: cycle.directDebitDate,
-                        actualDuePence: amountOverride ?? actualDuePence,
-                        forecastDuePence: amountOverride ?? forecastDuePence,
+                        actualDuePence: actualAmount.remainingAmountPence,
+                        forecastDuePence: forecastAmount.remainingAmountPence,
                         scheduledStatementDate: cycle.scheduledStatementDate,
-                        isHeld: false
+                        isHeld: false,
+                        amountSource: actualAmount.source
                     )
                 )
             }
@@ -2137,44 +2191,53 @@ enum PlannerDerivedData {
                         includesCycleStart: includesCycleStart,
                         asOfDate: asOfDate
                     )
-                    let statementAmountPence = transactions.reduce(0) { $0 + max(0, $1.amountPence) }
-                    let paidAmountPence = min(
-                        statementAmountPence,
-                        snapshot.creditCardRepayments
-                            .filter {
-                                $0.deletedAt == nil &&
-                                $0.creditCardId == card.id &&
-                                (
-                                    ($0.statementDate == cycle.statementDate && $0.date >= cycle.statementDate) ||
-                                    ($0.statementDate == nil && $0.date > cycle.statementDate && $0.date <= cycle.directDebitDate)
-                                ) &&
-                                $0.date <= asOfDate
-                            }
-                            .reduce(0) { $0 + max(0, $1.amountPence) }
+                    let calculatedAmountPence = transactions.reduce(0) { $0 + max(0, $1.amountPence) }
+                    let confirmedAmountPence = creditCardCycleConfirmedAmountPence(
+                        snapshot: snapshot,
+                        cardId: card.id,
+                        scheduledStatementDate: cycle.scheduledStatementDate
                     )
-                    let unpaidAmountPence = max(0, statementAmountPence - paidAmountPence)
+                    let paidAmountPence = creditCardCyclePaidAmountPence(
+                        snapshot: snapshot,
+                        cardId: card.id,
+                        scheduledStatementDate: cycle.scheduledStatementDate,
+                        statementDate: cycle.statementDate,
+                        directDebitDate: cycle.directDebitDate,
+                        asOfDate: asOfDate
+                    )
+                    let amount = creditCardCycleAmount(
+                        cardId: card.id,
+                        scheduledStatementDate: cycle.scheduledStatementDate,
+                        calculatedAmountPence: calculatedAmountPence,
+                        confirmedAmountPence: confirmedAmountPence,
+                        paidAmountPence: paidAmountPence
+                    )
                     let status: CreditCardStatementStatus
                     if cycle.isHeld {
                         status = .awaitingConfirmation
-                    } else if statementAmountPence > 0 && unpaidAmountPence == 0 {
+                    } else if amount.effectiveAmountPence > 0 && amount.remainingAmountPence == 0 {
                         status = .paid
-                    } else if unpaidAmountPence > 0 && cycle.directDebitDate < asOfDate {
+                    } else if amount.remainingAmountPence > 0 && cycle.directDebitDate < asOfDate {
                         status = .overdue
                     } else {
                         status = .upcoming
                     }
 
-                    if statementAmountPence > 0 || paidAmountPence > 0 {
+                    if amount.effectiveAmountPence > 0 || amount.paidAmountPence > 0 {
                         summaries.append(
                             CreditCardStatementSummary(
                                 id: "\(card.id)-\(cycle.scheduledStatementDate)",
                                 cardId: card.id,
                                 cardName: card.name,
+                                scheduledStatementDate: cycle.scheduledStatementDate,
                                 statementDate: cycle.statementDate,
                                 directDebitDate: cycle.directDebitDate,
-                                statementAmountPence: statementAmountPence,
-                                paidAmountPence: paidAmountPence,
-                                unpaidAmountPence: unpaidAmountPence,
+                                calculatedAmountPence: amount.calculatedAmountPence,
+                                confirmedAmountPence: amount.confirmedAmountPence,
+                                statementAmountPence: amount.effectiveAmountPence,
+                                paidAmountPence: amount.paidAmountPence,
+                                unpaidAmountPence: amount.remainingAmountPence,
+                                amountSource: amount.source,
                                 status: status,
                                 transactions: transactions
                             )
@@ -2191,6 +2254,70 @@ enum PlannerDerivedData {
                 }
                 return $0.statementDate > $1.statementDate
             }
+    }
+
+    private static func creditCardCycleConfirmedAmountPence(
+        snapshot: PlannerSnapshot,
+        cardId: String,
+        scheduledStatementDate: String
+    ) -> Int? {
+        snapshot.creditCardCycleOverrides.first {
+            $0.deletedAt == nil &&
+            $0.creditCardId == cardId &&
+            $0.scheduledStatementDate == scheduledStatementDate
+        }?
+        .amountPenceOverride
+        .map { max(0, $0) }
+    }
+
+    private static func creditCardCyclePaidAmountPence(
+        snapshot: PlannerSnapshot,
+        cardId: String,
+        scheduledStatementDate: String,
+        statementDate: String,
+        directDebitDate: String,
+        asOfDate: String
+    ) -> Int {
+        snapshot.creditCardRepayments
+            .filter { repayment in
+                guard repayment.deletedAt == nil,
+                      !repayment.isRefunded,
+                      repayment.creditCardId == cardId,
+                      repayment.date <= asOfDate
+                else { return false }
+
+                if let repaymentStatementDate = repayment.statementDate {
+                    return repaymentStatementDate == scheduledStatementDate ||
+                        repaymentStatementDate == statementDate
+                }
+
+                return repayment.date > statementDate && repayment.date <= directDebitDate
+            }
+            .reduce(0) { $0 + max(0, $1.amountPence) }
+    }
+
+    private static func creditCardCycleAmount(
+        cardId: String,
+        scheduledStatementDate: String,
+        calculatedAmountPence: Int,
+        confirmedAmountPence: Int?,
+        paidAmountPence: Int
+    ) -> CreditCardCycleAmount {
+        let calculated = max(0, calculatedAmountPence)
+        let confirmed = confirmedAmountPence.map { max(0, $0) }
+        let effective = confirmed ?? calculated
+        let paid = min(effective, max(0, paidAmountPence))
+
+        return CreditCardCycleAmount(
+            cardId: cardId,
+            scheduledStatementDate: scheduledStatementDate,
+            calculatedAmountPence: calculated,
+            confirmedAmountPence: confirmed,
+            effectiveAmountPence: effective,
+            paidAmountPence: paid,
+            remainingAmountPence: max(0, effective - paid),
+            source: confirmed == nil ? .calculated : .confirmedBankAmount
+        )
     }
 
     static func recurringOccurrences(payments: [RecurringPayment], startDate: String, endDate: String) -> [RecurringPaymentOccurrence] {
@@ -3219,7 +3346,7 @@ enum PlannerDerivedData {
                 endDate: reminder.directDebitDate,
                 asOfDate: asOfDate
             ).first { $0.scheduledStatementDate == reminder.scheduledStatementDate }
-            let amount = max(0, override?.amountPenceOverride ?? payment?.forecastDuePence ?? 0)
+            let amount = max(0, payment?.forecastDuePence ?? 0)
 
             if validDates.contains(reminder.statementDate) {
                 events.append(HomeDueEvent(
@@ -4721,8 +4848,11 @@ private extension PlannerDerivedData {
             through: addIsoMonthsClamped(date: chargeDate, months: 1)
         )
             .first { cycle in
-                cycle.statementDate >= chargeDate ||
-                (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
+                cycle.directDebitDate >= chargeDate &&
+                (
+                    cycle.statementDate >= chargeDate ||
+                    (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
+                )
             }?
             .statementDate
     }
@@ -4793,8 +4923,14 @@ private extension PlannerDerivedData {
             through: addIsoMonthsClamped(date: chargeDate, months: 1)
         )
             .first { cycle in
-                cycle.statementDate >= chargeDate ||
-                (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
+                // An awaiting statement can remain open past its scheduled date,
+                // but it cannot absorb a charge made after that cycle's cash
+                // repayment date. That later charge belongs to the next cycle.
+                cycle.directDebitDate >= chargeDate &&
+                (
+                    cycle.statementDate >= chargeDate ||
+                    (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
+                )
             }?
             .directDebitDate
     }

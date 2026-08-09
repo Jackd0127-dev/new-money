@@ -413,6 +413,10 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(CardsLayoutPolicy.activeCardModelsAreRevisionCached)
         XCTAssertTrue(CardsLayoutPolicy.statementSummarySeparatesCurrentAndNextStatement)
         XCTAssertFalse(CardsLayoutPolicy.statementSummaryShowsPaycheckImpact)
+        XCTAssertEqual(CardsLayoutPolicy.cardBalanceTitle, "Card balance")
+        XCTAssertEqual(CardsLayoutPolicy.currentStatementDueTitle, "Current statement due")
+        XCTAssertEqual(CardsLayoutPolicy.forecastStatementDueTitle, "Forecast statement due")
+        XCTAssertTrue(CardsLayoutPolicy.detailUsesSafeAreaAwareTopSpacing)
         XCTAssertEqual(DebtsLayoutPolicy.sections, [.summary, .activeDebts])
         XCTAssertFalse(DebtsLayoutPolicy.sections.map(\.rawValue).contains("addDebt"))
     }
@@ -507,6 +511,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.monthCount, 12)
     }
 
+    @MainActor
     func testCreditSummaryOpensInlineOverviewDetail() {
         XCTAssertEqual(CreditLayoutPolicy.summaryPresentation, .navigationPush)
         XCTAssertTrue(CreditLayoutPolicy.summaryDetailUsesInlineTitle)
@@ -529,6 +534,12 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(CreditLayoutPolicy.nextStatementsIncludeEveryActiveCard)
         XCTAssertFalse(CreditLayoutPolicy.dueSoonHeadersShowLeadingSymbols)
         XCTAssertFalse(CreditLayoutPolicy.dueSoonHeadersShowSubtitles)
+        XCTAssertTrue(CreditLayoutPolicy.creditMetricsUseAlignedGrid)
+        XCTAssertTrue(CreditLayoutPolicy.creditMetricsStackAtAccessibilitySizes)
+        XCTAssertEqual(CreditLayoutPolicy.directDebitFutureStatus, "Due")
+        XCTAssertTrue(CreditLayoutPolicy.statementDetailShowsBankReconciliation)
+        XCTAssertEqual(CreditMetricGrid.regularPresentation, "twoColumnGrid")
+        XCTAssertEqual(CreditMetricGrid.accessibilityPresentation, "stackedRows")
         XCTAssertEqual(CreditCardVisualLayoutPolicy.cardAspectRatio, 1.58, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.cardCornerRadius, 12, accuracy: 0.001)
         XCTAssertEqual(CreditCardVisualLayoutPolicy.canonicalRenderer, "PremiumCardView")

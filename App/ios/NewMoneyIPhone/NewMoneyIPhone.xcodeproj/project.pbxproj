@@ -67,6 +67,7 @@
 		F60000000000000000000001 /* BankAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000011 /* BankAccountsView.swift */; };
 		F60000000000000000000002 /* BankAccountFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000012 /* BankAccountFormView.swift */; };
 		F60000000000000000000003 /* BankAccountDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000013 /* BankAccountDetailView.swift */; };
+		C70000000000000000000001 /* CreditMetricGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000002 /* CreditMetricGrid.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -140,6 +141,7 @@
 		F60000000000000000000011 /* BankAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccountsView.swift; sourceTree = "<group>"; };
 		F60000000000000000000012 /* BankAccountFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccountFormView.swift; sourceTree = "<group>"; };
 		F60000000000000000000013 /* BankAccountDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccountDetailView.swift; sourceTree = "<group>"; };
+		C70000000000000000000002 /* CreditMetricGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditMetricGrid.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -285,6 +287,7 @@
 			children = (
 				100000000000000000000215 /* AppComponents.swift */,
 				100000000000000000000217 /* ScreenComponents.swift */,
+				C70000000000000000000002 /* CreditMetricGrid.swift */,
 				E50000000000000000000002 /* DestructiveBadgeButton.swift */,
 			);
 			path = Components;
@@ -536,6 +539,7 @@
 				100000000000000000000113 /* AppComponents.swift in Sources */,
 				100000000000000000000114 /* PlannerDerivedData.swift in Sources */,
 				100000000000000000000115 /* ScreenComponents.swift in Sources */,
+				C70000000000000000000001 /* CreditMetricGrid.swift in Sources */,
 				E50000000000000000000001 /* DestructiveBadgeButton.swift in Sources */,
 				100000000000000000000116 /* DashboardView.swift in Sources */,
 				100000000000000000000117 /* PaydayView.swift in Sources */,
@@ -716,7 +720,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				CURRENT_PROJECT_VERSION = 36;
 				DEVELOPMENT_TEAM = XK5H4LTL88;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NewMoney/Info.plist;
@@ -746,7 +750,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				CURRENT_PROJECT_VERSION = 36;
 				DEVELOPMENT_TEAM = XK5H4LTL88;
 				EXCLUDED_SOURCE_FILE_NAMES = (
 					PersonalJuly2026Fixture.swift,

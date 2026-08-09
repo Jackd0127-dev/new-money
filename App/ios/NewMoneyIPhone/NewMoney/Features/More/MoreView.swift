@@ -131,6 +131,10 @@ struct CreditLayoutPolicy {
     static let nextStatementsIncludeEveryActiveCard = true
     static let dueSoonHeadersShowLeadingSymbols = false
     static let dueSoonHeadersShowSubtitles = false
+    static let creditMetricsUseAlignedGrid = true
+    static let creditMetricsStackAtAccessibilitySizes = true
+    static let directDebitFutureStatus = "Due"
+    static let statementDetailShowsBankReconciliation = true
 }
 
 struct PlanView: View {
@@ -3682,17 +3686,17 @@ private struct CreditSummaryCard: View {
 
     var body: some View {
         AppCard(glow: true) {
-            MetricRow(
-                label: "Total credit",
-                value: MoneyParser.formatPence(summary.totalCreditPence),
-                valueColor: AppTheme.Colors.primaryText
-            )
-            MetricRow(label: "Cards owed", value: MoneyParser.formatPence(summary.cardOwedPence))
-            MetricRow(label: "Debt balance", value: MoneyParser.formatPence(summary.debtBalancePence))
-            MetricRow(
-                label: "Unpaid statements",
-                value: MoneyParser.formatPence(summary.unpaidStatementsPence),
-                valueColor: summary.unpaidStatementsPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success
+            CreditMetricGrid(
+                items: [
+                    .init(label: "Total credit", value: MoneyParser.formatPence(summary.totalCreditPence)),
+                    .init(label: "Cards owed", value: MoneyParser.formatPence(summary.cardOwedPence)),
+                    .init(label: "Debt balance", value: MoneyParser.formatPence(summary.debtBalancePence)),
+                    .init(
+                        label: "Unpaid statements",
+                        value: MoneyParser.formatPence(summary.unpaidStatementsPence),
+                        valueColor: summary.unpaidStatementsPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success
+                    )
+                ]
             )
 
             if showsDisclosure {
@@ -3726,15 +3730,15 @@ private struct CreditOverviewDetailView: View {
 
             SectionTitle("Breakdown")
             AppCard {
-                MetricRow(label: "Active cards", value: "\(summary.activeCardCount)")
-                AppDivider()
-                MetricRow(label: "Active debts", value: "\(summary.activeDebtCount)")
-                AppDivider()
-                MetricRow(label: "Paid toward debts", value: MoneyParser.formatPence(summary.debtPaidPence), valueColor: AppTheme.Colors.success)
-                AppDivider()
-                MetricRow(label: "Overdue debts", value: "\(summary.overdueDebtCount)", valueColor: summary.overdueDebtCount > 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                AppDivider()
-                MetricRow(label: "Open statements", value: "\(summary.unpaidStatementCount)")
+                CreditMetricGrid(
+                    items: [
+                        .init(label: "Active cards", value: "\(summary.activeCardCount)"),
+                        .init(label: "Active debts", value: "\(summary.activeDebtCount)"),
+                        .init(label: "Paid toward debts", value: MoneyParser.formatPence(summary.debtPaidPence), valueColor: AppTheme.Colors.success),
+                        .init(label: "Overdue debts", value: "\(summary.overdueDebtCount)", valueColor: summary.overdueDebtCount > 0 ? AppTheme.Colors.danger : AppTheme.Colors.success),
+                        .init(label: "Open statements", value: "\(summary.unpaidStatementCount)")
+                    ]
+                )
             }
 
             SectionTitle("Due soon")
@@ -3742,24 +3746,24 @@ private struct CreditOverviewDetailView: View {
                 if dueItems.isEmpty {
                     EmptyStateView(title: "Nothing due soon", message: "Card statements and debt payments will appear here when scheduled.", systemImage: "checkmark.circle")
                 } else {
-                    ForEach(dueItems.prefix(10)) { item in
-                        MetricRow(
-                            label: "\(item.title) · \(shortDate(item.date))",
-                            value: MoneyParser.formatPence(item.amountPence),
-                            valueColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning
-                        )
-
-                        if item.id != dueItems.prefix(10).last?.id {
-                            AppDivider()
+                    CreditMetricGrid(
+                        items: dueItems.prefix(10).map { item in
+                            .init(
+                                id: item.id,
+                                label: item.title,
+                                detail: shortDate(item.date),
+                                value: MoneyParser.formatPence(item.amountPence),
+                                valueColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning
+                            )
                         }
-                    }
+                    )
                 }
             }
         }
     }
 }
 
-private struct CreditDueItem: Identifiable {
+struct CreditDueItem: Identifiable {
     var id: String
     var title: String
     var date: String
@@ -3767,18 +3771,18 @@ private struct CreditDueItem: Identifiable {
     var isOverdue: Bool
 }
 
-private struct CreditNextStatementItem: Identifiable {
+struct CreditNextStatementItem: Identifiable {
     var id: String
     var cardName: String
     var statementDate: String
 }
 
-private enum CreditScheduleDetail {
+enum CreditScheduleDetail {
     case directDebits([CreditDueItem])
     case nextStatements([CreditNextStatementItem])
 }
 
-private struct CreditScheduleDetailView: View {
+struct CreditScheduleDetailView: View {
     var schedule: CreditScheduleDetail
 
     var body: some View {
@@ -3890,28 +3894,21 @@ private struct CreditDirectDebitRow: View {
     var item: CreditDueItem
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.subheadline)
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                Text(MoneyParser.formatPence(item.amountPence))
-                    .font(.caption)
-                    .foregroundStyle(item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText)
-            }
-
-            Spacer(minLength: AppTheme.Spacing.sm)
-
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(item.isOverdue ? "Overdue" : "Taken")
-                    .font(.caption)
-                    .foregroundStyle(item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.tertiaryText)
-                Text(shortDate(item.date))
-                    .font(.subheadline.bold())
-                    .foregroundStyle(item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        CreditMetricGrid(
+            items: [
+                .init(
+                    id: item.id,
+                    label: item.title,
+                    detail: MoneyParser.formatPence(item.amountPence),
+                    value: item.isOverdue ? "Overdue" : CreditLayoutPolicy.directDebitFutureStatus,
+                    valueDetail: shortDate(item.date),
+                    labelColor: AppTheme.Colors.primaryText,
+                    valueColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.tertiaryText,
+                    detailColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText,
+                    valueDetailColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning
+                )
+            ]
+        )
     }
 }
 
@@ -3952,23 +3949,19 @@ private struct CreditNextStatementsCard: View {
                 )
             } else {
                 ForEach(visibleItems) { item in
-                    HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
-                        Text(item.cardName)
-                            .font(.subheadline)
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-
-                        Spacer(minLength: AppTheme.Spacing.sm)
-
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text("Statement")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.Colors.tertiaryText)
-                            Text(shortDate(item.statementDate))
-                                .font(.subheadline.bold())
-                                .foregroundStyle(AppTheme.Colors.warning)
-                        }
-                    }
-                    .accessibilityElement(children: .combine)
+                    CreditMetricGrid(
+                        items: [
+                            .init(
+                                id: item.id,
+                                label: item.cardName,
+                                value: "Statement",
+                                valueDetail: shortDate(item.statementDate),
+                                labelColor: AppTheme.Colors.primaryText,
+                                valueColor: AppTheme.Colors.tertiaryText,
+                                valueDetailColor: AppTheme.Colors.warning
+                            )
+                        ]
+                    )
 
                     if item.id != visibleItems.last?.id {
                         AppDivider()
@@ -4058,11 +4051,12 @@ struct StatementsView: View {
 
 private struct StatementSummaryCard: View {
     var statement: CreditCardStatementSummary
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         AppCard(glow: statement.status == .overdue) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                HStack(alignment: .top) {
+                if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("\(statement.cardName) Statement")
                             .font(.headline)
@@ -4070,39 +4064,62 @@ private struct StatementSummaryCard: View {
                         Text("Statement date: \(shortDate(statement.statementDate))")
                             .font(.caption)
                             .foregroundStyle(AppTheme.Colors.secondaryText)
-                    }
-                    Spacer()
-                    Text(statusLabel)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(statusColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(statusColor.opacity(0.12))
-                        .clipShape(Capsule())
 
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                        HStack(spacing: AppTheme.Spacing.sm) {
+                            statusBadge
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                        }
+                    }
+                } else {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("\(statement.cardName) Statement")
+                                .font(.headline)
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                            Text("Statement date: \(shortDate(statement.statementDate))")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                        }
+                        Spacer()
+                        statusBadge
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    }
                 }
 
-                VStack(spacing: 8) {
-                    MetricRow(label: "Amount", value: MoneyParser.formatPence(statement.statementAmountPence), valueColor: AppTheme.Colors.primaryOrange)
-                    MetricRow(label: "Due date", value: shortDate(statement.directDebitDate))
-                    if statement.paidAmountPence > 0 {
-                        MetricRow(label: "Paid", value: MoneyParser.formatPence(statement.paidAmountPence), valueColor: AppTheme.Colors.success)
-                    }
-                    if statement.unpaidAmountPence > 0 {
-                        MetricRow(label: "Unpaid", value: MoneyParser.formatPence(statement.unpaidAmountPence), valueColor: statement.status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.warning)
-                    }
-                    MetricRow(
-                        label: "Transactions",
-                        value: "\(statement.transactions.count)",
-                        valueColor: AppTheme.Colors.secondaryText
-                    )
-                }
+                CreditMetricGrid(items: statementMetrics)
             }
         }
         .accessibilityIdentifier("statement-card-\(statement.cardId)-\(statement.statementDate)")
+    }
+
+    private var statusBadge: some View {
+        Text(statusLabel)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(statusColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(statusColor.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private var statementMetrics: [CreditMetricGrid.Item] {
+        var items = [
+            CreditMetricGrid.Item(label: "Statement total", value: MoneyParser.formatPence(statement.statementAmountPence), valueColor: AppTheme.Colors.primaryOrange),
+            CreditMetricGrid.Item(label: "Due date", value: shortDate(statement.directDebitDate))
+        ]
+        if statement.paidAmountPence > 0 {
+            items.append(.init(label: "Paid", value: MoneyParser.formatPence(statement.paidAmountPence), valueColor: AppTheme.Colors.success))
+        }
+        if statement.unpaidAmountPence > 0 {
+            items.append(.init(label: "Remaining", value: MoneyParser.formatPence(statement.unpaidAmountPence), valueColor: statement.status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.warning))
+        }
+        items.append(.init(label: "Tracked transactions", value: "\(statement.transactions.count)", valueColor: AppTheme.Colors.secondaryText))
+        return items
     }
 
     private var statusLabel: String {

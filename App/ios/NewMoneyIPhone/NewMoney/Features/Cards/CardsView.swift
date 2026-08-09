@@ -25,6 +25,10 @@ struct CardsLayoutPolicy {
     static let activeCardModelsAreRevisionCached = true
     static let statementSummarySeparatesCurrentAndNextStatement = true
     static let statementSummaryShowsPaycheckImpact = false
+    static let cardBalanceTitle = "Card balance"
+    static let currentStatementDueTitle = "Current statement due"
+    static let forecastStatementDueTitle = "Forecast statement due"
+    static let detailUsesSafeAreaAwareTopSpacing = true
     static let sections: [CardsSection] = [
         .summary,
         .activeCards
@@ -78,7 +82,7 @@ struct CreditCardPreviewModel: Identifiable, Equatable {
         self.limitPillTitle = "Limit \(creditCardCompactMoney(card.limitPence))"
         self.duePillTitle = card.dueDay.map { "Due \($0)" } ?? "Due --"
         self.availablePillTitle = "Avail \(creditCardCompactMoney(availablePence))"
-        self.accessibilityLabel = "\(card.name), \(spentLabel) spent"
+        self.accessibilityLabel = "\(card.name), card balance \(spentLabel)"
     }
 }
 
@@ -293,20 +297,23 @@ struct CardsView: View {
         let available = cardModels.reduce(0) { $0 + $1.availability.actualAvailablePence }
         let forecastAvailable = cardModels.reduce(0) { $0 + $1.availability.forecastAvailablePence }
         return AppCard(glow: true) {
-            MetricRow(label: "Total credit", value: MoneyParser.formatPence(totalCredit), valueColor: AppTheme.Colors.primaryText)
-            MetricRow(label: "Owed", value: MoneyParser.formatPence(owed), valueColor: AppTheme.Colors.orangeHighlight)
-            MetricRow(
-                label: available < 0 ? "Over limit" : "Available credit",
-                value: MoneyParser.formatPence(abs(available)),
-                valueColor: available < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText
+            CreditMetricGrid(
+                items: [
+                    .init(label: "Total credit", value: MoneyParser.formatPence(totalCredit)),
+                    .init(label: "Owed", value: MoneyParser.formatPence(owed), valueColor: AppTheme.Colors.orangeHighlight),
+                    .init(
+                        label: available < 0 ? "Over limit" : "Available credit",
+                        value: MoneyParser.formatPence(abs(available)),
+                        valueColor: available < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText
+                    )
+                ] + (forecastOwed != owed || forecastAvailable != available ? [
+                    .init(
+                        label: forecastAvailable < 0 ? "Forecast over limit" : "Forecast availability",
+                        value: MoneyParser.formatPence(abs(forecastAvailable)),
+                        valueColor: forecastAvailable < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning
+                    )
+                ] : [])
             )
-            if forecastOwed != owed || forecastAvailable != available {
-                MetricRow(
-                    label: forecastAvailable < 0 ? "Forecast over limit" : "Forecast availability",
-                    value: MoneyParser.formatPence(abs(forecastAvailable)),
-                    valueColor: forecastAvailable < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning
-                )
-            }
         }
     }
 
@@ -319,6 +326,7 @@ struct CreditCardRow: View {
     var showsTitle = true
     var matchedNamespace: Namespace.ID?
     var matchedID: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
@@ -326,7 +334,7 @@ struct CreditCardRow: View {
                 .frame(maxWidth: .infinity, alignment: .center)
 
             if showsTitle {
-                HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
+                if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(card.name)
                             .font(.title3.weight(.bold))
@@ -338,25 +346,54 @@ struct CreditCardRow: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                             .lineLimit(1)
+
+                        balanceAmount
                     }
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.md) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(card.name)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
 
-                    Spacer(minLength: AppTheme.Spacing.sm)
+                            Text(card.provider.isEmpty ? "Card" : card.provider)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
 
-                    balanceAmount
+                        Spacer(minLength: AppTheme.Spacing.sm)
+
+                        balanceAmount
+                    }
                 }
             } else {
-                HStack(alignment: .firstTextBaseline) {
+                if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Spent")
+                        Text(CardsLayoutPolicy.cardBalanceTitle)
                             .font(.caption.weight(.bold))
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                         balanceAmount
+                        Text(card.provider.isEmpty ? "Card" : card.provider)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
                     }
-                    Spacer()
-                    Text(card.provider.isEmpty ? "Card" : card.provider)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(1)
+                } else {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(CardsLayoutPolicy.cardBalanceTitle)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                            balanceAmount
+                        }
+                        Spacer()
+                        Text(card.provider.isEmpty ? "Card" : card.provider)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
+                    }
                 }
             }
 
@@ -364,22 +401,44 @@ struct CreditCardRow: View {
                 .tint(balancePence > card.limitPence ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
                 .background(AppTheme.Colors.divider)
 
-            HStack(spacing: AppTheme.Spacing.sm) {
-                Pill(text: "Limit \(MoneyParser.formatPence(card.limitPence))", systemImage: "gauge")
-                if let dueDay = card.dueDay {
-                    Pill(text: "Due day \(dueDay)", systemImage: "calendar")
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                    Pill(text: "Limit \(MoneyParser.formatPence(card.limitPence))", systemImage: "gauge")
+                    if let dueDay = card.dueDay {
+                        Pill(text: "Due day \(dueDay)", systemImage: "calendar")
+                    }
+                }
+            } else {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    Pill(text: "Limit \(MoneyParser.formatPence(card.limitPence))", systemImage: "gauge")
+                    if let dueDay = card.dueDay {
+                        Pill(text: "Due day \(dueDay)", systemImage: "calendar")
+                    }
                 }
             }
 
-            HStack {
-                Text(cardAvailabilityLabel(actualAvailablePence))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                Spacer()
-                if forecastAvailablePence != actualAvailablePence {
-                    Text(forecastAvailabilityLabel(forecastAvailablePence))
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                    Text(cardAvailabilityLabel(actualAvailablePence))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning)
+                        .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                    if forecastAvailablePence != actualAvailablePence {
+                        Text(forecastAvailabilityLabel(forecastAvailablePence))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning)
+                    }
+                }
+            } else {
+                HStack {
+                    Text(cardAvailabilityLabel(actualAvailablePence))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                    Spacer()
+                    if forecastAvailablePence != actualAvailablePence {
+                        Text(forecastAvailabilityLabel(forecastAvailablePence))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning)
+                    }
                 }
             }
         }
@@ -681,6 +740,7 @@ private struct CreditCardEditFormView: View {
                 }
                 .padding(AppTheme.Spacing.lg)
             }
+            .contentMargins(.top, AppTheme.Spacing.lg, for: .scrollContent)
             .premiumScreenBackground()
             .navigationTitle("Edit card")
             .navigationBarTitleDisplayMode(.inline)
@@ -905,29 +965,7 @@ struct CardDetailView: View {
     private var statementSummaryCard: some View {
         AppCard {
             SectionTitle("Statement")
-            MetricRow(label: "Statement day", value: statementDayLabel)
-            if let currentStatementDate {
-                MetricRow(label: "Current statement", value: friendlyDate(currentStatementDate))
-            }
-            MetricRow(label: "Next statement", value: nextStatementDate.map(friendlyDate) ?? "Not set")
-            MetricRow(label: "Direct debit", value: nextDirectDebitDate.map(friendlyDate) ?? "Not set")
-            MetricRow(label: "Current statement due", value: MoneyParser.formatPence(currentStatementDuePence), valueColor: currentStatementDuePence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
-            if heldCycleReservePence > 0 {
-                MetricRow(label: "Held cycle reserve", value: MoneyParser.formatPence(heldCycleReservePence), valueColor: AppTheme.Colors.warning)
-            }
-            MetricRow(
-                label: cardAvailability.actualAvailablePence < 0 ? "Over limit" : "Available",
-                value: MoneyParser.formatPence(abs(cardAvailability.actualAvailablePence)),
-                valueColor: cardAvailability.actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
-            )
-            if cardAvailability.forecastAvailablePence != cardAvailability.actualAvailablePence {
-                MetricRow(
-                    label: cardAvailability.forecastAvailablePence < 0 ? "Forecast over limit" : "Forecast availability",
-                    value: MoneyParser.formatPence(abs(cardAvailability.forecastAvailablePence)),
-                    valueColor: cardAvailability.forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning
-                )
-            }
-            MetricRow(label: "Linked pot cover", value: MoneyParser.formatPence(linkedPotCoverPence), valueColor: AppTheme.Colors.primaryOrange)
+            CreditMetricGrid(items: statementMetrics)
             if let cycleAdjustmentSummary, cycleAdjustmentSummary.isStatementHeld || cycleAdjustmentSummary.isDirectDebitHeld {
                 Text("This cycle is on hold. New card spending is kept reserved until you confirm the bank dates.")
                     .font(.footnote.weight(.medium))
@@ -1163,8 +1201,27 @@ struct CardDetailView: View {
         )
     }
 
+    private var statementSummaries: [CreditCardStatementSummary] {
+        PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: store.snapshot,
+            asOfDate: store.todayIso
+        )
+        .filter { $0.cardId == currentCard.id }
+    }
+
+    private var activeStatementSummary: CreditCardStatementSummary? {
+        if let scheduledStatementDate = cycleAdjustmentSummary?.scheduledStatementDate,
+           let summary = statementSummaries.first(where: { $0.scheduledStatementDate == scheduledStatementDate }) {
+            return summary
+        }
+
+        return statementSummaries.first {
+            $0.statementDate <= store.todayIso && $0.status != .paid
+        } ?? statementSummaries.first { $0.statementDate <= store.todayIso }
+    }
+
     private var currentStatementDate: String? {
-        guard let statementDate = cycleAdjustmentSummary?.statementDate,
+        guard let statementDate = activeStatementSummary?.statementDate,
               statementDate <= store.todayIso else {
             return nil
         }
@@ -1173,7 +1230,7 @@ struct CardDetailView: View {
     }
 
     private var nextDirectDebitDate: String? {
-        cycleAdjustmentSummary?.directDebitDate ?? nextStatementPayment?.directDebitDate
+        activeStatementSummary?.directDebitDate ?? cycleAdjustmentSummary?.directDebitDate ?? nextStatementPayment?.directDebitDate
     }
 
     private var cycleAdjustmentSummary: CreditCardCycleAdjustmentSummary? {
@@ -1195,8 +1252,71 @@ struct CardDetailView: View {
         .first
     }
 
-    private var currentStatementDuePence: Int {
-        nextStatementPayment?.actualDuePence ?? 0
+    private var displayedStatementDuePence: Int {
+        activeStatementSummary?.unpaidAmountPence ?? nextStatementPayment?.forecastDuePence ?? 0
+    }
+
+    private var statementDueLabel: String {
+        activeStatementSummary == nil
+            ? CardsLayoutPolicy.forecastStatementDueTitle
+            : CardsLayoutPolicy.currentStatementDueTitle
+    }
+
+    private var statementMetrics: [CreditMetricGrid.Item] {
+        var items = [
+            CreditMetricGrid.Item(label: "Statement day", value: statementDayLabel)
+        ]
+
+        if let currentStatementDate {
+            items.append(.init(label: "Current statement", value: friendlyDate(currentStatementDate)))
+        }
+
+        items.append(.init(label: "Next statement", value: nextStatementDate.map(friendlyDate) ?? "Not set"))
+        items.append(.init(label: "Direct debit", value: nextDirectDebitDate.map(friendlyDate) ?? "Not set"))
+        items.append(
+            .init(
+                label: statementDueLabel,
+                value: MoneyParser.formatPence(displayedStatementDuePence),
+                valueColor: displayedStatementDuePence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText
+            )
+        )
+
+        if heldCycleReservePence > 0 {
+            items.append(
+                .init(
+                    label: "Held cycle reserve",
+                    value: MoneyParser.formatPence(heldCycleReservePence),
+                    valueColor: AppTheme.Colors.warning
+                )
+            )
+        }
+
+        items.append(
+            .init(
+                label: cardAvailability.actualAvailablePence < 0 ? "Over limit" : "Available",
+                value: MoneyParser.formatPence(abs(cardAvailability.actualAvailablePence)),
+                valueColor: cardAvailability.actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
+            )
+        )
+
+        if cardAvailability.forecastAvailablePence != cardAvailability.actualAvailablePence {
+            items.append(
+                .init(
+                    label: cardAvailability.forecastAvailablePence < 0 ? "Forecast over limit" : "Forecast availability",
+                    value: MoneyParser.formatPence(abs(cardAvailability.forecastAvailablePence)),
+                    valueColor: cardAvailability.forecastAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.warning
+                )
+            )
+        }
+
+        items.append(
+            .init(
+                label: "Linked pot cover",
+                value: MoneyParser.formatPence(linkedPotCoverPence),
+                valueColor: AppTheme.Colors.primaryOrange
+            )
+        )
+        return items
     }
 
     private var heldCycleReservePence: Int {

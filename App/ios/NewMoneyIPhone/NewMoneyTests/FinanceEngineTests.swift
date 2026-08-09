@@ -1,6 +1,10 @@
 import Foundation
+import SwiftUI
+import UIKit
 import XCTest
 @testable import NewMoneyIPhone
+
+private typealias Transaction = NewMoneyIPhone.Transaction
 
 final class FinanceEngineTests: XCTestCase {
     private var originalPaydayCleanupFlag: Any?
@@ -1040,6 +1044,109 @@ final class FinanceEngineTests: XCTestCase {
             return false
         })
         XCTAssertEqual(cardSpends.reduce(0) { $0 + $1.amountPence }, 8216)
+    }
+
+    func testAwaitingCardStatementDoesNotPullLaterChargesIntoAnEarlierFundingPeriod() {
+        let settings = makeManualSettings(today: "2026-08-02")
+        let julyToAugust = makePayPeriod(
+            id: "period-july-august",
+            startDate: "2026-07-31",
+            endDate: "2026-08-30",
+            payday: "2026-07-31",
+            incomePence: 100000
+        )
+        let augustToSeptember = makePayPeriod(
+            id: "period-august-september",
+            startDate: "2026-08-31",
+            endDate: "2026-09-30",
+            payday: "2026-08-31",
+            incomePence: 100000
+        )
+        let card = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-07-31",
+            dueDay: 20,
+            createdAt: "2026-07-01T08:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-aqua",
+            name: "Aqua",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let amazonShop = makeTransaction(
+            id: "transaction-amazon-shop",
+            cardId: card.id,
+            amountPence: 7767,
+            date: "2026-07-31",
+            note: "Amazon shop spend"
+        )
+        let chatGPT = makeRecurringPayment(
+            id: "bill-chatgpt",
+            name: "ChatGPT bill",
+            amountPence: 20000,
+            dueDay: 21,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let mma = makeRecurringPayment(
+            id: "bill-mma",
+            name: "MMA bill",
+            amountPence: 6000,
+            dueDay: 24,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let awaitingStatement = CreditCardCycleOverride(
+            id: "card-aqua-cycle-2026-07-31",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-07-31",
+            statementState: .awaitingConfirmation,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-02T00:00:00.000Z",
+            updatedAt: "2026-08-02T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [chatGPT, mma],
+            payPeriods: [julyToAugust, augustToSeptember],
+            transactions: [amazonShop],
+            creditCards: [card],
+            creditCardCycleOverrides: [awaitingStatement]
+        )
+
+        let currentItems = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: julyToAugust,
+            asOfDate: "2026-08-02",
+            groupByFundingDueDate: true
+        )
+        let nextItems = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: augustToSeptember,
+            asOfDate: "2026-08-31",
+            groupByFundingDueDate: true
+        )
+
+        XCTAssertTrue(currentItems.contains { $0.name == "Amazon shop spend" && $0.dueDate == "2026-08-20" })
+        XCTAssertFalse(currentItems.contains { $0.name == chatGPT.name || $0.name == mma.name })
+        XCTAssertEqual(
+            Dictionary(uniqueKeysWithValues: nextItems
+                .filter { $0.name == chatGPT.name || $0.name == mma.name }
+                .map { ($0.name, $0.dueDate) }),
+            [chatGPT.name: "2026-09-20", mma.name: "2026-09-20"]
+        )
     }
 
     func testBarclaysCardPaymentBreakdownReconcilesOpeningBalanceICloudAndTemu() {
@@ -5259,8 +5366,8 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(cc1Statement.cardName, "CC1")
         XCTAssertEqual(cc1Statement.directDebitDate, "2026-08-02")
         XCTAssertEqual(cc1Statement.statementAmountPence, 57500)
-        XCTAssertEqual(cc1Statement.paidAmountPence, 0)
-        XCTAssertEqual(cc1Statement.unpaidAmountPence, 57500)
+        XCTAssertEqual(cc1Statement.paidAmountPence, 50000)
+        XCTAssertEqual(cc1Statement.unpaidAmountPence, 7500)
         XCTAssertEqual(cc1Statement.status, .upcoming)
         XCTAssertEqual(cc1Statement.transactions.map(\.name), ["ChatGPT", "Opening statement balance"])
         XCTAssertEqual(cc1Statement.transactions.map(\.date), ["2026-07-01", "2026-07-05"])
@@ -6987,6 +7094,554 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertNotEqual(cardPayments.first { $0.scheduledStatementDate == "2026-08-10" }?.forecastDuePence, 12345)
     }
 
+    func testConfirmedBankCycleAmountsReconcileAquaAndJajaAcrossDerivedSurfaces() throws {
+        let settings = makeManualSettings(today: "2026-08-08")
+        let augustPeriod = makePayPeriod(
+            id: "period-august",
+            startDate: "2026-08-01",
+            endDate: "2026-08-31",
+            payday: "2026-08-01",
+            incomePence: 200_000
+        )
+        let aqua = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            limitPence: 130_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-03",
+            dueDay: 20,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let jaja = makeCreditCard(
+            id: "card-jaja",
+            name: "Jaja",
+            limitPence: 25_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-07",
+            dueDay: 3,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let aquaPot = makePot(
+            id: "pot-aqua",
+            name: "Aqua",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: aqua.id
+        )
+        let jajaPot = makePot(
+            id: "pot-jaja",
+            name: "Jaja",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: jaja.id
+        )
+        let aquaTransaction = makeTransaction(
+            id: "transaction-aqua-tracked",
+            cardId: aqua.id,
+            amountPence: 8_216,
+            date: "2026-08-03",
+            note: "Tracked Aqua spending"
+        )
+        let jajaTransaction = makeTransaction(
+            id: "transaction-jaja-tracked",
+            cardId: jaja.id,
+            amountPence: 129,
+            date: "2026-08-07",
+            note: "Tracked Jaja spending"
+        )
+        let aquaOverride = CreditCardCycleOverride(
+            id: "override-aqua-2026-08-03",
+            creditCardId: aqua.id,
+            scheduledStatementDate: "2026-08-03",
+            statementState: .normal,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 69_588,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-03T00:00:00.000Z",
+            updatedAt: "2026-08-03T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let jajaOverride = CreditCardCycleOverride(
+            id: "override-jaja-2026-08-07",
+            creditCardId: jaja.id,
+            scheduledStatementDate: "2026-08-07",
+            statementState: .normal,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 2_428,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-07T00:00:00.000Z",
+            updatedAt: "2026-08-07T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [aquaPot, jajaPot],
+            payPeriods: [augustPeriod],
+            transactions: [aquaTransaction, jajaTransaction],
+            creditCards: [aqua, jaja],
+            creditCardCycleOverrides: [aquaOverride, jajaOverride]
+        )
+
+        let summaries = PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: snapshot,
+            asOfDate: "2026-08-08"
+        )
+        let aquaSummary = try XCTUnwrap(summaries.first { $0.cardId == aqua.id })
+        let jajaSummary = try XCTUnwrap(summaries.first { $0.cardId == jaja.id })
+
+        XCTAssertEqual(aquaSummary.scheduledStatementDate, "2026-08-03")
+        XCTAssertEqual(aquaSummary.calculatedAmountPence, 8_216)
+        XCTAssertEqual(aquaSummary.confirmedAmountPence, 69_588)
+        XCTAssertEqual(aquaSummary.statementAmountPence, 69_588)
+        XCTAssertEqual(aquaSummary.unpaidAmountPence, 69_588)
+        XCTAssertEqual(aquaSummary.reconciliationAdjustmentPence, 61_372)
+        XCTAssertEqual(aquaSummary.amountSource, .confirmedBankAmount)
+
+        XCTAssertEqual(jajaSummary.scheduledStatementDate, "2026-08-07")
+        XCTAssertEqual(jajaSummary.calculatedAmountPence, 129)
+        XCTAssertEqual(jajaSummary.confirmedAmountPence, 2_428)
+        XCTAssertEqual(jajaSummary.statementAmountPence, 2_428)
+        XCTAssertEqual(jajaSummary.unpaidAmountPence, 2_428)
+        XCTAssertEqual(jajaSummary.reconciliationAdjustmentPence, 2_299)
+        XCTAssertEqual(jajaSummary.amountSource, .confirmedBankAmount)
+
+        let aquaPayment = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementPayments(
+                card: aqua,
+                snapshot: snapshot,
+                startDate: "2026-08-08",
+                endDate: "2026-08-31",
+                asOfDate: "2026-08-08"
+            ).first
+        )
+        let jajaPayment = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementPayments(
+                card: jaja,
+                snapshot: snapshot,
+                startDate: "2026-08-08",
+                endDate: "2026-09-30",
+                asOfDate: "2026-08-08"
+            ).first
+        )
+        XCTAssertEqual(aquaPayment.actualDuePence, 69_588)
+        XCTAssertEqual(aquaPayment.forecastDuePence, 69_588)
+        XCTAssertEqual(aquaPayment.amountSource, .confirmedBankAmount)
+        XCTAssertEqual(jajaPayment.actualDuePence, 2_428)
+        XCTAssertEqual(jajaPayment.forecastDuePence, 2_428)
+        XCTAssertEqual(jajaPayment.amountSource, .confirmedBankAmount)
+
+        XCTAssertEqual(
+            PlannerDerivedData.potProgress(
+                pot: aquaPot,
+                snapshot: snapshot,
+                today: "2026-08-08"
+            ).linkedCardPayments.first?.amountPence,
+            69_588
+        )
+        let aquaFunding = PlannerDerivedData.fundingChecklistPresentationItems(
+            snapshot: snapshot,
+            payPeriod: augustPeriod,
+            asOfDate: "2026-08-08",
+            groupByFundingDueDate: true
+        )
+        .filter { item in
+            switch item.action {
+            case .cardSpend(let transactionId, _):
+                transactionId == aquaTransaction.id
+            case .cardPayment(let cardId, _, _, _):
+                cardId == aqua.id
+            default:
+                false
+            }
+        }
+        XCTAssertEqual(aquaFunding.reduce(0) { $0 + $1.amountPence }, 69_588)
+
+        let aquaDueEvent = PlannerDerivedData.homeDueEvents(
+            snapshot: snapshot,
+            asOfDate: "2026-08-20"
+        ).first { event in
+            if case .cardDirectDebit(let cardId, _) = event.source {
+                return cardId == aqua.id
+            }
+            return false
+        }
+        let jajaDueEvent = PlannerDerivedData.homeDueEvents(
+            snapshot: snapshot,
+            asOfDate: "2026-09-03"
+        ).first { event in
+            if case .cardDirectDebit(let cardId, _) = event.source {
+                return cardId == jaja.id
+            }
+            return false
+        }
+        XCTAssertEqual(aquaDueEvent?.amountPence, 69_588)
+        XCTAssertEqual(jajaDueEvent?.amountPence, 2_428)
+    }
+
+    @MainActor
+    func testConfirmedAquaAndJajaCreditScreensRenderAtNormalAndAccessibilitySizes() throws {
+        let settings = makeManualSettings(today: "2026-08-08")
+        let augustPeriod = makePayPeriod(
+            id: "period-august-visual",
+            startDate: "2026-08-01",
+            endDate: "2026-08-31",
+            payday: "2026-08-01",
+            incomePence: 200_000
+        )
+        let aqua = makeCreditCard(
+            id: "card-aqua-visual",
+            name: "AQUA",
+            limitPence: 130_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-02",
+            dueDay: 20,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let jaja = makeCreditCard(
+            id: "card-jaja-visual",
+            name: "JAJA",
+            limitPence: 25_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-07",
+            dueDay: 3,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let aquaPot = makePot(
+            id: "pot-aqua-visual",
+            name: "Aqua payment",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: aqua.id
+        )
+        let jajaPot = makePot(
+            id: "pot-jaja-visual",
+            name: "Jaja payment",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: jaja.id
+        )
+        let aquaTransaction = makeTransaction(
+            id: "transaction-aqua-visual",
+            cardId: aqua.id,
+            amountPence: 8_216,
+            date: "2026-08-03",
+            note: "Tracked Aqua spending"
+        )
+        let jajaTransaction = makeTransaction(
+            id: "transaction-jaja-visual",
+            cardId: jaja.id,
+            amountPence: 129,
+            date: "2026-08-07",
+            note: "Tracked Jaja spending"
+        )
+        let aquaPostStatementTransaction = makeTransaction(
+            id: "transaction-aqua-next-cycle-visual",
+            cardId: aqua.id,
+            amountPence: 87_305,
+            date: "2026-08-04",
+            note: "Aqua next-cycle spending"
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [aquaPot, jajaPot],
+            payPeriods: [augustPeriod],
+            transactions: [aquaTransaction, aquaPostStatementTransaction, jajaTransaction],
+            creditCards: [aqua, jaja],
+            creditCardCycleOverrides: [
+                CreditCardCycleOverride(
+                    id: "override-aqua-visual",
+                    creditCardId: aqua.id,
+                    scheduledStatementDate: "2026-08-02",
+                    statementState: .confirmed,
+                    actualStatementDate: "2026-08-03",
+                    directDebitState: .normal,
+                    actualDirectDebitDate: nil,
+                    amountPenceOverride: 69_588,
+                    reversedAutomaticRepaymentIds: [],
+                    createdAt: "2026-08-03T00:00:00.000Z",
+                    updatedAt: "2026-08-03T00:00:00.000Z",
+                    deletedAt: nil
+                ),
+                CreditCardCycleOverride(
+                    id: "override-jaja-visual",
+                    creditCardId: jaja.id,
+                    scheduledStatementDate: "2026-08-07",
+                    statementState: .normal,
+                    actualStatementDate: nil,
+                    directDebitState: .normal,
+                    actualDirectDebitDate: nil,
+                    amountPenceOverride: 2_428,
+                    reversedAutomaticRepaymentIds: [],
+                    createdAt: "2026-08-07T00:00:00.000Z",
+                    updatedAt: "2026-08-07T00:00:00.000Z",
+                    deletedAt: nil
+                )
+            ]
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+        store.useSnapshotForSimulation(snapshot)
+        let summaries = PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: "2026-08-08")
+        let aquaSummary = try XCTUnwrap(summaries.first { $0.cardId == aqua.id })
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: aqua, snapshot: snapshot), 95_521)
+        XCTAssertEqual(aquaSummary.calculatedAmountPence, 8_216)
+        XCTAssertEqual(aquaSummary.statementAmountPence, 69_588)
+        let dueItems = summaries
+            .filter { $0.unpaidAmountPence > 0 }
+            .map {
+                CreditDueItem(
+                    id: $0.id,
+                    title: "\($0.cardName) direct debit",
+                    date: $0.directDebitDate,
+                    amountPence: $0.unpaidAmountPence,
+                    isOverdue: $0.directDebitDate < "2026-08-08"
+                )
+            }
+            .sorted { $0.date < $1.date }
+
+        for configuration in [
+            (name: "normal", size: DynamicTypeSize.large),
+            (name: "accessibility", size: DynamicTypeSize.accessibility3)
+        ] {
+            attachCreditRender(
+                CardDetailView(store: store, card: aqua),
+                name: "credit-card-aqua-\(configuration.name)",
+                dynamicTypeSize: configuration.size
+            )
+            attachCreditRender(
+                CardDetailView(store: store, card: jaja),
+                name: "credit-card-jaja-\(configuration.name)",
+                dynamicTypeSize: configuration.size
+            )
+            attachCreditRender(
+                NavigationStack {
+                    CreditScheduleDetailView(schedule: .directDebits(dueItems))
+                },
+                name: "credit-direct-debits-\(configuration.name)",
+                dynamicTypeSize: configuration.size
+            )
+            attachCreditRender(
+                NavigationStack {
+                    StatementsView(store: store, navigationMode: .inline, toolbarMode: .none)
+                },
+                name: "credit-statements-\(configuration.name)",
+                dynamicTypeSize: configuration.size
+            )
+            attachCreditRender(
+                NavigationStack {
+                    StatementDetailView(statement: aquaSummary)
+                },
+                name: "credit-statement-aqua-\(configuration.name)",
+                dynamicTypeSize: configuration.size
+            )
+        }
+    }
+
+    @MainActor
+    func testConfirmedBankCycleRepaysFullRemainingCashObligationBeyondTrackedCardBalance() throws {
+        let settings = makeManualSettings(today: "2026-09-03")
+        let septemberPeriod = makePayPeriod(
+            id: "period-september",
+            startDate: "2026-09-01",
+            endDate: "2026-09-30",
+            payday: "2026-09-01",
+            incomePence: 100_000
+        )
+        let card = makeCreditCard(
+            id: "card-jaja",
+            name: "Jaja",
+            limitPence: 25_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-07",
+            dueDay: 3,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-jaja",
+            name: "Jaja",
+            balancePence: 1_000,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let trackedSpend = makeTransaction(
+            id: "transaction-jaja-tracked",
+            cardId: card.id,
+            amountPence: 129,
+            date: "2026-08-07",
+            note: "Tracked Jaja spending"
+        )
+        let partialPayment = CreditCardRepayment(
+            id: "manual-jaja-partial",
+            creditCardId: card.id,
+            amountPence: 500,
+            date: "2026-08-20",
+            note: "Partial payment",
+            source: .manual,
+            paycheckContributionPence: 500,
+            createdAt: "2026-08-20T00:00:00.000Z",
+            updatedAt: "2026-08-20T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let refundedPayment = CreditCardRepayment(
+            id: "manual-jaja-refunded",
+            creditCardId: card.id,
+            amountPence: 700,
+            date: "2026-08-21",
+            note: "Refunded payment",
+            source: .manual,
+            paycheckContributionPence: 700,
+            refundedAt: "2026-08-22T00:00:00.000Z",
+            createdAt: "2026-08-21T00:00:00.000Z",
+            updatedAt: "2026-08-22T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let cycleOverride = CreditCardCycleOverride(
+            id: "override-jaja-2026-08-07",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-08-07",
+            statementState: .normal,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 2_428,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-07T00:00:00.000Z",
+            updatedAt: "2026-08-07T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [septemberPeriod],
+            transactions: [trackedSpend],
+            creditCards: [card],
+            creditCardRepayments: [partialPayment, refundedPayment],
+            creditCardCycleOverrides: [cycleOverride]
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+        store.useSnapshotForSimulation(snapshot)
+        let cashBeforePayment = PlannerDerivedData.currentTotalMoneyPence(
+            snapshot: store.snapshot,
+            payPeriod: septemberPeriod
+        )
+
+        let beforePayment = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementPayments(
+                card: card,
+                snapshot: store.snapshot,
+                startDate: "2026-09-03",
+                endDate: "2026-09-03",
+                asOfDate: "2026-09-03"
+            ).first
+        )
+        XCTAssertEqual(beforePayment.actualDuePence, 1_928)
+        XCTAssertEqual(
+            PlannerDerivedData.homeDueEvents(snapshot: store.snapshot, asOfDate: "2026-09-03")
+                .first { event in
+                    if case .cardDirectDebit(let cardId, _) = event.source {
+                        return cardId == card.id
+                    }
+                    return false
+                }?
+                .amountPence,
+            1_928
+        )
+
+        XCTAssertTrue(store.applyDueCreditCardPaymentsForSimulation(asOf: "2026-09-03"))
+        XCTAssertFalse(store.applyDueCreditCardPaymentsForSimulation(asOf: "2026-09-03"))
+
+        let automaticPayment = try XCTUnwrap(store.snapshot.creditCardRepayments.first {
+            $0.source == .linkedPotStatement || $0.source == .automaticStatement
+        })
+        XCTAssertEqual(automaticPayment.amountPence, 1_928)
+        XCTAssertEqual(automaticPayment.potContributionPence, 1_000)
+        XCTAssertEqual(automaticPayment.paycheckContributionPence, 928)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 0)
+        XCTAssertEqual(
+            PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: septemberPeriod),
+            cashBeforePayment - 1_928
+        )
+
+        let summary = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementSummaries(
+                snapshot: store.snapshot,
+                asOfDate: "2026-09-03"
+            ).first
+        )
+        XCTAssertEqual(summary.statementAmountPence, 2_428)
+        XCTAssertEqual(summary.paidAmountPence, 2_428)
+        XCTAssertEqual(summary.unpaidAmountPence, 0)
+        XCTAssertEqual(summary.status, .paid)
+    }
+
+    @MainActor
+    func testConfirmedBankCycleBelowTrackedTransactionsPaysOnlyConfirmedAmount() throws {
+        let settings = makeManualSettings(today: "2026-08-20")
+        let card = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-03",
+            dueDay: 20,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let trackedSpend = makeTransaction(
+            id: "transaction-aqua-tracked",
+            cardId: card.id,
+            amountPence: 5_000,
+            date: "2026-08-03",
+            note: "Tracked Aqua spending"
+        )
+        let cycleOverride = CreditCardCycleOverride(
+            id: "override-aqua-2026-08-03",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-08-03",
+            statementState: .normal,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 3_000,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-03T00:00:00.000Z",
+            updatedAt: "2026-08-03T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            settings: settings,
+            transactions: [trackedSpend],
+            creditCards: [card],
+            creditCardCycleOverrides: [cycleOverride]
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+        store.useSnapshotForSimulation(snapshot)
+
+        let beforeSummary = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementSummaries(
+                snapshot: snapshot,
+                asOfDate: "2026-08-20"
+            ).first
+        )
+        XCTAssertEqual(beforeSummary.calculatedAmountPence, 5_000)
+        XCTAssertEqual(beforeSummary.statementAmountPence, 3_000)
+        XCTAssertEqual(beforeSummary.reconciliationAdjustmentPence, -2_000)
+
+        XCTAssertTrue(store.applyDueCreditCardPaymentsForSimulation(asOf: "2026-08-20"))
+        let repayment = try XCTUnwrap(store.snapshot.creditCardRepayments.first)
+        XCTAssertEqual(repayment.amountPence, 3_000)
+        XCTAssertEqual(repayment.paycheckContributionPence, 3_000)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 2_000)
+    }
+
     func testNextRecurringOccurrencesLimitsEveryFrequencyAndSortsDeterministically() {
         let asOfDate = "2026-07-10"
         let payments = [
@@ -7251,6 +7906,35 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(summary.projectedMoneyLeftPence, 85_000)
         XCTAssertEqual(summary.projectedMoneyLeftPence, summary.payReceivedPence - summary.projectedCostsPence)
         XCTAssertEqual(summary.projectedCostsPence, summary.totalCostsPence + 1_000)
+    }
+
+    @MainActor
+    private func attachCreditRender<Content: View>(
+        _ content: Content,
+        name: String,
+        dynamicTypeSize: DynamicTypeSize
+    ) {
+        let rootView = content
+            .environment(\.dynamicTypeSize, dynamicTypeSize)
+            .environment(\.colorScheme, .light)
+        let host = UIHostingController(rootView: rootView)
+        let frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let window = UIWindow(frame: frame)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = frame
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        let image = UIGraphicsImageRenderer(size: frame.size).image { _ in
+            host.view.drawHierarchy(in: frame, afterScreenUpdates: true)
+        }
+        XCTAssertEqual(image.size, frame.size)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        window.isHidden = true
     }
 
     private func makeSnapshot(

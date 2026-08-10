@@ -213,23 +213,23 @@ struct DashboardView: View {
                     HStack(spacing: AppTheme.Spacing.sm) {
                         Image(systemName: events.contains { $0.direction == .outgoing } ? "bell.badge.fill" : "sparkles")
                             .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.controlText)
+                            .foregroundStyle(dueBannerColor(events))
                             .frame(width: 38, height: 38)
-                            .background(.white.opacity(0.18), in: Circle())
+                            .background(dueBannerColor(events).opacity(0.11), in: Circle())
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(dueBannerTitle(events))
                                 .font(.subheadline.weight(.bold))
-                                .foregroundStyle(AppTheme.Colors.controlText)
-                            Text(dynamicTypeSize.isAccessibilitySize ? "Tap to review or edit" : "Today and tomorrow · tap to review or edit")
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                            Text(dynamicTypeSize.isAccessibilitySize ? "Tap to review or edit" : "Previous 7 days · today · next 3 days")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(AppTheme.Colors.controlText.opacity(0.78))
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
                         }
 
                         Spacer(minLength: AppTheme.Spacing.xs)
                         Image(systemName: "chevron.down")
                             .font(.caption.weight(.black))
-                            .foregroundStyle(AppTheme.Colors.controlText)
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
                             .rotationEffect(.degrees(isDueEventsExpanded ? 180 : 0))
                     }
                     .padding(AppTheme.Spacing.md)
@@ -253,7 +253,7 @@ struct DashboardView: View {
 
                             if event.id != events.last?.id {
                                 Rectangle()
-                                    .fill(.white.opacity(0.13))
+                                    .fill(AppTheme.Colors.divider.opacity(0.72))
                                     .frame(height: 1)
                                     .padding(.leading, 56)
                             }
@@ -262,35 +262,26 @@ struct DashboardView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .background(dueBannerGradient(events), in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+            .background(AppTheme.Gradients.softAccentSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
-                    .stroke(.white.opacity(0.2), lineWidth: 1)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
             }
-            .shadow(color: dueBannerColor(events).opacity(0.25), radius: 18, y: 9)
+            .shadow(color: AppTheme.Colors.shadow, radius: 12, y: 5)
             .accessibilityIdentifier("home-due-events-banner")
         }
     }
 
     private func dueBannerTitle(_ events: [HomeDueEvent]) -> String {
-        let todayCount = events.filter { $0.date == store.todayIso }.count
-        let tomorrowCount = events.count - todayCount
-        if todayCount > 0 && tomorrowCount > 0 {
-            return "\(todayCount) today, \(tomorrowCount) tomorrow"
+        let needsReviewCount = events.count { $0.status == .awaiting }
+        if needsReviewCount > 0 {
+            return "\(needsReviewCount) \(needsReviewCount == 1 ? "item" : "items") need review"
         }
-        if todayCount > 0 {
-            return "\(todayCount) due today"
-        }
-        return "\(tomorrowCount) due tomorrow"
+        return "\(events.count) recent and upcoming \(events.count == 1 ? "item" : "items")"
     }
 
     private func dueBannerColor(_ events: [HomeDueEvent]) -> Color {
         events.contains { $0.status == .awaiting } ? AppTheme.Colors.warning : AppTheme.Colors.primaryOrange
-    }
-
-    private func dueBannerGradient(_ events: [HomeDueEvent]) -> LinearGradient {
-        let color = dueBannerColor(events)
-        return LinearGradient(colors: [color, color.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private var recentActivity: some View {
@@ -739,9 +730,9 @@ private struct HomeDueEventRow: View {
         HStack(spacing: AppTheme.Spacing.sm) {
             Image(systemName: event.direction == .incoming ? "arrow.down.left" : "arrow.up.right")
                 .font(.caption.weight(.black))
-                .foregroundStyle(.white)
+                .foregroundStyle(eventTone)
                 .frame(width: 34, height: 34)
-                .background(.white.opacity(0.16), in: Circle())
+                .background(eventTone.opacity(0.11), in: Circle())
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -756,12 +747,12 @@ private struct HomeDueEventRow: View {
                             .font(.caption)
                     }
                 }
-                Text("\(event.date == todayIso ? "Today" : "Tomorrow") · \(event.sourceLabel) · \(event.cycleLabel)")
-                    .font(.caption2.weight(.semibold))
+                Text("\(relativeDateLabel) · \(event.sourceLabel) · \(event.cycleLabel)")
+                    .font(.caption.weight(.semibold))
                     .lineLimit(2)
-                    .opacity(0.75)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(AppTheme.Colors.primaryText)
 
             Spacer(minLength: AppTheme.Spacing.xs)
 
@@ -769,20 +760,41 @@ private struct HomeDueEventRow: View {
                 Text("\(event.direction == .incoming ? "+" : "−")\(MoneyParser.formatPence(event.amountPence))")
                     .font(.subheadline.weight(.black))
                 Text(event.status.rawValue.capitalized)
-                    .font(.caption2.weight(.bold))
-                    .opacity(0.75)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(event.direction == .incoming ? AppTheme.Colors.success : AppTheme.Colors.primaryText)
 
             Image(systemName: "slider.horizontal.3")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
         }
         .padding(.horizontal, AppTheme.Spacing.md)
         .padding(.vertical, AppTheme.Spacing.sm)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(event.title), \(event.direction.rawValue), \(MoneyParser.formatPence(event.amountPence)), \(event.date), \(event.status.rawValue), \(event.sourceLabel), \(event.cycleLabel)")
+    }
+
+    private var eventTone: Color {
+        if event.status == .awaiting {
+            AppTheme.Colors.warning
+        } else if event.direction == .incoming {
+            AppTheme.Colors.success
+        } else {
+            AppTheme.Colors.accent
+        }
+    }
+
+    private var relativeDateLabel: String {
+        let yesterday = FinanceEngine.addIsoDays(date: todayIso, days: -1)
+        let tomorrow = FinanceEngine.addIsoDays(date: todayIso, days: 1)
+        switch event.date {
+        case todayIso: return "Today"
+        case yesterday: return "Yesterday"
+        case tomorrow: return "Tomorrow"
+        default: return FinanceEngine.parseDate(event.date).formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        }
     }
 }
 
@@ -847,6 +859,7 @@ private struct HomeDueEventEditorView: View {
             }
             .navigationTitle(event.title)
             .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

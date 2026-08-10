@@ -235,8 +235,8 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     func testProfileMenuIncludesSettingsRoute() {
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Income", "Accounts", "Statements", "Settings"])
-        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "doc.text.magnifyingglass", "gearshape"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.title), ["Income", "Accounts", "Statements", "FAQ", "Settings"])
+        XCTAssertEqual(ProfileMenuAction.allCases.map(\.symbol), ["sterlingsign.circle", "building.columns", "doc.text.magnifyingglass", "questionmark.circle", "gearshape"])
         XCTAssertFalse(ProfileMenuPresentationPolicy.includesAddIncomeAction)
         XCTAssertFalse(ProfileMenuPresentationPolicy.opensAppearanceDirectly)
     }
@@ -264,6 +264,16 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(ProfileMenuPresentationPolicy.editActionOpensAccounts)
         XCTAssertFalse(ProfileMenuPresentationPolicy.animatesFromBottom)
         XCTAssertFalse(ProfileMenuPresentationPolicy.avoidsSystemNavigationBar)
+        XCTAssertTrue(ProfileMenuPresentationPolicy.usesCompactActionRows)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionIcons)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionSubtitles)
+    }
+
+    func testSettingsUsesDedicatedDestinationForEveryRequestedSection() {
+        XCTAssertEqual(
+            SettingsRoute.allCases.map(\.title),
+            ["Appearance", "Pay defaults", "Date simulation", "Money left", "History", "AI", "Account", "Data"]
+        )
     }
 
     func testAccountsSheetUsesCarouselCreateButtonAndHiddenManagement() {
@@ -332,10 +342,6 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(CreditRoute.allCases.map(\.title), ["Cards", "Debts"])
         XCTAssertFalse(CreditRoute.allCases.map(\.title).contains("Card payments"))
         XCTAssertFalse(CreditRoute.allCases.map(\.title).contains("Statements"))
-    }
-
-    func testSettingsRoutesContainHistoryOnly() {
-        XCTAssertEqual(SettingsRoute.allCases.map(\.title), ["History"])
     }
 
     func testCreditSecondaryScreenToolbarActionsMatchRequestedButtons() {

@@ -3202,9 +3202,13 @@ enum PlannerDerivedData {
     /// attached to its immutable scheduled occurrence rather than its moved date.
     static func homeDueEvents(snapshot: PlannerSnapshot, asOfDate: String) -> [HomeDueEvent] {
         guard FinanceEngine.isIsoDate(asOfDate) else { return [] }
-        let tomorrow = FinanceEngine.addIsoDays(date: asOfDate, days: 1)
-        let validDates = Set([asOfDate, tomorrow])
+        let windowStart = FinanceEngine.addIsoDays(date: asOfDate, days: -7)
+        let windowEnd = FinanceEngine.addIsoDays(date: asOfDate, days: 3)
         let activeIncomeOverrides = snapshot.incomeOccurrenceOverrides.filter { $0.deletedAt == nil }
+
+        func isInWindow(_ date: String) -> Bool {
+            date >= windowStart && date <= windowEnd
+        }
 
         func incomeOverride(kind: IncomeOccurrenceSourceKind, id: String, scheduledDate: String) -> IncomeOccurrenceOverride? {
             activeIncomeOverrides.first {
@@ -3235,7 +3239,7 @@ enum PlannerDerivedData {
             let override = incomeOverride(kind: .paycheck, id: sourceId, scheduledDate: period.payday)
             guard override?.state != .cancelled else { continue }
             let date = incomeDate(override, scheduledDate: period.payday)
-            guard validDates.contains(date) else { continue }
+            guard isInWindow(date) else { continue }
             let baseAmount = paycheck.map { $0.actualAmountPence ?? $0.calculatedAmountPence } ?? period.incomePence
             events.append(HomeDueEvent(
                 id: "home-payday-\(sourceId)-\(period.payday)",
@@ -3255,7 +3259,7 @@ enum PlannerDerivedData {
             let override = incomeOverride(kind: .oneOffIncome, id: income.id, scheduledDate: income.date)
             guard override?.state != .cancelled else { continue }
             let date = incomeDate(override, scheduledDate: income.date)
-            guard validDates.contains(date) else { continue }
+            guard isInWindow(date) else { continue }
             events.append(HomeDueEvent(
                 id: "home-one-off-\(income.id)-\(income.date)",
                 scheduledDate: income.date,
@@ -3273,9 +3277,9 @@ enum PlannerDerivedData {
         for occurrence in resolvedRecurringOccurrences(
             snapshot: snapshot,
             payments: snapshot.recurringPayments.filter { $0.deletedAt == nil },
-            startDate: asOfDate,
-            endDate: tomorrow
-        ) where validDates.contains(occurrence.dueDate) {
+            startDate: windowStart,
+            endDate: windowEnd
+        ) where isInWindow(occurrence.dueDate) {
             let occurrenceOverride = snapshot.recurringPaymentOccurrenceOverrides.first {
                 $0.deletedAt == nil &&
                 $0.paymentId == occurrence.payment.id &&
@@ -3297,7 +3301,7 @@ enum PlannerDerivedData {
             ))
         }
 
-        for payment in snapshot.customPayments where payment.deletedAt == nil && payment.status != .archived && validDates.contains(payment.dueDate) {
+        for payment in snapshot.customPayments where payment.deletedAt == nil && payment.status != .archived && isInWindow(payment.dueDate) {
             events.append(HomeDueEvent(
                 id: "home-saved-\(payment.id)",
                 scheduledDate: payment.dueDate,
@@ -3317,7 +3321,7 @@ enum PlannerDerivedData {
             where item.deletedAt == nil && item.status != .cancelled {
             guard let debt = debtsById[item.debtId], debt.status.isActiveLike || item.status == .paid else { continue }
             let effectiveDate = item.paidDate ?? item.dueDate
-            guard validDates.contains(effectiveDate) else { continue }
+            guard isInWindow(effectiveDate) else { continue }
             events.append(HomeDueEvent(
                 id: "home-debt-\(item.id)",
                 scheduledDate: item.dueDate,
@@ -3332,7 +3336,7 @@ enum PlannerDerivedData {
             ))
         }
 
-        let reminderStart = FinanceEngine.addIsoDays(date: asOfDate, days: -45)
+        let reminderStart = FinanceEngine.addIsoDays(date: windowStart, days: -45)
         for reminder in creditCardCycleReminders(snapshot: snapshot, asOfDate: reminderStart, months: 3) {
             let card = snapshot.creditCards.first { $0.id == reminder.cardId && !$0.archived && $0.deletedAt == nil }
             guard let card else { continue }
@@ -3348,7 +3352,7 @@ enum PlannerDerivedData {
             ).first { $0.scheduledStatementDate == reminder.scheduledStatementDate }
             let amount = max(0, payment?.forecastDuePence ?? 0)
 
-            if validDates.contains(reminder.statementDate) {
+            if isInWindow(reminder.statementDate) {
                 events.append(HomeDueEvent(
                     id: "home-card-statement-\(card.id)-\(reminder.scheduledStatementDate)",
                     scheduledDate: reminder.scheduledStatementDate,
@@ -3362,7 +3366,7 @@ enum PlannerDerivedData {
                     source: .cardStatement(cardId: card.id, scheduledStatementDate: reminder.scheduledStatementDate)
                 ))
             }
-            if validDates.contains(reminder.directDebitDate) {
+            if isInWindow(reminder.directDebitDate) {
                 events.append(HomeDueEvent(
                     id: "home-card-direct-debit-\(card.id)-\(reminder.scheduledStatementDate)",
                     scheduledDate: reminder.scheduledStatementDate,
@@ -4341,7 +4345,11 @@ private extension PlannerDerivedData {
             asOfDate: today
         )
         .compactMap { payment -> LinkedCardPaymentDue? in
-            let amountPence = max(payment.actualDuePence, payment.forecastDuePence)
+            // Upcoming linked-card payments should only show money already owed:
+            // a confirmed/current statement balance or spending recorded in the
+            // following open statement cycle. Planned recurring or custom card
+            // charges remain forecasts until they are actually recorded.
+            let amountPence = max(0, payment.actualDuePence)
             guard amountPence > 0 else { return nil }
 
             return LinkedCardPaymentDue(

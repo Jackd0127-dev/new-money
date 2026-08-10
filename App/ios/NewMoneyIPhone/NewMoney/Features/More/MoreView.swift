@@ -4013,7 +4013,7 @@ struct StatementsView: View {
     var body: some View {
         ScreenScaffold(
             title: "Credit Statements",
-            subtitle: "Created card statements and direct debit status.",
+            subtitle: "",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {

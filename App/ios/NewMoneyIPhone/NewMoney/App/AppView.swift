@@ -239,6 +239,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
     case income
     case accounts
     case statements
+    case faq
     case settings
 
     var id: String { rawValue }
@@ -248,6 +249,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .income: "Income"
         case .accounts: "Accounts"
         case .statements: "Statements"
+        case .faq: "FAQ"
         case .settings: "Settings"
         }
     }
@@ -257,6 +259,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .income: "Paychecks, one-off income, and pay periods."
         case .accounts: "Balances, income destinations, pots, and Direct Debits."
         case .statements: "Card statements and direct debit status."
+        case .faq: "Answers to common New Money questions."
         case .settings: "Appearance, history, planner defaults, and account controls."
         }
     }
@@ -266,6 +269,7 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .income: "sterlingsign.circle"
         case .accounts: "building.columns"
         case .statements: "doc.text.magnifyingglass"
+        case .faq: "questionmark.circle"
         case .settings: "gearshape"
         }
     }
@@ -303,6 +307,9 @@ enum ProfileMenuPresentationPolicy {
     static let editActionOpensAccounts = true
     static let animatesFromBottom = false
     static let avoidsSystemNavigationBar = false
+    static let usesCompactActionRows = true
+    static let showsActionIcons = false
+    static let showsActionSubtitles = false
 }
 
 private enum AppSheetDestination: String, Identifiable {
@@ -871,7 +878,8 @@ private struct ProfileMenuScreenView: View {
         .alert("Reset all data?", isPresented: $isFirstResetConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Continue", role: .destructive) {
-                DispatchQueue.main.async {
+                Task { @MainActor in
+                    await Task.yield()
                     isSecondResetConfirmationPresented = true
                 }
             }
@@ -922,17 +930,19 @@ private struct ProfileMenuScreenView: View {
 
     private var actionsCard: some View {
         AppCard {
-            ForEach(Array(ProfileMenuAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
-                NavigationLink {
-                    profileDestination(for: action)
-                } label: {
-                    ProfileMenuActionRow(action: action)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("profile-menu-\(action.rawValue)")
+            VStack(spacing: 0) {
+                ForEach(Array(ProfileMenuAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
+                    NavigationLink {
+                        profileDestination(for: action)
+                    } label: {
+                        ProfileMenuActionRow(action: action)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile-menu-\(action.rawValue)")
 
-                if index < ProfileMenuAction.allCases.count - 1 {
-                    AppDivider()
+                    if index < ProfileMenuAction.allCases.count - 1 {
+                        AppDivider()
+                    }
                 }
             }
         }
@@ -940,27 +950,38 @@ private struct ProfileMenuScreenView: View {
 
     private var signOutCard: some View {
         AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                SectionTitle("Account")
-                SecondaryButton(
-                    title: authSession.isWorking ? "Logging Out..." : ProfileMenuPresentationPolicy.logOutActionTitle,
-                    systemImage: "rectangle.portrait.and.arrow.right",
-                    role: .destructive
-                ) {
+            VStack(spacing: 0) {
+                Button(role: .destructive) {
                     isLogOutConfirmationPresented = true
+                } label: {
+                    HStack {
+                        Text(authSession.isWorking ? "Logging Out…" : ProfileMenuPresentationPolicy.logOutActionTitle)
+                            .font(.body)
+                        Spacer()
+                    }
+                    .frame(minHeight: 48)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.danger)
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-sign-out")
 
                 AppDivider()
 
-                SecondaryButton(
-                    title: authSession.isWorking ? "Resetting Data..." : ProfileMenuPresentationPolicy.resetDataActionTitle,
-                    systemImage: "trash",
-                    role: .destructive
-                ) {
+                Button(role: .destructive) {
                     isFirstResetConfirmationPresented = true
+                } label: {
+                    HStack {
+                        Text(authSession.isWorking ? "Resetting Data…" : ProfileMenuPresentationPolicy.resetDataActionTitle)
+                            .font(.body)
+                        Spacer()
+                    }
+                    .frame(minHeight: 48)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.danger)
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-reset-data")
             }
@@ -1002,6 +1023,8 @@ private struct ProfileMenuScreenView: View {
             BankAccountsView(store: store)
         case .statements:
             StatementsView(store: store, navigationMode: .inline, toolbarMode: .none)
+        case .faq:
+            FAQView()
         case .settings:
             SettingsView(store: store, navigationMode: .inline, toolbarMode: .none)
         }
@@ -1012,23 +1035,10 @@ private struct ProfileMenuActionRow: View {
     var action: ProfileMenuAction
 
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.md) {
-            Image(systemName: action.symbol)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.primaryOrange)
-                .frame(width: 38, height: 38)
-                .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(action.title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                Text(action.subtitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
-                    .lineLimit(2)
-            }
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Text(action.title)
+                .font(.body)
+                .foregroundStyle(AppTheme.Colors.primaryText)
 
             Spacer(minLength: AppTheme.Spacing.sm)
 
@@ -1036,7 +1046,7 @@ private struct ProfileMenuActionRow: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(AppTheme.Colors.tertiaryText)
         }
-        .padding(.vertical, AppTheme.Spacing.sm)
+        .frame(minHeight: 48)
         .contentShape(Rectangle())
     }
 }

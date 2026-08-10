@@ -3502,297 +3502,108 @@ struct HistoryView: View {
     }
 }
 
-enum SettingsRoute: String, CaseIterable, Equatable {
+enum SettingsRoute: String, CaseIterable, Hashable {
+    case appearance
+    case payDefaults
+    case dateSimulation
+    case moneyLeft
     case history
+    case ai
+    case account
+    case data
 
     var title: String {
         switch self {
+        case .appearance: "Appearance"
+        case .payDefaults: "Pay defaults"
+        case .dateSimulation: "Date simulation"
+        case .moneyLeft: "Money left"
         case .history: "History"
+        case .ai: "AI"
+        case .account: "Account"
+        case .data: "Data"
         }
     }
 
     var subtitle: String {
         switch self {
+        case .appearance: "Colour theme and visual style."
+        case .payDefaults: "Pay frequency, hourly rate, and hours."
+        case .dateSimulation: "Automatic or manually simulated dates."
+        case .moneyLeft: "Choose what is included in your total."
         case .history: "Paycheck and allocation history."
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .history: "clock.arrow.circlepath"
+        case .ai: "Assistant provider and instructions."
+        case .account: "Sign-in, cloud sync, and account controls."
+        case .data: "Local planner reset controls."
         }
     }
 }
 
 struct SettingsView: View {
-    @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
     var toolbarMode: AppToolbarMode = .secondarySingle
-    @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
-    @State private var hourlyRate = ""
-    @State private var hours = ""
-    @State private var showResetAlert = false
-    @State private var showDeleteAccountAlert = false
-    @State private var showLogOutConfirmation = false
-    @State private var resetDataToggle = false
 
     var body: some View {
         ScreenScaffold(
             title: "Settings",
-            subtitle: "Planner defaults, account, and local data controls.",
+            subtitle: "",
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
-            appearanceCard
-
-            AppCard(glow: true) {
-                SectionTitle("Pay defaults")
-                Picker("Pay frequency", selection: bindingPayFrequency) {
-                    ForEach(PayFrequency.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                MoneyField(title: "Hourly rate", text: $hourlyRate)
-                TextField("Default hours", text: $hours).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
-                SecondaryButton(title: "Save pay defaults", systemImage: "checkmark") {
-                    var settings = store.snapshot.settings
-                    settings.hourlyRatePence = MoneyParser.parsePoundsToPence(hourlyRate)
-                    settings.defaultHoursWorked = Double(hours) ?? settings.defaultHoursWorked
-                    store.updateSettings(settings)
-                }
-            }
-
-            DateSimulationCard(store: store)
-
-            moneyLeftCard
-
-            settingsRoutes
-
-            AppCard {
-                SectionTitle("AI")
-                Picker("Provider", selection: bindingAIProvider) {
-                    ForEach(AIProvider.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                TextEditor(text: bindingAIInstructions)
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 110)
-                    .padding(AppTheme.Spacing.sm)
-                    .background(AppTheme.Colors.elevatedSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-            }
-
-            accountCard
-
-            resetDataCard
+            settingsSection("Personalisation", routes: [.appearance])
+            settingsSection("Planning", routes: [.payDefaults, .dateSimulation, .moneyLeft, .history])
+            settingsSection("Assistant", routes: [.ai])
+            settingsSection("Account and data", routes: [.account, .data])
         }
-        .onAppear {
-            hourlyRate = String(format: "%.2f", Double(store.snapshot.settings.hourlyRatePence) / 100)
-            hours = String(format: "%.0f", store.snapshot.settings.defaultHoursWorked)
-        }
-        .alert("Reset local planner?", isPresented: $showResetAlert) {
-            Button("Cancel", role: .cancel) {
-                resetDataToggle = false
-            }
-            Button("Reset", role: .destructive) {
-                store.resetLocalData()
-                hourlyRate = "0.00"
-                hours = "0"
-                resetDataToggle = false
-            }
-        } message: {
-            Text("This clears local iPhone planner inputs and returns the app to its default data.")
-        }
-        .alert("Delete account?", isPresented: $showDeleteAccountAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    await authSession.deleteAccount()
-                }
-            }
-        } message: {
-            Text("This deletes your account through the backend account endpoint. Local data on this iPhone is not reset by this action.")
-        }
-        .alert("Log out?", isPresented: $showLogOutConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button(ProfileMenuPresentationPolicy.logOutActionTitle, role: .destructive) {
-                Task {
-                    await authSession.signOut()
-                }
-            }
-        } message: {
-            Text("Are you sure you want to log out of this account?")
-        }
-    }
-
-    private var appearanceCard: some View {
-        AppearanceThemeCustomizerCard(selectedThemeRawValue: $selectedThemeRawValue)
-    }
-
-    private var moneyLeftCard: some View {
-        AppCard {
-            SectionTitle("Money left")
-            Toggle("Include pots in Money left", isOn: includePotsInMoneyLeftBinding)
-                .tint(AppTheme.Colors.success)
-                .foregroundStyle(AppTheme.Colors.primaryText)
-            Text("Turn this off to show only bank-account balances and any current income that is not linked to an account. Pot and card-reserve balances remain tracked but are left out of the total.")
-                .font(.footnote)
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-        }
-    }
-
-    private var settingsRoutes: some View {
-        VStack(spacing: AppTheme.Spacing.md) {
-            ForEach(SettingsRoute.allCases, id: \.rawValue) { route in
-                settingsRoute(route)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func settingsRoute(_ route: SettingsRoute) -> some View {
-        switch route {
-        case .history:
-            NavigationLink {
+        .navigationDestination(for: SettingsRoute.self) { route in
+            switch route {
+            case .appearance:
+                AppearanceSettingsView()
+            case .payDefaults:
+                PayDefaultsSettingsView(store: store)
+            case .dateSimulation:
+                DateSimulationSettingsView(store: store)
+            case .moneyLeft:
+                MoneyLeftSettingsView(store: store)
+            case .history:
                 HistoryView(store: store)
-            } label: {
-                settingsRouteCard(route)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func settingsRouteCard(_ route: SettingsRoute) -> some View {
-        AppCard {
-            HStack(spacing: AppTheme.Spacing.md) {
-                Image(systemName: route.symbol)
-                    .foregroundStyle(AppTheme.Colors.primaryOrange)
-                    .frame(width: 40, height: 40)
-                    .background(AppTheme.Colors.primaryOrange.opacity(0.12))
-                    .clipShape(Circle())
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(route.title)
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text(route.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            case .ai:
+                AISettingsView(store: store)
+            case .account:
+                AccountSettingsView()
+            case .data:
+                DataSettingsView(store: store)
             }
         }
+        .navigationTopDividerHidden()
+        .accessibilityIdentifier("settings-index-screen")
     }
 
-    private var accountCard: some View {
-        AppCard {
-            SectionTitle("Account")
-            if let user = currentAuthUser {
-                MetricRow(label: "Provider", value: user.providerLabel, valueColor: AppTheme.Colors.success)
-                if let email = user.email {
-                    MetricRow(label: "Email", value: email)
-                }
-                if let phoneNumber = user.phoneNumber {
-                    MetricRow(label: "Phone", value: phoneNumber)
-                }
-                MetricRow(label: "Cloud sync", value: authSession.cloudStatus)
+    private func settingsSection(_ title: String, routes: [SettingsRoute]) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            SectionTitle(title)
+            AppCard {
+                VStack(spacing: 0) {
+                    ForEach(Array(routes.enumerated()), id: \.element.rawValue) { index, route in
+                        NavigationLink(value: route) {
+                            SettingsRouteRow(route: route)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint(route.subtitle)
+                        .accessibilityIdentifier("settings-route-\(route.rawValue)")
 
-                SecondaryButton(title: ProfileMenuPresentationPolicy.logOutActionTitle, systemImage: "rectangle.portrait.and.arrow.right") {
-                    showLogOutConfirmation = true
+                        if index < routes.count - 1 {
+                            AppDivider()
+                        }
+                    }
                 }
-
-                SecondaryButton(title: "Delete Account", systemImage: "trash", role: .destructive) {
-                    showDeleteAccountAlert = true
-                }
-            } else {
-                MetricRow(label: "Status", value: "Signed out", valueColor: AppTheme.Colors.warning)
             }
-        }
-    }
-
-    private var currentAuthUser: AuthUser? {
-        switch authSession.state {
-        case .emailVerificationRequired(let user),
-             .syncing(let user, _),
-             .ready(let user):
-            return user
-        case .loading, .signedOut, .failed:
-            return nil
-        }
-    }
-
-    private var resetDataCard: some View {
-        AppCard {
-            SectionTitle("Data")
-            Toggle("Reset data", isOn: resetDataBinding)
-                .tint(AppTheme.Colors.danger)
-                .foregroundStyle(AppTheme.Colors.primaryText)
-            Text("Clears paychecks, pots, bills, cards, debts, spending, history, date simulation, and saved settings from this iPhone.")
-                .font(.footnote)
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-        }
-    }
-
-    private var resetDataBinding: Binding<Bool> {
-        Binding {
-            resetDataToggle
-        } set: { isOn in
-            resetDataToggle = isOn
-            if isOn {
-                showResetAlert = true
-            }
-        }
-    }
-
-    private var bindingPayFrequency: Binding<PayFrequency> {
-        Binding {
-            store.snapshot.settings.payFrequency
-        } set: {
-            var settings = store.snapshot.settings
-            settings.payFrequency = $0
-            settings.defaultPayPeriodDays = FinanceEngine.frequencyToDays($0)
-            store.updateSettings(settings)
-        }
-    }
-
-    private var bindingAIProvider: Binding<AIProvider> {
-        Binding {
-            store.snapshot.settings.aiProvider
-        } set: {
-            var settings = store.snapshot.settings
-            settings.aiProvider = $0
-            store.updateSettings(settings)
-        }
-    }
-
-    private var bindingAIInstructions: Binding<String> {
-        Binding {
-            store.snapshot.settings.aiInstructions
-        } set: {
-            var settings = store.snapshot.settings
-            settings.aiInstructions = $0
-            store.updateSettings(settings)
-        }
-    }
-
-    private var includePotsInMoneyLeftBinding: Binding<Bool> {
-        Binding {
-            store.snapshot.settings.includePotsInMoneyLeft ?? true
-        } set: { includesPots in
-            var settings = store.snapshot.settings
-            settings.includePotsInMoneyLeft = includesPots
-            store.updateSettings(settings)
         }
     }
 }
 
-private struct AppearanceThemeCustomizerCard: View {
+struct AppearanceThemeCustomizerCard: View {
     @Binding var selectedThemeRawValue: String
 
     var body: some View {

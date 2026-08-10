@@ -28,6 +28,15 @@
 		100000000000000000000119 /* CardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000221 /* CardsView.swift */; };
 		100000000000000000000120 /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* MoreView.swift */; };
 		100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* SecondaryFeatureViews.swift */; };
+		D8100000000000000000001 /* FAQView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000001 /* FAQView.swift */; };
+		D8100000000000000000002 /* SettingsRouteRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000002 /* SettingsRouteRow.swift */; };
+		D8100000000000000000003 /* AppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000003 /* AppearanceSettingsView.swift */; };
+		D8100000000000000000004 /* PayDefaultsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000004 /* PayDefaultsSettingsView.swift */; };
+		D8100000000000000000005 /* DateSimulationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000005 /* DateSimulationSettingsView.swift */; };
+		D8100000000000000000006 /* MoneyLeftSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000006 /* MoneyLeftSettingsView.swift */; };
+		D8100000000000000000007 /* AISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000007 /* AISettingsView.swift */; };
+		D8100000000000000000008 /* AccountSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000008 /* AccountSettingsView.swift */; };
+		D8100000000000000000009 /* DataSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8200000000000000000009 /* DataSettingsView.swift */; };
 		100000000000000000000122 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* Assets.xcassets */; };
 		100000000000000000000123 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000225 /* GoogleService-Info.plist */; };
 		100000000000000000000124 /* AuthSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000226 /* AuthSyncTests.swift */; };
@@ -104,6 +113,15 @@
 		100000000000000000000221 /* CardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardsView.swift; sourceTree = "<group>"; };
 		100000000000000000000222 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		100000000000000000000223 /* SecondaryFeatureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryFeatureViews.swift; sourceTree = "<group>"; };
+		D8200000000000000000001 /* FAQView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FAQView.swift; sourceTree = "<group>"; };
+		D8200000000000000000002 /* SettingsRouteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRouteRow.swift; sourceTree = "<group>"; };
+		D8200000000000000000003 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
+		D8200000000000000000004 /* PayDefaultsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayDefaultsSettingsView.swift; sourceTree = "<group>"; };
+		D8200000000000000000005 /* DateSimulationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateSimulationSettingsView.swift; sourceTree = "<group>"; };
+		D8200000000000000000006 /* MoneyLeftSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLeftSettingsView.swift; sourceTree = "<group>"; };
+		D8200000000000000000007 /* AISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsView.swift; sourceTree = "<group>"; };
+		D8200000000000000000008 /* AccountSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsView.swift; sourceTree = "<group>"; };
+		D8200000000000000000009 /* DataSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataSettingsView.swift; sourceTree = "<group>"; };
 		100000000000000000000224 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		100000000000000000000225 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		100000000000000000000226 /* AuthSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSyncTests.swift; sourceTree = "<group>"; };
@@ -361,6 +379,15 @@
 				100000000000000000000222 /* MoreView.swift */,
 				D40000000000000000000002 /* StatementDetailView.swift */,
 				100000000000000000000223 /* SecondaryFeatureViews.swift */,
+				D8200000000000000000001 /* FAQView.swift */,
+				D8200000000000000000002 /* SettingsRouteRow.swift */,
+				D8200000000000000000003 /* AppearanceSettingsView.swift */,
+				D8200000000000000000004 /* PayDefaultsSettingsView.swift */,
+				D8200000000000000000005 /* DateSimulationSettingsView.swift */,
+				D8200000000000000000006 /* MoneyLeftSettingsView.swift */,
+				D8200000000000000000007 /* AISettingsView.swift */,
+				D8200000000000000000008 /* AccountSettingsView.swift */,
+				D8200000000000000000009 /* DataSettingsView.swift */,
 			);
 			path = More;
 			sourceTree = "<group>";
@@ -552,6 +579,15 @@
 				100000000000000000000120 /* MoreView.swift in Sources */,
 				D40000000000000000000001 /* StatementDetailView.swift in Sources */,
 				100000000000000000000121 /* SecondaryFeatureViews.swift in Sources */,
+				D8100000000000000000001 /* FAQView.swift in Sources */,
+				D8100000000000000000002 /* SettingsRouteRow.swift in Sources */,
+				D8100000000000000000003 /* AppearanceSettingsView.swift in Sources */,
+				D8100000000000000000004 /* PayDefaultsSettingsView.swift in Sources */,
+				D8100000000000000000005 /* DateSimulationSettingsView.swift in Sources */,
+				D8100000000000000000006 /* MoneyLeftSettingsView.swift in Sources */,
+				D8100000000000000000007 /* AISettingsView.swift in Sources */,
+				D8100000000000000000008 /* AccountSettingsView.swift in Sources */,
+				D8100000000000000000009 /* DataSettingsView.swift in Sources */,
 				F60000000000000000000001 /* BankAccountsView.swift in Sources */,
 				F60000000000000000000002 /* BankAccountFormView.swift in Sources */,
 				F60000000000000000000003 /* BankAccountDetailView.swift in Sources */,

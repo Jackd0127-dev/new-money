@@ -2936,12 +2936,12 @@ final class FinanceEngineTests: XCTestCase {
 
         let carWorkPayments = try linkedPayments(for: "Car & Work")
         XCTAssertEqual(carWorkPayments.first?.dueIso, "2027-01-25")
-        XCTAssertEqual(carWorkPayments.first?.amountPence, 31000)
+        XCTAssertEqual(carWorkPayments.first?.amountPence, 25500)
         XCTAssertEqual(carWorkPayments.filter { $0.dueIso == "2027-01-25" }.count, 1)
 
         let annualIrregularPayments = try linkedPayments(for: "Annual & Irregular")
         XCTAssertEqual(annualIrregularPayments.first?.dueIso, "2027-01-28")
-        XCTAssertEqual(annualIrregularPayments.first?.amountPence, 22500)
+        XCTAssertEqual(annualIrregularPayments.first?.amountPence, 18000)
         XCTAssertEqual(annualIrregularPayments.filter { $0.dueIso == "2027-01-28" }.count, 1)
     }
 
@@ -3362,24 +3362,24 @@ final class FinanceEngineTests: XCTestCase {
         }
 
         XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-01").map { $0.0 }, ["2026-09-02", "2026-10-02"])
-        XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-01").map { $0.1 }, [43000, 8300])
+        XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-01").map { $0.1 }, [43000, 7500])
         XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-01").map { $0.0 }, ["2026-09-10", "2026-10-10"])
-        XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-01").map { $0.1 }, [16000, 13400])
-        XCTAssertEqual(try linkedRows(for: "Annual & Work", today: "2026-09-01").map { $0.0 }, ["2026-09-27", "2026-10-27"])
-        XCTAssertEqual(try linkedRows(for: "Annual & Work", today: "2026-09-01").map { $0.1 }, [9000, 18000])
+        XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-01").map { $0.1 }, [16000, 11000])
+        XCTAssertEqual(try linkedRows(for: "Annual & Work", today: "2026-09-01").map { $0.0 }, ["2026-09-27"])
+        XCTAssertEqual(try linkedRows(for: "Annual & Work", today: "2026-09-01").map { $0.1 }, [9000])
         XCTAssertTrue(try linkedRows(for: "Emergency", today: "2026-09-01").isEmpty)
 
         var september3Settings = store.snapshot.settings
         september3Settings.manualTodayIso = "2026-09-03"
         store.updateSettings(september3Settings)
-        XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-03").map { $0.0 }, ["2026-10-02", "2026-11-02"])
-        XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-03").map { $0.1 }, [8300, 7000])
+        XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-03").map { $0.0 }, ["2026-10-02"])
+        XCTAssertEqual(try linkedRows(for: "Subscriptions", today: "2026-09-03").map { $0.1 }, [7500])
 
         var september11Settings = store.snapshot.settings
         september11Settings.manualTodayIso = "2026-09-11"
         store.updateSettings(september11Settings)
-        XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-11").map { $0.0 }, ["2026-10-10", "2026-11-10"])
-        XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-11").map { $0.1 }, [13400, 22000])
+        XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-11").map { $0.0 }, ["2026-10-10"])
+        XCTAssertEqual(try linkedRows(for: "Car & Insurance", today: "2026-09-11").map { $0.1 }, [11000])
     }
 
     func testComplexStressFundingChecklistIncludesAllSeptemberObligations() {
@@ -5298,6 +5298,156 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(payments.map(\.actualDuePence), [17000, 0])
     }
 
+    func testLinkedCardUpcomingPaymentsRollFromFrozenStatementToLiveNextCycleSpend() {
+        let card = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-03",
+            dueDay: 20,
+            createdAt: "2026-07-01T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-aqua",
+            name: "Aqua",
+            balancePence: 55_000,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let postStatementSpend = makeTransaction(
+            id: "aqua-post-statement-spend",
+            cardId: card.id,
+            amountPence: 5_000,
+            date: "2026-08-04",
+            note: "Post-statement spend"
+        )
+        let plannedCharge = CustomPayment(
+            id: "aqua-future-charge",
+            name: "Future card charge",
+            amountPence: 7_000,
+            dueDate: "2026-08-15",
+            creditCardId: card.id,
+            status: .unpaid,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let augustCycle = CreditCardCycleOverride(
+            id: "aqua-august-cycle",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-08-03",
+            statementState: .confirmed,
+            actualStatementDate: "2026-08-03",
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 50_000,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-03T00:00:00.000Z",
+            updatedAt: "2026-08-03T00:00:00.000Z",
+            deletedAt: nil
+        )
+        var snapshot = makeSnapshot(
+            pots: [pot],
+            transactions: [postStatementSpend],
+            creditCards: [card],
+            customPayments: [plannedCharge],
+            creditCardCycleOverrides: [augustCycle]
+        )
+
+        XCTAssertEqual(
+            PlannerDerivedData.potProgress(
+                pot: pot,
+                snapshot: snapshot,
+                today: "2026-08-10"
+            ).linkedCardPayments,
+            [
+                LinkedCardPaymentDue(
+                    cardId: card.id,
+                    cardName: card.name,
+                    statementIso: "2026-08-03",
+                    dueIso: "2026-08-20",
+                    amountPence: 50_000
+                ),
+                LinkedCardPaymentDue(
+                    cardId: card.id,
+                    cardName: card.name,
+                    statementIso: "2026-09-03",
+                    dueIso: "2026-09-20",
+                    amountPence: 5_000
+                )
+            ]
+        )
+
+        snapshot.creditCardRepayments = [
+            CreditCardRepayment(
+                id: "aqua-august-repayment",
+                creditCardId: card.id,
+                amountPence: 50_000,
+                date: "2026-08-20",
+                note: "Aqua statement payment",
+                statementDate: "2026-08-03",
+                directDebitDate: "2026-08-20",
+                source: .linkedPotStatement,
+                potId: pot.id,
+                potContributionPence: 50_000,
+                paycheckContributionPence: 0,
+                createdAt: "2026-08-20T00:00:00.000Z",
+                updatedAt: "2026-08-20T00:00:00.000Z",
+                deletedAt: nil
+            )
+        ]
+
+        XCTAssertEqual(
+            PlannerDerivedData.potProgress(
+                pot: pot,
+                snapshot: snapshot,
+                today: "2026-08-20"
+            ).linkedCardPayments,
+            [
+                LinkedCardPaymentDue(
+                    cardId: card.id,
+                    cardName: card.name,
+                    statementIso: "2026-09-03",
+                    dueIso: "2026-09-20",
+                    amountPence: 5_000
+                )
+            ]
+        )
+
+        snapshot.creditCardCycleOverrides.append(
+            CreditCardCycleOverride(
+                id: "aqua-september-cycle",
+                creditCardId: card.id,
+                scheduledStatementDate: "2026-09-03",
+                statementState: .confirmed,
+                actualStatementDate: "2026-09-05",
+                directDebitState: .confirmed,
+                actualDirectDebitDate: "2026-09-22",
+                amountPenceOverride: 5_000,
+                reversedAutomaticRepaymentIds: [],
+                createdAt: "2026-09-05T00:00:00.000Z",
+                updatedAt: "2026-09-05T00:00:00.000Z",
+                deletedAt: nil
+            )
+        )
+
+        XCTAssertEqual(
+            PlannerDerivedData.potProgress(
+                pot: pot,
+                snapshot: snapshot,
+                today: "2026-08-21"
+            ).linkedCardPayments.first,
+            LinkedCardPaymentDue(
+                cardId: card.id,
+                cardName: card.name,
+                statementIso: "2026-09-05",
+                dueIso: "2026-09-22",
+                amountPence: 5_000
+            )
+        )
+    }
+
     func testStatementDueSubtractsRepaymentsAlreadyAssignedToThatStatement() {
         let card = makeCreditCard(
             id: "card-main",
@@ -7002,7 +7152,7 @@ final class FinanceEngineTests: XCTestCase {
             store.setCardBillFundingCompleted(paymentId: spendingMoney.paymentId, dueDate: spendingMoney.dueDate, payPeriodId: payPeriod.id, completed: true)
     }
 
-    func testHomeDueEventsIncludesEveryRequestedSourceAcrossTodayAndTomorrow() {
+    func testHomeDueEventsIncludesEveryRequestedSourceWithinRollingWindow() {
         let today = "2026-07-10"
         let period = makePayPeriod(id: "period-july", startDate: "2026-07-10", endDate: "2026-08-09", payday: today, incomePence: 120000)
         let snapshot = makeSnapshot(
@@ -7028,6 +7178,24 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(events.map(\.date), events.map(\.date).sorted())
     }
 
+    func testHomeDueEventsIncludesPreviousSevenDaysAndNextThreeDaysOnly() {
+        let today = "2026-07-10"
+        let payments = [
+            CustomPayment(id: "past-boundary", name: "Past boundary", amountPence: 1000, dueDate: "2026-07-03", creditCardId: nil, status: .paid, createdAt: today, updatedAt: today, deletedAt: nil),
+            CustomPayment(id: "too-old", name: "Too old", amountPence: 1000, dueDate: "2026-07-02", creditCardId: nil, status: .paid, createdAt: today, updatedAt: today, deletedAt: nil),
+            CustomPayment(id: "future-boundary", name: "Future boundary", amountPence: 1000, dueDate: "2026-07-13", creditCardId: nil, status: .unpaid, createdAt: today, updatedAt: today, deletedAt: nil),
+            CustomPayment(id: "too-far", name: "Too far", amountPence: 1000, dueDate: "2026-07-14", creditCardId: nil, status: .unpaid, createdAt: today, updatedAt: today, deletedAt: nil)
+        ]
+
+        let events = PlannerDerivedData.homeDueEvents(
+            snapshot: makeSnapshot(customPayments: payments),
+            asOfDate: today
+        )
+
+        XCTAssertEqual(events.map(\.title), ["Past boundary", "Future boundary"])
+        XCTAssertEqual(events.map(\.date), ["2026-07-03", "2026-07-13"])
+    }
+
     func testHomeDueEventsUsesStableOverridesAndFiltersCancelledOrOutOfWindowItems() {
         let today = "2026-07-10"
         let period = makePayPeriod(id: "period-july", startDate: today, endDate: "2026-08-09", payday: today, incomePence: 100000)
@@ -7036,7 +7204,7 @@ final class FinanceEngineTests: XCTestCase {
             customPayments: [CustomPayment(id: "archived", name: "Old", amountPence: 1000, dueDate: today, creditCardId: nil, status: .archived, createdAt: today, updatedAt: today, deletedAt: nil)],
             oneOffIncomes: [
                 OneOffIncome(id: "moved", payPeriodId: period.id, name: "Moved bonus", amountPence: 5000, date: today, note: "", createdAt: today, updatedAt: today, deletedAt: nil),
-                OneOffIncome(id: "later", payPeriodId: nil, name: "Later", amountPence: 5000, date: "2026-07-12", note: "", createdAt: today, updatedAt: today, deletedAt: nil),
+                OneOffIncome(id: "later", payPeriodId: nil, name: "Later", amountPence: 5000, date: "2026-07-14", note: "", createdAt: today, updatedAt: today, deletedAt: nil),
                 OneOffIncome(id: "cancelled", payPeriodId: period.id, name: "Cancelled", amountPence: 5000, date: today, note: "", createdAt: today, updatedAt: today, deletedAt: nil)
             ]
         )

@@ -3733,6 +3733,10 @@ enum AssistantMenuPresentationPolicy {
     static let customiseAssistantRoute = "instructionsScreen"
     static let renamePresentation = "textFieldAlert"
     static let instructionsUsesPlaceholderToolbar = false
+    static let focusedMessageBottomClearance: CGFloat = 132
+    static let bottomScrollAnchorID = "assistant-bottom-scroll-anchor"
+    static let returnsToStandardBottomWhenKeyboardCloses = true
+    static let everyPromptReceivesLocalReply = true
 }
 
 struct AssistantView: View {
@@ -3743,8 +3747,9 @@ struct AssistantView: View {
     @State private var isRenameAssistantPresented = false
     @State private var assistantNameDraft = ""
     @State private var activeAssistantSheet: AssistantSettingsSheet?
+    @State private var scrollRequestRevision = 0
     @State private var messages: [AssistantMessage] = [
-        AssistantMessage(role: "Assistant", text: "I can summarise your local planner. Authenticated AI chat needs the native Firebase/backend TODOs in Settings.")
+        AssistantMessage(role: "Assistant", text: "Ask me about your money left, income, payday, bills, cards, or debts.")
     ]
     @FocusState private var isPromptFocused: Bool
     private let assistantCoordinateSpace = "assistantScrollSpace"
@@ -3770,27 +3775,34 @@ struct AssistantView: View {
             GeometryReader { geometry in
                 ZStack(alignment: .bottom) {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                            AppCard(glow: true) {
-                                MetricRow(label: "Spendable", value: MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots)), valueColor: AppTheme.Colors.primaryOrange)
-                                MetricRow(label: "Active cards", value: "\(store.activeCards.count)")
-                                MetricRow(label: "Active debts", value: "\(store.activeDebts.count)")
-                            }
-                            .assistantBottomContentBlur(viewportHeight: geometry.size.height, coordinateSpaceName: assistantCoordinateSpace)
-
-                            ForEach(messages) { message in
-                                HStack {
-                                    if message.role == "You" { Spacer() }
-                                    Text(message.text)
-                                        .font(.subheadline)
-                                        .foregroundStyle(AppTheme.Colors.primaryText)
-                                        .padding(AppTheme.Spacing.md)
-                                        .background(message.role == "You" ? AppTheme.Colors.primaryOrange.opacity(0.32) : AppTheme.Colors.elevatedSurface)
-                                        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
-                                    if message.role != "You" { Spacer() }
+                        VStack(alignment: .leading, spacing: 0) {
+                            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                                AppCard(glow: true) {
+                                    MetricRow(label: "Spendable", value: MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots)), valueColor: AppTheme.Colors.primaryOrange)
+                                    MetricRow(label: "Active cards", value: "\(store.activeCards.count)")
+                                    MetricRow(label: "Active debts", value: "\(store.activeDebts.count)")
                                 }
                                 .assistantBottomContentBlur(viewportHeight: geometry.size.height, coordinateSpaceName: assistantCoordinateSpace)
+
+                                ForEach(messages) { message in
+                                    HStack {
+                                        if message.role == "You" { Spacer() }
+                                        Text(message.text)
+                                            .font(.subheadline)
+                                            .foregroundStyle(AppTheme.Colors.primaryText)
+                                            .padding(AppTheme.Spacing.md)
+                                            .background(message.role == "You" ? AppTheme.Colors.primaryOrange.opacity(0.32) : AppTheme.Colors.elevatedSurface)
+                                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+                                        if message.role != "You" { Spacer() }
+                                    }
+                                    .assistantBottomContentBlur(viewportHeight: geometry.size.height, coordinateSpaceName: assistantCoordinateSpace)
+                                }
                             }
+
+                            Color.clear
+                                .frame(height: isPromptFocused ? AssistantMenuPresentationPolicy.focusedMessageBottomClearance : 0)
+                                .id(AssistantMenuPresentationPolicy.bottomScrollAnchorID)
+                                .accessibilityHidden(true)
                         }
                         .padding(.horizontal, AppTheme.Spacing.lg)
                         .padding(.top, AppTheme.Spacing.lg)
@@ -3800,15 +3812,20 @@ struct AssistantView: View {
                         scrollToBottom(with: proxy, animated: false)
                     }
                     .onChange(of: messages.count) { _, _ in
+                        requestScrollToBottom()
+                    }
+                    .onChange(of: isPromptFocused) { _, _ in
+                        requestScrollToBottom()
+                    }
+                    .task(id: scrollRequestRevision) {
+                        await Task.yield()
+                        scrollToBottom(with: proxy)
+                        try? await Task.sleep(for: .milliseconds(320))
+                        guard !Task.isCancelled else { return }
                         scrollToBottom(with: proxy)
                     }
-                    .onChange(of: isPromptFocused) { _, isFocused in
-                        if isFocused {
-                            scrollToBottomAfterLayoutSettles(with: proxy)
-                        }
-                    }
 
-                    assistantComposer(proxy: proxy)
+                    assistantComposer
                         .zIndex(1)
                 }
                 .coordinateSpace(name: assistantCoordinateSpace)
@@ -3858,27 +3875,24 @@ struct AssistantView: View {
         }
     }
 
-    private func assistantComposer(proxy: ScrollViewProxy) -> some View {
+    private var assistantComposer: some View {
         HStack(spacing: AppTheme.Spacing.sm) {
-            promptField(proxy: proxy)
+            promptField
 
-            Button {
-                sendLocalReply()
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .foregroundStyle(AppTheme.Colors.controlText)
-                    .frame(width: 48, height: 48)
-                    .background(AppTheme.Gradients.primary)
-                    .clipShape(Circle())
-                    .shadow(color: AppTheme.Colors.glowOrange.opacity(0.6), radius: 12, y: 4)
-            }
-            .buttonStyle(ScaleButtonStyle())
-            .disabled(prompt.isBlank)
+            Button("Send message", systemImage: "paperplane.fill", action: sendLocalReply)
+                .labelStyle(.iconOnly)
+                .foregroundStyle(AppTheme.Colors.controlText)
+                .frame(width: 48, height: 48)
+                .background(AppTheme.Gradients.primary)
+                .clipShape(Circle())
+                .shadow(color: AppTheme.Colors.glowOrange.opacity(0.6), radius: 12, y: 4)
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(prompt.isBlank)
         }
         .padding(AppTheme.Spacing.lg)
     }
 
-    private func promptField(proxy: ScrollViewProxy) -> some View {
+    private var promptField: some View {
         TextField("Ask Assistant", text: $prompt)
             .foregroundStyle(AppTheme.Colors.primaryText)
             .padding(.horizontal, AppTheme.Spacing.md)
@@ -3888,40 +3902,34 @@ struct AssistantView: View {
                     .stroke(AppTheme.Colors.primaryText.opacity(0.14), lineWidth: 1)
             )
             .focused($isPromptFocused)
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    scrollToBottomAfterLayoutSettles(with: proxy)
-                }
-            )
+            .submitLabel(.send)
+            .onSubmit(sendLocalReply)
     }
 
-    private func scrollToBottomAfterLayoutSettles(with proxy: ScrollViewProxy) {
-        scrollToBottom(with: proxy)
-        DispatchQueue.main.async {
-            scrollToBottom(with: proxy)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-            scrollToBottom(with: proxy)
-        }
+    private func requestScrollToBottom() {
+        scrollRequestRevision += 1
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool = true) {
-        guard let lastMessageID = messages.last?.id else { return }
         if animated {
             withAnimation(AppTheme.Animation.standard) {
-                proxy.scrollTo(lastMessageID, anchor: .bottom)
+                proxy.scrollTo(AssistantMenuPresentationPolicy.bottomScrollAnchorID, anchor: .bottom)
             }
         } else {
-            proxy.scrollTo(lastMessageID, anchor: .bottom)
+            proxy.scrollTo(AssistantMenuPresentationPolicy.bottomScrollAnchorID, anchor: .bottom)
         }
     }
 
     private func sendLocalReply() {
-        let text = prompt
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
         messages.append(AssistantMessage(role: "You", text: text))
         prompt = ""
-        let period = store.selectedPayPeriod
-        let reply = "Local summary: \(MoneyParser.formatPence(period?.incomePence ?? 0)) income in the current plan, \(MoneyParser.formatPence(FinanceEngine.getSpendablePence(pots: store.snapshot.pots))) spendable, and \(store.snapshot.recurringPayments.filter(\.active).count) active bills. Authenticated AI actions are waiting on native Firebase ID tokens."
+        let reply = AssistantLocalResponseBuilder.response(
+            to: text,
+            snapshot: store.snapshot,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
         messages.append(AssistantMessage(role: assistantName, text: reply))
     }
 

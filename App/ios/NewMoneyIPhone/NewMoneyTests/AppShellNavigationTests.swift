@@ -314,6 +314,31 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AssistantMenuPresentationPolicy.customiseAssistantRoute, "instructionsScreen")
         XCTAssertEqual(AssistantMenuPresentationPolicy.renamePresentation, "textFieldAlert")
         XCTAssertFalse(AssistantMenuPresentationPolicy.instructionsUsesPlaceholderToolbar)
+        XCTAssertEqual(AssistantMenuPresentationPolicy.focusedMessageBottomClearance, 132)
+        XCTAssertTrue(AssistantMenuPresentationPolicy.returnsToStandardBottomWhenKeyboardCloses)
+        XCTAssertTrue(AssistantMenuPresentationPolicy.everyPromptReceivesLocalReply)
+    }
+
+    func testAssistantAlwaysReturnsLocalPlannerReply() {
+        let prompts = [
+            "Hi",
+            "How much money do I have?",
+            "When is payday?",
+            "Show my bills",
+            "What are my card balances?",
+            "How much debt do I have?",
+            "Tell me something about my planner"
+        ]
+
+        for prompt in prompts {
+            let reply = AssistantLocalResponseBuilder.response(
+                to: prompt,
+                snapshot: DefaultData.emptySnapshot,
+                selectedPayPeriod: nil
+            )
+            XCTAssertFalse(reply.isEmpty, "Expected a reply for: \(prompt)")
+            XCTAssertFalse(reply.localizedStandardContains("working on getting assistant up and running"))
+        }
     }
 
     func testEditToolbarActionUsesTextButton() {

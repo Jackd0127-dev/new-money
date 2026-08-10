@@ -262,6 +262,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(ProfileMenuPresentationPolicy.showsProfileSubtitle)
         XCTAssertEqual(ProfileMenuPresentationPolicy.editActionTitle, "Edit")
         XCTAssertTrue(ProfileMenuPresentationPolicy.editActionOpensAccounts)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.accountsPresentationStyle, "navigationDestination")
         XCTAssertFalse(ProfileMenuPresentationPolicy.animatesFromBottom)
         XCTAssertFalse(ProfileMenuPresentationPolicy.avoidsSystemNavigationBar)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesCompactActionRows)
@@ -276,27 +277,34 @@ final class AppShellNavigationTests: XCTestCase {
         )
     }
 
-    func testAccountsSheetUsesCarouselCreateButtonAndHiddenManagement() {
+    func testAccountsScreenUsesNativeCarouselAndHalfHeightCreateSheet() {
         XCTAssertEqual(AccountsLayoutPolicy.sections, [.carousel, .profileOverview, .profilePulse, .profilePills])
         XCTAssertEqual(AccountsLayoutPolicy.createActionPlacement, "topBarTrailing")
-        XCTAssertEqual(AccountsLayoutPolicy.presentationDetent, "large")
+        XCTAssertEqual(AccountsLayoutPolicy.presentationStyle, "navigationDestination")
+        XCTAssertEqual(AccountsLayoutPolicy.createSheetDetent, "fractionHalf")
+        XCTAssertFalse(AccountsLayoutPolicy.createSheetShowsDividers)
         XCTAssertFalse(AccountsLayoutPolicy.showsNavigationDivider)
         XCTAssertFalse(AccountsLayoutPolicy.avatarPreviewShowsNavigationDivider)
         XCTAssertEqual(AccountsLayoutPolicy.managementPresentation, .contextMenu)
-        XCTAssertLessThan(AccountsLayoutPolicy.carouselSnapThreshold, 0.15)
-        XCTAssertLessThanOrEqual(AccountsLayoutPolicy.carouselMinimumDragDistance, 6)
-        XCTAssertLessThanOrEqual(AccountsLayoutPolicy.carouselMinimumSwipeDistance, 16)
-        XCTAssertLessThanOrEqual(AccountsLayoutPolicy.carouselMaximumSwipeDistance, 32)
-        XCTAssertLessThan(AccountsLayoutPolicy.carouselVerticalToleranceRatio, 0.6)
         XCTAssertEqual(AccountsLayoutPolicy.editMenuPresentation, "nativeSwiftUIMenu")
         XCTAssertEqual(AccountsLayoutPolicy.avatarSourcePresentation, "nativeSwiftUIMenu")
-        XCTAssertEqual(AccountsLayoutPolicy.carouselInteraction, "directionalSwipeAutoAdvance")
+        XCTAssertEqual(AccountsLayoutPolicy.carouselInteraction, "nativeViewAlignedScroll")
+        XCTAssertTrue(AccountsLayoutPolicy.carouselUsesNativeSnapping)
+        XCTAssertTrue(AccountsLayoutPolicy.carouselAllowsVerticalScrollPassthrough)
         XCTAssertEqual(AccountsLayoutPolicy.profileGraphMetric, "monthlySavedSpentActivity")
         XCTAssertFalse(AccountsLayoutPolicy.profileGraphShowsMetricPills)
         XCTAssertFalse(AccountsLayoutPolicy.profileGraphUsesContinuousAnimation)
         XCTAssertFalse(AccountsLayoutPolicy.carouselUsesVerticalLift)
         XCTAssertEqual(AccountsLayoutPolicy.profilePulseCardCornerRadius, AppTheme.Radius.md)
         XCTAssertFalse(AccountsLayoutPolicy.showsBottomAccountList)
+    }
+
+    func testBankAccountFormsAndIncomeToggleUseRequestedPresentation() {
+        XCTAssertEqual(BankAccountFormLayoutPolicy.accountTypeControl, "selectionFieldBox")
+        XCTAssertFalse(BankAccountFormLayoutPolicy.showsColourFooterSubtitle)
+        XCTAssertEqual(AddIncomeTransitionPolicy.formTransition, "matchedGeometry")
+        XCTAssertEqual(AddIncomeTransitionPolicy.toolbarContentTransition, "interpolate")
+        XCTAssertTrue(AddIncomeTransitionPolicy.respectsReduceMotion)
     }
 
     func testAssistantUsesNativeEditMenuAndInstructionsRoute() {
@@ -708,7 +716,6 @@ final class DashboardSpendingChartTests: XCTestCase {
                 .dueEvents,
                 .hero,
                 .accounts,
-                .quickRoutes,
                 .monthlySpendChart,
                 .upcomingBeforePayday,
                 .alerts
@@ -718,7 +725,9 @@ final class DashboardSpendingChartTests: XCTestCase {
         XCTAssertFalse(DashboardHomeLayoutPolicy.homeSections.contains(.spendingSnapshot))
         XCTAssertFalse(DashboardHomeLayoutPolicy.homeSections.contains(.recentActivity))
         XCTAssertEqual(DashboardHomeLayoutPolicy.quickRouteTitles, ["Income", "Spending"])
-        XCTAssertEqual(DashboardHomeLayoutPolicy.quickRoutesPlacement, "aboveManualSpends")
+        XCTAssertEqual(DashboardHomeLayoutPolicy.quickRoutesPlacement, "besideAccounts")
+        XCTAssertEqual(DashboardHomeLayoutPolicy.monthlyChartNavigation, "horizontalSwipe")
+        XCTAssertFalse(DashboardHomeLayoutPolicy.monthlyChartShowsArrow)
         XCTAssertTrue(DashboardHomeLayoutPolicy.moneyLeftDetailSections.contains(.spendingSnapshot))
         XCTAssertEqual(DashboardHomeLayoutPolicy.moneyLeftDetailPresentation, .navigationPush)
     }
@@ -908,6 +917,13 @@ final class ActivityLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityLayoutPolicy.recentActivityDetailToolbarActions, ["trash", "edit"])
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteRequiresConfirmation)
         XCTAssertTrue(ActivityLayoutPolicy.recentActivityDeleteIsPermanent)
+        XCTAssertTrue(ActivityLayoutPolicy.transactionEditorHidesTopSpacing)
+        XCTAssertTrue(ActivityLayoutPolicy.transactionEditorHidesNavigationDivider)
+        XCTAssertEqual(ActivityLayoutPolicy.transactionEditorRoutePickerPresentation, "selectionFieldBox")
+        XCTAssertEqual(ActivityLayoutPolicy.transactionEditorDeletePlacement, "topRightToolbar")
+        XCTAssertTrue(ActivityLayoutPolicy.transactionEditorDeleteRequiresConfirmation)
+        XCTAssertTrue(CycleAdjustmentLayoutPolicy.hidesTopSpacing)
+        XCTAssertTrue(CycleAdjustmentLayoutPolicy.hidesNavigationDivider)
     }
 
     func testExpandableSectionsUseCleanRightAndDownDisclosureSymbols() {

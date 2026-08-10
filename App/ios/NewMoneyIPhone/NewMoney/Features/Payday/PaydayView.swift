@@ -229,26 +229,45 @@ private struct SpendingPeriodGroup: Identifiable {
     var sortDate: String
 }
 
+struct AddIncomeTransitionPolicy {
+    static let formTransition = "matchedGeometry"
+    static let toolbarContentTransition = "interpolate"
+    static let respectsReduceMotion = true
+}
+
 struct AddPaycheckSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: PlannerStore
     @State private var isOneOffIncome = false
+    @Namespace private var incomeFormNamespace
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                Group {
+                ZStack(alignment: .topLeading) {
                     if isOneOffIncome {
                         OneOffIncomeFormCard(store: store) {
                             dismiss()
                         }
+                        .matchedGeometryEffect(
+                            id: reduceMotion ? "one-off-income-form" : "income-form",
+                            in: incomeFormNamespace
+                        )
+                        .transition(incomeFormTransition)
                     } else {
                         PaycheckPlanFormCard(store: store) {
                             dismiss()
                         }
+                        .matchedGeometryEffect(
+                            id: reduceMotion ? "paycheck-form" : "income-form",
+                            in: incomeFormNamespace
+                        )
+                        .transition(incomeFormTransition)
                     }
                 }
                 .padding(AppTheme.Spacing.lg)
+                .animation(incomeFormAnimation, value: isOneOffIncome)
             }
             .premiumScreenBackground()
             .navigationTitle("Add income")
@@ -258,13 +277,27 @@ struct AddPaycheckSheetView: View {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(isOneOffIncome ? "Paycheck" : "One off") {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                            isOneOffIncome.toggle()
-                        }
+                    Button(action: toggleIncomeMode) {
+                        Text(isOneOffIncome ? "Paycheck" : "One off")
+                            .contentTransition(reduceMotion ? .opacity : .interpolate)
                     }
+                    .animation(incomeFormAnimation, value: isOneOffIncome)
                 }
             }
+        }
+    }
+
+    private var incomeFormAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.16) : .spring(response: 0.42, dampingFraction: 0.84)
+    }
+
+    private var incomeFormTransition: AnyTransition {
+        .opacity
+    }
+
+    private func toggleIncomeMode() {
+        withAnimation(incomeFormAnimation) {
+            isOneOffIncome.toggle()
         }
     }
 }

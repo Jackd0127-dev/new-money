@@ -946,6 +946,11 @@ struct ActivityLayoutPolicy {
     static let incomeEditRequiresDeletableItem = true
     static let spendingEditRequiresDeletableItem = true
     static let editDeleteBadgeRequiresConfirmation = true
+    static let transactionEditorHidesTopSpacing = true
+    static let transactionEditorHidesNavigationDivider = true
+    static let transactionEditorRoutePickerPresentation = "selectionFieldBox"
+    static let transactionEditorDeletePlacement = "topRightToolbar"
+    static let transactionEditorDeleteRequiresConfirmation = true
 
     static func recentActivityVisibleCount(afterSeeMoreTaps taps: Int, totalCount: Int) -> Int {
         min(

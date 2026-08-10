@@ -20,12 +20,13 @@ enum DashboardDetailPresentation: Equatable {
 
 struct DashboardHomeLayoutPolicy {
     static let quickRouteTitles = ["Income", "Spending"]
-    static let quickRoutesPlacement = "aboveManualSpends"
+    static let quickRoutesPlacement = "besideAccounts"
+    static let monthlyChartNavigation = "horizontalSwipe"
+    static let monthlyChartShowsArrow = false
     static let homeSections: [DashboardHomeSection] = [
         .dueEvents,
         .hero,
         .accounts,
-        .quickRoutes,
         .monthlySpendChart,
         .upcomingBeforePayday,
         .alerts
@@ -119,9 +120,9 @@ struct DashboardView: View {
         case .hero:
             heroCard
         case .accounts:
-            accountButton
+            quickAccessPills
         case .quickRoutes:
-            quickActivityRoutes
+            EmptyView()
         case .monthlySpendChart:
             monthlySpendChart
         case .upcomingBeforePayday:
@@ -135,37 +136,47 @@ struct DashboardView: View {
         }
     }
 
-    private var accountButton: some View {
-        HStack {
+    private var quickAccessPills: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
             Button {
                 onOpenAccount?()
             } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "person.2.fill")
-                        .font(.caption.weight(.bold))
-                    Text("Accounts")
-                        .font(.caption.weight(.bold))
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                }
-                .foregroundStyle(AppTheme.Colors.primaryText)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 8)
-                .background(AppTheme.Gradients.softAccentSurface)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(AppTheme.Colors.primaryOrange.opacity(0.24), lineWidth: 1)
+                DashboardQuickRoutePill(
+                    title: "Accounts",
+                    symbol: "person.2.fill",
+                    color: AppTheme.Colors.primaryOrange,
+                    trailingSymbol: "chevron.down"
                 )
-                .shadow(color: AppTheme.Colors.glowOrange.opacity(0.24), radius: 10, y: 5)
             }
             .buttonStyle(ScaleButtonStyle())
             .disabled(onOpenAccount == nil)
             .accessibilityLabel("Open Accounts")
 
-            Spacer()
+            NavigationLink {
+                IncomeBreakdownView(store: store)
+            } label: {
+                DashboardQuickRoutePill(
+                    title: "Income",
+                    symbol: "sterlingsign.circle.fill",
+                    color: AppTheme.Colors.success
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .accessibilityLabel("Open Income")
+
+            NavigationLink {
+                ActivitySpendingDetailView(store: store)
+            } label: {
+                DashboardQuickRoutePill(
+                    title: "Spending",
+                    symbol: "receipt.fill",
+                    color: AppTheme.Colors.primaryOrange
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .accessibilityLabel("Open Spending")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var heroCard: some View {
@@ -391,36 +402,6 @@ struct DashboardView: View {
             manualData: tabPresentation.manualMonthlySpendData,
             outgoingsData: tabPresentation.outgoingsMonthlySpendData
         )
-    }
-
-    private var quickActivityRoutes: some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
-            NavigationLink {
-                IncomeBreakdownView(store: store)
-            } label: {
-                DashboardQuickRouteCard(
-                    title: "Income",
-                    subtitle: "Pay and total money",
-                    symbol: "sterlingsign.circle.fill",
-                    color: AppTheme.Colors.success
-                )
-            }
-            .buttonStyle(ScaleButtonStyle())
-            .accessibilityLabel("Open Income")
-
-            NavigationLink {
-                ActivitySpendingDetailView(store: store)
-            } label: {
-                DashboardQuickRouteCard(
-                    title: "Spending",
-                    subtitle: "Period spending",
-                    symbol: "receipt.fill",
-                    color: AppTheme.Colors.primaryOrange
-                )
-            }
-            .buttonStyle(ScaleButtonStyle())
-            .accessibilityLabel("Open Spending")
-        }
     }
 
     private var heroSubtitle: String {
@@ -682,43 +663,33 @@ private struct HomeAlertRow: Identifiable {
     var color: Color
 }
 
-private struct DashboardQuickRouteCard: View {
+private struct DashboardQuickRoutePill: View {
     var title: String
-    var subtitle: String
     var symbol: String
     var color: Color
+    var trailingSymbol: String? = nil
 
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
+        HStack(spacing: 6) {
             Image(systemName: symbol)
-                .font(.system(size: 16, weight: .bold))
+                .font(.caption.weight(.bold))
                 .foregroundStyle(color)
-                .frame(width: 34, height: 34)
-                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption2.weight(.semibold))
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if let trailingSymbol {
+                Image(systemName: trailingSymbol)
+                    .font(.system(size: 8, weight: .black))
                     .foregroundStyle(AppTheme.Colors.secondaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, AppTheme.Spacing.sm)
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-        .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
-                .stroke(color.opacity(0.18), lineWidth: 1)
-        }
-        .shadow(color: color.opacity(0.07), radius: 10, y: 5)
-        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        .padding(.horizontal, 11)
+        .frame(minHeight: 44)
+        .background(color.opacity(0.10), in: Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 1))
+        .contentShape(Capsule())
     }
 }
 
@@ -1352,6 +1323,10 @@ enum DashboardMonthlySpendChartMode: String, Equatable, CaseIterable {
         case .allOutgoings: .manualSpends
         }
     }
+
+    var previous: DashboardMonthlySpendChartMode {
+        next
+    }
 }
 
 struct DashboardMonthlySpendChartData: Equatable {
@@ -1506,6 +1481,7 @@ private struct DashboardMonthlySpendChartView: View {
     var outgoingsData: DashboardMonthlySpendChartData
     @State private var mode: DashboardMonthlySpendChartMode = .manualSpends
     @State private var selectedDay: Int?
+    @State private var transitionMovesForward = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var data: DashboardMonthlySpendChartData {
@@ -1537,25 +1513,6 @@ private struct DashboardMonthlySpendChartView: View {
                     Spacer(minLength: AppTheme.Spacing.sm)
 
                     VStack(alignment: .trailing, spacing: AppTheme.Spacing.sm) {
-                        Button {
-                            let animation: Animation = reduceMotion
-                                ? .easeInOut(duration: 0.2)
-                                : .spring(response: 0.48, dampingFraction: 0.82)
-                            withAnimation(animation) {
-                                mode = mode.next
-                                selectedDay = nil
-                            }
-                        } label: {
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(AppTheme.Colors.primaryOrange)
-                                .frame(width: 44, height: 44)
-                                .background(AppTheme.Colors.primaryOrange.opacity(0.14))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(ScaleButtonStyle())
-                        .accessibilityLabel("Switch monthly chart")
-
                         DashboardMonthProgressBadge(progress: data.progressFraction, label: "\(data.daysElapsed)/\(data.daysInMonth)")
                     }
                 }
@@ -1565,7 +1522,10 @@ private struct DashboardMonthlySpendChartView: View {
                         .id(mode)
                         .transition(reduceMotion
                             ? .opacity
-                            : .asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                            : .asymmetric(
+                                insertion: .move(edge: transitionMovesForward ? .trailing : .leading),
+                                removal: .move(edge: transitionMovesForward ? .leading : .trailing)
+                            ))
                 }
                 .frame(height: 218)
                 .clipped()
@@ -1583,8 +1543,44 @@ private struct DashboardMonthlySpendChartView: View {
                 }
             }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded(handleHorizontalSwipe)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mode.title) \(MoneyParser.formatPence(data.totalPence))")
+        .accessibilityHint("Swipe left or right to switch chart")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                switchChart(forward: true)
+            case .decrement:
+                switchChart(forward: false)
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private func handleHorizontalSwipe(_ value: DragGesture.Value) {
+        let horizontalDistance = value.translation.width
+        let verticalDistance = value.translation.height
+        guard abs(horizontalDistance) >= 48,
+              abs(horizontalDistance) > abs(verticalDistance)
+        else { return }
+
+        switchChart(forward: horizontalDistance < 0)
+    }
+
+    private func switchChart(forward: Bool) {
+        transitionMovesForward = forward
+        let animation: Animation = reduceMotion
+            ? .easeInOut(duration: 0.2)
+            : .spring(response: 0.48, dampingFraction: 0.82)
+        withAnimation(animation) {
+            mode = forward ? mode.next : mode.previous
+            selectedDay = nil
+        }
     }
 
     private var visibleCategories: [DashboardOutgoingCategory] {

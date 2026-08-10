@@ -305,6 +305,7 @@ enum ProfileMenuPresentationPolicy {
     static let showsProfileSubtitle = false
     static let editActionTitle = "Edit"
     static let editActionOpensAccounts = true
+    static let accountsPresentationStyle = "navigationDestination"
     static let animatesFromBottom = false
     static let avoidsSystemNavigationBar = false
     static let usesCompactActionRows = true
@@ -320,7 +321,6 @@ private enum AppSheetDestination: String, Identifiable {
     case addCard
     case spendingHistory
     case calendar
-    case accounts
     case potHistory
 
     var id: String { rawValue }
@@ -328,6 +328,7 @@ private enum AppSheetDestination: String, Identifiable {
 
 private enum AppNavigationDestination: String, Identifiable {
     case plan
+    case accounts
 
     var id: String { rawValue }
 }
@@ -378,8 +379,6 @@ struct AppView: View {
                 SpendingHistorySheetView(store: store)
             case .calendar:
                 CalendarSheetView(store: store)
-            case .accounts:
-                AccountsSheetView(store: store)
             case .potHistory:
                 PotHistorySheetView(store: store)
             }
@@ -408,7 +407,7 @@ struct AppView: View {
                         rootTabResetRevision: rootTabResetRevision(for: .home),
                         presentationCache: tabPresentationCache,
                         presentationContext: presentationContext,
-                        onOpenAccount: { activeSheet = .accounts },
+                        onOpenAccount: { activeNavigationDestination = .accounts },
                         onViewPlan: { activeNavigationDestination = .plan },
                         onViewActivity: { selectTab(.activity) }
                     )
@@ -596,6 +595,8 @@ struct AppView: View {
         switch destination {
         case .plan:
             PlanView(store: store, navigationMode: .inline, toolbarMode: .none)
+        case .accounts:
+            AccountsSheetView(store: store)
         }
     }
 
@@ -839,7 +840,6 @@ private struct AddMenuSheetView: View {
 private struct ProfileMenuScreenView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
-    @State private var isAccountsPresented = false
     @State private var isLogOutConfirmationPresented = false
     @State private var isFirstResetConfirmationPresented = false
     @State private var isSecondResetConfirmationPresented = false
@@ -857,13 +857,12 @@ private struct ProfileMenuScreenView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(ProfileMenuPresentationPolicy.editActionTitle) {
-                    isAccountsPresented = true
+                NavigationLink {
+                    AccountsSheetView(store: store)
+                } label: {
+                    Text(ProfileMenuPresentationPolicy.editActionTitle)
                 }
             }
-        }
-        .sheet(isPresented: $isAccountsPresented) {
-            AccountsSheetView(store: store)
         }
         .alert("Log out?", isPresented: $isLogOutConfirmationPresented) {
             Button("Cancel", role: .cancel) {}

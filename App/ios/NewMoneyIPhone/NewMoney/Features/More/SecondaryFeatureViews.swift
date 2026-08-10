@@ -306,29 +306,26 @@ struct SpendingTransactionDetailView: View {
                             .font(.caption)
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                     } else if paymentMethod == .bankAccount {
-                        Picker("Bank account", selection: $selectedBankAccountId) {
-                            Text("No account").tag("")
+                        SelectionField(title: "Bank account", value: selectedBankAccountName, placeholder: "No account", systemImage: "building.columns") {
+                            Button("No account") { selectedBankAccountId = "" }
                             ForEach(selectableBankAccounts) { account in
-                                Text(account.name).tag(account.id)
+                                Button(account.name) { selectedBankAccountId = account.id }
                             }
                         }
-                        .pickerStyle(.menu)
                     } else if paymentMethod == .pot {
-                        Picker("Pot", selection: $selectedPotId) {
-                            Text("No pot").tag("")
+                        SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                            Button("No pot") { selectedPotId = "" }
                             ForEach(selectablePots) { pot in
-                                Text(pot.name).tag(pot.id)
+                                Button(pot.name) { selectedPotId = pot.id }
                             }
                         }
-                        .pickerStyle(.menu)
                     } else {
-                        Picker("Card", selection: $selectedCardId) {
-                            Text("No card").tag("")
+                        SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
+                            Button("No card") { selectedCardId = "" }
                             ForEach(selectableCards) { card in
-                                Text(card.name).tag(card.id)
+                                Button(card.name) { selectedCardId = card.id }
                             }
                         }
-                        .pickerStyle(.menu)
                     }
 
                     MoneyField(title: "Amount", text: $amount)
@@ -360,15 +357,24 @@ struct SpendingTransactionDetailView: View {
                     }
                 }
 
-                SecondaryButton(title: "Delete spending", systemImage: "trash", role: .destructive) {
-                    isDeleteConfirmationPresented = true
-                }
             }
-            .padding(AppTheme.Spacing.lg)
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.bottom, AppTheme.Spacing.lg)
         }
         .premiumScreenBackground()
         .navigationTitle("Edit spending")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTopDividerHidden()
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .accessibilityLabel("Delete spending")
+            }
+        }
         .onAppear {
             if selectedPotId.isEmpty {
                 selectedPotId = selectablePots.first?.id ?? ""
@@ -402,6 +408,10 @@ struct SpendingTransactionDetailView: View {
         return active + [currentPot]
     }
 
+    private var selectedPotName: String {
+        selectablePots.first { $0.id == selectedPotId }?.name ?? ""
+    }
+
     private var currentTransaction: Transaction {
         store.snapshot.transactions.first(where: { $0.id == transaction.id }) ?? transaction
     }
@@ -415,6 +425,10 @@ struct SpendingTransactionDetailView: View {
         return active + [currentCard]
     }
 
+    private var selectedCardName: String {
+        selectableCards.first { $0.id == selectedCardId }?.name ?? ""
+    }
+
     private var selectableBankAccounts: [BankAccount] {
         let active = store.activeBankAccounts
         guard let currentId = transaction.bankAccountId,
@@ -422,6 +436,10 @@ struct SpendingTransactionDetailView: View {
               let currentAccount = store.snapshot.bankAccounts.first(where: { $0.id == currentId })
         else { return active }
         return active + [currentAccount]
+    }
+
+    private var selectedBankAccountName: String {
+        selectableBankAccounts.first { $0.id == selectedBankAccountId }?.name ?? ""
     }
 
     private var canSave: Bool {
@@ -1456,6 +1474,11 @@ private enum RecurringBillOccurrenceDateChoice: String, CaseIterable, Identifiab
     var id: String { rawValue }
 }
 
+enum CycleAdjustmentLayoutPolicy {
+    static let hidesTopSpacing = true
+    static let hidesNavigationDivider = true
+}
+
 struct RecurringBillOccurrenceAdjustmentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
@@ -1515,7 +1538,10 @@ struct RecurringBillOccurrenceAdjustmentSheet: View {
                     }
                 }
             }
+            .contentMargins(.top, 0, for: .scrollContent)
             .navigationTitle("Check this cycle")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

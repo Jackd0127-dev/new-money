@@ -18,19 +18,18 @@ enum AccountManagementPresentation: Equatable {
 struct AccountsLayoutPolicy {
     static let sections: [AccountsLayoutSection] = [.carousel, .profileOverview, .profilePulse, .profilePills]
     static let createActionPlacement = "topBarTrailing"
-    static let presentationDetent = "large"
+    static let presentationStyle = "navigationDestination"
+    static let createSheetDetent = "fractionHalf"
+    static let createSheetShowsDividers = false
     static let showsNavigationDivider = false
     static let avatarPreviewShowsNavigationDivider = false
     static let managementPresentation: AccountManagementPresentation = .contextMenu
     static let showsBottomAccountList = false
-    static var carouselSnapThreshold: CGFloat { 0.12 }
-    static var carouselMinimumDragDistance: CGFloat { 6 }
-    static var carouselMinimumSwipeDistance: CGFloat { 16 }
-    static var carouselMaximumSwipeDistance: CGFloat { 32 }
-    static var carouselVerticalToleranceRatio: CGFloat { 0.55 }
     static let editMenuPresentation = "nativeSwiftUIMenu"
     static let avatarSourcePresentation = "nativeSwiftUIMenu"
-    static let carouselInteraction = "directionalSwipeAutoAdvance"
+    static let carouselInteraction = "nativeViewAlignedScroll"
+    static let carouselUsesNativeSnapping = true
+    static let carouselAllowsVerticalScrollPassthrough = true
     static let profileGraphMetric = "monthlySavedSpentActivity"
     static let profileGraphShowsMetricPills = false
     static let profileGraphUsesContinuousAnimation = false
@@ -39,7 +38,6 @@ struct AccountsLayoutPolicy {
 }
 
 struct AccountsSheetView: View {
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     @State private var selectedAccountId: String?
     @State private var errorMessage: String?
@@ -53,9 +51,7 @@ struct AccountsSheetView: View {
     @State private var isFileImporterPresented = false
 
     var body: some View {
-        navigationContent
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+        screenContent
             .onAppear(perform: syncSelectedAccount)
             .onChange(of: store.activePlannerAccountId) { _, newValue in
                 selectedAccountId = newValue
@@ -98,46 +94,39 @@ struct AccountsSheetView: View {
                     deleteAccount(account)
                 }
             }
+            .navigationTopDividerHidden()
     }
 
-    private var navigationContent: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: AppTheme.Spacing.md) {
-                    if let errorMessage {
-                        ErrorBanner(message: errorMessage) {
-                            self.errorMessage = nil
-                        }
-                        .padding(.top, AppTheme.Spacing.md)
+    private var screenContent: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: AppTheme.Spacing.md) {
+                if let errorMessage {
+                    ErrorBanner(message: errorMessage) {
+                        self.errorMessage = nil
                     }
-
-                    accountCarousel
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 208)
-                        .padding(.top, AppTheme.Spacing.sm)
-
-                    if let selectedAccountProfile {
-                        AccountProfileDetailsView(profile: selectedAccountProfile)
-                    }
+                    .padding(.top, AppTheme.Spacing.md)
                 }
-                .padding(.horizontal, AppTheme.Spacing.lg)
-                .padding(.bottom, AppTheme.Spacing.xl)
+
+                accountCarousel
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 208)
+                    .padding(.top, AppTheme.Spacing.sm)
+
+                if let selectedAccountProfile {
+                    AccountProfileDetailsView(profile: selectedAccountProfile)
+                }
             }
-            .premiumScreenBackground()
-            .navigationTitle("Accounts")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    CreateAccountToolbarButton(isVisible: store.canCreatePlannerAccount) {
-                        presentCreateAccountPrompt()
-                    }
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.bottom, AppTheme.Spacing.xl)
+        }
+        .premiumScreenBackground()
+        .navigationTitle("Accounts")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                CreateAccountToolbarButton(isVisible: store.canCreatePlannerAccount) {
+                    presentCreateAccountPrompt()
                 }
             }
         }
@@ -256,21 +245,24 @@ struct AccountsSheetView: View {
     private func beginPhotoLibrarySelection(for account: PlannerAccount) {
         avatarTargetAccount = account
         selectedPhotoItem = nil
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await Task.yield()
             isPhotoPickerPresented = true
         }
     }
 
     private func beginCameraSelection(for account: PlannerAccount) {
         avatarTargetAccount = account
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await Task.yield()
             isCameraPresented = true
         }
     }
 
     private func beginFileSelection(for account: PlannerAccount) {
         avatarTargetAccount = account
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await Task.yield()
             isFileImporterPresented = true
         }
     }
@@ -462,7 +454,8 @@ private struct AccountNameInputSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(220)])
+        .navigationTopDividerHidden()
+        .presentationDetents([.fraction(0.5)])
         .presentationDragIndicator(.visible)
     }
 
@@ -973,6 +966,7 @@ private struct AccountCarouselDisplayItem: Identifiable {
 }
 
 private struct AccountsCarouselView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let accounts: [AccountCarouselDisplayItem]
     let selectedAccountId: String?
     let canUseCamera: Bool
@@ -983,123 +977,78 @@ private struct AccountsCarouselView: View {
     let onRename: (PlannerAccount) -> Void
     let onRemovePhoto: (PlannerAccount) -> Void
     let onDelete: (PlannerAccount) -> Void
+    @State private var visibleAccountId: String?
 
     var body: some View {
+        let shouldReduceMotion = reduceMotion
+
         GeometryReader { proxy in
-            let step = min(proxy.size.width * 0.46, 176)
-            let activeIndex = activeIndex
-
-            ZStack {
-                ForEach(Array(accounts.enumerated()), id: \.element.id) { index, item in
-                    let relativePosition = CGFloat(index - activeIndex)
-                    let prominence = carouselProminence(for: relativePosition)
-
-                AccountCarouselItem(
-                        account: item.account,
-                        avatarImage: item.avatarImage,
-                        prominence: prominence,
-                        onSelect: {
-                            onSelect(item.id)
-                        },
-                        canDelete: accounts.count > 1,
-                        canUseCamera: canUseCamera,
-                        canRemovePhoto: item.account.avatarImageName != nil,
-                        onChoosePhoto: {
-                            onChoosePhoto(item.account)
-                        },
-                        onTakePhoto: {
-                            onTakePhoto(item.account)
-                        },
-                        onChooseFile: {
-                            onChooseFile(item.account)
-                        },
-                        onRename: {
-                            onRename(item.account)
-                        },
-                        onRemovePhoto: {
-                            onRemovePhoto(item.account)
-                        },
-                        onDelete: {
-                            onDelete(item.account)
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: AppTheme.Spacing.lg) {
+                    ForEach(accounts) { item in
+                        AccountCarouselItem(
+                            account: item.account,
+                            avatarImage: item.avatarImage,
+                            onSelect: {
+                                onSelect(item.id)
+                            },
+                            canDelete: accounts.count > 1,
+                            canUseCamera: canUseCamera,
+                            canRemovePhoto: item.account.avatarImageName != nil,
+                            onChoosePhoto: {
+                                onChoosePhoto(item.account)
+                            },
+                            onTakePhoto: {
+                                onTakePhoto(item.account)
+                            },
+                            onChooseFile: {
+                                onChooseFile(item.account)
+                            },
+                            onRename: {
+                                onRename(item.account)
+                            },
+                            onRemovePhoto: {
+                                onRemovePhoto(item.account)
+                            },
+                            onDelete: {
+                                onDelete(item.account)
+                            }
+                        )
+                        .frame(width: 138)
+                        .id(item.id)
+                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                            content
+                                .scaleEffect(shouldReduceMotion ? 1 : (phase.isIdentity ? 1.06 : 0.86))
+                                .opacity(phase.isIdentity ? 1 : 0.5)
                         }
-                    )
-                    .frame(width: 138)
-                    .scaleEffect(0.84 + (0.24 * prominence))
-                    .opacity(0.42 + (0.58 * prominence))
-                    .offset(x: relativePosition * step)
-                    .zIndex(Double(prominence))
-                    .allowsHitTesting(abs(relativePosition) < 1.15)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
-            .contentShape(Rectangle())
-            .simultaneousGesture(carouselSwipeGesture(step: step), including: .all)
-            .animation(.snappy(duration: 0.28), value: selectedAccountId)
+            .contentMargins(.horizontal, max(0, (proxy.size.width - 138) / 2), for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+            .scrollPosition(id: $visibleAccountId, anchor: .center)
         }
-    }
-
-    private var activeIndex: Int {
-        guard let selectedAccountId,
-              let index = accounts.firstIndex(where: { $0.id == selectedAccountId })
-        else {
-            return 0
+        .onAppear {
+            visibleAccountId = selectedAccountId ?? accounts.first?.id
         }
-        return index
-    }
-
-    private func carouselSwipeGesture(step: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: AccountsLayoutPolicy.carouselMinimumDragDistance)
-            .onEnded { value in
-                advanceCarousel(for: value, step: step)
+        .onChange(of: selectedAccountId) { _, newValue in
+            guard visibleAccountId != newValue else { return }
+            withAnimation(reduceMotion ? nil : .snappy) {
+                visibleAccountId = newValue
             }
-    }
-
-    private func advanceCarousel(for value: DragGesture.Value, step: CGFloat) {
-        guard accounts.count > 1 else { return }
-        let horizontalMovement = dominantHorizontalMovement(for: value)
-        let verticalMovement = dominantVerticalMovement(for: value)
-        let threshold = min(
-            max(step * AccountsLayoutPolicy.carouselSnapThreshold, AccountsLayoutPolicy.carouselMinimumSwipeDistance),
-            AccountsLayoutPolicy.carouselMaximumSwipeDistance
-        )
-        guard abs(horizontalMovement) >= threshold,
-              abs(horizontalMovement) > verticalMovement * AccountsLayoutPolicy.carouselVerticalToleranceRatio
-        else {
-            return
         }
-
-        var targetIndex = activeIndex
-
-        if horizontalMovement < 0, targetIndex < accounts.count - 1 {
-            targetIndex += 1
-        } else if horizontalMovement > 0, targetIndex > 0 {
-            targetIndex -= 1
-        } else {
-            return
+        .onChange(of: visibleAccountId) { _, newValue in
+            guard let newValue, newValue != selectedAccountId else { return }
+            onSelect(newValue)
         }
-
-        onSelect(accounts[targetIndex].id)
-    }
-
-    private func dominantHorizontalMovement(for value: DragGesture.Value) -> CGFloat {
-        let actual = value.translation.width
-        let predicted = value.predictedEndTranslation.width
-        return abs(predicted) > abs(actual) ? predicted : actual
-    }
-
-    private func dominantVerticalMovement(for value: DragGesture.Value) -> CGFloat {
-        max(abs(value.translation.height), abs(value.predictedEndTranslation.height) * 0.55)
-    }
-
-    private func carouselProminence(for relativePosition: CGFloat) -> CGFloat {
-        max(0, min(1, 1 - abs(relativePosition)))
     }
 }
 
 private struct AccountCarouselItem: View {
     var account: PlannerAccount
     var avatarImage: UIImage?
-    var prominence: CGFloat
     var onSelect: () -> Void
     var canDelete: Bool
     var canUseCamera: Bool
@@ -1117,11 +1066,11 @@ private struct AccountCarouselItem: View {
                 PlannerAccountAvatarCircle(
                     account: account,
                     image: avatarImage,
-                    size: 60 + (18 * prominence)
+                    size: 78
                 )
 
                 Text(account.name)
-                    .font(prominence > 0.55 ? .headline.weight(.bold) : .subheadline.weight(.semibold))
+                    .font(.headline.bold())
                     .foregroundStyle(AppTheme.Colors.primaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)

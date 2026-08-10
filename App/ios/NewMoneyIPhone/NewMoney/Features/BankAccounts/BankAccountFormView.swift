@@ -1,5 +1,10 @@
 import SwiftUI
 
+struct BankAccountFormLayoutPolicy {
+    static let accountTypeControl = "selectionFieldBox"
+    static let showsColourFooterSubtitle = false
+}
+
 struct BankAccountFormView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
@@ -38,13 +43,17 @@ struct BankAccountFormView: View {
                 TextField("Bank or provider", text: $provider)
                     .textFieldStyle(AppTextFieldStyle())
 
-                Picker("Account type", selection: $type) {
+                SelectionField(
+                    title: "Account type",
+                    value: type.displayName,
+                    systemImage: type.systemImage
+                ) {
                     ForEach(BankAccountType.allCases) { accountType in
-                        Text(accountType.displayName).tag(accountType)
+                        Button(accountType.displayName) {
+                            type = accountType
+                        }
                     }
                 }
-                .pickerStyle(.menu)
-                .tint(AppTheme.Colors.primaryOrange)
 
                 MoneyField(title: "Current balance", text: $currentBalance)
 
@@ -59,10 +68,6 @@ struct BankAccountFormView: View {
                     .tint(AppTheme.Colors.primaryOrange)
 
                 colorPicker
-
-                Text("Linked income and spending update this balance automatically. Editing the balance reconciles it without changing your history.")
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
 
                 PrimaryButton(
                     title: account == nil ? "Add account" : "Save changes",

@@ -1421,6 +1421,7 @@ private struct CreditCardCycleAdjustmentSheet: View {
                     ContentUnavailableView("Statement setup needed", systemImage: "calendar.badge.exclamationmark", description: Text("Add a statement day and direct-debit day before adjusting a cycle."))
                 }
             }
+            .contentMargins(.top, 0, for: .scrollContent)
             .navigationBarTitleDisplayMode(.inline)
             .navigationTopDividerHidden()
             .navigationTitle("Check this cycle")

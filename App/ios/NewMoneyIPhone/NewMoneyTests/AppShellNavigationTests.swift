@@ -268,6 +268,11 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesCompactActionRows)
         XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionIcons)
         XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionSubtitles)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionDisclosureIndicators)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionDividers)
+        XCTAssertTrue(ProfileMenuPresentationPolicy.usesSeparateDestructiveActionCards)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.actionRowMinimumHeight, 58)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.actionCardCornerRadius, AppTheme.Radius.xl)
     }
 
     func testSettingsUsesDedicatedDestinationForEveryRequestedSection() {
@@ -275,6 +280,12 @@ final class AppShellNavigationTests: XCTestCase {
             SettingsRoute.allCases.map(\.title),
             ["Appearance", "Pay defaults", "Date simulation", "Money left", "History", "AI", "Account", "Data"]
         )
+        XCTAssertTrue(SettingsLayoutPolicy.usesDirectNavigationDestinations)
+        XCTAssertTrue(SettingsLayoutPolicy.usesSingleRoundedRouteCard)
+        XCTAssertFalse(SettingsLayoutPolicy.showsSectionHeaders)
+        XCTAssertFalse(SettingsLayoutPolicy.showsRouteDividers)
+        XCTAssertFalse(SettingsLayoutPolicy.showsRouteDisclosureIndicators)
+        XCTAssertEqual(SettingsLayoutPolicy.routeRowMinimumHeight, 58)
     }
 
     func testAccountsScreenUsesNativeCarouselAndHalfHeightCreateSheet() {
@@ -296,6 +307,9 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(AccountsLayoutPolicy.profileGraphUsesContinuousAnimation)
         XCTAssertFalse(AccountsLayoutPolicy.carouselUsesVerticalLift)
         XCTAssertEqual(AccountsLayoutPolicy.profilePulseCardCornerRadius, AppTheme.Radius.md)
+        XCTAssertEqual(AccountsLayoutPolicy.carouselItemWidth, 154)
+        XCTAssertEqual(AccountsLayoutPolicy.avatarShadowClearance, 12)
+        XCTAssertTrue(AccountsLayoutPolicy.avatarUsesUnclippedScrollContent)
         XCTAssertFalse(AccountsLayoutPolicy.showsBottomAccountList)
     }
 

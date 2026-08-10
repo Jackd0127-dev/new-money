@@ -3565,6 +3565,15 @@ enum SettingsRoute: String, CaseIterable, Hashable {
     }
 }
 
+enum SettingsLayoutPolicy {
+    static let usesDirectNavigationDestinations = true
+    static let usesSingleRoundedRouteCard = true
+    static let showsSectionHeaders = false
+    static let showsRouteDividers = false
+    static let showsRouteDisclosureIndicators = false
+    static let routeRowMinimumHeight: CGFloat = 58
+}
+
 struct SettingsView: View {
     @ObservedObject var store: PlannerStore
     var navigationMode: ScreenNavigationMode = .inline
@@ -3577,55 +3586,23 @@ struct SettingsView: View {
             navigationMode: navigationMode,
             toolbarMode: toolbarMode
         ) {
-            settingsSection("Personalisation", routes: [.appearance])
-            settingsSection("Planning", routes: [.payDefaults, .dateSimulation, .moneyLeft, .history])
-            settingsSection("Assistant", routes: [.ai])
-            settingsSection("Account and data", routes: [.account, .data])
-        }
-        .navigationDestination(for: SettingsRoute.self) { route in
-            switch route {
-            case .appearance:
-                AppearanceSettingsView()
-            case .payDefaults:
-                PayDefaultsSettingsView(store: store)
-            case .dateSimulation:
-                DateSimulationSettingsView(store: store)
-            case .moneyLeft:
-                MoneyLeftSettingsView(store: store)
-            case .history:
-                HistoryView(store: store)
-            case .ai:
-                AISettingsView(store: store)
-            case .account:
-                AccountSettingsView()
-            case .data:
-                DataSettingsView(store: store)
-            }
-        }
-        .navigationTopDividerHidden()
-        .accessibilityIdentifier("settings-index-screen")
-    }
-
-    private func settingsSection(_ title: String, routes: [SettingsRoute]) -> some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            SectionTitle(title)
-            AppCard {
+            AppCard(cornerRadius: AppTheme.Radius.xl) {
                 VStack(spacing: 0) {
-                    ForEach(Array(routes.enumerated()), id: \.element.rawValue) { index, route in
-                        NavigationLink(value: route) {
+                    ForEach(SettingsRoute.allCases, id: \.rawValue) { route in
+                        NavigationLink {
+                            SettingsRouteDestination(route: route, store: store)
+                        } label: {
                             SettingsRouteRow(route: route)
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint(route.subtitle)
                         .accessibilityIdentifier("settings-route-\(route.rawValue)")
-
-                        if index < routes.count - 1 {
-                            AppDivider()
-                        }
                     }
                 }
             }
         }
+        .navigationTopDividerHidden()
+        .accessibilityIdentifier("settings-index-screen")
     }
 }
 

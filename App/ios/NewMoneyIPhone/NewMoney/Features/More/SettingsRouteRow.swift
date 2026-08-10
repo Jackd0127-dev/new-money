@@ -10,12 +10,8 @@ struct SettingsRouteRow: View {
                 .foregroundStyle(AppTheme.Colors.primaryText)
 
             Spacer(minLength: AppTheme.Spacing.sm)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.tertiaryText)
         }
-        .frame(minHeight: 48)
+        .frame(minHeight: SettingsLayoutPolicy.routeRowMinimumHeight)
         .contentShape(Rectangle())
     }
 }

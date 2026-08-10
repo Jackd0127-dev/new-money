@@ -35,6 +35,9 @@ struct AccountsLayoutPolicy {
     static let profileGraphUsesContinuousAnimation = false
     static let carouselUsesVerticalLift = false
     static var profilePulseCardCornerRadius: CGFloat { AppTheme.Radius.md }
+    static let carouselItemWidth: CGFloat = 154
+    static let avatarShadowClearance: CGFloat = 12
+    static let avatarUsesUnclippedScrollContent = true
 }
 
 struct AccountsSheetView: View {
@@ -1014,7 +1017,7 @@ private struct AccountsCarouselView: View {
                                 onDelete(item.account)
                             }
                         )
-                        .frame(width: 138)
+                        .frame(width: AccountsLayoutPolicy.carouselItemWidth)
                         .id(item.id)
                         .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                             content
@@ -1025,8 +1028,14 @@ private struct AccountsCarouselView: View {
                 }
                 .scrollTargetLayout()
             }
-            .contentMargins(.horizontal, max(0, (proxy.size.width - 138) / 2), for: .scrollContent)
+            .contentMargins(
+                .horizontal,
+                max(AccountsLayoutPolicy.avatarShadowClearance, (proxy.size.width - AccountsLayoutPolicy.carouselItemWidth) / 2),
+                for: .scrollContent
+            )
+            .contentMargins(.vertical, AccountsLayoutPolicy.avatarShadowClearance, for: .scrollContent)
             .scrollIndicators(.hidden)
+            .scrollClipDisabled()
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .scrollPosition(id: $visibleAccountId, anchor: .center)
         }
@@ -1068,6 +1077,7 @@ private struct AccountCarouselItem: View {
                     image: avatarImage,
                     size: 78
                 )
+                .padding(.horizontal, AccountsLayoutPolicy.avatarShadowClearance)
 
                 Text(account.name)
                     .font(.headline.bold())

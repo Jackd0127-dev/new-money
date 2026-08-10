@@ -311,6 +311,11 @@ enum ProfileMenuPresentationPolicy {
     static let usesCompactActionRows = true
     static let showsActionIcons = false
     static let showsActionSubtitles = false
+    static let showsActionDisclosureIndicators = false
+    static let showsActionDividers = false
+    static let usesSeparateDestructiveActionCards = true
+    static let actionRowMinimumHeight: CGFloat = 58
+    static let actionCardCornerRadius: CGFloat = AppTheme.Radius.xl
 }
 
 private enum AppSheetDestination: String, Identifiable {
@@ -928,9 +933,9 @@ private struct ProfileMenuScreenView: View {
     }
 
     private var actionsCard: some View {
-        AppCard {
+        AppCard(cornerRadius: ProfileMenuPresentationPolicy.actionCardCornerRadius) {
             VStack(spacing: 0) {
-                ForEach(Array(ProfileMenuAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
+                ForEach(ProfileMenuAction.allCases, id: \.rawValue) { action in
                     NavigationLink {
                         profileDestination(for: action)
                     } label: {
@@ -938,18 +943,14 @@ private struct ProfileMenuScreenView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("profile-menu-\(action.rawValue)")
-
-                    if index < ProfileMenuAction.allCases.count - 1 {
-                        AppDivider()
-                    }
                 }
             }
         }
     }
 
     private var signOutCard: some View {
-        AppCard {
-            VStack(spacing: 0) {
+        VStack(spacing: AppTheme.Spacing.md) {
+            AppCard(cornerRadius: ProfileMenuPresentationPolicy.actionCardCornerRadius) {
                 Button(role: .destructive) {
                     isLogOutConfirmationPresented = true
                 } label: {
@@ -958,16 +959,16 @@ private struct ProfileMenuScreenView: View {
                             .font(.body)
                         Spacer()
                     }
-                    .frame(minHeight: 48)
+                    .frame(minHeight: ProfileMenuPresentationPolicy.actionRowMinimumHeight)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(AppTheme.Colors.danger)
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-sign-out")
+            }
 
-                AppDivider()
-
+            AppCard(cornerRadius: ProfileMenuPresentationPolicy.actionCardCornerRadius) {
                 Button(role: .destructive) {
                     isFirstResetConfirmationPresented = true
                 } label: {
@@ -976,7 +977,7 @@ private struct ProfileMenuScreenView: View {
                             .font(.body)
                         Spacer()
                     }
-                    .frame(minHeight: 48)
+                    .frame(minHeight: ProfileMenuPresentationPolicy.actionRowMinimumHeight)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1040,12 +1041,8 @@ private struct ProfileMenuActionRow: View {
                 .foregroundStyle(AppTheme.Colors.primaryText)
 
             Spacer(minLength: AppTheme.Spacing.sm)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.tertiaryText)
         }
-        .frame(minHeight: 48)
+        .frame(minHeight: ProfileMenuPresentationPolicy.actionRowMinimumHeight)
         .contentShape(Rectangle())
     }
 }

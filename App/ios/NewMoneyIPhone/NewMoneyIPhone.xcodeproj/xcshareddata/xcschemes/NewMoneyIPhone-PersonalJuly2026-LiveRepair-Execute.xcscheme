@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "2600"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "100000000000000000000401"
+               BuildableName = "NewMoneyIPhone.app"
+               BlueprintName = "NewMoneyIPhone"
+               ReferencedContainer = "container:NewMoneyIPhone.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      shouldAutocreateTestPlan = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "100000000000000000000401"
+            BuildableName = "NewMoneyIPhone.app"
+            BlueprintName = "NewMoneyIPhone"
+            ReferencedContainer = "container:NewMoneyIPhone.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "100000000000000000000402"
+               BuildableName = "NewMoneyIPhoneTests.xctest"
+               BlueprintName = "NewMoneyIPhoneTests"
+               ReferencedContainer = "container:NewMoneyIPhone.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "NO">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "100000000000000000000401"
+            BuildableName = "NewMoneyIPhone.app"
+            BlueprintName = "NewMoneyIPhone"
+            ReferencedContainer = "container:NewMoneyIPhone.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR"
+            value = "personal-july-2026-v1"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR_MODE"
+            value = "execute"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR_EXPECTED_SHA256"
+            value = "14c6bc4ced90d2ece5c526671bbb37c9c4f588ae750b0cef210a6ecd3053278b"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR_CONFIRMATION"
+            value = "I_AUTHORIZE_EXACTLY_FOUR_PERSONAL_JULY_2026_CHANGES"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "NEWMONEY_LIVE_REPAIR_CHECKPOINT"
+            value = "20260710T153042Z-pre-executor-source"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

@@ -1,0 +1,4131 @@
+import Charts
+import SwiftUI
+
+enum DashboardHomeSection: String, Equatable {
+    case dueEvents
+    case hero
+    case accounts
+    case paydayPlanning
+    case spendingSnapshot
+    case quickRoutes
+    case monthlySpendChart
+    case upcomingBeforePayday
+    case alerts
+    case recentActivity
+}
+
+enum DashboardDetailPresentation: Equatable {
+    case navigationPush
+}
+
+struct DashboardHomeLayoutPolicy {
+    static let quickRouteTitles = ["Income", "Spending"]
+    static let quickRoutesPlacement = "besideAccounts"
+    static let monthlyChartNavigation = "horizontalSwipe"
+    static let monthlyChartShowsArrow = false
+    static let homeSections: [DashboardHomeSection] = [
+        .dueEvents,
+        .hero,
+        .accounts,
+        .monthlySpendChart,
+        .upcomingBeforePayday,
+        .alerts
+    ]
+
+    static let moneyLeftDetailSections: [DashboardHomeSection] = [
+        .hero,
+        .spendingSnapshot
+    ]
+
+    static let moneyLeftDetailPresentation: DashboardDetailPresentation = .navigationPush
+}
+
+private enum DashboardSheetDestination: Identifiable {
+    case paycheck(Paycheck)
+
+    var id: String {
+        switch self {
+        case .paycheck(let paycheck):
+            "paycheck-\(paycheck.id)"
+        }
+    }
+}
+
+private struct DashboardTabPresentation {
+    var selectedPayPeriod: PayPeriod?
+    var currentCostSummary: PayPeriodCostSummary
+    var dueEvents: [HomeDueEvent]
+    var manualMonthlySpendData: DashboardMonthlySpendChartData
+    var outgoingsMonthlySpendData: DashboardMonthlySpendChartData
+    var alertRows: [HomeAlertRow]
+    var upcomingMoneyEvents: [CalendarEvent]
+    var recentRows: [DashboardActivityRow]
+}
+
+struct DashboardView: View {
+    @ObservedObject var store: PlannerStore
+    var navigationMode: ScreenNavigationMode = .root
+    var toolbarMode: AppToolbarMode = .primaryDouble
+    var rootTabResetRevision: Int?
+    var presentationCache: PlannerTabPresentationCache?
+    var presentationContext: PlannerTabPresentationContext?
+    var onOpenAccount: (() -> Void)?
+    var onViewPlan: (() -> Void)?
+    var onViewActivity: (() -> Void)?
+    @State private var activeDashboardSheet: DashboardSheetDestination?
+    @State private var selectedDueEvent: HomeDueEvent?
+    @State private var isDueEventsExpanded = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var snapshot: PlannerSnapshot { store.snapshot }
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Home",
+            subtitle: "Total money and upcoming pressure.",
+            navigationMode: navigationMode,
+            toolbarMode: toolbarMode,
+            rootTabResetRevision: rootTabResetRevision
+        ) {
+            if store.isLoading {
+                LoadingView()
+            }
+
+            if let message = store.errorMessage {
+                ErrorBanner(message: message) {
+                    store.errorMessage = nil
+                }
+            }
+
+            ForEach(DashboardHomeLayoutPolicy.homeSections, id: \.rawValue) { section in
+                homeSection(section)
+            }
+        }
+        .sheet(item: $activeDashboardSheet) { sheet in
+            switch sheet {
+            case .paycheck(let paycheck):
+                PaycheckDetailView(store: store, paycheck: paycheck)
+            }
+        }
+        .sheet(item: $selectedDueEvent) { event in
+            HomeDueEventEditorView(store: store, event: event)
+        }
+    }
+
+    @ViewBuilder
+    private func homeSection(_ section: DashboardHomeSection) -> some View {
+        switch section {
+        case .dueEvents:
+            dueEventsBanner
+        case .hero:
+            heroCard
+        case .accounts:
+            quickAccessPills
+        case .quickRoutes:
+            EmptyView()
+        case .monthlySpendChart:
+            monthlySpendChart
+        case .upcomingBeforePayday:
+            upcomingBeforePayday
+        case .alerts:
+            homeAlerts
+        case .recentActivity:
+            recentActivity
+        case .paydayPlanning, .spendingSnapshot:
+            EmptyView()
+        }
+    }
+
+    private var quickAccessPills: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Button {
+                onOpenAccount?()
+            } label: {
+                DashboardQuickRoutePill(
+                    title: "Accounts",
+                    symbol: "person.2.fill",
+                    color: AppTheme.Colors.primaryOrange,
+                    trailingSymbol: "chevron.down"
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .disabled(onOpenAccount == nil)
+            .accessibilityLabel("Open Accounts")
+
+            NavigationLink {
+                IncomeBreakdownView(store: store)
+            } label: {
+                DashboardQuickRoutePill(
+                    title: "Income",
+                    symbol: "sterlingsign.circle.fill",
+                    color: AppTheme.Colors.success
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .accessibilityLabel("Open Income")
+
+            NavigationLink {
+                ActivitySpendingDetailView(store: store)
+            } label: {
+                DashboardQuickRoutePill(
+                    title: "Spending",
+                    symbol: "receipt.fill",
+                    color: AppTheme.Colors.primaryOrange
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .accessibilityLabel("Open Spending")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var heroCard: some View {
+        NavigationLink {
+            DashboardMoneyLeftDetailView(store: store)
+        } label: {
+            AppCard(glow: true) {
+                DashboardMoneyLeftHeroContent(
+                    summary: currentCostSummary,
+                    currentTotalMoneyPence: currentTotalMoneyPence,
+                    subtitle: heroSubtitle,
+                    paydayLabel: paydayLabel
+                )
+            }
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .accessibilityLabel("Open money left details")
+        .accessibilityHint("Shows spending snapshot and money left details.")
+    }
+
+    private var paydayLabel: String {
+        guard let period = tabPresentation.selectedPayPeriod else {
+            return "No payday"
+        }
+        return FinanceEngine.formatPaydayLabel(period.payday)
+    }
+
+    private var currentTotalMoneyPence: Int {
+        PlannerDerivedData.currentTotalMoneyPence(
+            snapshot: snapshot,
+            payPeriod: tabPresentation.selectedPayPeriod
+        )
+    }
+
+    @ViewBuilder
+    private var dueEventsBanner: some View {
+        let events = tabPresentation.dueEvents
+        if !events.isEmpty {
+            VStack(spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                        isDueEventsExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: AppTheme.Spacing.sm) {
+                        Image(systemName: events.contains { $0.direction == .outgoing } ? "bell.badge.fill" : "sparkles")
+                            .font(.headline)
+                            .foregroundStyle(dueBannerColor(events))
+                            .frame(width: 38, height: 38)
+                            .background(dueBannerColor(events).opacity(0.11), in: Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(dueBannerTitle(events))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                            Text(dynamicTypeSize.isAccessibilitySize ? "Tap to review or edit" : "Previous 7 days · today · next 3 days")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.xs)
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            .rotationEffect(.degrees(isDueEventsExpanded ? 180 : 0))
+                    }
+                    .padding(AppTheme.Spacing.md)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .accessibilityLabel("\(dueBannerTitle(events)). \(isDueEventsExpanded ? "Collapse" : "Expand")")
+
+                if isDueEventsExpanded {
+                    VStack(spacing: 0) {
+                        ForEach(events) { event in
+                            Button {
+                                selectedDueEvent = event
+                            } label: {
+                                HomeDueEventRow(event: event, todayIso: store.todayIso)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 52)
+                            .accessibilityHint("Opens this cycle's date, status, and amount editor")
+
+                            if event.id != events.last?.id {
+                                Rectangle()
+                                    .fill(AppTheme.Colors.divider.opacity(0.72))
+                                    .frame(height: 1)
+                                    .padding(.leading, 56)
+                            }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .background(AppTheme.Gradients.softAccentSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+            }
+            .shadow(color: AppTheme.Colors.shadow, radius: 12, y: 5)
+            .accessibilityIdentifier("home-due-events-banner")
+        }
+    }
+
+    private func dueBannerTitle(_ events: [HomeDueEvent]) -> String {
+        let needsReviewCount = events.count { $0.status == .awaiting }
+        if needsReviewCount > 0 {
+            return "\(needsReviewCount) \(needsReviewCount == 1 ? "item" : "items") need review"
+        }
+        return "\(events.count) recent and upcoming \(events.count == 1 ? "item" : "items")"
+    }
+
+    private func dueBannerColor(_ events: [HomeDueEvent]) -> Color {
+        events.contains { $0.status == .awaiting } ? AppTheme.Colors.warning : AppTheme.Colors.primaryOrange
+    }
+
+    private var recentActivity: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("Recent activity")
+            if recentRows.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No activity yet", message: "Payday plans, pot allocations, and spend records will appear here.", systemImage: "clock")
+                }
+            } else {
+                let visibleRows = Array(recentRows.prefix(5))
+                AppCard {
+                    ForEach(visibleRows, id: \.id) { row in
+                        if let paycheckId = row.paycheckId {
+                            Button {
+                                if let paycheck = snapshot.paychecks.first(where: { $0.id == paycheckId }) {
+                                    activeDashboardSheet = .paycheck(paycheck)
+                                }
+                            } label: {
+                                DashboardActivityRowView(row: row, showsChevron: true)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            DashboardActivityRowView(row: row)
+                        }
+
+                        if row.id != visibleRows.last?.id {
+                            AppDivider()
+                        }
+                    }
+
+                    AppDivider()
+                    feedFooterButton("See all", action: onViewActivity)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var homeAlerts: some View {
+        let alerts = alertRows
+        if !alerts.isEmpty {
+            AppCard(glow: true) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    SectionTitle("Alerts")
+                    ForEach(alerts) { alert in
+                        HStack(spacing: AppTheme.Spacing.md) {
+                            Image(systemName: alert.symbol)
+                                .foregroundStyle(alert.color)
+                                .frame(width: 32, height: 32)
+                                .background(alert.color.opacity(0.12))
+                                .clipShape(Circle())
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(alert.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AppTheme.Colors.primaryText)
+                                Text(alert.message)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var upcomingBeforePayday: some View {
+        if tabPresentation.selectedPayPeriod != nil {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                SectionTitle("Before payday")
+                AppCard {
+                    if upcomingMoneyEvents.isEmpty {
+                        EmptyStateView(
+                            title: "No planned events before payday",
+                            message: "Bills, debts, card payments, and paydays will appear here.",
+                            systemImage: "calendar.badge.clock"
+                        )
+                    } else {
+                        let visibleEvents = Array(upcomingMoneyEvents.prefix(5))
+                        ForEach(visibleEvents) { event in
+                            DashboardMoneyEventRowView(
+                                title: event.title,
+                                subtitle: "\(friendlyDate(event.date)) · \(homeEventTypeLabel(event.type))",
+                                amount: homeEventAmountText(event),
+                                symbol: homeEventSymbol(event.type),
+                                color: homeEventColor(event.type)
+                            )
+
+                            if event.id != visibleEvents.last?.id {
+                                AppDivider()
+                            }
+                        }
+
+                        AppDivider()
+                        feedFooterButton("See all", action: onViewPlan)
+                    }
+                }
+            }
+        }
+    }
+
+    private var monthlySpendChart: some View {
+        DashboardMonthlySpendChartView(
+            manualData: tabPresentation.manualMonthlySpendData,
+            outgoingsData: tabPresentation.outgoingsMonthlySpendData
+        )
+    }
+
+    private var heroSubtitle: String {
+        guard tabPresentation.selectedPayPeriod != nil else {
+            return "Add income to create a live period."
+        }
+        let scope = snapshot.settings.includePotsInMoneyLeft ?? true
+            ? "including pots"
+            : "excluding pots"
+        return "Current cash across income and bank accounts, \(scope)."
+    }
+
+    private var currentCostSummary: PayPeriodCostSummary {
+        tabPresentation.currentCostSummary
+    }
+
+    private var alertRows: [HomeAlertRow] {
+        tabPresentation.alertRows
+    }
+
+    private var upcomingMoneyEvents: [CalendarEvent] {
+        tabPresentation.upcomingMoneyEvents
+    }
+
+    @ViewBuilder
+    private func feedFooterButton(_ title: String, action: (() -> Void)?) -> some View {
+        Button {
+            action?()
+        } label: {
+            Text(title)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .accessibilityLabel(title)
+    }
+
+    private var recentRows: [DashboardActivityRow] {
+        tabPresentation.recentRows
+    }
+
+    private var tabPresentation: DashboardTabPresentation {
+        let context = presentationContext ?? PlannerTabPresentationContext(
+            snapshot: store.snapshot,
+            activePlannerAccountId: store.activePlannerAccountId,
+            snapshotRevision: store.snapshotRevision,
+            todayIso: store.todayIso,
+            selectedPayPeriod: store.selectedPayPeriod
+        )
+
+        guard let presentationCache else {
+            return Self.makePresentation(context: context)
+        }
+
+        return presentationCache.value(for: context.key(for: .home)) {
+            Self.makePresentation(context: context)
+        }
+    }
+
+    static func warmPresentation(cache: PlannerTabPresentationCache, context: PlannerTabPresentationContext) {
+        _ = cache.value(for: context.key(for: .home)) {
+            makePresentation(context: context)
+        } as DashboardTabPresentation
+    }
+
+    private static func makePresentation(context: PlannerTabPresentationContext) -> DashboardTabPresentation {
+        let snapshot = context.snapshot
+        let payPeriod = context.selectedPayPeriod
+        let todayIso = context.todayIso
+        let costSummary = PlannerDerivedData.payPeriodCostSummary(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: todayIso
+        )
+        let debtSummary = FinanceEngine.getDebtSummary(
+            debts: snapshot.debts,
+            payments: snapshot.debtPayments,
+            reserves: snapshot.debtReserves,
+            pots: snapshot.pots,
+            today: todayIso
+        )
+        let overdueStatements = PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: snapshot,
+            asOfDate: todayIso
+        )
+        .filter { $0.status == .overdue }
+
+        var alerts: [HomeAlertRow] = []
+        let currentTotalMoneyPence = PlannerDerivedData.currentTotalMoneyPence(
+            snapshot: snapshot,
+            payPeriod: payPeriod
+        )
+        if currentTotalMoneyPence < 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Money left is negative",
+                    message: "\(MoneyParser.formatPence(abs(currentTotalMoneyPence))) over the current position.",
+                    symbol: "exclamationmark.triangle",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+        if debtSummary.overdueDebtCount > 0 {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Debt payment overdue",
+                    message: "\(debtSummary.overdueDebtCount) debt item\(debtSummary.overdueDebtCount == 1 ? "" : "s") need attention.",
+                    symbol: "exclamationmark.shield",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+        if !overdueStatements.isEmpty {
+            alerts.append(
+                HomeAlertRow(
+                    title: "Statement payment overdue",
+                    message: "\(overdueStatements.count) card statement\(overdueStatements.count == 1 ? "" : "s") are overdue.",
+                    symbol: "creditcard.trianglebadge.exclamationmark",
+                    color: AppTheme.Colors.danger
+                )
+            )
+        }
+
+        let fallbackEndDate = FinanceEngine.addIsoDays(date: todayIso, days: 14)
+        let eventEndDate = payPeriod?.payday ?? fallbackEndDate
+        let upcomingEvents = PlannerDerivedData.calendarEvents(
+            snapshot: snapshot,
+            startDate: todayIso,
+            endDate: eventEndDate
+        )
+        .filter { $0.date >= todayIso && $0.type != .spending }
+        .sorted { $0.date < $1.date }
+
+        let potsById = Dictionary(uniqueKeysWithValues: snapshot.pots.map { ($0.id, $0) })
+        let transactionRows = snapshot.transactions.map {
+            DashboardActivityRow(
+                id: $0.id,
+                title: $0.note.isEmpty ? "Spending" : $0.note,
+                detail: dashboardFriendlyDate($0.date),
+                amount: "-\(MoneyParser.formatPence($0.amountPence))",
+                symbol: $0.paymentMethod == .creditCard ? "creditcard" : "cart",
+                color: AppTheme.Colors.orangeHighlight
+            )
+        }
+        let paycheckRows = snapshot.paychecks.map {
+            DashboardActivityRow(
+                id: $0.id,
+                title: "Paycheck",
+                detail: $0.createdAt.prefixDateLabel,
+                amount: "+\(MoneyParser.formatPence($0.calculatedAmountPence))",
+                symbol: "sterlingsign.circle",
+                color: AppTheme.Colors.success,
+                paycheckId: $0.id
+            )
+        }
+        let allocationRows = snapshot.potAllocations.map { allocation in
+            DashboardActivityRow(
+                id: allocation.id,
+                title: potsById[allocation.potId]?.name ?? "Pot allocation",
+                detail: allocation.createdAt.prefixDateLabel,
+                amount: "-\(MoneyParser.formatPence(allocation.amountPence))",
+                symbol: "wallet.pass",
+                color: AppTheme.Colors.primaryOrange
+            )
+        }
+        let repaymentRows = snapshot.creditCardRepayments.map {
+            DashboardActivityRow(
+                id: $0.id,
+                title: $0.note.isEmpty ? "Card repayment" : $0.note,
+                detail: dashboardFriendlyDate($0.date),
+                amount: "-\(MoneyParser.formatPence($0.amountPence))",
+                symbol: "creditcard.and.123",
+                color: AppTheme.Colors.warning
+            )
+        }
+
+        return DashboardTabPresentation(
+            selectedPayPeriod: payPeriod,
+            currentCostSummary: costSummary,
+            dueEvents: PlannerDerivedData.homeDueEvents(snapshot: snapshot, asOfDate: todayIso),
+            manualMonthlySpendData: DashboardMonthlySpendChartData.make(
+                transactions: snapshot.transactions,
+                todayIso: todayIso
+            ),
+            outgoingsMonthlySpendData: DashboardMonthlySpendChartData.makeAllOutgoings(
+                snapshot: snapshot,
+                todayIso: todayIso
+            ),
+            alertRows: alerts,
+            upcomingMoneyEvents: upcomingEvents,
+            recentRows: Array((transactionRows + paycheckRows + allocationRows + repaymentRows).prefix(12))
+        )
+    }
+
+    private static func dashboardFriendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+
+    private func homeEventAmountText(_ event: CalendarEvent) -> String? {
+        guard let amountPence = event.amountPence else { return nil }
+        let formattedAmount = MoneyParser.formatPence(amountPence)
+        return event.type == .payday ? "+\(formattedAmount)" : "-\(formattedAmount)"
+    }
+
+    private func homeEventTypeLabel(_ type: CalendarEventType) -> String {
+        switch type {
+        case .payday: "Money in"
+        case .recurring: "Bill"
+        case .savedPayment: "Saved payment"
+        case .spending: "Spend"
+        case .cardPayment: "Card payment"
+        case .debtDue: "Debt due"
+        case .debtReserve: "Debt reserve"
+        case .debtPayment: "Debt paid"
+        case .allocation: "Pot allocation"
+        }
+    }
+
+    private func homeEventSymbol(_ type: CalendarEventType) -> String {
+        switch type {
+        case .payday: "arrow.down.circle"
+        case .recurring: "calendar.badge.clock"
+        case .savedPayment: "calendar.badge.plus"
+        case .spending: "receipt"
+        case .cardPayment: "creditcard"
+        case .debtDue: "exclamationmark.shield"
+        case .debtReserve: "plus.circle"
+        case .debtPayment: "checkmark.circle"
+        case .allocation: "wallet.pass"
+        }
+    }
+
+    private func homeEventColor(_ type: CalendarEventType) -> Color {
+        switch type {
+        case .payday:
+            AppTheme.Colors.success
+        case .recurring, .savedPayment, .debtDue:
+            AppTheme.Colors.warning
+        case .spending, .cardPayment:
+            AppTheme.Colors.orangeHighlight
+        case .debtReserve, .debtPayment, .allocation:
+            AppTheme.Colors.primaryOrange
+        }
+    }
+
+    private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct HomeAlertRow: Identifiable {
+    let id = UUID()
+    var title: String
+    var message: String
+    var symbol: String
+    var color: Color
+}
+
+private struct DashboardQuickRoutePill: View {
+    var title: String
+    var symbol: String
+    var color: Color
+    var trailingSymbol: String? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if let trailingSymbol {
+                Image(systemName: trailingSymbol)
+                    .font(.system(size: 8, weight: .black))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(minHeight: 44)
+        .background(color.opacity(0.10), in: Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 1))
+        .contentShape(Capsule())
+    }
+}
+
+private struct HomeDueEventRow: View {
+    var event: HomeDueEvent
+    var todayIso: String
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: event.direction == .incoming ? "arrow.down.left" : "arrow.up.right")
+                .font(.caption.weight(.black))
+                .foregroundStyle(eventTone)
+                .frame(width: 34, height: 34)
+                .background(eventTone.opacity(0.11), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(event.title)
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                    if event.status == .completed {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                    } else if event.status == .awaiting {
+                        Image(systemName: "clock.badge.exclamationmark.fill")
+                            .font(.caption)
+                    } else if event.status == .cancelled {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.danger)
+                    } else if event.status == .refunded {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.success)
+                    }
+                }
+                Text("\(relativeDateLabel) · \(event.sourceLabel) · \(event.cycleLabel)")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(2)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+            .foregroundStyle(AppTheme.Colors.primaryText)
+
+            Spacer(minLength: AppTheme.Spacing.xs)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("\(event.direction == .incoming ? "+" : "−")\(MoneyParser.formatPence(event.amountPence))")
+                    .font(.subheadline.weight(.black))
+                Text(event.status.rawValue.capitalized)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+            .foregroundStyle(amountTone)
+
+            Image(systemName: "slider.horizontal.3")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+        }
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.vertical, AppTheme.Spacing.sm)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(event.title), \(event.direction.rawValue), \(MoneyParser.formatPence(event.amountPence)), \(event.date), \(event.status.rawValue), \(event.sourceLabel), \(event.cycleLabel)")
+    }
+
+    private var eventTone: Color {
+        if event.status == .cancelled {
+            AppTheme.Colors.danger
+        } else if event.status == .refunded {
+            AppTheme.Colors.success
+        } else if event.status == .awaiting {
+            AppTheme.Colors.warning
+        } else if event.direction == .incoming {
+            AppTheme.Colors.success
+        } else {
+            AppTheme.Colors.accent
+        }
+    }
+
+    private var amountTone: Color {
+        if event.status == .cancelled {
+            AppTheme.Colors.tertiaryText
+        } else if event.status == .refunded || event.direction == .incoming {
+            AppTheme.Colors.success
+        } else {
+            AppTheme.Colors.primaryText
+        }
+    }
+
+    private var relativeDateLabel: String {
+        let yesterday = FinanceEngine.addIsoDays(date: todayIso, days: -1)
+        let tomorrow = FinanceEngine.addIsoDays(date: todayIso, days: 1)
+        switch event.date {
+        case todayIso: return "Today"
+        case yesterday: return "Yesterday"
+        case tomorrow: return "Tomorrow"
+        default: return FinanceEngine.parseDate(event.date).formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        }
+    }
+}
+
+private enum HomeDueEditorStatus: String, CaseIterable, Identifiable {
+    case scheduled
+    case awaiting
+    case completed
+    case cancelled
+    case refunded
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+private struct HomeDueEventEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    let event: HomeDueEvent
+    @State private var date: Date
+    @State private var amount: String
+    @State private var refundAmount: String
+    @State private var status: HomeDueEditorStatus
+
+    init(store: PlannerStore, event: HomeDueEvent) {
+        self.store = store
+        self.event = event
+        _date = State(initialValue: FinanceEngine.parseDate(event.date))
+        let recurringRefund: (gross: Int, refunded: Int)?
+        if case .recurringBill(let paymentId, let scheduledDueDate) = event.source,
+           let payment = store.snapshot.recurringPayments.first(where: { $0.id == paymentId }) {
+            let override = store.snapshot.recurringPaymentOccurrenceOverrides.first {
+                $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+            }
+            let gross = override?.amountPenceOverride ?? payment.amountPence
+            recurringRefund = (gross, override?.effectiveRefundedAmountPence(originalAmountPence: gross) ?? 0)
+        } else {
+            recurringRefund = nil
+        }
+        let grossAmount = recurringRefund?.gross ?? event.amountPence
+        let existingRefundAmount = recurringRefund?.refunded ?? 0
+        let initialRefundAmount = existingRefundAmount > 0 ? existingRefundAmount : grossAmount
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: grossAmount))
+        _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: initialRefundAmount))
+        let initialStatus: HomeDueEditorStatus
+        switch event.status {
+        case .scheduled: initialStatus = .scheduled
+        case .awaiting: initialStatus = .awaiting
+        case .completed: initialStatus = .completed
+        case .cancelled: initialStatus = .cancelled
+        case .refunded: initialStatus = .refunded
+        }
+        _status = State(initialValue: initialStatus)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("This cycle") {
+                    LabeledContent("Source", value: event.sourceLabel)
+                    LabeledContent("Scheduled", value: event.scheduledDate)
+                    Text(event.cycleLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Update") {
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    if isRecurringRefund {
+                        MoneyField(title: "Refund amount", text: $refundAmount)
+                        Text("Choose the amount actually returned. The rest of this bill stays counted for this cycle.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        MoneyField(title: "Amount", text: $amount)
+                    }
+                    Picker("Status", selection: $status) {
+                        ForEach(availableStatuses) { option in
+                            Text(statusTitle(option)).tag(option)
+                        }
+                    }
+                }
+
+                Section {
+                    Text("Only this scheduled cycle changes. The normal date, recurrence, and following cycles stay untouched.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(event.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                    .disabled(!enteredAmountIsValid)
+                }
+            }
+        }
+    }
+
+    private var availableStatuses: [HomeDueEditorStatus] {
+        switch event.source {
+        case .recurringBill:
+            hasGeneratedRecurringCharge
+                ? HomeDueEditorStatus.allCases
+                : [.scheduled, .awaiting, .completed, .cancelled]
+        case .cardStatement, .cardDirectDebit:
+            [.scheduled, .awaiting, .completed]
+        default:
+            [.scheduled, .awaiting, .completed, .cancelled]
+        }
+    }
+
+    private var hasGeneratedRecurringCharge: Bool {
+        guard case .recurringBill(let paymentId, let scheduledDueDate) = event.source else { return false }
+        let generatedIds = [
+            "recurring-\(paymentId)-\(scheduledDueDate)",
+            "card-recurring-\(paymentId)-\(scheduledDueDate)"
+        ]
+        return store.snapshot.transactions.contains {
+            $0.deletedAt == nil && generatedIds.contains($0.id)
+        }
+    }
+
+    private func save() {
+        let dateIso = FinanceEngine.toIsoDate(date)
+        let amountPence = MoneyParser.parsePoundsToPence(amount)
+
+        switch event.source {
+        case .payday(let payPeriodId, let paycheckId):
+            store.updateIncomeOccurrence(
+                sourceKind: .paycheck,
+                sourceId: paycheckId ?? payPeriodId,
+                scheduledDate: event.scheduledDate,
+                state: incomeState,
+                actualDate: status == .completed ? dateIso : nil,
+                amountPence: amountPence
+            )
+        case .oneOffIncome(let incomeId):
+            store.updateIncomeOccurrence(
+                sourceKind: .oneOffIncome,
+                sourceId: incomeId,
+                scheduledDate: event.scheduledDate,
+                state: incomeState,
+                actualDate: status == .completed ? dateIso : nil,
+                amountPence: amountPence
+            )
+        case .recurringBill(let paymentId, let scheduledDueDate):
+            if status == .cancelled {
+                store.cancelRecurringBillOccurrence(
+                    paymentId: paymentId,
+                    scheduledDueDate: scheduledDueDate
+                )
+                return
+            }
+            if status == .refunded {
+                store.setRecurringBillOccurrenceRefundAmount(
+                    paymentId: paymentId,
+                    scheduledDueDate: scheduledDueDate,
+                    amountPence: MoneyParser.parsePoundsToPence(refundAmount)
+                )
+                return
+            }
+            store.setRecurringBillOccurrenceAmount(paymentId: paymentId, scheduledDueDate: scheduledDueDate, amountPence: amountPence)
+            switch status {
+            case .scheduled:
+                store.clearRecurringBillOccurrenceAdjustment(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            case .awaiting:
+                store.markRecurringBillOccurrenceAwaiting(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            case .completed:
+                store.confirmRecurringBillOccurrence(paymentId: paymentId, scheduledDueDate: scheduledDueDate, actualDueDate: dateIso)
+            case .cancelled, .refunded:
+                break
+            }
+        case .savedPayment(let paymentId):
+            store.updateCustomPaymentOccurrence(
+                id: paymentId,
+                amountPence: amountPence,
+                dueDate: dateIso,
+                status: status == .completed ? .paid : (status == .cancelled ? .archived : .unpaid)
+            )
+        case .debtPayment(let scheduleItemId, let debtId):
+            store.updateDebtScheduleOccurrence(
+                scheduleItemId: scheduleItemId,
+                debtId: debtId,
+                amountPence: amountPence,
+                dueDate: dateIso,
+                status: status == .completed ? .paid : (status == .cancelled ? .cancelled : (status == .awaiting ? .overdue : .planned))
+            )
+        case .cardStatement(let cardId, let scheduledStatementDate):
+            store.setCreditCardCycleAmount(cardId: cardId, scheduledStatementDate: scheduledStatementDate, amountPence: amountPence)
+            switch status {
+            case .scheduled:
+                store.clearCreditCardStatementAdjustment(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .awaiting:
+                store.markCreditCardStatementAwaiting(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .completed:
+                store.confirmCreditCardStatement(cardId: cardId, scheduledStatementDate: scheduledStatementDate, actualStatementDate: dateIso)
+            case .cancelled, .refunded:
+                break
+            }
+        case .cardDirectDebit(let cardId, let scheduledStatementDate):
+            store.setCreditCardCycleAmount(cardId: cardId, scheduledStatementDate: scheduledStatementDate, amountPence: amountPence)
+            switch status {
+            case .scheduled:
+                store.clearCreditCardDirectDebitAdjustment(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .awaiting:
+                store.markCreditCardDirectDebitAwaiting(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+            case .completed:
+                store.confirmCreditCardDirectDebit(cardId: cardId, scheduledStatementDate: scheduledStatementDate, actualDirectDebitDate: dateIso)
+            case .cancelled, .refunded:
+                break
+            }
+        }
+    }
+
+    private var isRecurringRefund: Bool {
+        guard status == .refunded else { return false }
+        if case .recurringBill = event.source { return true }
+        return false
+    }
+
+    private var enteredAmountIsValid: Bool {
+        if isRecurringRefund {
+            let refundPence = MoneyParser.parsePoundsToPence(refundAmount)
+            return refundPence > 0 && refundPence <= MoneyParser.parsePoundsToPence(amount)
+        }
+        return MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private func statusTitle(_ option: HomeDueEditorStatus) -> String {
+        return option.title
+    }
+
+    private var incomeState: IncomeOccurrenceState {
+        switch status {
+        case .scheduled: .normal
+        case .awaiting: .awaiting
+        case .completed: .confirmed
+        case .cancelled: .cancelled
+        case .refunded: .normal
+        }
+    }
+}
+
+private struct DashboardMoneyLeftDetailView: View {
+    @ObservedObject var store: PlannerStore
+
+    private var snapshot: PlannerSnapshot { store.snapshot }
+    private var currentCostSummary: PayPeriodCostSummary {
+        PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
+    }
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Money left",
+            subtitle: "",
+            navigationMode: .inline,
+            toolbarMode: .none
+        ) {
+            ForEach(DashboardHomeLayoutPolicy.moneyLeftDetailSections, id: \.rawValue) { section in
+                detailSection(section)
+            }
+
+            DashboardMoneyLeftBreakdownCard(breakdown: currentMoneyBreakdown)
+        }
+    }
+
+    @ViewBuilder
+    private func detailSection(_ section: DashboardHomeSection) -> some View {
+        switch section {
+        case .hero:
+            AppCard(glow: true) {
+                DashboardMoneyLeftHeroContent(
+                    summary: currentCostSummary,
+                    currentTotalMoneyPence: currentTotalMoneyPence,
+                    subtitle: heroSubtitle,
+                    paydayLabel: paydayLabel
+                )
+            }
+        case .spendingSnapshot:
+            DashboardSpendingSnapshotCard(
+                summary: currentCostSummary,
+                currentTotalMoneyPence: currentTotalMoneyPence,
+                periodLabel: spendingPeriodLabel,
+                entryCount: selectedPeriodTransactions.count
+            )
+        case .dueEvents, .accounts, .paydayPlanning, .quickRoutes, .monthlySpendChart, .upcomingBeforePayday, .alerts, .recentActivity:
+            EmptyView()
+        }
+    }
+
+    private var paydayLabel: String {
+        guard let period = store.selectedPayPeriod else {
+            return "No payday"
+        }
+        return FinanceEngine.formatPaydayLabel(period.payday)
+    }
+
+    private var currentTotalMoneyPence: Int {
+        currentMoneyBreakdown.totalPence
+    }
+
+    private var currentMoneyBreakdown: CurrentMoneyBreakdown {
+        PlannerDerivedData.currentMoneyBreakdown(
+            snapshot: snapshot,
+            payPeriod: store.selectedPayPeriod
+        )
+    }
+
+    private var selectedPeriodTransactions: [Transaction] {
+        guard let period = store.selectedPayPeriod else { return [] }
+        return snapshot.transactions.filter {
+            $0.type == .spending &&
+            ($0.payPeriodId == period.id || ($0.date >= period.startDate && $0.date <= period.endDate))
+        }
+    }
+
+    private var spendingPeriodLabel: String {
+        guard let period = store.selectedPayPeriod else {
+            return "No current pay period yet"
+        }
+        return "\(friendlyDate(period.startDate)) to \(friendlyDate(period.endDate))"
+    }
+
+    private var heroSubtitle: String {
+        guard store.selectedPayPeriod != nil else {
+            return "Add income to create a live period."
+        }
+        let scope = currentMoneyBreakdown.includesPots
+            ? "including pots"
+            : "excluding pots"
+        return "Current cash across income and bank accounts, \(scope)."
+    }
+
+    private func friendlyDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct DashboardMoneyLeftHeroContent: View {
+    var summary: PayPeriodCostSummary
+    var currentTotalMoneyPence: Int
+    var subtitle: String
+    var paydayLabel: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    moneyLeftBlock
+                    HStack(alignment: .bottom, spacing: AppTheme.Spacing.md) {
+                        Pill(text: paydayLabel, systemImage: "calendar")
+                        Spacer(minLength: 0)
+                        plannedCostsBlock(alignment: .trailing)
+                    }
+                }
+            } else {
+                HStack(alignment: .top) {
+                    moneyLeftBlock
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Pill(text: paydayLabel, systemImage: "calendar")
+                        plannedCostsBlock(alignment: .trailing)
+                    }
+                }
+            }
+        }
+    }
+
+    private var moneyLeftBlock: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Text("Money left")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.cardEyebrow)
+            Text(MoneyParser.formatPence(currentTotalMoneyPence))
+                .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                .foregroundStyle(currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
+    }
+
+    private func plannedCostsBlock(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            Text("Planned costs")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+            Text(MoneyParser.formatPence(summary.projectedCostsPence))
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.warning)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+}
+
+private struct DashboardSpendingSnapshotCard: View {
+    var summary: PayPeriodCostSummary
+    var currentTotalMoneyPence: Int
+    var periodLabel: String
+    var entryCount: Int
+
+    var body: some View {
+        AppCard {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        SectionTitle("Spending snapshot")
+                        Text(periodLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Pill(
+                        text: "\(entryCount) entries",
+                        systemImage: "receipt",
+                        color: entryCount == 0 ? AppTheme.Colors.tertiaryText : AppTheme.Colors.warning
+                    )
+                }
+
+                MetricRow(label: "Spent this period", value: MoneyParser.formatPence(summary.manualSpendingPence), valueColor: summary.manualSpendingPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText)
+                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                MetricRow(label: "Projected end", value: MoneyParser.formatPence(summary.projectedMoneyLeftPence), valueColor: summary.projectedMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+            }
+        }
+    }
+}
+
+private struct DashboardMoneyLeftBreakdownCard: View {
+    var breakdown: CurrentMoneyBreakdown
+    @State private var isExpanded = false
+
+    var body: some View {
+        AppCard {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    if breakdown.components.isEmpty {
+                        Text("No balances are contributing to Money left yet.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    } else {
+                        ForEach(Array(breakdown.components.enumerated()), id: \.element.id) { index, component in
+                            DashboardMoneyLeftBreakdownRow(component: component)
+
+                            if index != breakdown.components.count - 1 {
+                                AppDivider()
+                            }
+                        }
+                    }
+
+                    AppDivider()
+                    MetricRow(
+                        label: "Total Money left",
+                        value: MoneyParser.formatPence(breakdown.totalPence),
+                        valueColor: breakdown.totalPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
+                    )
+                }
+                .padding(.top, AppTheme.Spacing.md)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What makes up Money left")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(breakdown.includesPots ? "Accounts, pots, reserves, and unlinked income" : "Accounts and unlinked income · pots excluded in Settings")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+            }
+            .tint(AppTheme.Colors.primaryOrange)
+            .accessibilityHint(isExpanded ? "Hides the Money left breakdown" : "Reveals every balance included in Money left")
+        }
+    }
+}
+
+private struct DashboardMoneyLeftBreakdownRow: View {
+    var component: CurrentMoneyComponent
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(component.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(component.detail)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Text(MoneyParser.formatPence(component.amountPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(component.amountPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                .multilineTextAlignment(.trailing)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch component.kind {
+        case .bankAccount:
+            "building.columns.fill"
+        case .pot:
+            "tray.full.fill"
+        case .cardReserve:
+            "creditcard.fill"
+        case .unlinkedIncome:
+            "sterlingsign.circle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch component.kind {
+        case .bankAccount:
+            AppTheme.Colors.success
+        case .pot:
+            AppTheme.Colors.primaryOrange
+        case .cardReserve:
+            AppTheme.Colors.warning
+        case .unlinkedIncome:
+            AppTheme.Colors.accentHighlight
+        }
+    }
+}
+
+private struct DashboardActivityRow {
+    var id: String
+    var title: String
+    var detail: String
+    var amount: String
+    var symbol: String
+    var color: Color
+    var paycheckId: String? = nil
+}
+
+struct DashboardMonthlySpendChartPoint: Equatable, Identifiable {
+    var day: Int
+    var amountPence: Int
+    var isFuture: Bool
+    var segments: [DashboardMonthlySpendChartSegment] = []
+
+    var id: Int { day }
+}
+
+enum DashboardOutgoingCategory: String, CaseIterable, Identifiable, Equatable, Hashable {
+    case spending
+    case bills
+    case savedPayments = "Saved payments"
+    case debt
+    case cardPayments = "Card payments"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .spending: "Spending"
+        case .bills: "Bills"
+        case .savedPayments: "Saved payments"
+        case .debt: "Debt"
+        case .cardPayments: "Card payments"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .spending: AppTheme.Colors.primaryOrange
+        case .bills: AppTheme.Colors.warning
+        case .savedPayments: AppTheme.Colors.accentHighlight
+        case .debt: AppTheme.Colors.danger
+        case .cardPayments: AppTheme.Colors.success
+        }
+    }
+}
+
+struct DashboardMonthlySpendChartSegment: Equatable, Identifiable {
+    var category: DashboardOutgoingCategory
+    var amountPence: Int
+
+    var id: String { category.rawValue }
+}
+
+enum DashboardMonthlySpendChartMode: String, Equatable, CaseIterable {
+    case manualSpends
+    case allOutgoings
+
+    var title: String {
+        switch self {
+        case .manualSpends: "Manual spends"
+        case .allOutgoings: "All outgoings"
+        }
+    }
+
+    var emptyMessagePrefix: String {
+        switch self {
+        case .manualSpends: "No manual spend recorded in"
+        case .allOutgoings: "No outgoings planned in"
+        }
+    }
+
+    var activeMessageSuffix: String {
+        switch self {
+        case .manualSpends: "so far"
+        case .allOutgoings: "planned and recorded"
+        }
+    }
+
+    var next: DashboardMonthlySpendChartMode {
+        switch self {
+        case .manualSpends: .allOutgoings
+        case .allOutgoings: .manualSpends
+        }
+    }
+
+    var previous: DashboardMonthlySpendChartMode {
+        next
+    }
+}
+
+struct DashboardMonthlySpendChartData: Equatable {
+    var monthLabel: String
+    var totalPence: Int
+    var averageDailyPence: Int
+    var highestDailyPence: Int
+    var daysElapsed: Int
+    var daysInMonth: Int
+    var points: [DashboardMonthlySpendChartPoint]
+
+    var progressFraction: Double {
+        guard daysInMonth > 0 else { return 0 }
+        return min(1, max(0, Double(daysElapsed) / Double(daysInMonth)))
+    }
+
+    var hasSpending: Bool {
+        totalPence > 0
+    }
+
+    static func make(transactions: [Transaction], todayIso: String) -> DashboardMonthlySpendChartData {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+
+        let today = FinanceEngine.parseDate(todayIso)
+        let todayComponents = calendar.dateComponents([.year, .month, .day], from: today)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: today)?.count ?? 0
+        let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
+
+        var buckets: [Int: Int] = [:]
+        for transaction in transactions where transaction.type == .spending && transaction.deletedAt == nil && !transaction.isRefunded {
+            let transactionDate = FinanceEngine.parseDate(transaction.date)
+            let transactionComponents = calendar.dateComponents([.year, .month, .day], from: transactionDate)
+            guard transactionComponents.year == todayComponents.year,
+                  transactionComponents.month == todayComponents.month,
+                  let transactionDay = transactionComponents.day,
+                  transactionDay <= currentDay
+            else {
+                continue
+            }
+            buckets[transactionDay, default: 0] += transaction.netAmountPence
+        }
+
+        let points = (1...max(daysInMonth, 1)).map { day in
+            let amount = day <= currentDay ? buckets[day, default: 0] : 0
+            return DashboardMonthlySpendChartPoint(
+                day: day,
+                amountPence: amount,
+                isFuture: day > currentDay,
+                segments: amount > 0 ? [DashboardMonthlySpendChartSegment(category: .spending, amountPence: amount)] : []
+            )
+        }
+        let totalPence = points.reduce(0) { $0 + ($1.isFuture ? 0 : $1.amountPence) }
+
+        return DashboardMonthlySpendChartData(
+            monthLabel: today.formatted(.dateTime.month(.wide).year()),
+            totalPence: totalPence,
+            averageDailyPence: totalPence / max(currentDay, 1),
+            highestDailyPence: points.map(\.amountPence).max() ?? 0,
+            daysElapsed: currentDay,
+            daysInMonth: max(daysInMonth, 1),
+            points: points
+        )
+    }
+
+    static func makeAllOutgoings(snapshot: PlannerSnapshot, todayIso: String) -> DashboardMonthlySpendChartData {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+
+        let today = FinanceEngine.parseDate(todayIso)
+        let todayComponents = calendar.dateComponents([.year, .month, .day], from: today)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: today)?.count ?? 0
+        let currentDay = min(max(todayComponents.day ?? 1, 1), max(daysInMonth, 1))
+        let monthStart = monthBoundaryIsoDate(today, calendar: calendar, day: 1)
+        let monthEnd = monthBoundaryIsoDate(today, calendar: calendar, day: max(daysInMonth, 1))
+
+        var buckets: [Int: [DashboardOutgoingCategory: Int]] = [:]
+        for event in PlannerDerivedData.calendarEvents(snapshot: snapshot, startDate: monthStart, endDate: monthEnd) {
+            // Pot allocations are internal transfers. The bill/card/debt event they
+            // fund is already represented in this chart, so including both would
+            // inflate "All outgoings" without changing the safe-to-spend calculation.
+            guard event.type != .payday,
+                  event.type != .allocation,
+                  event.type != .debtReserve,
+                  let amountPence = event.amountPence,
+                  amountPence > 0
+            else {
+                continue
+            }
+
+            let eventDate = FinanceEngine.parseDate(event.date)
+            let eventComponents = calendar.dateComponents([.year, .month, .day], from: eventDate)
+            guard eventComponents.year == todayComponents.year,
+                  eventComponents.month == todayComponents.month,
+                  let eventDay = eventComponents.day
+            else {
+                continue
+            }
+
+            let category: DashboardOutgoingCategory
+            switch event.type {
+            case .spending:
+                category = .spending
+            case .recurring:
+                category = .bills
+            case .savedPayment:
+                category = .savedPayments
+            case .debtDue, .debtPayment:
+                category = .debt
+            case .cardPayment:
+                category = .cardPayments
+            case .payday, .debtReserve, .allocation:
+                continue
+            }
+            buckets[eventDay, default: [:]][category, default: 0] += amountPence
+        }
+
+        let points = (1...max(daysInMonth, 1)).map { day in
+            let segments = DashboardOutgoingCategory.allCases.compactMap { category -> DashboardMonthlySpendChartSegment? in
+                let amount = buckets[day]?[category, default: 0] ?? 0
+                return amount > 0 ? DashboardMonthlySpendChartSegment(category: category, amountPence: amount) : nil
+            }
+            return DashboardMonthlySpendChartPoint(
+                day: day,
+                amountPence: segments.reduce(0) { $0 + $1.amountPence },
+                isFuture: day > currentDay,
+                segments: segments
+            )
+        }
+        let totalPence = points.reduce(0) { $0 + $1.amountPence }
+
+        return DashboardMonthlySpendChartData(
+            monthLabel: today.formatted(.dateTime.month(.wide).year()),
+            totalPence: totalPence,
+            averageDailyPence: totalPence / max(daysInMonth, 1),
+            highestDailyPence: points.map(\.amountPence).max() ?? 0,
+            daysElapsed: currentDay,
+            daysInMonth: max(daysInMonth, 1),
+            points: points
+        )
+    }
+
+    private static func monthBoundaryIsoDate(_ date: Date, calendar: Calendar, day: Int) -> String {
+        var components = calendar.dateComponents([.year, .month], from: date)
+        components.day = day
+        return FinanceEngine.toIsoDate(calendar.date(from: components) ?? date)
+    }
+}
+
+private struct DashboardMonthlySpendChartView: View {
+    var manualData: DashboardMonthlySpendChartData
+    var outgoingsData: DashboardMonthlySpendChartData
+    @State private var mode: DashboardMonthlySpendChartMode = .manualSpends
+    @State private var selectedDay: Int?
+    @State private var transitionMovesForward = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var data: DashboardMonthlySpendChartData {
+        switch mode {
+        case .manualSpends: manualData
+        case .allOutgoings: outgoingsData
+        }
+    }
+
+    var body: some View {
+        AppCard(glow: data.hasSpending) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(mode.title)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                            .textCase(.uppercase)
+                        Text(MoneyParser.formatPence(data.totalPence))
+                            .font(.system(.title, design: .rounded, weight: .bold))
+                            .foregroundStyle(data.hasSpending ? AppTheme.Colors.primaryText : AppTheme.Colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text(data.hasSpending ? "\(data.monthLabel) \(mode.activeMessageSuffix)" : "\(mode.emptyMessagePrefix) \(data.monthLabel)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    VStack(alignment: .trailing, spacing: AppTheme.Spacing.sm) {
+                        DashboardMonthProgressBadge(progress: data.progressFraction, label: "\(data.daysElapsed)/\(data.daysInMonth)")
+                    }
+                }
+
+                ZStack {
+                    DashboardSpendBarGraph(data: data, selectedDay: $selectedDay)
+                        .id(mode)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .move(edge: transitionMovesForward ? .trailing : .leading),
+                                removal: .move(edge: transitionMovesForward ? .leading : .trailing)
+                            ))
+                }
+                .frame(height: 218)
+                .clipped()
+
+                DashboardChartLegend(categories: visibleCategories)
+
+                if let selectedPoint {
+                    DashboardSelectedDayBreakdown(point: selectedPoint)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    DashboardChartMetricPill(label: "Daily avg", value: MoneyParser.formatPence(data.averageDailyPence), color: AppTheme.Colors.primaryOrange)
+                    DashboardChartMetricPill(label: "Highest", value: MoneyParser.formatPence(data.highestDailyPence), color: AppTheme.Colors.warning)
+                }
+            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded(handleHorizontalSwipe)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(mode.title) \(MoneyParser.formatPence(data.totalPence))")
+        .accessibilityHint("Swipe left or right to switch chart")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                switchChart(forward: true)
+            case .decrement:
+                switchChart(forward: false)
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private func handleHorizontalSwipe(_ value: DragGesture.Value) {
+        let horizontalDistance = value.translation.width
+        let verticalDistance = value.translation.height
+        guard abs(horizontalDistance) >= 48,
+              abs(horizontalDistance) > abs(verticalDistance)
+        else { return }
+
+        switchChart(forward: horizontalDistance < 0)
+    }
+
+    private func switchChart(forward: Bool) {
+        transitionMovesForward = forward
+        let animation: Animation = reduceMotion
+            ? .easeInOut(duration: 0.2)
+            : .spring(response: 0.48, dampingFraction: 0.82)
+        withAnimation(animation) {
+            mode = forward ? mode.next : mode.previous
+            selectedDay = nil
+        }
+    }
+
+    private var visibleCategories: [DashboardOutgoingCategory] {
+        let available = Set(data.points.flatMap(\.segments).map(\.category))
+        return DashboardOutgoingCategory.allCases.filter { available.contains($0) }
+    }
+
+    private var selectedPoint: DashboardMonthlySpendChartPoint? {
+        selectedDay.flatMap { day in data.points.first { $0.day == day } }
+    }
+}
+
+private struct DashboardSpendBarGraph: View {
+    var data: DashboardMonthlySpendChartData
+    @Binding var selectedDay: Int?
+
+    var body: some View {
+        Chart {
+            RectangleMark(
+                xStart: .value("Future start", Double(data.daysElapsed) + 0.5),
+                xEnd: .value("Month end", Double(data.daysInMonth) + 0.5),
+                yStart: .value("Baseline", 0),
+                yEnd: .value("Maximum", max(data.highestDailyPence, 1))
+            )
+            .foregroundStyle(AppTheme.Colors.elevatedSurface.opacity(0.48))
+
+            ForEach(data.points) { point in
+                ForEach(point.segments) { segment in
+                    BarMark(
+                        x: .value("Day", point.day),
+                        y: .value("Amount", segment.amountPence),
+                        width: .ratio(0.74),
+                        stacking: .standard
+                    )
+                    .foregroundStyle(segment.category.color)
+                    .opacity(point.isFuture ? 0.58 : 1)
+                    .accessibilityLabel("Day \(point.day), \(segment.category.title)")
+                    .accessibilityValue(MoneyParser.formatPence(segment.amountPence))
+                }
+            }
+
+            RuleMark(x: .value("Today", data.daysElapsed))
+                .foregroundStyle(AppTheme.Colors.primaryText.opacity(0.58))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text("Today")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+            if let selectedDay {
+                RuleMark(x: .value("Selected day", selectedDay))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+        .chartXScale(domain: 1...max(data.daysInMonth, 1))
+        .chartYScale(domain: 0...max(data.highestDailyPence, 1))
+        .chartXAxis {
+            AxisMarks(values: dayTicks) { value in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                    .foregroundStyle(AppTheme.Colors.border.opacity(0.45))
+                AxisTick()
+                AxisValueLabel {
+                    if let day = value.as(Int.self) { Text("\(day)") }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine()
+                    .foregroundStyle(AppTheme.Colors.border.opacity(0.5))
+                AxisValueLabel {
+                    if let amount = value.as(Int.self) {
+                        Text(poundsAxisLabel(amount))
+                    }
+                }
+            }
+        }
+        .chartXSelection(value: $selectedDay)
+        .accessibilityLabel("Daily stacked monthly outgoings chart")
+    }
+
+    private var dayTicks: [Int] {
+        Array(Set([1, 7, 14, 21, 28, data.daysInMonth])).sorted()
+    }
+
+    private func poundsAxisLabel(_ pence: Int) -> String {
+        let pounds = Double(pence) / 100
+        if pounds >= 1_000 { return "£\(String(format: "%.1fk", pounds / 1_000))" }
+        return "£\(Int(pounds.rounded()))"
+    }
+}
+
+private struct DashboardChartLegend: View {
+    var categories: [DashboardOutgoingCategory]
+
+    var body: some View {
+        if !categories.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                legendRow
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(categories) { category in
+                        legendItem(category)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var legendRow: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            ForEach(categories) { category in
+                legendItem(category)
+            }
+        }
+    }
+
+    private func legendItem(_ category: DashboardOutgoingCategory) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(category.color).frame(width: 7, height: 7)
+            Text(category.title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(category.title) category")
+    }
+}
+
+private struct DashboardSelectedDayBreakdown: View {
+    var point: DashboardMonthlySpendChartPoint
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Day \(point.day) · \(MoneyParser.formatPence(point.amountPence))")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            if point.segments.isEmpty {
+                Text("No outgoings")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            } else {
+                ForEach(point.segments) { segment in
+                    HStack {
+                        Label(segment.category.title, systemImage: "circle.fill")
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(segment.category.color)
+                        Spacer()
+                        Text(MoneyParser.formatPence(segment.amountPence))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                    }
+                }
+            }
+        }
+        .padding(AppTheme.Spacing.sm)
+        .background(AppTheme.Colors.elevatedSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DashboardMonthProgressBadge: View {
+    var progress: Double
+    var label: String
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(AppTheme.Colors.border, lineWidth: 7)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    AppTheme.Gradients.primary,
+                    style: StrokeStyle(lineWidth: 7, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 1) {
+                Text(label)
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text("days")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+        .frame(width: 64, height: 64)
+    }
+}
+
+private struct DashboardChartMetricPill: View {
+    var label: String
+    var value: String
+    var color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.11))
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                .stroke(color.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct DashboardActivityRowView: View {
+    var row: DashboardActivityRow
+    var showsChevron = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            DashboardFeedIcon(symbol: row.symbol, color: row.color, badgeSymbol: row.paycheckId == nil ? nil : "plus")
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(row.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(2)
+                Text(row.detail)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(row.amount)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(row.color)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.74)
+
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct DashboardMoneyEventRowView: View {
+    var title: String
+    var subtitle: String
+    var amount: String?
+    var symbol: String
+    var color: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+            DashboardFeedIcon(symbol: symbol, color: color)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let amount {
+                Text(amount)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(color)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.74)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct DashboardFeedIcon: View {
+    var symbol: String
+    var color: Color
+    var badgeSymbol: String?
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(systemName: symbol)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 46, height: 46)
+                .background(color.opacity(0.14))
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(color.opacity(0.28), lineWidth: 1)
+                )
+
+            if let badgeSymbol {
+                Image(systemName: badgeSymbol)
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.surface)
+                    .frame(width: 18, height: 18)
+                    .background(AppTheme.Colors.primaryText)
+                    .clipShape(Circle())
+                    .offset(x: 2, y: 2)
+            }
+        }
+        .frame(width: 50, height: 50)
+    }
+}
+
+private extension String {
+    var accessibilityIdentifierSlug: String {
+        lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
+}
+
+private struct FundingChecklistRow: View {
+    var item: FundingChecklistPresentationItem
+    var isReadOnly: Bool
+    var action: () -> Void
+    var excludeAction: () -> Void
+    @State private var isBreakdownExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Button(action: action) {
+                    HStack(spacing: AppTheme.Spacing.md) {
+                        Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(iconColor)
+                            .frame(width: 32, height: 32)
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(titleColor)
+                                .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
+                                .lineLimit(2)
+                            Text(detailText)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(2)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.sm)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isReadOnly)
+
+                FundingChecklistBreakdownToggle(isExpanded: $isBreakdownExpanded, itemName: item.name)
+
+                if !isReadOnly {
+                    Button(action: excludeAction) {
+                        Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.isExcluded ? "Include \(item.name)" : "Exclude \(item.name)")
+                }
+            }
+
+            if isBreakdownExpanded {
+                FundingChecklistBreakdownList(items: item.breakdown)
+            }
+        }
+        .opacity(isReadOnly ? 0.72 : 1)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var iconColor: Color {
+        if isReadOnly {
+            return AppTheme.Colors.secondaryText
+        }
+
+        if item.isExcluded {
+            return AppTheme.Colors.warning
+        }
+
+        return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.secondaryText
+    }
+
+    private var titleColor: Color {
+        if isReadOnly {
+            return AppTheme.Colors.secondaryText
+        }
+
+        if item.isExcluded {
+            return AppTheme.Colors.secondaryText
+        }
+
+        return item.isCompleted ? AppTheme.Colors.success : AppTheme.Colors.primaryText
+    }
+
+    private var detailText: String {
+        if item.isExcluded {
+            return "\(item.detail) · excluded this period"
+        }
+
+        guard let paidDate = item.paidDate else {
+            return item.detail
+        }
+
+        return "\(item.detail) · paid \(shortDate(paidDate))"
+    }
+
+    private var accessibilityLabel: String {
+        if isReadOnly {
+            return "Paid \(item.name)"
+        }
+
+        if item.isExcluded {
+            return "Fund excluded \(item.name)"
+        }
+
+        return "\(item.isCompleted ? "Undo" : "Fund") \(item.name)"
+    }
+
+    private func shortDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated))
+    }
+}
+
+private struct DashboardBreakdownScaffold<Content: View>: View {
+    var title: String
+    var subtitle: String
+    var toolbarMode: AppToolbarMode = .secondarySingle
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                if !subtitle.isBlank {
+                    ScreenHeader(subtitle: subtitle)
+                }
+                content
+            }
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.top, AppTheme.Spacing.sm)
+            .padding(.bottom, 110)
+        }
+        .premiumScreenBackground()
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
+        .appPlaceholderToolbar(toolbarMode)
+    }
+}
+
+struct IncomeBreakdownView: View {
+    @ObservedObject var store: PlannerStore
+    @State private var isAddIncomePresented = false
+    @State private var isPaycheckInputsExpanded = true
+    @State private var isOneOffIncomeExpanded = true
+    @State private var isPayPeriodsExpanded = false
+    @State private var editMode: EditMode = .inactive
+
+    private var snapshot: PlannerSnapshot { store.snapshot }
+    private var costSummary: PayPeriodCostSummary {
+        PlannerDerivedData.payPeriodCostSummary(snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: store.todayIso)
+    }
+    private var currentTotalMoneyPence: Int {
+        PlannerDerivedData.currentTotalMoneyPence(snapshot: snapshot, payPeriod: store.selectedPayPeriod)
+    }
+    private var activePaychecks: [Paycheck] {
+        snapshot.paychecks
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+    private var activeOneOffIncomes: [OneOffIncome] {
+        snapshot.oneOffIncomes
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.date > $1.date }
+    }
+    private var activePayPeriods: [PayPeriod] {
+        snapshot.payPeriods
+            .filter { $0.deletedAt == nil }
+            .sorted { $0.payday > $1.payday }
+    }
+    private var hasDeletableIncome: Bool {
+        !activePaychecks.isEmpty || !activeOneOffIncomes.isEmpty || !activePayPeriods.isEmpty
+    }
+
+    var body: some View {
+        DashboardBreakdownScaffold(
+            title: "Income",
+            subtitle: "Paycheck inputs, pay periods, and total money.",
+            toolbarMode: .editDoneAndAdd(
+                isEditing: editMode.isEditing,
+                canEdit: hasDeletableIncome,
+                editAction: toggleEditMode,
+                addAction: { isAddIncomePresented = true }
+            )
+        ) {
+            AppCard(glow: true) {
+                MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod.map { PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: $0) } ?? 0), valueColor: AppTheme.Colors.success)
+                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+                MetricRow(label: "Projected costs", value: MoneyParser.formatPence(costSummary.projectedCostsPence), valueColor: AppTheme.Colors.warning)
+                if costSummary.unfundedChecklistPence > 0 {
+                    MetricRow(label: "Unfunded checklist", value: MoneyParser.formatPence(costSummary.unfundedChecklistPence), valueColor: AppTheme.Colors.secondaryText)
+                }
+            }
+
+            paycheckInputsSection
+            oneOffIncomeSection
+            payPeriodsSection
+        }
+        .sheet(isPresented: $isAddIncomePresented) {
+            AddPaycheckSheetView(store: store)
+        }
+        .environment(\.editMode, $editMode)
+    }
+
+    private var paycheckInputsSection: some View {
+        IncomeExpandableSection(title: "Paycheck inputs", isExpanded: $isPaycheckInputsExpanded) {
+            if activePaychecks.isEmpty {
+                AppCard { EmptyStateView(title: "No paycheck inputs", message: "Saved paycheck plans will appear here.", systemImage: "sterlingsign.circle") }
+            } else {
+                VStack(spacing: AppTheme.Spacing.md) {
+                    ForEach(activePaychecks, id: \.id) { paycheck in
+                        let paydayLabel = period(for: paycheck).map { FinanceEngine.formatPaydayLabel($0.payday) } ?? "No linked period"
+                        if editMode.isEditing {
+                            PaycheckInputRow(
+                                paydayLabel: paydayLabel,
+                                amountLabel: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence),
+                                onDelete: {
+                                    store.deletePaycheck(id: paycheck.id)
+                                }
+                            )
+                        } else {
+                            NavigationLink {
+                                PaycheckDetailView(store: store, paycheck: paycheck, presentation: .push)
+                            } label: {
+                                PaycheckInputRow(
+                                    paydayLabel: paydayLabel,
+                                    amountLabel: MoneyParser.formatPence(paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open paycheck \(paydayLabel)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var oneOffIncomeSection: some View {
+        IncomeExpandableSection(title: "One-off income", isExpanded: $isOneOffIncomeExpanded) {
+            if activeOneOffIncomes.isEmpty {
+                AppCard {
+                    EmptyStateView(
+                        title: "No one-off income",
+                        message: "Birthday money, bonuses, and corrections will appear here.",
+                        systemImage: "plus.circle"
+                    )
+                }
+            } else {
+                VStack(spacing: AppTheme.Spacing.md) {
+                    ForEach(activeOneOffIncomes, id: \.id) { income in
+                        if editMode.isEditing {
+                            OneOffIncomeRow(
+                                name: income.name,
+                                dateLabel: FinanceEngine.formatPaydayLabel(income.date),
+                                periodLabel: period(for: income).map { FinanceEngine.formatPaydayLabel($0.payday) },
+                                amountLabel: MoneyParser.formatPence(income.amountPence),
+                                onDelete: {
+                                    _ = store.deleteOneOffIncome(id: income.id)
+                                }
+                            )
+                        } else {
+                            NavigationLink {
+                                OneOffIncomeDetailView(store: store, income: income)
+                            } label: {
+                                OneOffIncomeRow(
+                                    name: income.name,
+                                    dateLabel: FinanceEngine.formatPaydayLabel(income.date),
+                                    periodLabel: period(for: income).map { FinanceEngine.formatPaydayLabel($0.payday) },
+                                    amountLabel: MoneyParser.formatPence(income.amountPence)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open income \(income.name)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var payPeriodsSection: some View {
+        IncomeExpandableSection(title: "Pay periods", isExpanded: $isPayPeriodsExpanded) {
+            if activePayPeriods.isEmpty {
+                AppCard { EmptyStateView(title: "No pay periods", message: "Create a paycheck plan to start tracking periods.", systemImage: "calendar") }
+            } else {
+                ForEach(activePayPeriods) { period in
+                    AppCard {
+                        HStack(spacing: AppTheme.Spacing.sm) {
+                            MetricRow(label: "Payday", value: FinanceEngine.formatPaydayLabel(period.payday))
+
+                            if editMode.isEditing {
+                                DestructiveBadgeButton(
+                                    accessibilityLabel: "Delete pay period for \(FinanceEngine.formatPaydayLabel(period.payday))",
+                                    confirmationTitle: "Delete this pay period?",
+                                    confirmationMessage: "This removes the pay period, its linked paycheck inputs, and its pot allocations.",
+                                    action: {
+                                        store.deletePayPeriod(id: period.id)
+                                    }
+                                )
+                            }
+                        }
+                        MetricRow(label: "Period", value: "\(FinanceEngine.formatPaydayLabel(period.startDate)) to \(FinanceEngine.formatPaydayLabel(period.endDate))")
+                        MetricRow(label: "Next payday", value: FinanceEngine.formatPaydayLabel(period.nextPayday))
+                        MetricRow(label: "Income", value: MoneyParser.formatPence(PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: period)), valueColor: AppTheme.Colors.success)
+                        MetricRow(label: "Status", value: period.status.rawValue.capitalized)
+                        MetricRow(label: "Allocated", value: MoneyParser.formatPence(allocations(for: period).reduce(0) { $0 + $1.amountPence }), valueColor: AppTheme.Colors.primaryOrange)
+                        ForEach(allocations(for: period)) { allocation in
+                            MetricRow(label: potName(for: allocation.potId), value: MoneyParser.formatPence(allocation.amountPence))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func period(for paycheck: Paycheck) -> PayPeriod? {
+        snapshot.payPeriods.first { $0.id == paycheck.payPeriodId }
+    }
+
+    private func period(for income: OneOffIncome) -> PayPeriod? {
+        if let payPeriodId = income.payPeriodId,
+           let period = snapshot.payPeriods.first(where: { $0.id == payPeriodId }) {
+            return period
+        }
+        return PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: income.date)
+    }
+
+    private func allocations(for period: PayPeriod) -> [PotAllocation] {
+        snapshot.potAllocations.filter { $0.payPeriodId == period.id }
+    }
+
+    private func potName(for id: String) -> String {
+        snapshot.pots.first { $0.id == id }?.name ?? "Pot"
+    }
+
+    private func toggleEditMode() {
+        withAnimation(appToolbarMorphAnimation) {
+            editMode = editMode.isEditing ? .inactive : .active
+        }
+    }
+}
+
+private struct IncomeExpandableSection<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var title: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: toggleExpansion) {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    SectionTitle(title)
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    Image(systemName: ExpandableSectionLayoutPolicy.symbol(isExpanded: isExpanded))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .zIndex(1)
+            .accessibilityLabel(title)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isExpanded ? "Closes this section" : "Opens this section")
+
+            if isExpanded {
+                content
+                    .padding(.top, AppTheme.Spacing.md)
+                    .transition(contentTransition)
+                    .zIndex(0)
+            }
+        }
+    }
+
+    private var contentTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -14)),
+            removal: .opacity.combined(with: .offset(y: -14))
+        )
+    }
+
+    private func toggleExpansion() {
+        let animation = reduceMotion
+            ? Animation.linear(duration: 0.12)
+            : Animation.easeOut(duration: 0.18)
+
+        withAnimation(animation) {
+            isExpanded.toggle()
+        }
+    }
+}
+
+private struct PaycheckInputRow: View {
+    var paydayLabel: String
+    var amountLabel: String
+    var onDelete: (() -> Void)? = nil
+
+    var body: some View {
+        AppCard {
+            HStack(spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Payday")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                    Text(paydayLabel)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                }
+
+                Spacer()
+
+                Text(amountLabel)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                if let onDelete {
+                    DestructiveBadgeButton(
+                        accessibilityLabel: "Delete paycheck for \(paydayLabel)",
+                        confirmationTitle: "Delete this paycheck?",
+                        confirmationMessage: "This removes the paycheck, its linked pay period, and its pot allocations.",
+                        action: onDelete
+                    )
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+    }
+}
+
+private struct OneOffIncomeRow: View {
+    var name: String
+    var dateLabel: String
+    var periodLabel: String?
+    var amountLabel: String
+    var onDelete: (() -> Void)? = nil
+
+    var body: some View {
+        AppCard {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                    .frame(width: 40, height: 40)
+                    .background(AppTheme.Colors.success.opacity(0.12))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                    Text(periodLabel.map { "\(dateLabel) · \($0)" } ?? dateLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text(amountLabel)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                if let onDelete {
+                    DestructiveBadgeButton(
+                        accessibilityLabel: "Delete income \(name)",
+                        confirmationTitle: "Delete this income?",
+                        confirmationMessage: "This one-off income will be removed from your saved income.",
+                        action: onDelete
+                    )
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.tertiaryText)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+    }
+}
+
+struct OneOffIncomeDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var income: OneOffIncome
+    @State private var name: String
+    @State private var amount: String
+    @State private var date: Date
+    @State private var note: String
+    @State private var bankAccountId: String
+    @State private var showDeleteAlert = false
+
+    init(store: PlannerStore, income: OneOffIncome) {
+        self.store = store
+        self.income = income
+        _name = State(initialValue: income.name)
+        _amount = State(initialValue: Self.formatMoneyInput(income.amountPence))
+        _date = State(initialValue: income.date.isoDate)
+        _note = State(initialValue: income.note)
+        _bankAccountId = State(initialValue: income.bankAccountId ?? "")
+    }
+
+    var body: some View {
+        DashboardBreakdownScaffold(
+            title: "Edit income",
+            subtitle: "",
+            toolbarMode: .none
+        ) {
+            summaryCard
+            editCard
+            SecondaryButton(title: "Delete income", systemImage: "trash", role: .destructive) {
+                showDeleteAlert = true
+            }
+        }
+        .alert("Delete income?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                if store.deleteOneOffIncome(id: income.id) {
+                    dismiss()
+                }
+            }
+        } message: {
+            Text("This removes the income from your totals for this pay period.")
+        }
+    }
+
+    private var summaryCard: some View {
+        AppCard(glow: true) {
+            MetricRow(label: "Name", value: currentIncome.name)
+            MetricRow(label: "Amount", value: MoneyParser.formatPence(currentIncome.amountPence), valueColor: AppTheme.Colors.success)
+            MetricRow(label: "Date", value: FinanceEngine.formatPaydayLabel(currentIncome.date))
+            if let period = currentPeriod {
+                MetricRow(label: "Pay period", value: "\(FinanceEngine.formatPaydayLabel(period.startDate)) to \(FinanceEngine.formatPaydayLabel(period.endDate))")
+            }
+            if let bankAccountName = currentIncome.bankAccountId.flatMap({ id in
+                store.snapshot.bankAccounts.first(where: { $0.id == id })?.name
+            }) {
+                MetricRow(label: "Paid into", value: bankAccountName)
+            }
+        }
+    }
+
+    private var editCard: some View {
+        AppCard {
+            SectionTitle("Edit one-off income")
+
+            TextField("Source", text: $name)
+                .textFieldStyle(AppTextFieldStyle())
+
+            MoneyField(title: "Amount", text: $amount)
+
+            DatePicker("Date", selection: $date, displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .tint(AppTheme.Colors.primaryOrange)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+
+            TextField("Note", text: $note, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(AppTextFieldStyle())
+
+            SelectionField(
+                title: "Paid into",
+                value: store.snapshot.bankAccounts.first(where: { $0.id == bankAccountId })?.name ?? "",
+                placeholder: "Not linked",
+                systemImage: "building.columns"
+            ) {
+                Button("Not linked") { bankAccountId = "" }
+                ForEach(store.activeBankAccounts) { account in
+                    Button(account.name) { bankAccountId = account.id }
+                }
+            }
+
+            PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSaveChanges) {
+                _ = store.updateOneOffIncome(
+                    id: income.id,
+                    name: name,
+                    amountPence: MoneyParser.parsePoundsToPence(amount),
+                    date: date.isoDateString,
+                    note: note,
+                    bankAccountId: bankAccountId
+                )
+            }
+        }
+    }
+
+    private var currentIncome: OneOffIncome {
+        store.snapshot.oneOffIncomes.first(where: { $0.id == income.id }) ?? income
+    }
+
+    private var currentPeriod: PayPeriod? {
+        if let payPeriodId = currentIncome.payPeriodId,
+           let period = store.snapshot.payPeriods.first(where: { $0.id == payPeriodId }) {
+            return period
+        }
+        return PlannerDerivedData.findPayPeriod(payPeriods: store.snapshot.payPeriods, date: currentIncome.date)
+    }
+
+    private var canSaveChanges: Bool {
+        MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        String(format: "%.2f", Double(amountPence) / 100)
+    }
+}
+
+private struct BillsBreakdownView: View {
+    @ObservedObject var store: PlannerStore
+    @State private var isAddBillPresented = false
+    @State private var selectedBill: RecurringPayment?
+
+    private var snapshot: PlannerSnapshot { store.snapshot }
+
+    var body: some View {
+        DashboardBreakdownScaffold(
+            title: "Bills",
+            subtitle: "Recurring payments, card-linked bills, and period due dates.",
+            toolbarMode: .add(action: { isAddBillPresented = true })
+        ) {
+            billsOverviewCard
+            payPeriodBillsSection
+            allBillsSection
+        }
+        .sheet(isPresented: $isAddBillPresented) {
+            AddBillSheetView(store: store)
+        }
+        .sheet(item: $selectedBill) { bill in
+            BillDetailView(store: store, payment: bill)
+        }
+    }
+
+    private var billsOverviewCard: some View {
+        AppCard(glow: currentPeriodBills > 0) {
+            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+                    Text("This pay period")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                    Text(MoneyParser.formatPence(currentPeriodBills))
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .foregroundStyle(AppTheme.Colors.warning)
+                        .minimumScaleFactor(0.72)
+                }
+
+                Spacer()
+
+                Image(systemName: "calendar.badge.clock")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.Colors.warning)
+                    .frame(width: 38, height: 38)
+                    .background(AppTheme.Colors.warning.opacity(0.12))
+                    .clipShape(Circle())
+            }
+
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Pill(text: "\(activeBillCount) active", systemImage: "checkmark.circle", color: AppTheme.Colors.success)
+                Pill(text: nextBillLabel, systemImage: "calendar", color: AppTheme.Colors.primaryOrange)
+            }
+        }
+    }
+
+    private var payPeriodBillsSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("This pay period")
+            if store.selectedPayPeriod == nil {
+                AppCard {
+                    EmptyStateView(title: "No active pay period", message: "Create a paycheck plan to see bills due this pay period.", systemImage: "calendar")
+                }
+            } else if currentPeriodBillOccurrences.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No bills this pay period", message: "Recurring payments due in the current period will appear here.", systemImage: "calendar")
+                }
+            } else {
+                AppCard {
+                    ForEach(currentPeriodBillOccurrences) { occurrence in
+                        BillAgendaRow(occurrence: occurrence, snapshot: snapshot)
+                        if occurrence.id != currentPeriodBillOccurrences.last?.id {
+                            AppDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var allBillsSection: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionTitle("All bills")
+            if snapshot.recurringPayments.isEmpty {
+                AppCard {
+                    EmptyStateView(title: "No bills yet", message: "Add recurring payments to populate this breakdown.", systemImage: "calendar.badge.plus")
+                }
+            } else {
+                AppCard {
+                    ForEach(sortedBills) { payment in
+                        Button {
+                            selectedBill = payment
+                        } label: {
+                            BillLibraryRow(payment: payment, snapshot: snapshot)
+                        }
+                        .buttonStyle(.plain)
+                        if payment.id != sortedBills.last?.id {
+                            AppDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var currentPeriodBills: Int {
+        currentPeriodBillOccurrences.reduce(0) { $0 + $1.amountPence }
+    }
+
+    private var activeBillCount: Int {
+        snapshot.recurringPayments.filter(\.active).count
+    }
+
+    private var nextBillLabel: String {
+        nextBillOccurrence.map { "Next \(billDateLabel($0.dueDate))" } ?? "No upcoming"
+    }
+
+    private var nextBillOccurrence: RecurringPaymentOccurrence? {
+        let endDate = FinanceEngine.addIsoDays(date: store.todayIso, days: 90)
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: store.todayIso, endDate: endDate)
+            .sorted { lhs, rhs in
+                if lhs.dueDate == rhs.dueDate {
+                    return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
+                }
+                return lhs.dueDate < rhs.dueDate
+            }
+            .first
+    }
+
+    private var currentPeriodBillOccurrences: [RecurringPaymentOccurrence] {
+        guard let period = store.selectedPayPeriod else { return [] }
+        return PlannerDerivedData.resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: period.startDate, endDate: period.endDate)
+            .sorted { lhs, rhs in
+                if lhs.dueDate == rhs.dueDate {
+                    return lhs.payment.name.localizedCaseInsensitiveCompare(rhs.payment.name) == .orderedAscending
+                }
+                return lhs.dueDate < rhs.dueDate
+            }
+    }
+
+    private var sortedBills: [RecurringPayment] {
+        snapshot.recurringPayments.sorted { lhs, rhs in
+            if lhs.active == rhs.active {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            return lhs.active && !rhs.active
+        }
+    }
+}
+
+private struct BillAgendaRow: View {
+    var occurrence: RecurringPaymentOccurrence
+    var snapshot: PlannerSnapshot
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+            VStack(spacing: 2) {
+                Text(billDayNumber(occurrence.dueDate))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(billMonthText(occurrence.dueDate))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+            .frame(width: 46, height: 48)
+            .background(AppTheme.Colors.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                    .stroke(AppTheme.Colors.border, lineWidth: 1)
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(occurrence.payment.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                    .lineLimit(1)
+                Text(billLinkedTarget(for: occurrence.payment, in: snapshot))
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text(MoneyParser.formatPence(occurrence.amountPence))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.warning)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct BillLibraryRow: View {
+    var payment: RecurringPayment
+    var snapshot: PlannerSnapshot
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(payment.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(payment.active ? AppTheme.Colors.primaryText : AppTheme.Colors.tertiaryText)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(payment.active ? "Active" : "Inactive")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(payment.active ? AppTheme.Colors.success : AppTheme.Colors.tertiaryText)
+                    Text("\(payment.frequency.rawValue.capitalized) · \(billDueDayLabel(payment.dueDay))")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                Text(billLinkedTarget(for: payment, in: snapshot))
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.md)
+
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(MoneyParser.formatPence(payment.amountPence))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .multilineTextAlignment(.trailing)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private func billDateLabel(_ isoDate: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    let date = FinanceEngine.parseDate(isoDate)
+    let day = calendar.component(.day, from: date)
+    let month = calendar.component(.month, from: date)
+    return "\(ordinalDayLabel(day)) \(shortMonthLabel(month))"
+}
+
+private func billDayNumber(_ isoDate: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    return "\(calendar.component(.day, from: FinanceEngine.parseDate(isoDate)))"
+}
+
+private func billMonthText(_ isoDate: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    return shortMonthLabel(calendar.component(.month, from: FinanceEngine.parseDate(isoDate))).uppercased()
+}
+
+private func billDueDayLabel(_ dueDay: Int?) -> String {
+    guard let dueDay else { return "Not set" }
+    return ordinalDayLabel(dueDay)
+}
+
+private func billLinkedTarget(for payment: RecurringPayment, in snapshot: PlannerSnapshot) -> String {
+    let potName = payment.potId.flatMap { potId in snapshot.pots.first { $0.id == potId }?.name }
+    let cardName = payment.creditCardId.flatMap { cardId in snapshot.creditCards.first { $0.id == cardId }?.name }
+    let bankAccountName = payment.bankAccountId.flatMap { accountId in snapshot.bankAccounts.first { $0.id == accountId }?.name }
+    if let cardName, let potName {
+        return "\(cardName) + \(potName)"
+    }
+    if let potName { return potName }
+    if let cardId = payment.creditCardId {
+        return snapshot.creditCards.first { $0.id == cardId }?.name ?? "Linked card"
+    }
+    if let bankAccountName { return bankAccountName }
+    return "None"
+}
+
+private struct BillDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var payment: RecurringPayment
+    @State private var name: String
+    @State private var amount: String
+    @State private var dueDay: String
+    @State private var frequency: RecurringFrequency
+    @State private var priority: RecurringPriority
+    @State private var potId: String
+    @State private var cardId: String
+    @State private var bankAccountId: String
+    @State private var paymentRoute: BillPaymentRoute
+    @State private var isActive: Bool
+    @State private var showDeleteAlert = false
+    @State private var selectedOccurrenceForAdjustment: RecurringPaymentOccurrence?
+
+    init(store: PlannerStore, payment: RecurringPayment) {
+        self.store = store
+        self.payment = payment
+        _name = State(initialValue: payment.name)
+        _amount = State(initialValue: Self.formatMoneyInput(payment.amountPence))
+        _dueDay = State(initialValue: payment.dueDay.map(String.init) ?? "")
+        _frequency = State(initialValue: payment.frequency)
+        _priority = State(initialValue: payment.priority)
+        _potId = State(initialValue: payment.potId ?? "")
+        _cardId = State(initialValue: payment.creditCardId ?? "")
+        _bankAccountId = State(initialValue: payment.bankAccountId ?? "")
+        _paymentRoute = State(initialValue: payment.creditCardId != nil ? .creditCard : (payment.bankAccountId != nil ? .bankAccount : .pot))
+        _isActive = State(initialValue: payment.active)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.lg) {
+                    summaryCard
+                    editCard
+                    SecondaryButton(title: "Check this cycle", systemImage: "calendar.badge.exclamationmark") {
+                        selectedOccurrenceForAdjustment = cycleAdjustmentOccurrence
+                    }
+                    .disabled(cycleAdjustmentOccurrence == nil)
+                    .opacity(cycleAdjustmentOccurrence == nil ? 0.5 : 1)
+                    SecondaryButton(title: "Delete bill", systemImage: "trash", role: .destructive) {
+                        showDeleteAlert = true
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Bill")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+            .onAppear {
+                if potId.isEmpty {
+                    potId = store.activePots.first?.id ?? ""
+                }
+                if cardId.isEmpty {
+                    cardId = store.activeCards.first?.id ?? ""
+                }
+                if bankAccountId.isEmpty {
+                    bankAccountId = store.primaryBankAccount?.id ?? store.activeBankAccounts.first?.id ?? ""
+                }
+                normalizeSelectedCardPot()
+            }
+            .onChange(of: cardId) { _, _ in normalizeSelectedCardPot() }
+            .onChange(of: paymentRoute) { _, _ in normalizeSelectedCardPot() }
+            .alert("Delete bill?", isPresented: $showDeleteAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    store.deleteRecurringPayment(id: payment.id)
+                    dismiss()
+                }
+            } message: {
+                Text("This removes the recurring bill from future breakdowns.")
+            }
+        }
+        .sheet(item: $selectedOccurrenceForAdjustment) { occurrence in
+            RecurringBillOccurrenceAdjustmentSheet(store: store, occurrence: occurrence)
+        }
+    }
+
+    private var summaryCard: some View {
+        AppCard(glow: true) {
+            MetricRow(label: "Name", value: currentPayment.name)
+            MetricRow(label: "Amount", value: MoneyParser.formatPence(currentPayment.amountPence), valueColor: AppTheme.Colors.primaryOrange)
+            MetricRow(label: "Frequency", value: currentPayment.frequency.rawValue.capitalized)
+            MetricRow(label: "Due day", value: billDueDayLabel(currentPayment.dueDay))
+            MetricRow(label: "Linked", value: billLinkedTarget(for: currentPayment, in: store.snapshot))
+            MetricRow(label: "Priority", value: currentPayment.priority.rawValue.capitalized)
+            MetricRow(label: "Status", value: currentPayment.active ? "Active" : "Inactive", valueColor: currentPayment.active ? AppTheme.Colors.success : AppTheme.Colors.tertiaryText)
+        }
+    }
+
+    private var editCard: some View {
+        AppCard {
+            SectionTitle("Edit bill")
+            TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
+            MoneyField(title: "Amount", text: $amount)
+            TextField("Due day", text: $dueDay).keyboardType(.numberPad).textFieldStyle(AppTextFieldStyle())
+            Picker("Frequency", selection: $frequency) {
+                ForEach(RecurringFrequency.allCases) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Picker("Priority", selection: $priority) {
+                ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Toggle("Active", isOn: $isActive)
+                .tint(AppTheme.Colors.primaryOrange)
+            Picker("Paid from", selection: $paymentRoute) {
+                ForEach(BillPaymentRoute.allCases) { route in
+                    Text(route.title).tag(route)
+                }
+            }
+            .pickerStyle(.segmented)
+            if paymentRoute == .creditCard {
+                SelectionField(title: "Card", value: selectedCardName, placeholder: "No card", systemImage: "creditcard") {
+                    Button("No card") { cardId = "" }
+                    ForEach(store.activeCards) { card in
+                        Button(card.name) { cardId = card.id }
+                    }
+                }
+                SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                    Button("No pot") { potId = "" }
+                    if cardLinkedPots.isEmpty {
+                        Text("No linked card pots")
+                    } else {
+                        ForEach(cardLinkedPots) { pot in
+                            Button(pot.name) { potId = pot.id }
+                        }
+                    }
+                }
+            } else if paymentRoute == .pot {
+                SelectionField(title: "Pot", value: selectedPotName, placeholder: "No pot", systemImage: "wallet.pass") {
+                    Button("No pot") { potId = "" }
+                    ForEach(store.activePots) { pot in
+                        Button(pot.name) { potId = pot.id }
+                    }
+                }
+            } else {
+                SelectionField(title: "Bank account", value: selectedBankAccountName, placeholder: "No account", systemImage: "building.columns") {
+                    Button("No account") { bankAccountId = "" }
+                    ForEach(store.activeBankAccounts) { account in
+                        Button(account.name) { bankAccountId = account.id }
+                    }
+                }
+            }
+            PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
+                var updated = currentPayment
+                updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.amountPence = MoneyParser.parsePoundsToPence(amount)
+                updated.dueDay = Int(dueDay)
+                updated.frequency = frequency
+                updated.priority = priority
+                updated.potId = cleanPotId
+                updated.creditCardId = paymentRoute == .creditCard ? cardId.nilIfBlank : nil
+                updated.bankAccountId = paymentRoute == .bankAccount ? bankAccountId.nilIfBlank : nil
+                updated.active = isActive
+                store.updateRecurringPayment(updated)
+            }
+        }
+    }
+
+    private var currentPayment: RecurringPayment {
+        store.snapshot.recurringPayments.first(where: { $0.id == payment.id }) ?? payment
+    }
+
+    private var cycleAdjustmentOccurrence: RecurringPaymentOccurrence? {
+        PlannerDerivedData.recurringBillCycleAdjustmentOccurrence(
+            snapshot: store.snapshot,
+            payment: currentPayment,
+            asOfDate: store.todayIso
+        )
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && MoneyParser.parsePoundsToPence(amount) > 0
+            && (paymentRoute != .bankAccount || !bankAccountId.isBlank)
+    }
+
+    private var cardLinkedPots: [Pot] {
+        store.activePots.filter { $0.linkedCreditCardId == cardId }
+    }
+
+    private var selectedCardName: String {
+        store.activeCards.first { $0.id == cardId }?.name ?? ""
+    }
+
+    private var selectedPotName: String {
+        store.activePots.first { $0.id == potId }?.name ?? ""
+    }
+
+    private var selectedBankAccountName: String {
+        store.activeBankAccounts.first { $0.id == bankAccountId }?.name ?? ""
+    }
+
+    private var cleanPotId: String? {
+        if paymentRoute == .creditCard {
+            return cardLinkedPots.contains(where: { $0.id == potId }) ? potId.nilIfBlank : nil
+        }
+
+        return paymentRoute == .pot ? potId.nilIfBlank : nil
+    }
+
+    private func normalizeSelectedCardPot() {
+        guard paymentRoute == .creditCard else { return }
+        if !cardLinkedPots.contains(where: { $0.id == potId }) {
+            potId = cardLinkedPots.first?.id ?? ""
+        }
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        amountPence > 0 ? String(format: "%.2f", Double(amountPence) / 100) : ""
+    }
+}
+
+private struct DebtsBreakdownView: View {
+    @ObservedObject var store: PlannerStore
+    @State private var isAddDebtPresented = false
+    @State private var isRecordPaymentPresented = false
+    @State private var selectedPayment: DebtPayment?
+    @State private var isActiveDebtsExpanded = true
+    @State private var isPaidDebtsExpanded = true
+    @State private var isPaymentsExpanded = true
+
+    private var snapshot: PlannerSnapshot { store.snapshot }
+    private var summary: DebtSummary {
+        FinanceEngine.getDebtSummary(debts: snapshot.debts, payments: snapshot.debtPayments, reserves: snapshot.debtReserves, pots: snapshot.pots, today: store.todayIso)
+    }
+    private var activeDebts: [Debt] { snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 } }
+    private var inactiveDebts: [Debt] { snapshot.debts.filter { !$0.status.isActiveLike || $0.currentBalancePence <= 0 } }
+
+    var body: some View {
+        DashboardBreakdownScaffold(
+            title: "Debts",
+            subtitle: "",
+            toolbarMode: .none
+        ) {
+            AppCard(glow: true) {
+                MetricRow(label: "Current debt", value: MoneyParser.formatPence(summary.totalCurrentBalancePence), valueColor: AppTheme.Colors.orangeHighlight)
+                MetricRow(label: "Overdue", value: "\(summary.overdueDebtCount)", valueColor: summary.overdueDebtCount > 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+            }
+
+            activeDebtsSection
+
+            paidDebtsSection
+
+            paymentsSection
+        }
+        .toolbar {
+            ToolbarItem(id: "debt-actions", placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        isAddDebtPresented = true
+                    } label: {
+                        Label("Add Debt", systemImage: "plus.circle")
+                    }
+                    Button {
+                        isRecordPaymentPresented = true
+                    } label: {
+                        Label("Record Payment", systemImage: "sterlingsign.circle")
+                    }
+                    .disabled(activeDebts.isEmpty)
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Debt actions")
+            }
+        }
+        .sheet(isPresented: $isAddDebtPresented) {
+            AddDebtSheetView(store: store)
+        }
+        .sheet(isPresented: $isRecordPaymentPresented) {
+            RecordDebtPaymentSheetView(store: store)
+        }
+        .sheet(item: $selectedPayment) { payment in
+            DebtPaymentEditSheetView(store: store, payment: payment)
+        }
+    }
+
+    private var activeDebtsSection: some View {
+        DisclosureGroup(isExpanded: $isActiveDebtsExpanded) {
+            if activeDebts.isEmpty {
+                AppCard { EmptyStateView(title: "No active debts", message: "Active balances will appear here.", systemImage: "checkmark.shield") }
+            } else {
+                ForEach(activeDebts) { debt in
+                    compactDebtCard(debt)
+                }
+            }
+        } label: {
+            SectionTitle("Active debts")
+        }
+        .tint(AppTheme.Colors.primaryOrange)
+    }
+
+    private var paidDebtsSection: some View {
+        DisclosureGroup(isExpanded: $isPaidDebtsExpanded) {
+            if inactiveDebts.isEmpty {
+                AppCard { EmptyStateView(title: "No paid debts", message: "Paid and archived debts will appear here.", systemImage: "checkmark.circle") }
+            } else {
+                ForEach(inactiveDebts) { debt in
+                    compactDebtCard(debt)
+                }
+            }
+        } label: {
+            SectionTitle("Paid Debts")
+        }
+        .tint(AppTheme.Colors.primaryOrange)
+    }
+
+    private var paymentsSection: some View {
+        DisclosureGroup(isExpanded: $isPaymentsExpanded) {
+            if snapshot.debtPayments.isEmpty {
+                AppCard { EmptyStateView(title: "No debt payments", message: "Recorded payments will appear here.", systemImage: "checkmark.circle") }
+            } else {
+                ForEach(snapshot.debtPayments.sorted { $0.date > $1.date }) { payment in
+                    Button {
+                        selectedPayment = payment
+                    } label: {
+                        debtPaymentRow(payment)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        } label: {
+            SectionTitle("Payments")
+        }
+        .tint(AppTheme.Colors.primaryOrange)
+    }
+
+    private func compactDebtCard(_ debt: Debt) -> some View {
+        NavigationLink {
+            DebtDetailScreenView(store: store, debt: debt)
+        } label: {
+            AppCard(glow: debt.status == .overdue || debt.status == .dueToday) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(debt.name)
+                                .font(.headline)
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                                .lineLimit(1)
+                            Text(debtLinkedSummary(for: debt, in: snapshot))
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: AppTheme.Spacing.md)
+                        VStack(alignment: .trailing, spacing: 8) {
+                            Text(MoneyParser.formatPence(debt.currentBalancePence))
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.orangeHighlight)
+                                .lineLimit(1)
+                            Text(debtStatusLabel(debt.status))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(debt.status == .overdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+                    }
+                    ProgressView(value: debtProgress(debt))
+                        .tint(AppTheme.Colors.primaryOrange)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Next")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            Text(nextPaymentText(for: debt))
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Funded")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                            Text(MoneyParser.formatPence(nextFundedPence(for: debt)))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.success)
+                        }
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(debt.name)")
+    }
+
+    private func scheduleItems(for debt: Debt) -> [DebtPaymentScheduleItem] {
+        PlannerDerivedData.debtScheduleItems(snapshot: snapshot, payPeriod: nil)
+            .filter { $0.debtId == debt.id && $0.status != .cancelled }
+            .sorted { $0.dueDate == $1.dueDate ? $0.id < $1.id : $0.dueDate < $1.dueDate }
+    }
+
+    private func nextScheduleItem(for debt: Debt) -> DebtPaymentScheduleItem? {
+        scheduleItems(for: debt).first { $0.status != .paid }
+    }
+
+    private func nextPaymentText(for debt: Debt) -> String {
+        guard let item = nextScheduleItem(for: debt) else { return "No scheduled payment" }
+        return "\(MoneyParser.formatPence(item.plannedAmountPence)) · \(item.dueDate)"
+    }
+
+    private func nextFundedPence(for debt: Debt) -> Int {
+        nextScheduleItem(for: debt)?.fundedAmountPence ?? 0
+    }
+
+    private func debtProgress(_ debt: Debt) -> Double {
+        let starting = max(1, debt.startingBalancePence)
+        let paid = max(0, starting - debt.currentBalancePence)
+        return min(1, max(0, Double(paid) / Double(starting)))
+    }
+
+    private func debtPaymentRow(_ payment: DebtPayment) -> some View {
+        AppCard {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: payment.hasRefund ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.Colors.success)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(debtName(for: payment.debtId))
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text(payment.hasRefund ? "\(payment.date) · Refunded \(MoneyParser.formatPence(payment.effectiveRefundedAmountPence))" : "\(payment.date) · \(payment.note.isBlank ? "Payment" : payment.note)")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text("-\(MoneyParser.formatPence(payment.netAmountPence))")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.success)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+    }
+
+    private func debtName(for id: String) -> String {
+        snapshot.debts.first { $0.id == id }?.name ?? "Debt"
+    }
+
+    private func debtLinkedSummary(for debt: Debt, in snapshot: PlannerSnapshot) -> String {
+        if let potName = linkedDebtPotName(in: snapshot, debtId: debt.id) {
+            return "\(debt.lender) · \(potName) · \(debtStrategyLabel(debt.repaymentStrategy))"
+        }
+        return "\(debt.lender) · \(debtStrategyLabel(debt.repaymentStrategy))"
+    }
+}
+
+private struct RecordDebtPaymentSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    @State private var debtId: String
+    @State private var amount = ""
+    @State private var paymentDate = Date()
+    @State private var paymentType: DebtPaymentType = .manualPayNow
+    @State private var recalculationMode: DebtRecalculationMode = .finishEarlier
+    @State private var note = ""
+
+    init(store: PlannerStore) {
+        self.store = store
+        _debtId = State(initialValue: store.snapshot.debts.first { $0.status.isActiveLike && $0.currentBalancePence > 0 }?.id ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.lg) {
+                    formCard
+                    if let debt = selectedPaymentDebt {
+                        AppCard {
+                            MetricRow(label: "Current debt", value: MoneyParser.formatPence(debt.currentBalancePence), valueColor: AppTheme.Colors.orangeHighlight)
+                            MetricRow(label: paymentType == .manualSetAside ? "Set aside" : "Payment", value: MoneyParser.formatPence(parsedAmountPence), valueColor: AppTheme.Colors.success)
+                            MetricRow(label: "Balance after", value: MoneyParser.formatPence(paymentType == .manualSetAside ? debt.currentBalancePence : max(0, debt.currentBalancePence - parsedAmountPence)), valueColor: AppTheme.Colors.primaryOrange)
+                        }
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Record payment")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+        }
+    }
+
+    private var formCard: some View {
+        AppCard(glow: true) {
+            SectionTitle("Record payment")
+            Picker("Debt", selection: $debtId) {
+                if selectableDebts.isEmpty {
+                    Text("No active debts").tag("")
+                } else {
+                    ForEach(selectableDebts) { debt in
+                        Text("\(debt.name) · \(MoneyParser.formatPence(debt.currentBalancePence))").tag(debt.id)
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            MoneyField(title: "Payment amount", text: $amount)
+            Picker("Action", selection: $paymentType) {
+                Text("Pay now").tag(DebtPaymentType.manualPayNow)
+                Text("Set aside").tag(DebtPaymentType.manualSetAside)
+            }
+            .pickerStyle(.segmented)
+            Picker("Recalculate", selection: $recalculationMode) {
+                Text("Lower payments").tag(DebtRecalculationMode.lowerFuturePayments)
+                Text("Finish earlier").tag(DebtRecalculationMode.finishEarlier)
+                Text("Skip next").tag(DebtRecalculationMode.skipNextPayment)
+            }
+            .pickerStyle(.menu)
+            DatePicker("Payment date", selection: $paymentDate, displayedComponents: .date)
+                .tint(AppTheme.Colors.primaryOrange)
+            TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+            PrimaryButton(title: "Record payment", systemImage: "checkmark.circle", isDisabled: !canSave) {
+                store.recordManualDebtPayment(
+                    debtId: debtId,
+                    amountPence: parsedAmountPence,
+                    date: paymentDate.isoDateString,
+                    paymentType: paymentType,
+                    recalculationMode: recalculationMode,
+                    note: note
+                )
+                dismiss()
+            }
+        }
+    }
+
+    private var selectableDebts: [Debt] {
+        store.snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 }
+    }
+
+    private var selectedPaymentDebt: Debt? {
+        selectableDebts.first { $0.id == debtId }
+    }
+
+    private var parsedAmountPence: Int {
+        MoneyParser.parsePoundsToPence(amount)
+    }
+
+    private var canSave: Bool {
+        !debtId.isEmpty && parsedAmountPence > 0
+    }
+}
+
+private struct DebtDetailScreenView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var debt: Debt
+    @State private var name: String
+    @State private var lender: String
+    @State private var balance: String
+    @State private var minimum: String
+    @State private var dueDate: Date
+    @State private var apr: String
+    @State private var note: String
+    @State private var status: DebtStatus
+    @State private var linkedPotId: String
+    @State private var showDeleteAlert = false
+
+    init(store: PlannerStore, debt: Debt) {
+        self.store = store
+        self.debt = debt
+        _name = State(initialValue: debt.name)
+        _lender = State(initialValue: debt.lender)
+        _balance = State(initialValue: Self.formatMoneyInput(debt.currentBalancePence))
+        _minimum = State(initialValue: Self.formatMoneyInput(debt.minimumPaymentPence))
+        _dueDate = State(initialValue: debt.dueDate.isoDate)
+        _apr = State(initialValue: debt.interestRateApr.map { String(format: "%.2f", $0) } ?? "")
+        _note = State(initialValue: debt.note)
+        _status = State(initialValue: debt.status)
+        _linkedPotId = State(initialValue: linkedDebtPot(in: store.snapshot, debtId: debt.id)?.id ?? "")
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: AppTheme.Spacing.lg) {
+                summaryCard
+                scheduleCard
+                paymentHistoryCard
+                interestCard
+                editCard
+                SecondaryButton(title: "Delete debt", systemImage: "trash", role: .destructive) {
+                    showDeleteAlert = true
+                }
+            }
+            .padding(AppTheme.Spacing.lg)
+        }
+        .premiumScreenBackground()
+        .navigationTitle(currentDebt.name.isBlank ? "Debt" : currentDebt.name)
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
+        .appPlaceholderToolbar(.secondarySingle)
+        .alert("Delete debt?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                store.deleteDebt(id: debt.id)
+                dismiss()
+            }
+        } message: {
+            Text("This removes the debt and its payment history.")
+        }
+    }
+
+    private var summaryCard: some View {
+        AppCard(glow: true) {
+            MetricRow(label: "Name", value: currentDebt.name)
+            MetricRow(label: "Lender", value: currentDebt.lender)
+            MetricRow(label: "Current debt", value: MoneyParser.formatPence(currentDebt.currentBalancePence), valueColor: AppTheme.Colors.orangeHighlight)
+            MetricRow(label: "Original balance", value: MoneyParser.formatPence(currentDebt.startingBalancePence))
+            ProgressView(value: debtProgress)
+                .tint(AppTheme.Colors.primaryOrange)
+            MetricRow(label: "Minimum payment", value: MoneyParser.formatPence(currentDebt.minimumPaymentPence))
+            MetricRow(label: "Strategy", value: debtStrategyLabel(currentDebt.repaymentStrategy))
+            MetricRow(label: "Next payment", value: nextScheduleItem.map { "\(MoneyParser.formatPence($0.plannedAmountPence)) on \($0.dueDate)" } ?? "None")
+            MetricRow(label: "APR", value: currentDebt.interestRateApr.map { String(format: "%.2f%%", $0) } ?? "Not set")
+            MetricRow(label: "Payments", value: MoneyParser.formatPence(paymentsTotalPence), valueColor: AppTheme.Colors.success)
+            MetricRow(label: "Linked pot", value: linkedDebtPotName(in: store.snapshot, debtId: currentDebt.id) ?? "None")
+            MetricRow(label: "Status", value: debtStatusLabel(currentDebt.status), valueColor: currentDebt.status.isActiveLike ? AppTheme.Colors.success : AppTheme.Colors.tertiaryText)
+            MetricRow(label: "Note", value: currentDebt.note.isBlank ? "No note" : currentDebt.note)
+        }
+    }
+
+    private var scheduleCard: some View {
+        AppCard {
+            SectionTitle("Schedule")
+            if scheduleItems.isEmpty {
+                EmptyStateView(title: "No scheduled payments", message: "Manual-only debts show payments after you add them.", systemImage: "calendar")
+            } else {
+                ForEach(scheduleItems, id: \.id) { (item: DebtPaymentScheduleItem) in
+                    scheduleRow(item)
+                    Divider().overlay(AppTheme.Colors.divider)
+                }
+            }
+        }
+    }
+
+    private func scheduleRow(_ item: DebtPaymentScheduleItem) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.dueDate)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text("\(item.status.rawValue.replacingOccurrences(of: "_", with: " ")) · funded \(MoneyParser.formatPence(item.fundedAmountPence))")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            }
+            Spacer()
+            Text(MoneyParser.formatPence(item.plannedAmountPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(item.status == .paid ? AppTheme.Colors.success : AppTheme.Colors.orangeHighlight)
+        }
+    }
+
+    private var paymentHistoryCard: some View {
+        AppCard {
+            SectionTitle("Payment history")
+            let payments = store.snapshot.debtPayments.filter { $0.debtId == currentDebt.id }.sorted { $0.date > $1.date }
+            if payments.isEmpty {
+                EmptyStateView(title: "No payments yet", message: "Debt payments will appear here.", systemImage: "checkmark.circle")
+            } else {
+                ForEach(payments) { payment in
+                    MetricRow(label: payment.date, value: MoneyParser.formatPence(payment.netAmountPence), valueColor: payment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
+                }
+            }
+        }
+    }
+
+    private var interestCard: some View {
+        AppCard {
+            SectionTitle("Interest")
+            MetricRow(label: "Type", value: debtInterestLabel(currentDebt.interestType))
+            MetricRow(label: "Estimated scheduled interest", value: MoneyParser.formatPence(scheduleItems.reduce(0) { $0 + $1.interestAmountPence }))
+            if currentDebt.status == .interestRisk {
+                Text("Payment does not cover estimated interest. Debt may increase.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.danger)
+            }
+        }
+    }
+
+    private var editCard: some View {
+        AppCard {
+            SectionTitle("Edit debt")
+            TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
+            TextField("Lender", text: $lender).textFieldStyle(AppTextFieldStyle())
+            MoneyField(title: "Current debt", text: $balance)
+            MoneyField(title: "Minimum payment", text: $minimum)
+            DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                .tint(AppTheme.Colors.primaryOrange)
+            Picker("Linked pot", selection: $linkedPotId) {
+                Text("No linked pot").tag("")
+                ForEach(eligibleDebtPots(in: store.snapshot, debtId: currentDebt.id)) { pot in
+                    Text(pot.name).tag(pot.id)
+                }
+            }
+            .pickerStyle(.menu)
+            TextField("APR", text: $apr).keyboardType(.decimalPad).textFieldStyle(AppTextFieldStyle())
+            Picker("Status", selection: $status) {
+                ForEach(DebtStatus.allCases, id: \.self) { status in
+                    Text(status.rawValue.capitalized).tag(status)
+                }
+            }
+            .pickerStyle(.segmented)
+            TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+            PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
+                var updated = currentDebt
+                let currentBalancePence = MoneyParser.parsePoundsToPence(balance)
+                updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.lender = lender.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.currentBalancePence = currentBalancePence
+                updated.minimumPaymentPence = MoneyParser.parsePoundsToPence(minimum)
+                updated.dueDate = dueDate.isoDateString
+                updated.interestRateApr = Double(apr)
+                updated.aprBasisPoints = Double(apr).map { Int(($0 * 100).rounded()) }
+                updated.interestType = updated.aprBasisPoints == nil ? .none : .apr
+                updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.status = currentBalancePence > 0 ? status : .paidOff
+                store.updateDebt(updated)
+                _ = store.setDebtLinkedPot(debtId: updated.id, potId: linkedPotId.nilIfBlank)
+            }
+        }
+    }
+
+    private var currentDebt: Debt {
+        store.snapshot.debts.first(where: { $0.id == debt.id }) ?? debt
+    }
+
+    private var paymentsTotalPence: Int {
+        store.snapshot.debtPayments
+            .filter { $0.debtId == currentDebt.id }
+            .reduce(0) { $0 + $1.amountPence }
+    }
+
+    private var scheduleItems: [DebtPaymentScheduleItem] {
+        PlannerDerivedData.debtScheduleItems(snapshot: store.snapshot, payPeriod: nil)
+            .filter { $0.debtId == currentDebt.id && $0.status != .cancelled }
+            .sorted { $0.dueDate == $1.dueDate ? $0.id < $1.id : $0.dueDate < $1.dueDate }
+    }
+
+    private var nextScheduleItem: DebtPaymentScheduleItem? {
+        scheduleItems.first { $0.status != .paid }
+    }
+
+    private var debtProgress: Double {
+        let starting = max(1, currentDebt.startingBalancePence)
+        return min(1, max(0, Double(max(0, starting - currentDebt.currentBalancePence)) / Double(starting)))
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !lender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        amountPence > 0 ? String(format: "%.2f", Double(amountPence) / 100) : ""
+    }
+}
+
+struct DebtPaymentEditSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var payment: DebtPayment
+    @State private var debtId: String
+    @State private var amount: String
+    @State private var paymentDate: Date
+    @State private var note: String
+    @State private var refundEnabled: Bool
+    @State private var refundAmount: String
+    @State private var showDeleteAlert = false
+
+    init(store: PlannerStore, payment: DebtPayment) {
+        self.store = store
+        self.payment = payment
+        _debtId = State(initialValue: payment.debtId)
+        _amount = State(initialValue: Self.formatMoneyInput(payment.amountPence))
+        _paymentDate = State(initialValue: payment.date.isoDate)
+        _note = State(initialValue: payment.note)
+        _refundEnabled = State(initialValue: payment.hasRefund)
+        _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: payment.effectiveRefundedAmountPence))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: AppTheme.Spacing.lg) {
+                    summaryCard
+                    editCard
+                    SecondaryButton(title: "Delete payment", systemImage: "trash", role: .destructive) {
+                        showDeleteAlert = true
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Debt payment")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .appPlaceholderToolbar(.modalSingle)
+            .alert("Delete payment?", isPresented: $showDeleteAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    store.deleteDebtPayment(id: payment.id)
+                    dismiss()
+                }
+            } message: {
+                Text("This restores the payment amount to the linked debt balance.")
+            }
+        }
+    }
+
+    private var summaryCard: some View {
+        AppCard(glow: true) {
+            MetricRow(label: "Debt", value: debtName(for: currentPayment.debtId))
+            MetricRow(label: "Original amount", value: MoneyParser.formatPence(currentPayment.amountPence))
+            MetricRow(label: "Net payment", value: MoneyParser.formatPence(currentPayment.netAmountPence), valueColor: currentPayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
+            MetricRow(label: "Date", value: currentPayment.date)
+            MetricRow(label: "Note", value: currentPayment.note.isBlank ? "Payment" : currentPayment.note)
+        }
+    }
+
+    private var editCard: some View {
+        AppCard {
+            SectionTitle("Edit payment")
+            Picker("Debt", selection: $debtId) {
+                ForEach(selectableDebts) { debt in
+                    Text("\(debt.name) · \(MoneyParser.formatPence(debt.currentBalancePence))").tag(debt.id)
+                }
+            }
+            .pickerStyle(.menu)
+            MoneyField(title: "Payment amount", text: $amount)
+            DatePicker("Payment date", selection: $paymentDate, displayedComponents: .date)
+                .tint(AppTheme.Colors.primaryOrange)
+            TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
+            PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
+                store.updateDebtPayment(
+                    id: payment.id,
+                    debtId: debtId,
+                    amountPence: MoneyParser.parsePoundsToPence(amount),
+                    date: paymentDate.isoDateString,
+                    note: note
+                )
+            }
+            AppDivider()
+            SectionTitle("Refund")
+            RefundAmountEditor(
+                originalAmountPence: currentPayment.amountPence,
+                isEnabled: $refundEnabled,
+                amount: $refundAmount
+            )
+            Text("Only the refunded amount is restored to the debt balance and repayment plan. The payment remains in history.")
+                .font(.footnote)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+            PrimaryButton(title: "Save refund", systemImage: "arrow.uturn.backward", isDisabled: !refundIsValid) {
+                store.setDebtPaymentRefundAmount(
+                    id: payment.id,
+                    amountPence: refundEnabled ? MoneyParser.parsePoundsToPence(refundAmount) : 0
+                )
+            }
+        }
+    }
+
+    private var currentPayment: DebtPayment {
+        store.snapshot.debtPayments.first(where: { $0.id == payment.id }) ?? payment
+    }
+
+    private var selectableDebts: [Debt] {
+        var debts = store.snapshot.debts.filter { $0.status.isActiveLike && $0.currentBalancePence > 0 }
+        if let linkedDebt = store.snapshot.debts.first(where: { $0.id == currentPayment.debtId }),
+           !debts.contains(where: { $0.id == linkedDebt.id }) {
+            debts.insert(linkedDebt, at: 0)
+        }
+        return debts
+    }
+
+    private var canSave: Bool {
+        guard !currentPayment.hasRefund else { return false }
+        return !debtId.isEmpty && MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private var refundIsValid: Bool {
+        guard refundEnabled else { return currentPayment.hasRefund }
+        let amountPence = MoneyParser.parsePoundsToPence(refundAmount)
+        return amountPence > 0 && amountPence <= currentPayment.amountPence
+    }
+
+    private func debtName(for id: String) -> String {
+        store.snapshot.debts.first { $0.id == id }?.name ?? "Deleted debt"
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        amountPence > 0 ? String(format: "%.2f", Double(amountPence) / 100) : ""
+    }
+}
+
+private func debtDateLabel(_ isoDate: String, relativeTo todayIso: String) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    let date = FinanceEngine.parseDate(isoDate)
+    let today = FinanceEngine.parseDate(todayIso)
+    let day = calendar.component(.day, from: date)
+    let month = calendar.component(.month, from: date)
+    let year = calendar.component(.year, from: date)
+    let currentYear = calendar.component(.year, from: today)
+    let monthLabel = shortMonthLabel(month)
+    let baseLabel = "\(ordinalDayLabel(day)) \(monthLabel)"
+
+    guard year != currentYear else { return baseLabel }
+    return "\(baseLabel) \(String(format: "%02d", year % 100))"
+}
+
+private func debtStatusLabel(_ status: DebtStatus) -> String {
+    status.rawValue
+        .replacingOccurrences(of: "_", with: " ")
+        .capitalized
+}
+
+private func debtStrategyLabel(_ strategy: DebtRepaymentStrategy) -> String {
+    switch strategy {
+    case .autoSpreadUntilDueDate: return "Auto spread"
+    case .payIn4: return "Pay in 4"
+    case .fixedPayment: return "Fixed payment"
+    case .minimumPlusExtra: return "Minimum + extra"
+    case .manualOnly: return "Manual only"
+    }
+}
+
+private func debtInterestLabel(_ type: DebtInterestType) -> String {
+    switch type {
+    case .none: return "None"
+    case .apr: return "APR"
+    case .fixedFee: return "Fixed fee"
+    }
+}
+
+private func eligibleDebtPots(in snapshot: PlannerSnapshot, debtId: String?) -> [Pot] {
+    snapshot.pots
+        .filter {
+            !$0.archived &&
+            $0.linkedCreditCardId == nil &&
+            ($0.linkedDebtId == nil || $0.linkedDebtId == debtId)
+        }
+        .sorted { lhs, rhs in
+            if lhs.name == rhs.name {
+                return lhs.id < rhs.id
+            }
+            return lhs.name < rhs.name
+        }
+}
+
+private func linkedDebtPot(in snapshot: PlannerSnapshot, debtId: String) -> Pot? {
+    eligibleDebtPots(in: snapshot, debtId: debtId)
+        .first { $0.linkedDebtId == debtId }
+}
+
+private func linkedDebtPotName(in snapshot: PlannerSnapshot, debtId: String) -> String? {
+    linkedDebtPot(in: snapshot, debtId: debtId)?.name
+}
+
+private func ordinalDayLabel(_ day: Int) -> String {
+    let suffix: String
+    switch day {
+    case 11, 12, 13:
+        suffix = "th"
+    default:
+        switch day % 10 {
+        case 1: suffix = "st"
+        case 2: suffix = "nd"
+        case 3: suffix = "rd"
+        default: suffix = "th"
+        }
+    }
+    return "\(day)\(suffix)"
+}
+
+private func shortMonthLabel(_ month: Int) -> String {
+    let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    guard months.indices.contains(month - 1) else { return "Jan" }
+    return months[month - 1]
+}
+
+enum PaycheckDetailPresentation: Equatable {
+    case sheet
+    case push
+}
+
+struct PaycheckDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var paycheck: Paycheck
+    var presentation: PaycheckDetailPresentation = .sheet
+    @State private var payday: Date
+    @State private var hoursWorked: String
+    @State private var hourlyRate: String
+    @State private var payFrequency: PayFrequency
+    @State private var bankAccountId: String
+    @State private var showDeleteAlert = false
+
+    init(store: PlannerStore, paycheck: Paycheck, presentation: PaycheckDetailPresentation = .sheet) {
+        self.store = store
+        self.paycheck = paycheck
+        self.presentation = presentation
+        let period = store.snapshot.payPeriods.first(where: { $0.id == paycheck.payPeriodId })
+        _payday = State(initialValue: period?.payday.isoDate ?? Date())
+        _hoursWorked = State(initialValue: Self.formatHours(paycheck.hoursWorked))
+        _hourlyRate = State(initialValue: Self.formatMoneyInput(paycheck.hourlyRatePence))
+        _payFrequency = State(initialValue: period?.payFrequency ?? store.snapshot.settings.payFrequency)
+        _bankAccountId = State(initialValue: paycheck.bankAccountId ?? "")
+    }
+
+    var body: some View {
+        switch presentation {
+        case .sheet:
+            NavigationStack {
+                detailContent
+            }
+        case .push:
+            detailContent
+        }
+    }
+
+    private var detailContent: some View {
+        ScrollView {
+            VStack(spacing: AppTheme.Spacing.lg) {
+                summaryCard
+                editCard
+                SecondaryButton(title: "Delete paycheck", systemImage: "trash", role: .destructive) {
+                    showDeleteAlert = true
+                }
+            }
+            .padding(AppTheme.Spacing.lg)
+        }
+        .premiumScreenBackground()
+        .navigationTitle("Paycheck")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarColorScheme(AppTheme.selectedColorScheme, for: .navigationBar)
+        .toolbar {
+            if presentation == .sheet {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .alert("Delete paycheck?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                store.deletePaycheck(id: paycheck.id)
+                dismiss()
+            }
+        } message: {
+            Text("This removes the linked pay period and its pot allocations.")
+        }
+    }
+
+    private var summaryCard: some View {
+        AppCard(glow: true) {
+            MetricRow(label: "Payday", value: currentPeriod.map { FinanceEngine.formatPaydayLabel($0.payday) } ?? FinanceEngine.formatPaydayLabel(payday.isoDateString))
+            MetricRow(label: "Paid in", value: MoneyParser.formatPence(currentPaycheck.calculatedAmountPence), valueColor: AppTheme.Colors.success)
+            MetricRow(label: "Hours", value: hoursLabel(currentPaycheck.hoursWorked))
+            MetricRow(label: "Hourly rate", value: MoneyParser.formatPence(currentPaycheck.hourlyRatePence))
+            MetricRow(label: "Pay period", value: periodRangeLabel)
+            MetricRow(label: "Frequency", value: frequencyLabel(currentPeriod?.payFrequency ?? payFrequency))
+            if let bankAccountName = currentPaycheck.bankAccountId.flatMap({ id in
+                store.snapshot.bankAccounts.first(where: { $0.id == id })?.name
+            }) {
+                MetricRow(label: "Paid into", value: bankAccountName)
+            }
+            MetricRow(label: "Allocated", value: MoneyParser.formatPence(allocatedPence), valueColor: AppTheme.Colors.primaryOrange)
+        }
+    }
+
+    private var editCard: some View {
+        AppCard {
+            SectionTitle("Edit paycheck")
+            DatePicker("Payday", selection: $payday, displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .tint(AppTheme.Colors.primaryOrange)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Picker("Frequency", selection: $payFrequency) {
+                ForEach(PayFrequency.allCases) { frequency in
+                    Text(frequencyLabel(frequency)).tag(frequency)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(AppTheme.Colors.primaryOrange)
+            TextField("Hours worked", text: $hoursWorked)
+                .keyboardType(.decimalPad)
+                .textFieldStyle(AppTextFieldStyle())
+            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
+                MoneyField(title: "Hourly rate", text: $hourlyRate)
+                    .layoutPriority(1)
+                paidInPreview
+                    .frame(width: 132)
+            }
+            SelectionField(
+                title: "Paid into",
+                value: store.snapshot.bankAccounts.first(where: { $0.id == bankAccountId })?.name ?? "",
+                placeholder: "Not linked",
+                systemImage: "building.columns"
+            ) {
+                Button("Not linked") { bankAccountId = "" }
+                ForEach(store.activeBankAccounts) { account in
+                    Button(account.name) { bankAccountId = account.id }
+                }
+            }
+            PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSaveChanges) {
+                store.updatePaycheck(
+                    id: paycheck.id,
+                    payday: payday.isoDateString,
+                    hoursWorked: Double(hoursWorked) ?? 0,
+                    hourlyRatePence: MoneyParser.parsePoundsToPence(hourlyRate),
+                    actualAmountPence: nil,
+                    payFrequency: payFrequency,
+                    bankAccountId: bankAccountId
+                )
+            }
+        }
+    }
+
+    private var paidInPreview: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Paid in")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+            Text(MoneyParser.formatPence(calculatedPayPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.success)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .background(AppTheme.Colors.elevatedSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
+                .stroke(AppTheme.Colors.success.opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    private var currentPaycheck: Paycheck {
+        store.snapshot.paychecks.first(where: { $0.id == paycheck.id }) ?? paycheck
+    }
+
+    private var currentPeriod: PayPeriod? {
+        store.snapshot.payPeriods.first(where: { $0.id == currentPaycheck.payPeriodId })
+    }
+
+    private var periodRangeLabel: String {
+        guard let currentPeriod else { return "No linked period" }
+        return "\(FinanceEngine.formatPaydayLabel(currentPeriod.startDate)) to \(FinanceEngine.formatPaydayLabel(currentPeriod.endDate))"
+    }
+
+    private var allocatedPence: Int {
+        store.snapshot.potAllocations
+            .filter { $0.payPeriodId == currentPaycheck.payPeriodId }
+            .reduce(0) { $0 + $1.amountPence }
+    }
+
+    private var calculatedPayPence: Int {
+        FinanceEngine.calculatePaycheckAmount(
+            hoursWorked: Double(hoursWorked) ?? 0,
+            hourlyRatePence: MoneyParser.parsePoundsToPence(hourlyRate),
+            actualAmountPence: nil
+        )
+    }
+
+    private var canSaveChanges: Bool {
+        let hours = Double(hoursWorked) ?? 0
+        let rate = MoneyParser.parsePoundsToPence(hourlyRate)
+        return hours > 0 && rate > 0
+    }
+
+    private func hoursLabel(_ hours: Double) -> String {
+        let formatted = Self.formatHours(hours)
+        return formatted.isBlank ? "Not set" : formatted
+    }
+
+    private func frequencyLabel(_ frequency: PayFrequency) -> String {
+        frequency.rawValue.capitalized
+    }
+
+    private static func formatMoneyInput(_ amountPence: Int) -> String {
+        amountPence > 0 ? String(format: "%.2f", Double(amountPence) / 100) : ""
+    }
+
+    private static func formatHours(_ hours: Double) -> String {
+        guard hours > 0 else { return "" }
+        if hours.rounded() == hours {
+            return String(format: "%.0f", hours)
+        }
+        return String(format: "%.2f", hours)
+    }
+}
+
+private extension String {
+    var isBlank: Bool {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var nilIfBlank: String? {
+        isBlank ? nil : self
+    }
+
+    var prefixDateLabel: String {
+        String(prefix(10))
+    }
+}

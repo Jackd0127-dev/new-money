@@ -6907,16 +6907,23 @@ describe('debts page', () => {
   })
 
   it('does not treat a future paycheck plan as the current pay period', () => {
+    const futureDate = (daysFromToday: number) => {
+      const date = new Date()
+      date.setDate(date.getDate() + daysFromToday)
+      return toIsoDate(date)
+    }
+    const startDate = futureDate(30)
+
     render(
       <DebtsPage
         snapshot={createSnapshot({
           payPeriods: [
             {
               id: 'period-next',
-              startDate: '2026-06-05',
-              endDate: '2026-06-18',
-              payday: '2026-06-05',
-              nextPayday: '2026-06-19',
+              startDate,
+              endDate: futureDate(43),
+              payday: startDate,
+              nextPayday: futureDate(44),
               payFrequency: 'biweekly',
               incomePence: 90000,
               status: 'planned',
@@ -6932,7 +6939,7 @@ describe('debts page', () => {
               originalAmountPence: 30000,
               currentBalancePence: 30000,
               minimumPaymentPence: 0,
-              dueDate: '2026-06-06',
+              dueDate: futureDate(31),
               interestRateApr: null,
               note: '',
               status: 'active',
@@ -6950,7 +6957,7 @@ describe('debts page', () => {
     expect(debtDueMetric).not.toBeNull()
     expect(within(debtDueMetric as HTMLElement).getAllByText('£0.00').length).toBeGreaterThan(0)
     expect(within(debtDueMetric as HTMLElement).getByText('No active pay period today')).toBeInTheDocument()
-    expect(within(debtDueMetric as HTMLElement).getByText(/Next saved period starts 2026-06-05/)).toBeInTheDocument()
+    expect(within(debtDueMetric as HTMLElement).getByText(`Next saved period starts ${startDate}; next payday is ${futureDate(44)}.`)).toBeInTheDocument()
     expect(within(debtDueMetric as HTMLElement).queryByText('Future period debt')).not.toBeInTheDocument()
   })
 })

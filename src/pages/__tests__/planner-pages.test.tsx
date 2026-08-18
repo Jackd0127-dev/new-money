@@ -64,18 +64,45 @@ describe('app shell navigation', () => {
     const labels = within(sidebarNav).getAllByRole('button').map((button) => button.textContent)
 
     expect(labels).toEqual([
-      'Dashboard',
-      'Pay day',
+      'Overview',
+      'Payday',
       'Spending',
-      'Allocating Payments',
-      'Recurring',
+      'Cards',
+      'Bills',
       'Pots',
-      'Savings & Investments',
+      'Savings',
       'Debts',
       'Calendar',
-      'AI',
+      'Jimbo',
       'Settings',
     ])
+  })
+
+  it('keeps renamed navigation labels mapped to the existing view keys', async () => {
+    const user = userEvent.setup()
+    const onViewChange = vi.fn()
+
+    render(
+      <AppShell activeView="dashboard" onViewChange={onViewChange}>
+        <div>Page content</div>
+      </AppShell>,
+    )
+
+    const sidebarNav = screen.getByRole('navigation', { name: 'Primary navigation' })
+
+    await user.click(within(sidebarNav).getByRole('button', { name: 'Overview' }))
+    await user.click(within(sidebarNav).getByRole('button', { name: 'Payday' }))
+    await user.click(within(sidebarNav).getByRole('button', { name: 'Cards' }))
+    await user.click(within(sidebarNav).getByRole('button', { name: 'Bills' }))
+    await user.click(within(sidebarNav).getByRole('button', { name: 'Savings' }))
+    await user.click(within(sidebarNav).getByRole('button', { name: 'Jimbo' }))
+
+    expect(onViewChange).toHaveBeenNthCalledWith(1, 'dashboard')
+    expect(onViewChange).toHaveBeenNthCalledWith(2, 'payday')
+    expect(onViewChange).toHaveBeenNthCalledWith(3, 'allocatingPayments')
+    expect(onViewChange).toHaveBeenNthCalledWith(4, 'recurring')
+    expect(onViewChange).toHaveBeenNthCalledWith(5, 'savingsInvestments')
+    expect(onViewChange).toHaveBeenNthCalledWith(6, 'aiPlan')
   })
 
   it('keeps desktop navigation scrollable so all tabs can be reached', () => {
@@ -86,6 +113,55 @@ describe('app shell navigation', () => {
     )
 
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveClass('overflow-y-auto')
+  })
+
+  it('uses the premium shell treatment without changing navigation callbacks', async () => {
+    const user = userEvent.setup()
+    const onViewChange = vi.fn()
+
+    render(
+      <AppShell
+        activeView="spending"
+        onViewChange={onViewChange}
+        selectedPayPeriod={createPayPeriod({ startDate: '2026-05-31', endDate: '2026-06-13' })}
+      >
+        <div>Page content</div>
+      </AppShell>,
+    )
+
+    const sidebar = screen.getByRole('complementary', { name: 'Application sidebar' })
+    const primaryNav = screen.getByRole('navigation', { name: 'Primary navigation' })
+    const activeNavItem = within(primaryNav).getByRole('button', { name: 'Spending' })
+
+    expect(sidebar).toHaveClass('bg-[var(--color-emerald)]')
+    expect(activeNavItem).toHaveAttribute('aria-current', 'page')
+    expect(activeNavItem).toHaveClass('bg-[var(--color-accent)]')
+    expect(screen.queryByText('Paycheck flow')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Spending' })).toBeInTheDocument()
+    expect(screen.getByText('31 May 26 to 13 Jun 26')).toBeInTheDocument()
+
+    await user.click(within(primaryNav).getByRole('button', { name: 'Calendar' }))
+
+    expect(onViewChange).toHaveBeenCalledWith('calendar')
+  })
+
+  it('uses bottom mobile tabs and a capped desktop content width', () => {
+    render(
+      <AppShell activeView="dashboard" onViewChange={vi.fn()}>
+        <div>Page content</div>
+      </AppShell>,
+    )
+
+    const mobileTabs = screen.getByRole('navigation', { name: 'Mobile tab navigation' })
+    const main = screen.getByRole('main')
+
+    expect(mobileTabs).toHaveClass('fixed')
+    expect(mobileTabs).toHaveClass('bottom-0')
+    expect(mobileTabs).toHaveClass('lg:hidden')
+    expect(mobileTabs).not.toHaveClass('mt-3')
+    expect(within(mobileTabs).getByRole('button', { name: 'Overview' })).toHaveClass('min-h-11')
+    expect(main).toHaveClass('max-w-[1320px]')
+    expect(main).toHaveClass('pb-28')
   })
 })
 
@@ -178,9 +254,11 @@ describe('savings and investments page', () => {
     expect(screen.getAllByText('Emergency fund').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Index fund').length).toBeGreaterThan(0)
     expect(screen.queryByText('Food')).not.toBeInTheDocument()
+    expect(screen.queryByText('Allocation preview')).not.toBeInTheDocument()
 
     await user.selectOptions(screen.getByLabelText('Savings or investment pot'), 'pot-emergency')
     await user.type(screen.getByLabelText('Amount to set aside'), '35.00')
+    expect(screen.getByText('Allocation preview')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Set aside money' }))
 
     expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
@@ -241,6 +319,8 @@ describe('savings and investments page', () => {
       />,
     )
 
+    expect(screen.getByText('This paycheck set-aside £20.00')).toBeInTheDocument()
+
     await user.selectOptions(screen.getByLabelText('Savings or investment pot'), 'pot-index')
     await user.type(screen.getByLabelText('Amount to set aside'), '15.00')
     await user.click(screen.getByRole('button', { name: 'Set aside money' }))
@@ -255,6 +335,182 @@ describe('savings and investments page', () => {
 })
 
 describe('calendar page', () => {
+  it('renders a mobile agenda view while keeping the desktop month grid', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+
+    render(
+      <CalendarPage
+        snapshot={createSnapshot({
+          settings: createSettings({ appDateMode: 'manual', manualTodayIso: '2026-05-16' }),
+          payPeriods: [selectedPayPeriod],
+        })}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    const agenda = screen.getByRole('region', { name: 'Calendar agenda' })
+    const monthGrid = screen.getByRole('region', { name: 'Calendar month grid' })
+    const paydayGroup = within(agenda).getByRole('region', { name: 'Agenda for 16 May 2026' })
+
+    expect(agenda).toHaveClass('md:hidden')
+    expect(within(agenda).getAllByText(/Income/).length).toBeGreaterThan(0)
+    expect(within(paydayGroup).getByText(/16 May 2026/)).toBeInTheDocument()
+    expect(within(paydayGroup).getByText('Today')).toBeInTheDocument()
+    expect(monthGrid).toHaveClass('hidden')
+    expect(monthGrid).toHaveClass('md:block')
+  })
+
+  it('uses six display categories without changing event dates', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-holiday',
+          name: 'Holiday',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'savings',
+          balancePence: 12000,
+          targetPence: 50000,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-holiday',
+          payPeriodId: 'period-current',
+          potId: 'pot-holiday',
+          amountPence: 2500,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone bill',
+          amountPence: 2200,
+          dueDay: 17,
+          dueDate: '2026-05-17',
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: null,
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDate: '2026-05-18',
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'custom-mot',
+          name: 'MOT',
+          amountPence: 4500,
+          dueDate: '2026-05-17',
+          creditCardId: 'card-amex',
+          status: 'unpaid',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-loan',
+          name: 'Personal loan',
+          lender: 'Loan Provider',
+          originalAmountPence: 50000,
+          currentBalancePence: 50000,
+          minimumPaymentPence: 5000,
+          dueDate: '2026-05-19',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-groceries',
+          potId: null,
+          payPeriodId: 'period-current',
+          amountPence: 1850,
+          type: 'spending',
+          date: '2026-05-20',
+          note: 'Groceries',
+          createdAt: '2026-05-20T00:00:00.000Z',
+          updatedAt: '2026-05-20T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<CalendarPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} />)
+
+    const categories = within(screen.getByRole('list', { name: 'Calendar categories' })).getAllByRole('listitem')
+
+    expect(categories.map((category) => category.textContent)).toEqual([
+      'Income',
+      'Bills',
+      'Cards',
+      'Debts',
+      'Savings',
+      'Spending',
+    ])
+    expect(categories[0]).toHaveClass('bg-lime-50')
+    expect(screen.getByRole('button', { name: 'Open 16 May 2026' })).toHaveClass('bg-lime-50/80')
+    expect(screen.getByRole('button', { name: 'Open 16 May 2026' })).toHaveTextContent('Paycheck received')
+    expect(screen.getByRole('button', { name: 'Open 17 May 2026' })).toHaveTextContent('Phone bill')
+    expect(screen.getByRole('button', { name: 'Open 18 May 2026' })).toHaveTextContent('Everyday card payment')
+    expect(screen.getByRole('button', { name: 'Open 19 May 2026' })).toHaveTextContent('Personal loan')
+    expect(screen.getByRole('button', { name: 'Open 20 May 2026' })).toHaveTextContent('Groceries')
+    const agenda = screen.getByRole('region', { name: 'Calendar agenda' })
+    const may16AgendaGroup = within(agenda).getByRole('region', { name: 'Agenda for 16 May 2026' })
+    expect(within(may16AgendaGroup).getByText('Paycheck received')).toBeInTheDocument()
+    expect(within(may16AgendaGroup).getByText('Holiday allocation')).toBeInTheDocument()
+    expect(screen.getByText('Holiday allocation').closest('button')).toHaveTextContent('Savings')
+    expect(screen.queryByText('Recurring')).not.toBeInTheDocument()
+    expect(screen.queryByText('Subscription')).not.toBeInTheDocument()
+    expect(screen.queryByText('Insurance')).not.toBeInTheDocument()
+    expect(screen.queryByText('Saved payment')).not.toBeInTheDocument()
+    expect(screen.queryByText('Card due')).not.toBeInTheDocument()
+    expect(screen.queryByText('Credit pot')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pot allocation')).not.toBeInTheDocument()
+    expect(screen.queryByText('Manual spend')).not.toBeInTheDocument()
+  })
+
   it('groups card-linked recurring payments under the card payment instead of showing them twice', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod({
@@ -1001,7 +1257,7 @@ describe('settings page', () => {
     const user = userEvent.setup()
     const actions = createActions()
 
-    render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
+    const { container } = render(<SettingsPage snapshot={createSnapshot()} actions={actions} />)
 
     expect(screen.queryByText('Planner settings')).not.toBeInTheDocument()
     expect(screen.queryByText('Settings saved')).not.toBeInTheDocument()
@@ -1009,6 +1265,11 @@ describe('settings page', () => {
     expect(screen.getByText('Local planner')).toBeInTheDocument()
     expect(screen.queryByText(/Cloud sync/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Planner data' })).not.toBeInTheDocument()
+    expect(container.querySelector('[class*="linear-gradient"]')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Choose the AI provider used by the server/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Normalises existing pots/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Used for Jimbo replies.')).toBeVisible()
+    expect(screen.getByText('Checks saved planner data and applies any available updates.')).toBeVisible()
 
     await user.click(screen.getByRole('button', { name: 'Save settings' }))
 
@@ -1125,7 +1386,11 @@ describe('settings page', () => {
 
     render(<SettingsPage snapshot={createSnapshot()} actions={createActions()} auth={auth} />)
 
-    await user.click(screen.getByRole('button', { name: 'Delete account' }))
+    const deleteButton = screen.getByRole('button', { name: 'Delete account' })
+    expect(deleteButton).toHaveClass('border-red-200')
+    expect(deleteButton).not.toHaveClass('bg-[var(--color-danger)]')
+
+    await user.click(deleteButton)
 
     expect(confirmSpy).toHaveBeenCalledWith(
       'Delete money@example.com? This cannot be undone. Local app data on this device will stay available.',
@@ -1205,7 +1470,8 @@ describe('AI page', () => {
     restoreLocalStorage = null
   })
 
-  it('shows the messaging surface without debt-plan controls', () => {
+  it('shows the messaging surface without debt-plan controls', async () => {
+    const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod()
 
     render(
@@ -1220,14 +1486,42 @@ describe('AI page', () => {
     expect(screen.queryByText('AI planning room')).not.toBeInTheDocument()
     expect(screen.queryByText('Planner context')).not.toBeInTheDocument()
     expect(screen.queryByText('Planning sources')).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Message AI' })).toHaveClass('min-h-12')
+    const messageInput = screen.getByRole('textbox', { name: 'Message Jimbo' })
+
+    expect(messageInput).toHaveClass('min-h-12')
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
     expect(screen.getByText('Saved money chats with confirmable actions.')).toBeInTheDocument()
     expect(screen.getByText('Chats')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New' })).toBeInTheDocument()
+    expect(screen.getByText(/Ask Jimbo about this pay period/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Can I afford this before payday?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Which bills are due before payday?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Why is my money left low?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'What is my payment priority?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'How much card cover do I need?' })).toBeInTheDocument()
+    expect(screen.getByText('Pay period')).toBeInTheDocument()
+    expect(screen.getByText('Money left')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Debt recommendations' })).not.toBeInTheDocument()
     expect(screen.queryByText('Set aside this paycheck')).not.toBeInTheDocument()
     expect(screen.queryByText(/Reserve £/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'How much card cover do I need?' }))
+
+    expect(messageInput).toHaveValue('How much card cover do I need?')
+  })
+
+  it('collapses the Jimbo insights rail when no pay period or actions exist', () => {
+    render(
+      <AiPlanPage
+        snapshot={createSnapshot({ payPeriods: [] })}
+        selectedPayPeriod={null}
+        user={null}
+        actions={createActions()}
+      />,
+    )
+
+    expect(screen.queryByText('Pay period')).not.toBeInTheDocument()
+    expect(screen.queryByText('Action queue')).not.toBeInTheDocument()
   })
 
   it('sends any user question to the assistant endpoint and shows the answer', async () => {
@@ -1239,6 +1533,22 @@ describe('AI page', () => {
         highlights: ['Hidden fees'],
         actions: ['Check balances'],
         confidence: 'high',
+        proposedActions: [
+          {
+            id: 'action-create-buffer-pot',
+            type: 'create_pot',
+            label: 'Create buffer pot',
+            payload: {
+              name: 'Buffer',
+              type: 'saving',
+              balancePence: 2500,
+              targetPence: 10000,
+              color: '#10b981',
+              linkedCreditCardId: null,
+              linkedDebtId: null,
+            },
+          },
+        ],
       }),
     } as Response)
     const authUser = {
@@ -1263,7 +1573,7 @@ describe('AI page', () => {
       />,
     )
 
-    await user.type(screen.getByRole('textbox', { name: 'Message AI' }), 'Can I afford my cards this month?')
+    await user.type(screen.getByRole('textbox', { name: 'Message Jimbo' }), 'Can I afford my cards this month?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     expect(authUser.getIdToken).toHaveBeenCalled()
@@ -1273,6 +1583,8 @@ describe('AI page', () => {
       body: expect.stringContaining('Can I afford my cards this month?'),
     }))
     expect(screen.getByText(/Use the spare cash for the highest-impact move first/)).toBeInTheDocument()
+    expect(screen.getByText('Action queue')).toBeInTheDocument()
+    expect(screen.getAllByText('Create buffer pot').length).toBeGreaterThan(0)
     expect(screen.queryByText(/Confidence:/)).not.toBeInTheDocument()
 
     fetchSpy.mockRestore()
@@ -1286,32 +1598,32 @@ describe('AI page', () => {
       <AiPlanPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} user={null} actions={actions} />,
     )
 
-    await user.type(screen.getByRole('textbox', { name: 'Message AI' }), 'How much can I move to savings?')
+    await user.type(screen.getByRole('textbox', { name: 'Message Jimbo' }), 'How much can I move to savings?')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    const messages = screen.getByRole('log', { name: 'AI conversation messages' })
+    const messages = screen.getByRole('log', { name: 'Jimbo conversation messages' })
 
     expect(within(messages).getByText('How much can I move to savings?')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open conversation How much can I move to savings?' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'New' }))
 
-    const newMessages = screen.getByRole('log', { name: 'AI conversation messages' })
+    const newMessages = screen.getByRole('log', { name: 'Jimbo conversation messages' })
 
     expect(within(newMessages).queryByText('How much can I move to savings?')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Open conversation How much can I move to savings?' }))
 
-    expect(within(screen.getByRole('log', { name: 'AI conversation messages' })).getByText('How much can I move to savings?')).toBeInTheDocument()
+    expect(within(screen.getByRole('log', { name: 'Jimbo conversation messages' })).getByText('How much can I move to savings?')).toBeInTheDocument()
 
     unmount()
 
     render(<AiPlanPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} user={null} actions={actions} />)
 
-    expect(within(screen.getByRole('log', { name: 'AI conversation messages' })).getByText('How much can I move to savings?')).toBeInTheDocument()
+    expect(within(screen.getByRole('log', { name: 'Jimbo conversation messages' })).getByText('How much can I move to savings?')).toBeInTheDocument()
   })
 
-  it('customizes the AI name and avatar across the AI page and floating assistant', async () => {
+  it('customizes the assistant name and avatar across the Jimbo page and floating assistant', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot()
     const actions = createActions()
@@ -1330,23 +1642,177 @@ describe('AI page', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Customize' }))
-    fireEvent.change(screen.getByLabelText('AI name'), { target: { value: 'Nova' } })
+    fireEvent.change(screen.getByLabelText('Assistant name'), { target: { value: 'Nova' } })
     fireEvent.change(screen.getByLabelText('PFP / initials'), { target: { value: 'NV' } })
 
     expect(screen.getByRole('heading', { name: 'Nova' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open AI helper' })).toHaveTextContent('Ask Nova')
+    expect(screen.getByRole('button', { name: 'Open Nova helper' })).toHaveTextContent('Nova')
     expect(screen.getAllByText('NV').length).toBeGreaterThan(0)
+  })
+
+  it('syncs Jimbo page and floating helper conversations without render-phase console errors', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot()
+    const actions = createActions()
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    window.localStorage.removeItem('new-money.assistant-conversations.v1')
+
+    try {
+      render(
+        <>
+          <AiPlanPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} user={null} actions={actions} />
+          <AppAssistant
+            snapshot={snapshot}
+            activeView="aiPlan"
+            selectedPayPeriod={snapshot.payPeriods[0]}
+            actions={actions}
+            user={null}
+          />
+        </>,
+      )
+
+      await user.type(screen.getByRole('textbox', { name: 'Message Jimbo' }), 'Can I cover the card payment?')
+      await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+      await waitFor(() => {
+        expect(screen.getAllByText(/Sign in from Settings to ask/).length).toBeGreaterThan(0)
+      })
+
+      expect(
+        consoleErrorSpy.mock.calls.some((call) =>
+          call.some((part) => String(part).includes('Cannot update a component')),
+        ),
+      ).toBe(false)
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })
 
 describe('payday wizard', () => {
+  it('shows pay planning on the left and a sticky allocation summary on the right', () => {
+    render(<PaydayWizardPage snapshot={createSnapshot()} actions={createActions()} />)
+
+    const formPanel = screen.getByRole('region', { name: 'Pay planning' })
+    const summaryPanel = screen.getByRole('region', { name: 'Pay plan summary' })
+
+    expect(formPanel).toContainElement(screen.getByLabelText('Payday'))
+    expect(formPanel).toContainElement(screen.getByLabelText('Pay frequency'))
+    expect(formPanel).toContainElement(screen.getByLabelText('Hours worked'))
+    expect(formPanel).toContainElement(screen.getByLabelText('Hourly rate'))
+    expect(formPanel).toContainElement(screen.getByLabelText('Actual received'))
+    expect(formPanel).toContainElement(screen.getByLabelText('Pay period'))
+
+    expect(summaryPanel).toHaveClass('lg:sticky')
+    expect(within(summaryPanel).getByText('Pay to plan')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('Reserved bills')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('Manual allocations')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('Left unassigned')).toBeInTheDocument()
+    expect(within(summaryPanel).queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm paycheque plan' })).toBeInTheDocument()
+    expect(screen.queryByText('Estimate')).not.toBeInTheDocument()
+    expect(screen.queryByText('Override')).not.toBeInTheDocument()
+    expect(screen.queryByText('Plan state')).not.toBeInTheDocument()
+  })
+
+  it('confirms an hourly estimate without changing the paycheck plan action shape', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      settings: createSettings({ appDateMode: 'manual', manualTodayIso: '2026-05-16' }),
+    })
+
+    render(<PaydayWizardPage snapshot={snapshot} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Confirm paycheque plan' }))
+
+    expect(actions.createPaycheckPlan).toHaveBeenCalledWith({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: null,
+      allocations: [],
+    })
+  })
+
+  it('uses actual received as the pay to plan while preserving the action payload', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      settings: createSettings({ appDateMode: 'manual', manualTodayIso: '2026-05-16' }),
+    })
+
+    render(<PaydayWizardPage snapshot={snapshot} actions={actions} />)
+
+    await user.type(screen.getByLabelText('Actual received'), '1000')
+
+    const summaryPanel = screen.getByRole('region', { name: 'Pay plan summary' })
+    const payToPlanMetric = within(summaryPanel).getByText('Pay to plan').closest('article')
+
+    expect(payToPlanMetric).not.toBeNull()
+    expect(within(payToPlanMetric as HTMLElement).getByText('£1,000.00')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Confirm paycheque plan' }))
+
+    expect(actions.createPaycheckPlan).toHaveBeenCalledWith({
+      payday: '2026-05-16',
+      payFrequency: 'biweekly',
+      hoursWorked: 72,
+      hourlyRatePence: 1250,
+      actualAmountPence: 100000,
+      allocations: [],
+    })
+  })
+
+  it('summarizes saved allocations and warns when a pay plan is overallocated', () => {
+    const snapshot = createSnapshot({
+      payPeriods: [createPayPeriod({ incomePence: 90000 })],
+      potAllocations: [
+        {
+          id: 'allocation-rent',
+          payPeriodId: 'period-current',
+          potId: 'pot-bills',
+          amountPence: 60000,
+          source: 'recurring',
+          recurringPaymentId: 'rent',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'pot-food',
+          amountPence: 40000,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PaydayWizardPage snapshot={snapshot} actions={createActions()} />)
+
+    const summaryPanel = screen.getByRole('region', { name: 'Pay plan summary' })
+
+    expect(within(summaryPanel).getByText('Reserved bills')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('£600.00')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('Manual allocations')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('£400.00')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('Left unassigned')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('-£100.00')).toBeInTheDocument()
+    expect(within(summaryPanel).getByText('This paycheque is overallocated by £100.00.')).toBeInTheDocument()
+  })
+
   it('does not crash while the payday date is temporarily invalid', () => {
     render(<PaydayWizardPage snapshot={createSnapshot()} actions={createActions()} />)
 
     fireEvent.change(screen.getByLabelText('Payday'), { target: { value: '' } })
 
     expect(screen.getByDisplayValue('Choose a valid payday')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Confirm paycheck plan' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Confirm paycheque plan' })).toBeDisabled()
   })
 
   it('lets the paycheck frequency change the visible pay period', async () => {
@@ -1416,7 +1882,7 @@ describe('payday wizard', () => {
 
     await user.clear(screen.getByLabelText('Hours worked'))
     await user.type(screen.getByLabelText('Hours worked'), '86')
-    await user.click(screen.getByRole('button', { name: 'Update paycheck plan' }))
+    await user.click(screen.getByRole('button', { name: 'Update paycheque plan' }))
 
     expect(actions.createPaycheckPlan).toHaveBeenCalledWith({
       payday: '2026-05-16',
@@ -1430,6 +1896,195 @@ describe('payday wizard', () => {
 })
 
 describe('spending page', () => {
+  it('shows a premium spending hero and quick form without the old command desk cards', () => {
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-card',
+          potId: null,
+          payPeriodId: selectedPayPeriod.id,
+          amountPence: 2000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-amex',
+          date: '2026-05-18',
+          note: 'Fuel',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+        {
+          id: 'txn-pot',
+          potId: 'pot-food',
+          payPeriodId: selectedPayPeriod.id,
+          amountPence: 1000,
+          type: 'spending',
+          paymentMethod: 'pot',
+          creditCardId: null,
+          date: '2026-05-17',
+          note: 'Groceries',
+          createdAt: '2026-05-17T00:00:00.000Z',
+          updatedAt: '2026-05-17T00:00:00.000Z',
+        },
+        {
+          id: 'txn-unlinked',
+          potId: null,
+          payPeriodId: selectedPayPeriod.id,
+          amountPence: 1250,
+          type: 'spending',
+          date: '2026-05-16',
+          note: 'Lunch',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<SpendingPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    const hero = screen.getByRole('region', { name: 'Spending hero' })
+    const quickSpend = screen.getByRole('region', { name: 'Quick spend' })
+
+    expect(within(hero).getByText('Spent this pay period')).toBeInTheDocument()
+    expect(within(hero).getByText('-£42.50')).toBeInTheDocument()
+    expect(within(hero).getByText('3 transactions')).toBeInTheDocument()
+    expect(within(hero).getByText('Routed')).toBeInTheDocument()
+    expect(within(hero).getByText('£30.00')).toBeInTheDocument()
+    expect(within(hero).getByText('Unlinked')).toBeInTheDocument()
+    expect(within(hero).getByText('£12.50')).toBeInTheDocument()
+    expect(within(hero).getByText('Recent payments')).toBeInTheDocument()
+
+    expect(quickSpend).toContainElement(screen.getByLabelText('Amount'))
+    expect(within(quickSpend).getByRole('button', { name: '£10.00' })).toBeInTheDocument()
+    expect(quickSpend).toContainElement(screen.getByLabelText('Link spend to'))
+    expect(quickSpend).toContainElement(screen.getByLabelText('Date'))
+    expect(quickSpend).toContainElement(screen.getByLabelText('Note'))
+    expect(within(quickSpend).getByRole('button', { name: 'Log spend' })).toBeInTheDocument()
+
+    expect(screen.queryByText('Spending command desk')).not.toBeInTheDocument()
+    expect(screen.queryByText('Today logged')).not.toBeInTheDocument()
+    expect(screen.queryByText('Selected paycheck')).not.toBeInTheDocument()
+    expect(screen.queryByText('Latest paycheck')).not.toBeInTheDocument()
+    expect(screen.queryByText('Card-linked spend')).not.toBeInTheDocument()
+  })
+
+  it('shows compact spending transaction rows with restrained edit and delete actions', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-long',
+          potId: 'pot-food',
+          payPeriodId: selectedPayPeriod.id,
+          amountPence: 1250,
+          type: 'spending',
+          paymentMethod: 'pot',
+          creditCardId: null,
+          date: '2026-05-18',
+          note: 'Long grocery merchant with weekend household essentials',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+        {
+          id: 'txn-card',
+          potId: null,
+          payPeriodId: selectedPayPeriod.id,
+          amountPence: 3250,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-amex',
+          date: '2026-05-17',
+          note: 'Train tickets',
+          createdAt: '2026-05-17T00:00:00.000Z',
+          updatedAt: '2026-05-17T00:00:00.000Z',
+        },
+      ],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<SpendingPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />)
+
+    const spendingPanel = screen.getByRole('region', { name: 'Spending by pay period' })
+    const groceryRow = within(spendingPanel)
+      .getByText('Long grocery merchant with weekend household essentials')
+      .closest('article')
+    const cardRow = within(spendingPanel).getByText('Train tickets').closest('article')
+
+    expect(groceryRow).toBeInstanceOf(HTMLElement)
+    expect(cardRow).toBeInstanceOf(HTMLElement)
+
+    expect(groceryRow as HTMLElement).toHaveClass('rounded-[var(--radius-card)]')
+    expect(within(groceryRow as HTMLElement).getByText('Food')).toBeInTheDocument()
+    expect(within(groceryRow as HTMLElement).getByText('2026-05-18')).toBeInTheDocument()
+    expect(within(groceryRow as HTMLElement).getByText('-£12.50')).toHaveClass('text-right')
+    expect(within(cardRow as HTMLElement).getByText('Everyday Amex')).toBeInTheDocument()
+    expect(within(cardRow as HTMLElement).getByText('-£32.50')).toHaveClass('text-right')
+
+    expect(within(groceryRow as HTMLElement).getByRole('button', { name: 'Edit Long grocery merchant with weekend household essentials' })).toHaveClass('size-9')
+    expect(within(groceryRow as HTMLElement).getByRole('button', { name: 'Delete Long grocery merchant with weekend household essentials' })).toHaveClass('size-9')
+    expect(within(spendingPanel).queryByText('Delete')).not.toBeInTheDocument()
+    expect(within(spendingPanel).queryByText('Edit')).not.toBeInTheDocument()
+    expect(spendingPanel.querySelector('.divide-y')).toBeNull()
+
+    await user.click(within(groceryRow as HTMLElement).getByRole('button', { name: 'Edit Long grocery merchant with weekend household essentials' }))
+
+    expect(screen.getByRole('region', { name: 'Edit spending entry' })).toBeInTheDocument()
+
+    await user.click(within(groceryRow as HTMLElement).getByRole('button', { name: 'Delete Long grocery merchant with weekend household essentials' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete Long grocery merchant with weekend household essentials?')
+    expect(actions.deleteTransaction).toHaveBeenCalledWith('txn-long')
+    confirmSpy.mockRestore()
+  })
+
+  it('shows a concise empty spending list state for a selected pay period', () => {
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      transactions: [],
+    })
+
+    render(<SpendingPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    const spendingPanel = screen.getByRole('region', { name: 'Spending by pay period' })
+
+    expect(within(spendingPanel).getByText('No spending yet.')).toBeInTheDocument()
+    expect(within(spendingPanel).getByText('Log your first payment to see it grouped by paycheck.')).toBeInTheDocument()
+    expect(within(spendingPanel).queryByText('No spending entries yet.')).not.toBeInTheDocument()
+  })
+
   it('saves quick spend without a pot or credit card link', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -1442,7 +2097,7 @@ describe('spending page', () => {
     expect(screen.queryByText('Recent trail')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '£10.00' }))
-    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+    await user.click(screen.getByRole('button', { name: 'Log spend' }))
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 1000,
@@ -1464,7 +2119,7 @@ describe('spending page', () => {
 
     await user.click(screen.getByRole('button', { name: '£10.00' }))
     await user.type(screen.getByLabelText('Note'), 'Coffee')
-    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+    await user.click(screen.getByRole('button', { name: 'Log spend' }))
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 1000,
@@ -1487,7 +2142,7 @@ describe('spending page', () => {
     await user.click(screen.getByRole('button', { name: '£5.00' }))
     await user.selectOptions(screen.getByLabelText('Link spend to'), 'pot')
     await user.selectOptions(screen.getByLabelText('Pot'), 'pot-food')
-    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+    await user.click(screen.getByRole('button', { name: 'Log spend' }))
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 500,
@@ -1548,7 +2203,7 @@ describe('spending page', () => {
     await user.selectOptions(screen.getByLabelText('Link spend to'), 'pot')
     await user.selectOptions(screen.getByLabelText('Pot'), 'pot-barclays')
     await user.type(screen.getByLabelText('Note'), 'Fuel top-up')
-    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+    await user.click(screen.getByRole('button', { name: 'Log spend' }))
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 2000,
@@ -1633,7 +2288,7 @@ describe('spending page', () => {
     await user.selectOptions(screen.getByLabelText('Link spend to'), 'credit_card')
     await user.selectOptions(screen.getByLabelText('Credit card'), 'card-amex')
     await user.type(screen.getByLabelText('Note'), 'Groceries')
-    await user.click(screen.getByRole('button', { name: 'Log spending' }))
+    await user.click(screen.getByRole('button', { name: 'Log spend' }))
 
     expect(actions.addTransaction).toHaveBeenCalledWith({
       amountPence: 2000,
@@ -1649,6 +2304,156 @@ describe('spending page', () => {
 })
 
 describe('allocating payments page', () => {
+  it('shows a Cards hero with card cover totals from the current allocation summary', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 23,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          creditCardId: 'card-amex',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-card',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 5000,
+          type: 'spending',
+          paymentMethod: 'credit_card',
+          creditCardId: 'card-amex',
+          date: '2026-05-18',
+          note: 'Groceries',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <AllocatingPaymentsPage
+        snapshot={snapshot}
+        actions={createActions()}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    const hero = screen.getByRole('region', { name: 'Cards hero' })
+
+    expect(within(hero).getByRole('heading', { name: 'Cards' })).toBeInTheDocument()
+    expect(within(hero).getAllByText('Card cover needed').length).toBeGreaterThan(0)
+    expect(within(hero).getAllByText('Total owed').length).toBeGreaterThan(0)
+    expect(within(hero).getAllByText('Available after card cover').length).toBeGreaterThan(0)
+    expect(within(hero).queryAllByText('Current pay period').filter((element) => element.closest('article'))).toHaveLength(0)
+    expect(within(hero).getAllByText('£72.00').length).toBeGreaterThanOrEqual(2)
+    expect(within(hero).getAllByText('£828.00').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('region', { name: 'Credit card summary' })).not.toBeInTheDocument()
+  })
+
+  it('renders premium stack cards with provider, owed, available, limit, due date, and utilization states', () => {
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-high',
+          name: 'High Card',
+          provider: 'High Bank',
+          limitPence: 100000,
+          openingBalancePence: 90000,
+          dueDay: 7,
+          dueDate: null,
+          color: '#0f172a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'card-low',
+          name: 'Low Card',
+          provider: 'Low Bank',
+          limitPence: 100000,
+          openingBalancePence: 10000,
+          dueDay: 19,
+          dueDate: null,
+          color: '#475569',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'card-missing',
+          name: 'No Limit Card',
+          provider: 'Unknown Bank',
+          limitPence: 0,
+          openingBalancePence: 10000,
+          dueDay: null,
+          dueDate: null,
+          color: '#64748b',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    const stack = screen.getByRole('region', { name: 'Credit card stack' })
+    const highCard = within(stack).getByRole('button', { name: 'Open High Card card details' })
+    const lowCard = within(stack).getByRole('button', { name: 'Open Low Card card details' })
+    const missingCard = within(stack).getByRole('button', { name: 'Open No Limit Card card details' })
+
+    expect(within(highCard).getAllByText('High Bank').length).toBeGreaterThan(0)
+    expect(within(highCard).getAllByText('High Card').length).toBeGreaterThan(0)
+    expect(within(highCard).getByText('Owed')).toBeInTheDocument()
+    expect(within(highCard).getAllByText('£900.00').length).toBeGreaterThan(0)
+    expect(within(highCard).getByText('Available')).toBeInTheDocument()
+    expect(within(highCard).getAllByText('£100.00').length).toBeGreaterThan(0)
+    expect(within(highCard).getByText('Limit')).toBeInTheDocument()
+    expect(within(highCard).getAllByText('£1,000.00').length).toBeGreaterThan(0)
+    expect(within(highCard).getByText('Due date')).toBeInTheDocument()
+    expect(within(highCard).getAllByText('Day 7').length).toBeGreaterThan(0)
+    expect(within(highCard).getByText('Utilization')).toBeInTheDocument()
+    expect(within(highCard).getAllByText('90%').length).toBeGreaterThan(0)
+
+    expect(within(lowCard).getAllByText('Low Bank').length).toBeGreaterThan(0)
+    expect(within(lowCard).getAllByText('10%').length).toBeGreaterThan(0)
+    expect(within(missingCard).getAllByText('Unknown Bank').length).toBeGreaterThan(0)
+    expect(within(missingCard).getByText('Utilization unavailable')).toBeInTheDocument()
+  })
+
   it('labels Barclays actual available credit separately from forecast available credit', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod({
@@ -1781,8 +2586,144 @@ describe('allocating payments page', () => {
     expect(screen.getByText(/missing card card-capital-one/i)).toBeInTheDocument()
   })
 
-  it('keeps card and repayment forms tucked behind compact controls', async () => {
+  it('shows compact payment allocation rows and preserves card linking behavior', async () => {
     const user = userEvent.setup()
+    const actions = createActions()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          openingBalancePence: 20000,
+          dueDay: 12,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone bill',
+          amountPence: 2200,
+          dueDate: '2026-05-20',
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          creditCardId: null,
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'custom-mot',
+          name: 'MOT',
+          amountPence: 14950,
+          dueDate: '2026-05-21',
+          creditCardId: 'card-amex',
+          status: 'unpaid',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-lunch',
+          potId: 'pot-food',
+          payPeriodId: selectedPayPeriod.id,
+          amountPence: 1250,
+          type: 'spending',
+          paymentMethod: 'pot',
+          creditCardId: null,
+          date: '2026-05-18',
+          note: 'Lunch',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />)
+
+    const paymentPanel = screen.getByRole('region', { name: 'Payment allocation list' })
+    const phoneRow = within(paymentPanel).getByText('Phone bill').closest('article')
+    const motRow = within(paymentPanel).getByText('MOT').closest('article')
+    const lunchRow = within(paymentPanel).getByText('Lunch').closest('article')
+
+    expect(phoneRow).toBeInstanceOf(HTMLElement)
+    expect(motRow).toBeInstanceOf(HTMLElement)
+    expect(lunchRow).toBeInstanceOf(HTMLElement)
+
+    expect(phoneRow as HTMLElement).toHaveClass('rounded-[var(--radius-card)]')
+    expect(within(phoneRow as HTMLElement).getByText('Bill')).toBeInTheDocument()
+    expect(within(phoneRow as HTMLElement).getByText('2026-05-20')).toBeInTheDocument()
+    expect(within(phoneRow as HTMLElement).getByText('£22.00')).toHaveClass('text-right')
+    expect(within(phoneRow as HTMLElement).getByText('Unlinked')).toBeInTheDocument()
+    expect(within(phoneRow as HTMLElement).getByLabelText('Linked card for Phone bill')).toHaveValue('')
+
+    expect(within(motRow as HTMLElement).getByText('Custom')).toBeInTheDocument()
+    expect(within(motRow as HTMLElement).getByText('Everyday Amex')).toBeInTheDocument()
+    expect(within(motRow as HTMLElement).getByLabelText('Linked card for MOT')).toHaveValue('card-amex')
+    expect(within(lunchRow as HTMLElement).getByText('Spending')).toBeInTheDocument()
+    expect(within(lunchRow as HTMLElement).getByText('£12.50')).toHaveClass('text-right')
+    expect(paymentPanel.querySelector('.divide-y')).toBeNull()
+    expect(within(paymentPanel).queryByText('Payment group total')).not.toBeInTheDocument()
+
+    await user.selectOptions(within(phoneRow as HTMLElement).getByLabelText('Linked card for Phone bill'), 'card-amex')
+
+    expect(actions.updateRecurringPayment).toHaveBeenCalledWith('rec-phone', {
+      name: 'Phone bill',
+      amountPence: 2200,
+      dueDay: null,
+      dueDate: '2026-05-20',
+      frequency: 'monthly',
+      potId: 'pot-bills',
+      creditCardId: 'card-amex',
+      priority: 'important',
+    })
+
+    await user.selectOptions(within(motRow as HTMLElement).getByLabelText('Linked card for MOT'), '')
+
+    expect(actions.updateCustomPayment).toHaveBeenCalledWith('custom-mot', {
+      name: 'MOT',
+      amountPence: 14950,
+      dueDate: '2026-05-21',
+      creditCardId: null,
+      status: 'unpaid',
+    })
+
+    await user.selectOptions(within(lunchRow as HTMLElement).getByLabelText('Linked card for Lunch'), 'card-amex')
+
+    expect(actions.updateTransaction).toHaveBeenCalledWith('txn-lunch', {
+      potId: null,
+      amountPence: 1250,
+      date: '2026-05-18',
+      note: 'Lunch',
+      paymentMethod: 'credit_card',
+      creditCardId: 'card-amex',
+    })
+
+    await user.click(within(motRow as HTMLElement).getByRole('button', { name: 'Delete MOT' }))
+
+    expect(within(motRow as HTMLElement).queryByText('Delete')).not.toBeInTheDocument()
+    expect(within(motRow as HTMLElement).getByRole('button', { name: 'Delete MOT' })).toHaveClass('size-9')
+    expect(confirmSpy).toHaveBeenCalledWith('Delete MOT?')
+    expect(actions.deleteCustomPayment).toHaveBeenCalledWith('custom-mot')
+    confirmSpy.mockRestore()
+  })
+
+  it('opens Cards forms in drawers and cancels them without side effects', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
     const selectedPayPeriod = createPayPeriod()
     const snapshot = createSnapshot({
       payPeriods: [selectedPayPeriod],
@@ -1803,19 +2744,37 @@ describe('allocating payments page', () => {
       ],
     })
 
-    render(<AllocatingPaymentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+    render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />)
 
     expect(screen.queryByText('Card allocation cockpit')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New card' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add one-off payment' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Record repayment' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Add credit card' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Record card repayment' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Add credit card' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Add one-off payment' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Record card repayment' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'New card' }))
-    expect(screen.getByRole('region', { name: 'Add credit card' })).toBeInTheDocument()
+    const cardDialog = screen.getByRole('dialog', { name: 'Add credit card' })
+    await user.type(within(cardDialog).getByLabelText('Card name'), 'Draft card')
+    await user.click(within(cardDialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Add credit card' })).not.toBeInTheDocument()
+    expect(actions.addCreditCard).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Add one-off payment' }))
+    const paymentDialog = screen.getByRole('dialog', { name: 'Add one-off payment' })
+    await user.type(within(paymentDialog).getByLabelText('Payment name'), 'MOT')
+    await user.type(within(paymentDialog).getByLabelText('Amount'), '149.50')
+    await user.click(within(paymentDialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Add one-off payment' })).not.toBeInTheDocument()
+    expect(actions.addCustomPayment).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Record repayment' }))
-    expect(screen.getByRole('region', { name: 'Record card repayment' })).toBeInTheDocument()
+    const repaymentDialog = screen.getByRole('dialog', { name: 'Record card repayment' })
+    await user.type(within(repaymentDialog).getByLabelText('Amount'), '20')
+    await user.click(within(repaymentDialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Record card repayment' })).not.toBeInTheDocument()
+    expect(actions.addCreditCardRepayment).not.toHaveBeenCalled()
   })
 
   it('creates a credit card and records a card repayment without showing credit pot controls', async () => {
@@ -1850,7 +2809,7 @@ describe('allocating payments page', () => {
     render(<AllocatingPaymentsPage snapshot={snapshot} actions={actions} selectedPayPeriod={selectedPayPeriod} />)
 
     await user.click(screen.getByRole('button', { name: 'New card' }))
-    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    const cardPanel = screen.getByRole('dialog', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Gold Card')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Capital One')
     await user.type(within(cardPanel).getByLabelText('Limit'), '1200')
@@ -1881,8 +2840,23 @@ describe('allocating payments page', () => {
     expect(screen.queryByRole('region', { name: 'Credit Pots' })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Credit pots' })).not.toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: 'Add one-off payment' }))
+    const paymentDialog = screen.getByRole('dialog', { name: 'Add one-off payment' })
+    await user.type(within(paymentDialog).getByLabelText('Payment name'), 'MOT')
+    await user.type(within(paymentDialog).getByLabelText('Amount'), '149.50')
+    fireEvent.change(within(paymentDialog).getByLabelText('Due date'), { target: { value: '2026-05-27' } })
+    await user.selectOptions(within(paymentDialog).getByLabelText('Linked card'), 'card-amex')
+    await user.click(within(paymentDialog).getByRole('button', { name: 'Add one-off payment' }))
+
+    expect(actions.addCustomPayment).toHaveBeenCalledWith({
+      amountPence: 14950,
+      creditCardId: 'card-amex',
+      dueDate: '2026-05-27',
+      name: 'MOT',
+    })
+
     await user.click(screen.getByRole('button', { name: 'Record repayment' }))
-    const repaymentPanel = screen.getByRole('region', { name: 'Record card repayment' })
+    const repaymentPanel = screen.getByRole('dialog', { name: 'Record card repayment' })
     await user.type(within(repaymentPanel).getByLabelText('Amount'), '12.50')
     await user.type(within(repaymentPanel).getByLabelText('Note'), 'Part payment')
     await user.click(within(repaymentPanel).getByRole('button', { name: 'Record repayment' }))
@@ -1979,7 +2953,7 @@ describe('allocating payments page', () => {
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
   })
 
-  it('orders and expands credit summary cards independently', async () => {
+  it('orders and expands Cards hero summary cards independently', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod()
     const snapshot = createSnapshot({
@@ -2003,32 +2977,34 @@ describe('allocating payments page', () => {
 
     render(<AllocatingPaymentsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
 
-    const summaryPanel = screen.getByRole('region', { name: 'Credit card summary' })
+    const summaryPanel = screen.getByRole('region', { name: 'Cards hero' })
     const metricLabels = within(summaryPanel)
-      .getAllByText(/Selected pay|Credit pots|Card cover needed/)
+      .getAllByText(/Card cover needed|Total owed|Available after card cover/)
       .filter((element) => element.closest('summary'))
       .map((element) => element.textContent)
 
-    expect(metricLabels).toEqual(['Selected pay', 'Credit pots', 'Card cover needed'])
+    expect(metricLabels).toEqual(['Card cover needed', 'Total owed', 'Available after card cover'])
 
-    const selectedPay = getMetricDetails(summaryPanel, 'Selected pay')
-    const creditPots = getMetricDetails(summaryPanel, 'Credit pots')
     const cardCoverNeeded = getMetricDetails(summaryPanel, 'Card cover needed')
+    const totalOwed = getMetricDetails(summaryPanel, 'Total owed')
+    const availableAfterCardCover = getMetricDetails(summaryPanel, 'Available after card cover')
 
-    await user.click(within(selectedPay).getByText('Show calculation'))
-    expect(selectedPay).toHaveAttribute('open')
-    expect(creditPots).not.toHaveAttribute('open')
-    expect(cardCoverNeeded).not.toHaveAttribute('open')
+    expect(within(summaryPanel).queryByText('Show calculation')).not.toBeInTheDocument()
 
-    await user.click(within(creditPots).getByText('Show calculation'))
-    expect(selectedPay).not.toHaveAttribute('open')
-    expect(creditPots).toHaveAttribute('open')
-    expect(cardCoverNeeded).not.toHaveAttribute('open')
-
-    await user.click(within(cardCoverNeeded).getByText('Show calculation'))
-    expect(selectedPay).not.toHaveAttribute('open')
-    expect(creditPots).not.toHaveAttribute('open')
+    await clickMetricSummary(user, cardCoverNeeded)
     expect(cardCoverNeeded).toHaveAttribute('open')
+    expect(totalOwed).not.toHaveAttribute('open')
+    expect(availableAfterCardCover).not.toHaveAttribute('open')
+
+    await clickMetricSummary(user, totalOwed)
+    expect(cardCoverNeeded).not.toHaveAttribute('open')
+    expect(totalOwed).toHaveAttribute('open')
+    expect(availableAfterCardCover).not.toHaveAttribute('open')
+
+    await clickMetricSummary(user, availableAfterCardCover)
+    expect(cardCoverNeeded).not.toHaveAttribute('open')
+    expect(totalOwed).not.toHaveAttribute('open')
+    expect(availableAfterCardCover).toHaveAttribute('open')
   })
 
   it('offers and renders the teal credit card design', async () => {
@@ -2066,7 +3042,7 @@ describe('allocating payments page', () => {
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4/bottom-panel.svg"]')).not.toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'New card' }))
-    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    const cardPanel = screen.getByRole('dialog', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Mint Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Mastercard')
     await user.type(within(cardPanel).getByLabelText('Limit'), '900')
@@ -2137,7 +3113,7 @@ describe('allocating payments page', () => {
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-4-maroon/bottom-panel.svg"]')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'New card' }))
-    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    const cardPanel = screen.getByRole('dialog', { name: 'Add credit card' })
 
     expect(within(cardPanel).queryByRole('button', { name: 'Gold Card' })).not.toBeInTheDocument()
     await user.click(within(cardPanel).getByRole('button', { name: 'Card design' }))
@@ -2192,7 +3168,7 @@ describe('allocating payments page', () => {
     expect(container.querySelector('img[src="/figma-assets/cart-geometric-1/visa-logo.svg"]')).not.toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'New card' }))
-    const cardPanel = screen.getByRole('region', { name: 'Add credit card' })
+    const cardPanel = screen.getByRole('dialog', { name: 'Add credit card' })
     await user.type(within(cardPanel).getByLabelText('Card name'), 'Blue Reserve')
     await user.type(within(cardPanel).getByLabelText('Provider'), 'Visa')
     await user.type(within(cardPanel).getByLabelText('Limit'), '900')
@@ -2273,6 +3249,153 @@ describe('allocating payments page', () => {
 })
 
 describe('pots page', () => {
+  it('shows a Pots summary and compact premium pot cards with targets and activity previews', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-food',
+          name: 'Food',
+          type: 'spending',
+          category: 'Spending',
+          icon: 'food',
+          balancePence: 12000,
+          targetPence: null,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-holiday',
+          name: 'Holiday',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'plane',
+          balancePence: 15000,
+          targetPence: 50000,
+          color: '#7c3aed',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'shield',
+          balancePence: 40000,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-card',
+          name: 'Barclays reserve',
+          type: 'reserved',
+          category: 'Bills',
+          icon: 'card',
+          balancePence: 30000,
+          targetPence: null,
+          color: '#ea580c',
+          linkedCreditCardId: 'card-barclays',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-archived',
+          name: 'Archived stash',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'savings',
+          balancePence: 99900,
+          targetPence: null,
+          color: '#475569',
+          archived: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-food',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 1250,
+          type: 'spending',
+          date: '2026-05-17',
+          note: 'Lunch',
+          createdAt: '2026-05-17T00:00:00.000Z',
+          updatedAt: '2026-05-17T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    const summary = screen.getByRole('region', { name: 'Pots summary' })
+
+    expect(within(summary).getByRole('heading', { name: 'Pots' })).toBeInTheDocument()
+    expect(within(summary).getByText('Total in pots')).toBeInTheDocument()
+    expect(within(summary).getByText('4 active pots')).toBeInTheDocument()
+    expect(within(summary).queryByText('Spending pots')).not.toBeInTheDocument()
+    expect(within(summary).queryByText('Savings pots')).not.toBeInTheDocument()
+    expect(within(summary).queryByText('Reserved/card pots')).not.toBeInTheDocument()
+    expect(within(summary).getByText('£970.00')).toBeInTheDocument()
+
+    const potGrid = screen.getByRole('region', { name: 'Pot grid' })
+    const foodCard = within(potGrid).getByRole('article', { name: 'Food pot card' })
+    const holidayCard = within(potGrid).getByRole('article', { name: 'Holiday pot card' })
+
+    expect(foodCard).not.toHaveClass('h-[330px]')
+    expect(within(foodCard).getByText('Spending')).toBeInTheDocument()
+    expect(within(foodCard).getByText('£120.00')).toBeInTheDocument()
+    expect(within(foodCard).getByText('No target')).toBeInTheDocument()
+    expect(within(foodCard).queryByText('0%')).not.toBeInTheDocument()
+    expect(within(foodCard).getByText('1 activity')).toBeInTheDocument()
+    expect(within(foodCard).getByText('Lunch')).toBeInTheDocument()
+
+    expect(within(holidayCard).getByText('Saving')).toBeInTheDocument()
+    expect(within(holidayCard).getByText('£150.00')).toBeInTheDocument()
+    expect(within(holidayCard).getByText('30%')).toBeInTheDocument()
+    expect(within(holidayCard).getByText('£500.00 target')).toBeInTheDocument()
+    expect(screen.queryByText('Archived stash')).not.toBeInTheDocument()
+  })
+
+  it('shows a clean empty Pots state without counting archived pots', () => {
+    const snapshot = createSnapshot({
+      pots: [
+        {
+          id: 'pot-archived',
+          name: 'Archived stash',
+          type: 'saving',
+          category: 'Savings',
+          icon: 'savings',
+          balancePence: 99900,
+          targetPence: null,
+          color: '#475569',
+          archived: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<PotsPage snapshot={snapshot} actions={createActions()} />)
+
+    const summary = screen.getByRole('region', { name: 'Pots summary' })
+    const potGrid = screen.getByRole('region', { name: 'Pot grid' })
+
+    expect(within(summary).getByRole('heading', { name: 'Pots' })).toBeInTheDocument()
+    expect(within(summary).getAllByText('£0.00').length).toBeGreaterThan(0)
+    expect(within(potGrid).getByText('No pots yet.')).toBeInTheDocument()
+    expect(within(potGrid).getByText('Create a pot to separate spending, savings, or reserved money.')).toBeInTheDocument()
+    expect(screen.queryByText('Archived stash')).not.toBeInTheDocument()
+  })
+
   it('edits and deletes pots after confirmation', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -2309,6 +3432,42 @@ describe('pots page', () => {
     expect(actions.deletePot).toHaveBeenCalledWith('pot-food')
 
     confirmSpy.mockRestore()
+  })
+
+  it('keeps pot create and top-up forms hidden until their actions open drawers', async () => {
+    const user = userEvent.setup()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+
+    render(
+      <PotsPage
+        snapshot={createSnapshot({ payPeriods: [selectedPayPeriod] })}
+        actions={createActions()}
+        selectedPayPeriod={selectedPayPeriod}
+      />,
+    )
+
+    expect(screen.queryByLabelText('Pot name')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Pot to top up')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Create pot' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Top up pot' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Create pot' }))
+
+    expect(within(screen.getByRole('dialog', { name: 'Create pot' })).getByLabelText('Pot name')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Close create pot' }))
+    await user.click(screen.getByRole('button', { name: 'Top up pot' }))
+
+    const topUpDialog = screen.getByRole('dialog', { name: 'Top up pot' })
+    expect(within(topUpDialog).getByLabelText('Pot to top up')).toBeInTheDocument()
+    expect(within(topUpDialog).getByLabelText('Top up amount')).toBeInTheDocument()
   })
 
   it('creates a pot linked to a credit card reserve target', async () => {
@@ -2463,9 +3622,11 @@ describe('pots page', () => {
       />,
     )
 
-    await user.selectOptions(screen.getByLabelText('Pot to top up'), 'pot-food')
-    await user.type(screen.getByLabelText('Top up amount'), '25.00')
     await user.click(screen.getByRole('button', { name: 'Top up pot' }))
+    const topUpDialog = screen.getByRole('dialog', { name: 'Top up pot' })
+    await user.selectOptions(within(topUpDialog).getByLabelText('Pot to top up'), 'pot-food')
+    await user.type(within(topUpDialog).getByLabelText('Top up amount'), '25.00')
+    await user.click(within(topUpDialog).getByRole('button', { name: 'Top up pot' }))
 
     expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
       id: expect.stringMatching(/^pot-top-up-period-current-pot-food-/),
@@ -2473,6 +3634,7 @@ describe('pots page', () => {
       potId: 'pot-food',
       amountPence: 2500,
     })
+    expect(screen.queryByRole('dialog', { name: 'Top up pot' })).not.toBeInTheDocument()
   })
 
   it('records another pot top-up as a separate paycheck allocation', async () => {
@@ -2509,9 +3671,11 @@ describe('pots page', () => {
       />,
     )
 
-    await user.selectOptions(screen.getByLabelText('Pot to top up'), 'pot-food')
-    await user.type(screen.getByLabelText('Top up amount'), '15.00')
     await user.click(screen.getByRole('button', { name: 'Top up pot' }))
+    const topUpDialog = screen.getByRole('dialog', { name: 'Top up pot' })
+    await user.selectOptions(within(topUpDialog).getByLabelText('Pot to top up'), 'pot-food')
+    await user.type(within(topUpDialog).getByLabelText('Top up amount'), '15.00')
+    await user.click(within(topUpDialog).getByRole('button', { name: 'Top up pot' }))
 
     expect(actions.upsertPaycheckPotAllocation).toHaveBeenCalledWith({
       id: expect.stringMatching(/^pot-top-up-period-current-pot-food-/),
@@ -2565,7 +3729,7 @@ describe('pots page', () => {
       />,
     )
 
-    const topUpPanel = screen.getByRole('region', { name: 'Top up pots' })
+    const topUpPanel = screen.getByRole('region', { name: 'Top-up history' })
 
     expect(within(topUpPanel).getByText('Top-up history')).toBeInTheDocument()
     expect(within(topUpPanel).getAllByText('Food').length).toBeGreaterThan(0)
@@ -2721,7 +3885,7 @@ describe('pots page', () => {
     expect(screen.queryByText('100%')).not.toBeInTheDocument()
   })
 
-  it('expands a pot to show spending, recurring payments, and allocations tied to it', async () => {
+  it('opens a pot detail drawer to show spending recurring payments and allocations tied to it', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
       payPeriods: [
@@ -2791,11 +3955,11 @@ describe('pots page', () => {
 
     render(<PotsPage snapshot={snapshot} actions={createActions()} />)
 
-    expect(screen.queryByText('Lunch')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Food pot details' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'View Food activity' }))
+    await user.click(screen.getByRole('button', { name: 'View Food details' }))
 
-    const activity = screen.getByRole('region', { name: 'Food activity' })
+    const activity = screen.getByRole('dialog', { name: 'Food pot details' })
     expect(within(activity).getAllByText('Lunch').length).toBeGreaterThan(0)
     expect(within(activity).getAllByText('Spending · 2026-05-17').length).toBeGreaterThan(0)
     expect(within(activity).getAllByText('-£12.50').length).toBeGreaterThan(0)
@@ -3098,6 +4262,121 @@ describe('pots page', () => {
 })
 
 describe('recurring page', () => {
+  it('shows a Bills summary and row list for active paused and due-soon bills', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      settings: createSettings({ appDateMode: 'manual', manualTodayIso: '2026-05-16' }),
+      payPeriods: [selectedPayPeriod],
+      recurringPayments: [
+        {
+          id: 'rec-phone',
+          name: 'Phone',
+          amountPence: 2200,
+          dueDay: 18,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'important',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'rec-broadband',
+          name: 'Broadband',
+          amountPence: 3200,
+          dueDay: 24,
+          frequency: 'monthly',
+          potId: null,
+          creditCardId: 'card-aqua',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'rec-gym',
+          name: 'Gym',
+          amountPence: 1800,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'pot-food',
+          priority: 'optional',
+          active: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-aqua',
+          name: 'Aqua',
+          provider: 'Aqua',
+          limitPence: 80000,
+          dueDay: 5,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    const summary = screen.getByRole('region', { name: 'Bills summary' })
+
+    expect(within(summary).getByRole('heading', { name: 'Bills' })).toBeInTheDocument()
+    expect(within(summary).getByText('Bills this pay period')).toBeInTheDocument()
+    expect(within(summary).getByText('Next bill due')).toBeInTheDocument()
+    expect(within(summary).getByText('2 active bills')).toBeInTheDocument()
+    expect(within(summary).queryByText('Active bills')).not.toBeInTheDocument()
+    expect(within(summary).queryByText('Before next payday')).not.toBeInTheDocument()
+    expect(within(summary).getAllByText('£54.00').length).toBe(1)
+    expect(within(summary).getByText('Phone')).toBeInTheDocument()
+    expect(within(summary).getByText('2026-05-18')).toBeInTheDocument()
+
+    const billsList = screen.getByRole('region', { name: 'Bills list' })
+    const phoneRow = within(billsList).getByRole('article', { name: 'Phone bill row' })
+    const broadbandRow = within(billsList).getByRole('article', { name: 'Broadband bill row' })
+    const gymRow = within(billsList).getByRole('article', { name: 'Gym bill row' })
+
+    expect(within(phoneRow).getByLabelText('Phone status active')).toBeInTheDocument()
+    expect(within(phoneRow).getByText('Due soon')).toBeInTheDocument()
+    expect(within(phoneRow).getByText(/Due day 18/)).toBeInTheDocument()
+    expect(within(phoneRow).getByText(/monthly/)).toBeInTheDocument()
+    expect(within(phoneRow).getByText('Bills')).toBeInTheDocument()
+    expect(within(phoneRow).getByText('important')).toBeInTheDocument()
+    expect(within(phoneRow).getByText('£22.00')).toBeInTheDocument()
+
+    expect(within(broadbandRow).getByText('Aqua')).toBeInTheDocument()
+    expect(within(broadbandRow).getByText('essential')).toBeInTheDocument()
+    expect(within(gymRow).getByLabelText('Gym status paused')).toBeInTheDocument()
+    expect(within(gymRow).getByText('Paused')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Recurring payments' })).not.toBeInTheDocument()
+  })
+
+  it('shows a clean Bills empty state when no bills exist', () => {
+    render(<RecurringPage snapshot={createSnapshot()} actions={createActions()} />)
+
+    const summary = screen.getByRole('region', { name: 'Bills summary' })
+    const billsList = screen.getByRole('region', { name: 'Bills list' })
+
+    expect(within(summary).getByRole('heading', { name: 'Bills' })).toBeInTheDocument()
+    expect(within(summary).getAllByText('£0.00').length).toBeGreaterThan(0)
+    expect(within(summary).getByText('0 active bills')).toBeInTheDocument()
+    expect(within(summary).getByText('No bills scheduled')).toBeInTheDocument()
+    expect(within(billsList).getByText('No bills yet.')).toBeInTheDocument()
+    expect(within(billsList).getByText('Add a bill to start tracking recurring payments.')).toBeInTheDocument()
+  })
+
   it('opens the create form from the app header action and keeps payment details tucked away', async () => {
     const user = userEvent.setup()
     const snapshot = createSnapshot({
@@ -3120,13 +4399,18 @@ describe('recurring page', () => {
     render(<RecurringWithHeaderAction snapshot={snapshot} actions={createActions()} />)
 
     expect(screen.queryByLabelText('Name')).not.toBeInTheDocument()
-    expect(screen.getByText('Phone')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Bills list' })).getByRole('article', {
+        name: 'Phone bill row',
+      }),
+    ).toBeInTheDocument()
     expect(screen.queryByText('Paid from Bills')).not.toBeInTheDocument()
     expect(screen.queryByText('Recurring control')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'New payment' }))
 
-    expect(screen.getByLabelText('Name')).toBeInTheDocument()
+    const createDialog = screen.getByRole('dialog', { name: 'Add recurring payment' })
+    expect(within(createDialog).getByLabelText('Name')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Show Phone details' }))
 
@@ -3166,14 +4450,17 @@ describe('recurring page', () => {
     render(<RecurringPage snapshot={snapshot} actions={createActions()} />)
 
     expect(screen.queryByRole('region', { name: 'Recurring calendar' })).not.toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Recurring payments' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'What you owe next payday' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Bills list' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Recurring payments' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'What you owe next payday' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Upcoming bills' })).toBeInTheDocument()
     expect(screen.getAllByText('Phone').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Broadband').length).toBeGreaterThan(0)
   })
 
-  it('shows a next payday owed dropdown with the next pay period costs', () => {
+  it('shows a Bills-only upcoming agenda without dashboard next-payday totals', () => {
     const snapshot = createSnapshot({
+      settings: createSettings({ appDateMode: 'manual', manualTodayIso: '2026-05-16' }),
       pots: [
         {
           id: 'pot-bills',
@@ -3247,13 +4534,15 @@ describe('recurring page', () => {
 
     render(<RecurringPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={snapshot.payPeriods[0]} />)
 
-    const nextPaydayPanel = screen.getByRole('region', { name: 'What you owe next payday' })
-    expect(within(nextPaydayPanel).getAllByText('Total owed next payday').length).toBeGreaterThan(0)
-    expect(within(nextPaydayPanel).getByText('2026-05-30 to 2026-06-12')).toBeInTheDocument()
-    expect(within(nextPaydayPanel).getAllByText('£1,495.00').length).toBeGreaterThan(0)
-    expect(within(nextPaydayPanel).getByText('Rent')).toBeInTheDocument()
-    expect(within(nextPaydayPanel).getByText('MOT')).toBeInTheDocument()
-    expect(within(nextPaydayPanel).getByText('Loan')).toBeInTheDocument()
+    const upcomingPanel = screen.getByRole('region', { name: 'Upcoming bills' })
+    expect(within(upcomingPanel).getByText('Rent')).toBeInTheDocument()
+    expect(within(upcomingPanel).getByText('2026-06-01')).toBeInTheDocument()
+    expect(within(upcomingPanel).getByText('£650.00')).toBeInTheDocument()
+    expect(within(upcomingPanel).queryByText('MOT')).not.toBeInTheDocument()
+    expect(within(upcomingPanel).queryByText('Loan')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'What you owe next payday' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Total owed next payday')).not.toBeInTheDocument()
+    expect(screen.queryByText('Money left estimate')).not.toBeInTheDocument()
   })
 
   it('creates a card-linked recurring payment without a pot', async () => {
@@ -3409,6 +4698,83 @@ describe('dashboard page', () => {
     expect(onPayPeriodChange).toHaveBeenCalledWith('period-next')
   })
 
+  it('shows the premium Overview hero with real summary values and primary actions', async () => {
+    const user = userEvent.setup()
+    const onViewChange = vi.fn()
+    const selectedPayPeriod = createPayPeriod({ incomePence: 90000 })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 1,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCardPots: [
+        {
+          id: 'credit-pot-amex',
+          creditCardId: 'card-amex',
+          payPeriodId: selectedPayPeriod.id,
+          payday: selectedPayPeriod.payday,
+          periodStartDate: selectedPayPeriod.startDate,
+          periodEndDate: selectedPayPeriod.endDate,
+          name: 'Amex payoff',
+          amountPence: 5000,
+          source: 'paycheck',
+          status: 'active',
+          note: 'Card set-aside',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={onViewChange} />)
+
+    const overviewHero = screen.getByRole('region', { name: 'Overview hero' })
+
+    expect(within(overviewHero).getAllByText('Money left this pay period').length).toBeGreaterThan(0)
+    expect(within(overviewHero).getByText('16th May 26 to 29th May 26')).toBeInTheDocument()
+    expect(within(overviewHero).getAllByText('£850.00').length).toBeGreaterThan(0)
+    expect(within(overviewHero).getAllByText('Income').length).toBeGreaterThan(0)
+    expect(within(overviewHero).getAllByText('Planned costs').length).toBeGreaterThan(0)
+    expect(within(overviewHero).getAllByText('Card cover / spend').length).toBeGreaterThan(0)
+    expect(within(overviewHero).getByText('Available after cards')).toBeInTheDocument()
+    expect(within(overviewHero).getAllByText('£900.00').length).toBeGreaterThan(0)
+    expect(within(overviewHero).getAllByText('£50.00').length).toBeGreaterThan(0)
+
+    await user.click(within(overviewHero).getByRole('button', { name: 'Log spend' }))
+    await user.click(within(overviewHero).getByRole('button', { name: 'Update payday' }))
+
+    expect(onViewChange).toHaveBeenNthCalledWith(1, 'spending')
+    expect(onViewChange).toHaveBeenNthCalledWith(2, 'payday')
+  })
+
+  it('shows a clean empty Overview hero without fake money values', async () => {
+    const user = userEvent.setup()
+    const onViewChange = vi.fn()
+
+    render(<DashboardPage snapshot={createSnapshot()} selectedPayPeriod={null} onViewChange={onViewChange} />)
+
+    const overviewHero = screen.getByRole('region', { name: 'Overview hero' })
+
+    expect(within(overviewHero).getByText('No paycheck plan yet')).toBeInTheDocument()
+    expect(within(overviewHero).getByText('Create your first paycheck plan to see your pay, planned costs, and money left.')).toBeInTheDocument()
+    expect(within(overviewHero).queryByText('£0.00')).not.toBeInTheDocument()
+
+    await user.click(within(overviewHero).getByRole('button', { name: 'Update payday' }))
+
+    expect(onViewChange).toHaveBeenCalledWith('payday')
+  })
+
   it('shows one clear pay summary with correct current period maths', () => {
     const snapshot = createSnapshot({
       pots: [
@@ -3524,10 +4890,11 @@ describe('dashboard page', () => {
 
     render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
 
-    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
-    expect(within(currentPeriod).getAllByText('Total pay').length).toBeGreaterThan(0)
-    expect(within(currentPeriod).getAllByText('Total costs').length).toBeGreaterThan(0)
-    expect(within(currentPeriod).getAllByText('Money left').length).toBeGreaterThan(0)
+    const currentPeriod = screen.getByRole('region', { name: 'Overview hero' })
+    expect(within(currentPeriod).getAllByText('Income').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('Planned costs').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getAllByText('Money left this pay period').length).toBeGreaterThan(0)
+    expect(within(currentPeriod).getByText('Safe to spend')).toBeInTheDocument()
     expect(within(currentPeriod).getAllByText('£798.00').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('£250.00').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('£548.00').length).toBeGreaterThan(0)
@@ -3538,7 +4905,228 @@ describe('dashboard page', () => {
     expect(screen.queryByText('Paycheck shape')).not.toBeInTheDocument()
   })
 
-  it('previews next paycheck outgoings in a collapsible panel with paycheck navigation', async () => {
+  it('shows compact lower Overview sections with useful obligations and recent activity rows', () => {
+    const restoreLocalStorage = mockLocalStorage()
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 120000,
+    })
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [
+        {
+          id: 'pot-bills',
+          name: 'Bills',
+          type: 'reserved',
+          balancePence: 0,
+          targetPence: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-food',
+          name: 'Food',
+          type: 'spending',
+          balancePence: 9000,
+          targetPence: null,
+          color: '#16a34a',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+        {
+          id: 'pot-holiday',
+          name: 'Holiday',
+          type: 'saving',
+          balancePence: 25000,
+          targetPence: 10000,
+          color: '#7c3aed',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      recurringPayments: [
+        {
+          id: 'council-tax',
+          name: 'Council Tax',
+          amountPence: 6000,
+          dueDay: 20,
+          frequency: 'monthly',
+          potId: 'pot-bills',
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'rent',
+          name: 'Rent',
+          amountPence: 100000,
+          dueDay: 8,
+          frequency: 'monthly',
+          potId: null,
+          priority: 'essential',
+          active: true,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      customPayments: [
+        {
+          id: 'mot',
+          name: 'MOT',
+          amountPence: 14950,
+          dueDate: '2026-06-02',
+          status: 'unpaid',
+          creditCardId: null,
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      debts: [
+        {
+          id: 'debt-loan',
+          name: 'Loan',
+          lender: 'Finance Co',
+          originalAmountPence: 50000,
+          currentBalancePence: 20000,
+          minimumPaymentPence: 4000,
+          dueDate: '2026-06-05',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCards: [
+        {
+          id: 'card-amex',
+          name: 'Everyday Amex',
+          provider: 'Amex',
+          limitPence: 100000,
+          dueDay: 1,
+          dueDate: null,
+          color: '#2563eb',
+          archived: false,
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      creditCardPots: [
+        {
+          id: 'credit-pot-amex',
+          creditCardId: 'card-amex',
+          payPeriodId: null,
+          payday: '2026-05-30',
+          periodStartDate: '2026-05-30',
+          periodEndDate: '2026-06-12',
+          name: 'Amex payoff',
+          amountPence: 5000,
+          source: 'paycheck',
+          status: 'active',
+          note: 'Card set-aside',
+          createdAt: '2026-05-16T00:00:00.000Z',
+          updatedAt: '2026-05-16T00:00:00.000Z',
+        },
+      ],
+      potAllocations: [
+        {
+          id: 'allocation-food',
+          payPeriodId: 'period-current',
+          potId: 'pot-food',
+          amountPence: 2500,
+          source: 'manual',
+          recurringPaymentId: null,
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn-lunch',
+          potId: 'pot-food',
+          payPeriodId: 'period-current',
+          amountPence: 1250,
+          type: 'spending',
+          paymentMethod: 'pot',
+          creditCardId: null,
+          recurringPaymentId: null,
+          date: '2026-05-18',
+          note: 'Lunch',
+          createdAt: '2026-05-18T10:00:00.000Z',
+          updatedAt: '2026-05-18T10:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
+
+    const checklist = screen.getByRole('region', { name: 'Paycheck to-do list' })
+    expect(within(checklist).getByText('0 of 3 sorted')).toBeInTheDocument()
+    expect(within(checklist).getByText('£97.50 left to sort')).toBeInTheDocument()
+    expect(within(checklist).getByText('Set aside £60.00 into "Bills" pot for "Council Tax"')).toBeInTheDocument()
+    expect(within(checklist).queryByText('Done')).not.toBeInTheDocument()
+    expect(within(checklist).queryByText('Left')).not.toBeInTheDocument()
+    expect(within(checklist).queryByText('Ignored')).not.toBeInTheDocument()
+
+    const obligations = screen.getByRole('region', { name: 'What you owe next paycheck' })
+    expect(within(obligations).getByText('Rent')).toBeInTheDocument()
+    expect(within(obligations).getByText('MOT')).toBeInTheDocument()
+    expect(within(obligations).getByText('Loan')).toBeInTheDocument()
+    expect(within(obligations).getByText('Amex payoff')).toBeInTheDocument()
+    expect(within(obligations).queryByText('Holiday')).not.toBeInTheDocument()
+    expect(within(obligations).queryByText('Total outgoing')).not.toBeInTheDocument()
+    expect(within(obligations).queryByText('Money left estimate')).not.toBeInTheDocument()
+    expect(within(obligations).queryByRole('button', { name: 'Show next paycheck outgoings' })).not.toBeInTheDocument()
+
+    const activity = screen.getByRole('region', { name: 'Recent activity' })
+    expect(within(activity).getByText('Lunch')).toBeInTheDocument()
+    expect(within(activity).getByText('Spending · Food')).toBeInTheDocument()
+    expect(within(activity).getByText('2026-05-18')).toBeInTheDocument()
+    expect(within(activity).getByText('-£12.50')).toBeInTheDocument()
+    expect(within(activity).getByText('Food top-up')).toBeInTheDocument()
+    expect(within(activity).getByText('Pot top-up · Food')).toBeInTheDocument()
+    expect(within(activity).getByText('2026-05-16')).toBeInTheDocument()
+    expect(within(activity).getByText('+£25.00')).toBeInTheDocument()
+
+    restoreLocalStorage()
+  })
+
+  it('shows clean empty lower Overview states without duplicate totals', () => {
+    const restoreLocalStorage = mockLocalStorage()
+    const selectedPayPeriod = createPayPeriod()
+    const snapshot = createSnapshot({
+      payPeriods: [selectedPayPeriod],
+      pots: [],
+      transactions: [],
+      potAllocations: [],
+      recurringPayments: [],
+      customPayments: [],
+      debts: [],
+      creditCards: [],
+      creditCardPots: [],
+    })
+
+    render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
+
+    expect(screen.getByText('No set-asides for this paycheck')).toBeInTheDocument()
+    expect(screen.getByText('No bills, debts, or card payments in this preview.')).toBeInTheDocument()
+    expect(screen.getByText('No recent activity for this paycheck.')).toBeInTheDocument()
+    expect(screen.queryByText('Total outgoing')).not.toBeInTheDocument()
+    expect(screen.queryByText('Money left estimate')).not.toBeInTheDocument()
+
+    restoreLocalStorage()
+  })
+
+  it('previews next paycheck outgoings in a compact agenda with paycheck navigation', async () => {
     const user = userEvent.setup()
     const selectedPayPeriod = createPayPeriod({
       id: 'period-current',
@@ -3596,15 +5184,14 @@ describe('dashboard page', () => {
     const previewPanel = screen.getByRole('region', { name: 'What you owe next paycheck' })
     expect(within(previewPanel).getByText('2026-06-05 to 2026-06-18')).toBeInTheDocument()
     expect(within(previewPanel).getAllByText('£1,149.50').length).toBeGreaterThan(0)
-    expect(within(previewPanel).queryByText('Rent')).not.toBeInTheDocument()
-
-    await user.click(within(previewPanel).getByRole('button', { name: 'Show next paycheck outgoings' }))
-
     expect(within(previewPanel).getByText('Rent')).toBeInTheDocument()
     expect(within(previewPanel).getByText('MOT')).toBeInTheDocument()
-    expect(within(previewPanel).getByText('2026-06-08 · Recurring')).toBeInTheDocument()
-    expect(within(previewPanel).getByText('2026-06-16 · Saved payment')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('2026-06-08')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('Recurring')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('2026-06-16')).toBeInTheDocument()
+    expect(within(previewPanel).getByText('Saved payment')).toBeInTheDocument()
     expect(within(previewPanel).queryByText('Phone')).not.toBeInTheDocument()
+    expect(within(previewPanel).queryByRole('button', { name: 'Show next paycheck outgoings' })).not.toBeInTheDocument()
 
     await user.click(within(previewPanel).getByRole('button', { name: 'Next paycheck preview' }))
 
@@ -4565,7 +6152,7 @@ describe('dashboard page', () => {
       <DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />,
     )
 
-    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const currentPeriod = screen.getByRole('region', { name: 'Overview hero' })
     const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
 
     expect(within(currentPeriod).getAllByText('£60.00').length).toBeGreaterThan(0)
@@ -4573,6 +6160,7 @@ describe('dashboard page', () => {
 
     await user.click(within(todoList).getByRole('button', { name: 'Ignore Payment for Council Tax' }))
 
+    expect(within(todoList).queryByText('Ignore Payment')).not.toBeInTheDocument()
     expect(within(todoList).getByRole('button', { name: 'Ignore Payment for Council Tax' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -4591,7 +6179,7 @@ describe('dashboard page', () => {
     )
     expect(screen.getByText('Ignored for this paycheck')).toBeInTheDocument()
     expect(
-      within(screen.getByRole('region', { name: 'Selected pay period' })).getAllByText('£1,000.00').length,
+      within(screen.getByRole('region', { name: 'Overview hero' })).getAllByText('£1,000.00').length,
     ).toBeGreaterThan(0)
     restoreLocalStorage()
   })
@@ -4637,7 +6225,7 @@ describe('dashboard page', () => {
 
     render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
 
-    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const currentPeriod = screen.getByRole('region', { name: 'Overview hero' })
     const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
 
     expect(within(currentPeriod).getAllByText('£0.00').length).toBeGreaterThan(0)
@@ -4686,7 +6274,7 @@ describe('dashboard page', () => {
 
     render(<DashboardPage snapshot={snapshot} selectedPayPeriod={selectedPayPeriod} onViewChange={vi.fn()} />)
 
-    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const currentPeriod = screen.getByRole('region', { name: 'Overview hero' })
     const todoList = screen.getByRole('region', { name: 'Paycheck to-do list' })
 
     expect(within(currentPeriod).getAllByText('£200.00').length).toBeGreaterThan(0)
@@ -4705,24 +6293,26 @@ describe('dashboard page', () => {
 
     render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
 
-    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
-    const totalPay = getMetricDetails(currentPeriod, 'Total pay')
-    const totalCosts = getMetricDetails(currentPeriod, 'Total costs')
-    const moneyLeft = getMetricDetails(currentPeriod, 'Money left')
+    const currentPeriod = screen.getByRole('region', { name: 'Overview hero' })
+    const totalPay = getMetricDetails(currentPeriod, 'Income')
+    const totalCosts = getMetricDetails(currentPeriod, 'Planned costs')
+    const moneyLeft = getMetricDetails(currentPeriod, 'Money left this pay period')
 
-    await user.click(within(totalPay).getByText('Show calculation'))
+    expect(within(currentPeriod).queryByText('Show calculation')).not.toBeInTheDocument()
+
+    await clickMetricSummary(user, totalPay)
 
     expect(totalPay).toHaveAttribute('open')
     expect(totalCosts).not.toHaveAttribute('open')
     expect(moneyLeft).not.toHaveAttribute('open')
 
-    await user.click(within(totalCosts).getByText('Show calculation'))
+    await clickMetricSummary(user, totalCosts)
 
     expect(totalPay).not.toHaveAttribute('open')
     expect(totalCosts).toHaveAttribute('open')
     expect(moneyLeft).not.toHaveAttribute('open')
 
-    await user.click(within(moneyLeft).getByText('Show calculation'))
+    await clickMetricSummary(user, moneyLeft)
 
     expect(totalPay).not.toHaveAttribute('open')
     expect(totalCosts).not.toHaveAttribute('open')
@@ -4781,7 +6371,7 @@ describe('dashboard page', () => {
 
     render(<DashboardPage snapshot={snapshot} selectedPayPeriod={snapshot.payPeriods[0]} onViewChange={vi.fn()} />)
 
-    const currentPeriod = screen.getByRole('region', { name: 'Selected pay period' })
+    const currentPeriod = screen.getByRole('region', { name: 'Overview hero' })
     expect(within(currentPeriod).getAllByText('£500.00').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('£200.00').length).toBeGreaterThan(0)
     expect(within(currentPeriod).getAllByText('£300.00').length).toBeGreaterThan(0)
@@ -4868,6 +6458,155 @@ describe('history page', () => {
 })
 
 describe('debts page', () => {
+  it('shows a calm Debts hero and compact debt rows for active paid overdue and due-soon debts', () => {
+    const selectedPayPeriod = createPayPeriod({
+      id: 'period-current',
+      startDate: '2026-05-16',
+      endDate: '2026-05-29',
+      payday: '2026-05-16',
+      nextPayday: '2026-05-30',
+      incomePence: 90000,
+    })
+    const snapshot = createSnapshot({
+      settings: createSettings({ appDateMode: 'manual', manualTodayIso: '2026-05-16' }),
+      payPeriods: [selectedPayPeriod],
+      debts: [
+        {
+          id: 'debt-car',
+          name: 'Car loan',
+          lender: 'Finance Co',
+          originalAmountPence: 100000,
+          currentBalancePence: 60000,
+          minimumPaymentPence: 5000,
+          dueDate: '2026-05-20',
+          interestRateApr: 12.5,
+          note: 'Vehicle finance',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'debt-store',
+          name: 'Store card',
+          lender: 'Retail Bank',
+          originalAmountPence: 80000,
+          currentBalancePence: 70000,
+          minimumPaymentPence: 2500,
+          dueDate: '2026-05-10',
+          interestRateApr: null,
+          note: '',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'debt-paid',
+          name: 'Paid off loan',
+          lender: 'Old Lender',
+          originalAmountPence: 30000,
+          currentBalancePence: 0,
+          minimumPaymentPence: 0,
+          dueDate: '2026-04-01',
+          interestRateApr: 7.2,
+          note: '',
+          status: 'paid',
+          createdAt: '2026-04-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DebtsPage snapshot={snapshot} actions={createActions()} selectedPayPeriod={selectedPayPeriod} />)
+
+    const hero = screen.getByRole('region', { name: 'Debts hero' })
+
+    expect(within(hero).getByRole('heading', { name: 'Debts' })).toBeInTheDocument()
+    expect(within(hero).getAllByText('Total debt').length).toBeGreaterThan(0)
+    expect(within(hero).getAllByText('Paid off').length).toBeGreaterThan(0)
+    expect(within(hero).getAllByText('Debt due this pay period').length).toBeGreaterThan(0)
+    expect(within(hero).getAllByText('Overdue').length).toBeGreaterThan(0)
+    expect(within(hero).getAllByText('£1,300.00').length).toBeGreaterThan(0)
+    expect(within(hero).getByText('28%')).toBeInTheDocument()
+    expect(within(hero).getAllByText('1').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Active debt')).not.toBeInTheDocument()
+    expect(screen.queryByText('Debt control')).not.toBeInTheDocument()
+
+    const debtList = screen.getByRole('region', { name: 'Debt list' })
+    const carLoanRow = within(debtList).getByRole('article', { name: 'Car loan debt row' })
+    const storeCardRow = within(debtList).getByRole('article', { name: 'Store card debt row' })
+    const paidOffRow = within(debtList).getByRole('article', { name: 'Paid off loan debt row' })
+
+    expect(carLoanRow.className).not.toContain('linear-gradient')
+    expect(within(carLoanRow).getByText('Finance Co')).toBeInTheDocument()
+    expect(within(carLoanRow).getByText('Balance')).toBeInTheDocument()
+    expect(within(carLoanRow).getAllByText('£600.00').length).toBeGreaterThan(0)
+    expect(within(carLoanRow).getByText('Minimum')).toBeInTheDocument()
+    expect(within(carLoanRow).getByText('£50.00')).toBeInTheDocument()
+    expect(within(carLoanRow).getByText('Due date')).toBeInTheDocument()
+    expect(within(carLoanRow).getByText('20 May 2026')).toBeInTheDocument()
+    expect(within(carLoanRow).getAllByText('40%').length).toBeGreaterThan(0)
+    expect(within(carLoanRow).getByText('12.5% APR')).toBeInTheDocument()
+    expect(within(carLoanRow).getByRole('button', { name: 'Edit Car loan' })).toHaveClass('size-7')
+    expect(within(carLoanRow).getByRole('button', { name: 'Delete Car loan' })).toHaveClass('size-7')
+
+    expect(within(storeCardRow).getByText('Overdue')).toBeInTheDocument()
+    expect(within(storeCardRow).queryByText(/APR/)).not.toBeInTheDocument()
+    expect(within(paidOffRow).getByText('Paid')).toBeInTheDocument()
+    expect(within(paidOffRow).getAllByText('100%').length).toBeGreaterThan(0)
+  })
+
+  it('shows a clean empty Debts state', () => {
+    render(<DebtsPage snapshot={createSnapshot()} actions={createActions()} />)
+
+    const hero = screen.getByRole('region', { name: 'Debts hero' })
+    const debtList = screen.getByRole('region', { name: 'Debt list' })
+
+    expect(within(hero).getByRole('heading', { name: 'Debts' })).toBeInTheDocument()
+    expect(within(hero).getAllByText('£0.00').length).toBeGreaterThan(0)
+    expect(within(hero).getByText('0%')).toBeInTheDocument()
+    expect(within(debtList).getByText('No debts yet.')).toBeInTheDocument()
+    expect(within(debtList).getByText('Add a debt to start tracking balances and due dates.')).toBeInTheDocument()
+  })
+
+  it('keeps debt and payment forms hidden until their drawer actions open them', async () => {
+    const user = userEvent.setup()
+    const snapshot = createSnapshot({
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Credit card',
+          lender: 'Bank',
+          originalAmountPence: 120000,
+          currentBalancePence: 85000,
+          minimumPaymentPence: 5000,
+          dueDate: '2026-05-20',
+          interestRateApr: 19.9,
+          note: 'Main card',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DebtsPage snapshot={snapshot} actions={createActions()} />)
+
+    expect(screen.queryByLabelText('Debt name')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Payment amount')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add debt' }))
+    const addDebtDialog = screen.getByRole('dialog', { name: 'Add debt' })
+
+    expect(within(addDebtDialog).getByLabelText('Debt name')).toBeInTheDocument()
+
+    await user.click(within(addDebtDialog).getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Record payment' }))
+
+    const paymentDialog = screen.getByRole('dialog', { name: 'Record debt payment' })
+
+    expect(within(paymentDialog).getByLabelText('Payment amount')).toBeInTheDocument()
+  })
+
   it('records a debt payment against the selected debt', async () => {
     const user = userEvent.setup()
     const actions = createActions()
@@ -4893,11 +6632,13 @@ describe('debts page', () => {
 
     render(<DebtsPage snapshot={snapshot} actions={actions} />)
 
-    const paymentPanel = screen.getByRole('region', { name: 'Record debt payment' })
-    await user.selectOptions(within(paymentPanel).getByLabelText('Debt'), 'debt-card')
-    await user.type(within(paymentPanel).getByLabelText('Payment amount'), '25.00')
-    await user.type(within(paymentPanel).getByLabelText('Payment note'), 'Extra payment')
-    await user.click(within(paymentPanel).getByRole('button', { name: 'Record payment' }))
+    await user.click(screen.getByRole('button', { name: 'Record payment' }))
+
+    const paymentDialog = screen.getByRole('dialog', { name: 'Record debt payment' })
+    await user.selectOptions(within(paymentDialog).getByLabelText('Debt'), 'debt-card')
+    await user.type(within(paymentDialog).getByLabelText('Payment amount'), '25.00')
+    await user.type(within(paymentDialog).getByLabelText('Payment note'), 'Extra payment')
+    await user.click(within(paymentDialog).getByRole('button', { name: 'Record payment' }))
 
     expect(actions.addDebtPayment).toHaveBeenCalledWith({
       amountPence: 2500,
@@ -4913,14 +6654,16 @@ describe('debts page', () => {
 
     render(<DebtsPage snapshot={createSnapshot()} actions={actions} />)
 
-    const debtPanel = screen.getByRole('region', { name: 'Add debt' })
-    await user.type(within(debtPanel).getByLabelText('Debt name'), 'Car finance')
-    await user.type(within(debtPanel).getByLabelText('Lender'), 'Finance Co')
-    await user.type(within(debtPanel).getByLabelText('Current balance'), '4000')
-    await user.type(within(debtPanel).getByLabelText('Minimum payment'), '120')
-    await user.clear(within(debtPanel).getByLabelText('Due date'))
-    await user.type(within(debtPanel).getByLabelText('Due date'), '2026-06-01')
-    await user.click(within(debtPanel).getByRole('button', { name: 'Add debt' }))
+    await user.click(screen.getByRole('button', { name: 'Add debt' }))
+
+    const debtDialog = screen.getByRole('dialog', { name: 'Add debt' })
+    await user.type(within(debtDialog).getByLabelText('Debt name'), 'Car finance')
+    await user.type(within(debtDialog).getByLabelText('Lender'), 'Finance Co')
+    await user.type(within(debtDialog).getByLabelText('Current balance'), '4000')
+    await user.type(within(debtDialog).getByLabelText('Minimum payment'), '120')
+    await user.clear(within(debtDialog).getByLabelText('Due date'))
+    await user.type(within(debtDialog).getByLabelText('Due date'), '2026-06-01')
+    await user.click(within(debtDialog).getByRole('button', { name: 'Add debt' }))
 
     expect(actions.addDebt).toHaveBeenCalledWith({
       currentBalancePence: 400000,
@@ -4939,15 +6682,17 @@ describe('debts page', () => {
 
     render(<DebtsPage snapshot={createSnapshot()} actions={actions} />)
 
-    const debtPanel = screen.getByRole('region', { name: 'Add debt' })
-    await user.type(within(debtPanel).getByLabelText('Debt name'), 'Store card')
-    await user.type(within(debtPanel).getByLabelText('Lender'), 'Retail Bank')
-    await user.type(within(debtPanel).getByLabelText('Current balance'), '300')
-    await user.clear(within(debtPanel).getByLabelText('Due date'))
-    await user.type(within(debtPanel).getByLabelText('Due date'), '2026-05-23')
+    await user.click(screen.getByRole('button', { name: 'Add debt' }))
 
-    expect(within(debtPanel).getByRole('button', { name: 'Add debt' })).toBeEnabled()
-    await user.click(within(debtPanel).getByRole('button', { name: 'Add debt' }))
+    const debtDialog = screen.getByRole('dialog', { name: 'Add debt' })
+    await user.type(within(debtDialog).getByLabelText('Debt name'), 'Store card')
+    await user.type(within(debtDialog).getByLabelText('Lender'), 'Retail Bank')
+    await user.type(within(debtDialog).getByLabelText('Current balance'), '300')
+    await user.clear(within(debtDialog).getByLabelText('Due date'))
+    await user.type(within(debtDialog).getByLabelText('Due date'), '2026-05-23')
+
+    expect(within(debtDialog).getByRole('button', { name: 'Add debt' })).toBeEnabled()
+    await user.click(within(debtDialog).getByRole('button', { name: 'Add debt' }))
 
     expect(actions.addDebt).toHaveBeenCalledWith({
       currentBalancePence: 30000,
@@ -4958,6 +6703,93 @@ describe('debts page', () => {
       name: 'Store card',
       note: '',
     })
+  })
+
+  it('opens edit debt in a drawer and preserves the update payload', async () => {
+    const user = userEvent.setup()
+    const actions = createActions()
+    const snapshot = createSnapshot({
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Credit card',
+          lender: 'Bank',
+          originalAmountPence: 120000,
+          currentBalancePence: 85000,
+          minimumPaymentPence: 5000,
+          dueDate: '2026-05-20',
+          interestRateApr: 19.9,
+          note: 'Main card',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DebtsPage snapshot={snapshot} actions={actions} />)
+
+    await user.click(screen.getByRole('button', { name: 'Edit Credit card' }))
+
+    const debtDialog = screen.getByRole('dialog', { name: 'Edit debt' })
+    await user.clear(within(debtDialog).getByLabelText('Current balance'))
+    await user.type(within(debtDialog).getByLabelText('Current balance'), '800')
+    await user.clear(within(debtDialog).getByLabelText('Note'))
+    await user.type(within(debtDialog).getByLabelText('Note'), 'Updated balance')
+    await user.click(within(debtDialog).getByRole('button', { name: 'Save debt' }))
+
+    expect(actions.updateDebt).toHaveBeenCalledWith('debt-card', {
+      currentBalancePence: 80000,
+      dueDate: '2026-05-20',
+      interestRateApr: 19.9,
+      lender: 'Bank',
+      minimumPaymentPence: 5000,
+      name: 'Credit card',
+      note: 'Updated balance',
+      status: 'active',
+    })
+  })
+
+  it('shows debt payment history as compact rows with restrained delete actions', () => {
+    const snapshot = createSnapshot({
+      debts: [
+        {
+          id: 'debt-card',
+          name: 'Credit card',
+          lender: 'Bank',
+          originalAmountPence: 120000,
+          currentBalancePence: 85000,
+          minimumPaymentPence: 5000,
+          dueDate: '2026-05-20',
+          interestRateApr: 19.9,
+          note: 'Main card',
+          status: 'active',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      debtPayments: [
+        {
+          id: 'debt-payment-1',
+          debtId: 'debt-card',
+          amountPence: 2500,
+          date: '2026-05-18',
+          note: 'Extra',
+          createdAt: '2026-05-18T00:00:00.000Z',
+          updatedAt: '2026-05-18T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(<DebtsPage snapshot={snapshot} actions={createActions()} />)
+
+    const history = screen.getByRole('region', { name: 'Payment history' })
+    const deleteButton = within(history).getByRole('button', { name: 'Delete payment for Credit card' })
+
+    expect(within(history).getByText('Credit card')).toBeInTheDocument()
+    expect(within(history).getByText('2026-05-18 · Extra')).toBeInTheDocument()
+    expect(within(history).getByText('-£25.00')).toBeInTheDocument()
+    expect(deleteButton).toHaveClass('size-7')
   })
 
   it('shows the full balance as due for active debts even when minimum payment is zero', () => {
@@ -5124,11 +6956,30 @@ describe('debts page', () => {
 })
 
 function getMetricDetails(container: HTMLElement, label: string): HTMLElement {
-  const details = within(container).getAllByText(label)[0].closest('details')
+  const details = within(container)
+    .getAllByText(label)
+    .map((element) => element.closest('details'))
+    .find((candidate): candidate is HTMLDetailsElement => {
+      if (!candidate) {
+        return false
+      }
+
+      const summary = candidate.querySelector('summary')
+
+      return summary ? within(summary as HTMLElement).queryByText(label) !== null : false
+    })
 
   expect(details).not.toBeNull()
 
   return details as HTMLElement
+}
+
+async function clickMetricSummary(user: ReturnType<typeof userEvent.setup>, details: HTMLElement) {
+  const summary = details.querySelector('summary')
+
+  expect(summary).not.toBeNull()
+
+  await user.click(summary as HTMLElement)
 }
 
 function RecurringWithHeaderAction({

@@ -10,7 +10,6 @@ import {
   PiggyBank,
   ReceiptText,
   Repeat2,
-  ShieldCheck,
   WalletCards,
 } from 'lucide-react'
 
@@ -59,6 +58,7 @@ type CalendarEventType =
 
 type CalendarEventDirection = 'in' | 'out' | 'info'
 type CalendarEventCompletionStatus = 'completed' | 'not_completed'
+type CalendarDisplayCategory = 'income' | 'bills' | 'cards' | 'debts' | 'savings' | 'spending'
 
 interface CalendarEvent {
   id: string
@@ -81,70 +81,35 @@ interface CalendarEventBreakdownItem {
   source: string
 }
 
-const eventStyles: Record<CalendarEventType, { label: string; className: string; icon: typeof CalendarDays }> = {
-  payday: {
-    label: 'Payday',
-    className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+const displayCategoryStyles: Record<CalendarDisplayCategory, { label: string; className: string; icon: typeof CalendarDays }> = {
+  income: {
+    label: 'Income',
+    className: 'border-lime-200 bg-lime-50 text-lime-800',
     icon: Banknote,
   },
-  recurring: {
-    label: 'Recurring',
-    className: 'border-indigo-200 bg-indigo-50 text-indigo-800',
+  bills: {
+    label: 'Bills',
+    className: 'border-slate-200 bg-slate-50 text-slate-700',
     icon: Repeat2,
   },
-  subscription: {
-    label: 'Subscription',
-    className: 'border-violet-200 bg-violet-50 text-violet-800',
-    icon: Repeat2,
-  },
-  insurance: {
-    label: 'Insurance',
-    className: 'border-sky-200 bg-sky-50 text-sky-800',
-    icon: ShieldCheck,
-  },
-  saved: {
-    label: 'Saved payment',
-    className: 'border-amber-200 bg-amber-50 text-amber-800',
-    icon: CalendarDays,
-  },
-  card: {
-    label: 'Card due',
+  cards: {
+    label: 'Cards',
     className: 'border-blue-200 bg-blue-50 text-blue-800',
     icon: CreditCard,
   },
-  debt: {
-    label: 'Debt due',
+  debts: {
+    label: 'Debts',
     className: 'border-red-200 bg-red-50 text-red-800',
-    icon: CreditCard,
-  },
-  debtReserve: {
-    label: 'Debt reserve',
-    className: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800',
-    icon: PiggyBank,
-  },
-  debtPayment: {
-    label: 'Debt payment',
-    className: 'border-rose-200 bg-rose-50 text-rose-800',
     icon: ReceiptText,
   },
-  cardRepayment: {
-    label: 'Card repayment',
-    className: 'border-cyan-200 bg-cyan-50 text-cyan-800',
-    icon: CreditCard,
-  },
-  creditCardPot: {
-    label: 'Credit pot',
-    className: 'border-lime-200 bg-lime-50 text-lime-800',
-    icon: PiggyBank,
-  },
-  allocation: {
-    label: 'Pot allocation',
-    className: 'border-teal-200 bg-teal-50 text-teal-800',
+  savings: {
+    label: 'Savings',
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
     icon: PiggyBank,
   },
   spending: {
-    label: 'Manual spend',
-    className: 'border-pink-200 bg-pink-50 text-pink-800',
+    label: 'Spending',
+    className: 'border-amber-200 bg-amber-50 text-amber-900',
     icon: WalletCards,
   },
 }
@@ -152,6 +117,34 @@ const eventStyles: Record<CalendarEventType, { label: string; className: string;
 const completionStatusStyles: Record<CalendarEventCompletionStatus, string> = {
   completed: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   not_completed: 'border-amber-200 bg-amber-50 text-amber-800',
+}
+
+function getEventDisplayStyle(type: CalendarEventType) {
+  return displayCategoryStyles[getEventDisplayCategory(type)]
+}
+
+function getEventDisplayCategory(type: CalendarEventType): CalendarDisplayCategory {
+  switch (type) {
+    case 'payday':
+      return 'income'
+    case 'recurring':
+    case 'subscription':
+    case 'insurance':
+    case 'saved':
+      return 'bills'
+    case 'card':
+    case 'cardRepayment':
+    case 'creditCardPot':
+      return 'cards'
+    case 'debt':
+    case 'debtReserve':
+    case 'debtPayment':
+      return 'debts'
+    case 'allocation':
+      return 'savings'
+    case 'spending':
+      return 'spending'
+  }
 }
 
 export function CalendarPage({
@@ -180,6 +173,21 @@ export function CalendarPage({
     [selectedDate, snapshot],
   )
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events])
+  const monthlyAgendaEvents = useMemo(
+    () =>
+      events
+        .filter((event) => event.date >= monthStart && event.date <= monthEnd)
+        .sort((a, b) => a.date.localeCompare(b.date) || getEventRank(a.type) - getEventRank(b.type) || a.title.localeCompare(b.title)),
+    [events, monthEnd, monthStart],
+  )
+  const monthlyAgendaDays = useMemo(
+    () =>
+      Array.from(groupEventsByDate(monthlyAgendaEvents).entries()).map(([date, dayEvents]) => ({
+        date,
+        events: dayEvents.sort((a, b) => getEventRank(a.type) - getEventRank(b.type) || a.title.localeCompare(b.title)),
+      })),
+    [monthlyAgendaEvents],
+  )
   const selectedDayPayPeriod = selectedDate ? findPayPeriodForDate(snapshot.payPeriods, selectedDate) : null
   useEffect(() => {
     if (!selectedDate || typeof window.scrollTo !== 'function') {
@@ -246,12 +254,12 @@ export function CalendarPage({
           </div>
         }
       >
-        <div className="mb-2 flex flex-nowrap gap-1.5 overflow-x-auto pb-1">
-          {Object.entries(eventStyles).map(([type, style]) => {
+        <div role="list" aria-label="Calendar categories" className="mb-2 flex flex-nowrap gap-1.5 overflow-x-auto pb-1">
+          {Object.entries(displayCategoryStyles).map(([category, style]) => {
             const Icon = style.icon
 
             return (
-              <span key={type} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${style.className}`}>
+              <span key={category} role="listitem" className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${style.className}`}>
                 <Icon size={12} />
                 {style.label}
               </span>
@@ -259,7 +267,101 @@ export function CalendarPage({
           })}
         </div>
 
-        <div className="max-w-full overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/[0.92] shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
+        <section aria-label="Calendar agenda" className="md:hidden">
+          {monthlyAgendaDays.length > 0 ? (
+            <div className="space-y-3">
+              {monthlyAgendaDays.map((day) => {
+                const isToday = day.date === today
+                const isSelectedPeriodDay = selectedPayPeriod
+                  ? day.date >= selectedPayPeriod.startDate && day.date <= selectedPayPeriod.endDate
+                  : false
+
+                return (
+                  <section
+                    key={day.date}
+                    aria-label={`Agenda for ${formatDateForAria(day.date)}`}
+                    className={clsx(
+                      'overflow-hidden rounded-[var(--radius-card)] border bg-[var(--color-surface)]',
+                      isToday ? 'border-slate-900 shadow-[0_0_0_1px_rgba(15,23,42,0.08)]' : 'border-[var(--color-border)]',
+                    )}
+                  >
+                    <div className={clsx(
+                      'flex items-center justify-between gap-3 border-b px-3 py-2',
+                      isToday ? 'border-slate-900 bg-slate-950 text-white' : 'border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text-primary)]',
+                    )}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold leading-5">{formatDayHeading(day.date)}</p>
+                        <p className={clsx('mt-0.5 text-xs', isToday ? 'text-slate-300' : 'text-[var(--color-text-muted)]')}>
+                          {day.events.length} item{day.events.length === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {isToday && (
+                          <span className="rounded-md bg-lime-300 px-2 py-0.5 text-[11px] font-semibold text-slate-950">
+                            Today
+                          </span>
+                        )}
+                        {!isToday && isSelectedPeriodDay && (
+                          <span className="rounded-md border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold text-cyan-800">
+                            Pay period
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-[var(--color-border)]">
+                      {day.events.map((event) => {
+                        const style = getEventDisplayStyle(event.type)
+                        const isDebtEvent = getEventDisplayCategory(event.type) === 'debts'
+                        const Icon = style.icon
+
+                        return (
+                          <button
+                            key={event.id}
+                            type="button"
+                            onClick={() => selectDate(event.date)}
+                            className="grid min-h-14 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left transition hover:bg-[var(--color-surface-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-emerald)]"
+                          >
+                            <span className={`flex size-9 items-center justify-center rounded-md border ${style.className}`}>
+                              <Icon size={16} aria-hidden="true" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold leading-5 text-[var(--color-text-primary)]">{event.title}</span>
+                              <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
+                                {style.label}
+                              </span>
+                            </span>
+                            <span
+                              className={clsx(
+                                'shrink-0 text-sm font-semibold',
+                                event.direction === 'in' && 'text-[var(--color-success)]',
+                                event.direction === 'out' && (isDebtEvent ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-primary)]'),
+                                event.direction === 'info' && 'text-[var(--color-text-muted)]',
+                              )}
+                            >
+                              {formatEventAmount(event)}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="rounded-[var(--radius-card)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-soft)] p-4 text-sm text-[var(--color-text-muted)]">
+              No calendar items this month.
+            </p>
+          )}
+        </section>
+
+        <div
+          role="region"
+          aria-label="Calendar month grid"
+          className="hidden max-w-full overflow-x-auto rounded-2xl border border-slate-200/90 bg-white/[0.92] shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur md:block"
+        >
           <div className="grid min-w-[680px] grid-cols-7">
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
               <div key={day} className="border-b border-slate-200/80 bg-slate-50/90 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -270,6 +372,7 @@ export function CalendarPage({
               const dayEvents = eventsByDate.get(cell.date) ?? []
               const isCurrentMonth = cell.date >= monthStart && cell.date <= monthEnd
               const isToday = cell.date === today
+              const isPayday = dayEvents.some((event) => event.type === 'payday')
               const isSelectedPeriodDay = selectedPayPeriod
                 ? cell.date >= selectedPayPeriod.startDate && cell.date <= selectedPayPeriod.endDate
                 : false
@@ -285,7 +388,9 @@ export function CalendarPage({
                   aria-label={`Open ${formatDateForAria(cell.date)}`}
                   className={clsx(
                     'group min-h-[58px] border-b border-r p-1 text-left transition focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-slate-950',
-                    isSelectedPeriodDay
+                    isPayday
+                      ? 'border-lime-200 bg-lime-50/80 hover:bg-lime-50'
+                      : isSelectedPeriodDay
                       ? 'border-cyan-100 bg-cyan-50/55 hover:bg-cyan-50'
                       : isCurrentMonth
                         ? 'border-slate-100 bg-white/95 hover:bg-slate-50/90'
@@ -297,6 +402,8 @@ export function CalendarPage({
                       className={
                         isToday
                           ? 'flex size-6 items-center justify-center rounded-full bg-slate-950 text-[11px] font-semibold text-white'
+                          : isPayday
+                            ? 'flex size-6 items-center justify-center rounded-full bg-lime-300 text-[11px] font-semibold text-slate-950'
                           : 'text-[11px] font-semibold text-slate-500'
                       }
                     >
@@ -313,12 +420,13 @@ export function CalendarPage({
                   )}
                   <div className="space-y-0.5">
                     {dayEvents.slice(0, 1).map((event) => {
-                      const Icon = eventStyles[event.type].icon
+                      const style = getEventDisplayStyle(event.type)
+                      const Icon = style.icon
 
                       return (
                         <div
                           key={event.id}
-                          className={`rounded-md border px-1.5 py-0.5 shadow-sm ${eventStyles[event.type].className}`}
+                          className={`rounded-md border px-1.5 py-0.5 shadow-sm ${style.className}`}
                           title={`${event.title} ${formatPence(event.amountPence)}`}
                         >
                           <div className="flex items-center gap-1">
@@ -387,7 +495,7 @@ function CalendarDayDetails({
 
   return (
     <div className="space-y-6" aria-label={`Calendar day ${date}`}>
-      <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617,#071526_54%,#0f2d36)] shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
+      <section className="max-w-full overflow-hidden rounded-2xl border border-slate-900 bg-[var(--color-deep-navy)] shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
         <div className="grid gap-6 p-5 text-white lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Day overview</p>
@@ -413,7 +521,7 @@ function CalendarDayDetails({
       <div className="grid gap-4 md:grid-cols-4">
         <DayMetric label="Money in" value={formatPence(moneyInPence)} tone="good" />
         <DayMetric label="Money out" value={formatPence(moneyOutPence)} tone={moneyOutPence > 0 ? 'warning' : 'neutral'} />
-        <DayMetric label="Net day" value={formatSignedPence(netPence)} tone={netPence >= 0 ? 'good' : 'bad'} />
+        <DayMetric label="Net day" value={formatSignedPence(netPence)} tone={netPence >= 0 ? 'good' : 'warning'} />
         <DayMetric label="Info items" value={String(infoCount)} tone="neutral" />
       </div>
 
@@ -472,7 +580,8 @@ function CalendarDayDetails({
 
 function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
   const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
-  const style = eventStyles[event.type]
+  const style = getEventDisplayStyle(event.type)
+  const isDebtEvent = getEventDisplayCategory(event.type) === 'debts'
   const Icon = style.icon
   const hasBreakdown = Boolean(event.breakdown && event.breakdown.length > 0)
   const breakdownTotalPence = event.breakdown?.reduce((total, item) => total + item.amountPence, 0) ?? 0
@@ -502,7 +611,7 @@ function CalendarDayEventCard({ event }: { event: CalendarEvent }) {
         <p className={clsx(
           'text-lg font-semibold',
           event.direction === 'in' && 'text-emerald-700',
-          event.direction === 'out' && 'text-red-700',
+          event.direction === 'out' && (isDebtEvent ? 'text-red-700' : 'text-slate-950'),
           event.direction === 'info' && 'text-slate-500',
         )}
         >
@@ -566,9 +675,9 @@ function DayMetric({
       className={clsx(
         'rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)]',
         tone === 'neutral' && 'border-slate-200/90 bg-white/95',
-        tone === 'good' && 'border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)]',
-        tone === 'warning' && 'border-amber-200 bg-amber-50 bg-[linear-gradient(135deg,#ffffff,#fffbeb)]',
-        tone === 'bad' && 'border-red-200 bg-red-50 bg-[linear-gradient(135deg,#ffffff,#fef2f2)]',
+        tone === 'good' && 'border-emerald-200 bg-emerald-50',
+        tone === 'warning' && 'border-amber-200 bg-amber-50',
+        tone === 'bad' && 'border-amber-200 bg-amber-50',
       )}
     >
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
@@ -587,7 +696,7 @@ function CompactMoneyLine({
   emphasized?: boolean
 }) {
   return (
-    <div className={clsx('flex items-center justify-between gap-3 rounded-lg border p-3 shadow-sm', emphasized ? 'border-emerald-200 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)]' : 'border-slate-200/90 bg-white/95')}>
+    <div className={clsx('flex items-center justify-between gap-3 rounded-lg border p-3 shadow-sm', emphasized ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200/90 bg-white/95')}>
       <p className="text-sm font-medium text-slate-600">{label}</p>
       <p className="text-sm font-semibold text-slate-950">{value}</p>
     </div>

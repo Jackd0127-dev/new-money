@@ -1,10 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  color: #0f172a;
-  background: #f8fbff;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui: Inter, Geist, "SF Pro Display", "SF Pro Text", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-app-bg: #f3f5f1;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f8faf6;
+  --color-text-primary: #111814;
+  --color-text-secondary: #3d4a42;
+  --color-text-muted: #6c766f;
+  --color-border: #dfe6dc;
+  --color-border-strong: #bfcbba;
+  --color-accent: #a7f15b;
+  --color-accent-strong: #7dcf35;
+  --color-success: #147a55;
+  --color-danger: #b13a32;
+  --color-warning: #b7791f;
+  --color-emerald: #0b3d2e;
+  --color-deep-navy: #071426;
+  --color-ink: #070a08;
+  --radius-card: 8px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
+  --shadow-card: 0 18px 46px rgba(17, 24, 20, 0.08), 0 1px 2px rgba(17, 24, 20, 0.05);
+  --shadow-card-soft: 0 12px 30px rgba(17, 24, 20, 0.06);
+  --shadow-button: 0 10px 22px rgba(7, 20, 38, 0.14);
+
+  color: var(--color-text-primary);
+  background: var(--color-app-bg);
+  font-family: var(--font-ui);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,8 +41,14 @@
 body {
   min-width: 320px;
   margin: 0;
-  background:
-    linear-gradient(180deg, #f8fbff 0%, #eef5f7 48%, #f7fafc 100%);
+  overflow-x: hidden;
+  background: var(--color-app-bg);
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
 }
 
 button,
@@ -33,9 +62,55 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+@media (max-width: 639px) {
+  button,
+  [role='button'] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+  }
+}
+
 ::selection {
-  background: rgba(20, 184, 166, 0.22);
-  color: #06122a;
+  background: rgba(167, 241, 91, 0.45);
+  color: var(--color-ink);
+}
+
+.fintech-surface {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fintech-surface-soft {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-soft);
+  box-shadow: var(--shadow-card-soft);
+}
+
+.fintech-button {
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-button);
+}
+
+.fintech-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-soft);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .app-panel {
@@ -139,31 +214,7 @@ button {
 }
 
 .ai-assistant-header {
-  background:
-    linear-gradient(115deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.82)),
-    linear-gradient(120deg, #4285f4, #9b72cb, #d96570, #f2a60c, #34a853, #4285f4);
-  background-size: 100% 100%, 260% 260%;
-  animation: ai-assistant-gradient 9s linear infinite;
-}
-
-.ai-assistant-trigger::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  z-index: -1;
-  border-radius: inherit;
-  background:
-    linear-gradient(120deg, #4285f4, #9b72cb, #d96570, #f2a60c, #34a853, #4285f4);
-  background-size: 260% 260%;
-  opacity: 0.85;
-  animation: ai-assistant-gradient 8s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ai-assistant-trigger::before,
-  .ai-assistant-header {
-    animation: none;
-  }
+  background: var(--color-deep-navy);
 }
 
 .ai-typing-dot {
@@ -172,20 +223,6 @@ button {
   border-radius: 999px;
   background: #64748b;
   animation: ai-typing-bounce 900ms ease-in-out infinite;
-}
-
-@keyframes ai-assistant-gradient {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-
-  100% {
-    background-position: 0% 50%;
-  }
 }
 
 @keyframes ai-typing-bounce {
@@ -204,46 +241,69 @@ button {
 
 .figma-card-button {
   width: 100%;
-  max-width: 360px;
-  border: 0;
-  border-radius: 20px 20px 8px 8px;
-  background: transparent;
-  padding: 0;
+  max-width: 420px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  padding: 12px;
   text-align: left;
   container-type: inline-size;
+  box-shadow: var(--shadow-card-soft);
   transition:
     transform 160ms ease,
     filter 160ms ease,
+    border-color 160ms ease,
     box-shadow 160ms ease;
 }
 
 .figma-card-button--compact {
-  max-width: 300px;
+  max-width: 400px;
 }
 
 .figma-card-button:hover {
   transform: translateY(-2px);
-  filter: brightness(1.04);
+  border-color: var(--color-border-strong);
+  filter: none;
+  box-shadow: var(--shadow-card);
 }
 
 .figma-card-button:focus-visible {
-  outline: 3px solid #0f172a;
-  outline-offset: 4px;
+  outline: 3px solid var(--color-emerald);
+  outline-offset: 3px;
 }
 
 .figma-card-button__summary {
   display: grid;
-  gap: 3px;
-  padding: 9px 2px 0;
+  gap: 8px;
+  padding: 2px 0 0;
 }
 
 .figma-card-button__summary p {
   margin: 0;
 }
 
+.figma-card-button__header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.figma-card-button__header span {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .figma-card-button__name {
   overflow: hidden;
-  color: #0f172a;
+  color: var(--color-text-primary);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.2;
@@ -254,8 +314,8 @@ button {
 .figma-card-button__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 8px;
-  color: #64748b;
+  gap: 5px 8px;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.25;
@@ -263,12 +323,15 @@ button {
 
 .figma-card-button__meta span {
   overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface-soft);
+  padding: 4px 7px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .figma-card-button__meta strong {
-  color: #334155;
+  color: var(--color-text-primary);
   font-weight: 700;
 }
 
@@ -523,9 +586,7 @@ button {
   left: 0;
   z-index: 1;
   height: 31.64%;
-  background-image:
-    linear-gradient(95.03deg, rgba(0, 0, 0, 0.2) 1.61%, rgba(32, 32, 32, 0.089) 47.29%, rgba(102, 102, 102, 0) 99.38%),
-    linear-gradient(90deg, #1e1e1e 0%, #1e1e1e 100%);
+  background: rgba(30, 30, 30, 0.92);
 }
 
 .figma-credit-card__noise {
@@ -708,11 +769,11 @@ button {
 .figma-credit-card__metrics {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-self: end;
-  width: min(76%, 410px);
+  width: min(88%, 470px);
   margin: 0;
-  gap: 12px;
+  gap: 8px;
   padding: clamp(6px, 1.7cqw, 10px);
   color: #ffffff;
   text-shadow: inherit;
@@ -759,8 +820,8 @@ button {
   }
 
   .figma-credit-card__metrics {
-    gap: 7px;
-    width: 78%;
+    gap: 5px;
+    width: 90%;
   }
 
   .figma-credit-card__metrics dd {

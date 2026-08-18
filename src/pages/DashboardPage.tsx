@@ -1,12 +1,15 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import {
+  Banknote,
   CalendarDays,
-  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock3,
+  CreditCard,
   EyeOff,
+  ReceiptText,
+  RotateCcw,
+  WalletCards,
 } from 'lucide-react'
 
 import {
@@ -30,7 +33,7 @@ import {
   type PayPeriodCostSummary,
 } from '../domain/money'
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
-import { Button, MoneyMetric, Panel, ProgressRail, SectionGrid, SelectInput, type CalculationBreakdown } from '../components/ui'
+import { ActionButton, Card, EmptyState, HeroMoneyCard, IconButton, MetricCard, Panel, PaymentRow, Pill, ProgressRail, SectionGrid, SelectInput, TransactionRow, type CalculationBreakdown } from '../components/ui'
 import type { PayFrequency, PayPeriod, PotAllocation } from '../types/models'
 import type { ViewKey } from '../types/navigation'
 
@@ -66,6 +69,16 @@ interface PaycheckTodoCompletion {
   amountPence: number
 }
 
+interface OverviewActivityItem {
+  id: string
+  title: string
+  description: string
+  date: string
+  amountPence: number
+  tone: 'neutral' | 'success' | 'warning' | 'danger'
+  sortKey: string
+}
+
 export function DashboardPage({
   snapshot,
   selectedPayPeriod,
@@ -89,7 +102,6 @@ export function DashboardPage({
   const [pendingTodoIds, setPendingTodoIds] = useState<Set<string>>(() => new Set())
   const [expandedTodoIds, setExpandedTodoIds] = useState<Set<string>>(() => new Set())
   const [fundingPotSelections, setFundingPotSelections] = useState<Record<string, string>>({})
-  const [isNextOutgoingsOpen, setIsNextOutgoingsOpen] = useState(false)
   const [outgoingPreviewOffset, setOutgoingPreviewOffset] = useState(1)
   const today = getAppTodayIso(snapshot.settings)
   const viewedPeriod = selectedPayPeriod ?? null
@@ -149,6 +161,12 @@ export function DashboardPage({
     ],
     asOfDate: today,
   })
+  const recentActivityItems = viewedPeriod ? getRecentOverviewActivityItems(snapshot, viewedPeriod) : []
+  const cardCoverSpendPence = summary.creditCardPotsPence + summary.creditCardNetPence
+  const hasCardCoverSpend = cardCoverSpendPence > 0
+  const payPeriodRangeLabel = viewedPeriod
+    ? `${formatShortDateWithOrdinal(viewedPeriod.startDate)} to ${formatShortDateWithOrdinal(viewedPeriod.endDate)}`
+    : null
 
   async function toggleTodo(item: PaycheckTodoItem, done: boolean) {
     if (!viewedPeriod) {
@@ -285,24 +303,34 @@ export function DashboardPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <Panel
-        title="Selected pay period"
-        accent="blue"
-        description={
-          viewedPeriod
-            ? `Paid ${formatShortDateWithOrdinal(viewedPeriod.payday)} · ${formatShortDateWithOrdinal(viewedPeriod.startDate)} to ${formatShortDateWithOrdinal(viewedPeriod.endDate)}`
-            : snapshot.payPeriods.length > 0
-              ? 'No saved pay period contains today. Choose a saved period to view its numbers.'
-              : 'Create your first paycheck plan to see your pay, payments due, and money left.'
-        }
-        action={
-          <div className="flex w-full flex-col gap-2 lg:min-w-80 lg:flex-row lg:items-end">
+      <section aria-label="Overview hero" className="space-y-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Pill tone={viewedPeriod && summary.isOverCommitted ? 'danger' : viewedPeriod ? 'emerald' : 'neutral'}>
+                {viewedPeriod ? summary.isOverCommitted ? 'Over committed' : 'Live paycheck' : 'Setup needed'}
+              </Pill>
+              {payPeriodRangeLabel && (
+                <span className="text-xs font-semibold text-[var(--color-text-muted)]">{payPeriodRangeLabel}</span>
+              )}
+            </div>
+            <h2 className="mt-2 text-2xl font-semibold text-[var(--color-text-primary)]">Overview summary</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)]">
+              {viewedPeriod
+                ? 'Your current paycheck answer, built from saved pay, planned costs, card cover, and logged spend.'
+                : snapshot.payPeriods.length > 0
+                  ? 'Choose a saved paycheck window to view its money left and planned costs.'
+                  : 'Start in Payday to unlock your Overview totals.'}
+            </p>
+          </div>
+
+          <div className="flex w-full flex-col gap-2 lg:w-auto lg:min-w-[28rem] lg:flex-row lg:items-end lg:justify-end">
             {snapshot.payPeriods.length > 0 && (
-              <label className="block w-full min-w-0 flex-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewing</span>
+              <label className="block w-full min-w-0 lg:max-w-56">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Viewing</span>
                 <SelectInput
                   aria-label="Viewing pay period"
-                  className="mt-1"
+                  className="mt-1 bg-white"
                   value={viewedPeriod?.id ?? ''}
                   onChange={(event) => onPayPeriodChange?.(event.target.value || null)}
                 >
@@ -315,60 +343,98 @@ export function DashboardPage({
                 </SelectInput>
               </label>
             )}
-            <Button className="w-full lg:w-auto" onClick={() => onViewChange('payday')}>
-              {viewedPeriod ? 'Update pay' : 'Plan pay'}
-            </Button>
+            <ActionButton type="button" className="w-full lg:w-auto" onClick={() => onViewChange('spending')}>
+              <WalletCards size={17} aria-hidden="true" />
+              Log spend
+            </ActionButton>
+            <ActionButton type="button" variant="secondary" className="w-full lg:w-auto" onClick={() => onViewChange('payday')}>
+              Update payday
+            </ActionButton>
           </div>
-        }
-      >
+        </div>
+
         {viewedPeriod ? (
-          <div className="space-y-4">
-            <div className="grid items-start gap-4 lg:grid-cols-3">
-              <MoneyMetric
-                label="Total pay"
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+            <HeroMoneyCard
+              label="Money left this pay period"
+              value={formatPence(summary.moneyLeftPence)}
+              description={
+                <span>
+                  {payPeriodRangeLabel}. {summary.moneyLeftPence < 0 ? 'This period is over committed.' : 'This remains after the listed costs.'}
+                </span>
+              }
+              breakdown={getMoneyLeftBreakdown(summary)}
+              open={openMetric === 'money-left'}
+              onOpenChange={(isOpen) =>
+                setOpenMetric((current) => isOpen ? 'money-left' : current === 'money-left' ? null : current)
+              }
+              className="min-h-[18rem]"
+            />
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <MetricCard
+                label="Income"
                 value={formatPence(summary.payReceivedPence)}
-                tone="primary"
+                detail="Saved on the active payday plan."
+                icon={<Banknote size={17} aria-hidden="true" />}
                 breakdown={getTotalPayBreakdown(summary, viewedPeriod.startDate, viewedPeriod.endDate)}
                 open={openMetric === 'total-pay'}
                 onOpenChange={(isOpen) =>
                   setOpenMetric((current) => isOpen ? 'total-pay' : current === 'total-pay' ? null : current)
                 }
               />
-              <MoneyMetric
-                label="Total costs"
+              <MetricCard
+                label="Planned costs"
                 value={formatPence(summary.totalCostsPence)}
                 tone="warning"
+                detail={`${summary.items.length} planned or logged item${summary.items.length === 1 ? '' : 's'} in this window.`}
+                icon={<ReceiptText size={17} aria-hidden="true" />}
                 breakdown={getTotalCostsBreakdown(summary)}
                 open={openMetric === 'total-costs'}
                 onOpenChange={(isOpen) =>
                   setOpenMetric((current) => isOpen ? 'total-costs' : current === 'total-costs' ? null : current)
                 }
               />
-              <MoneyMetric
-                label="Money left"
+              {hasCardCoverSpend && (
+                <MetricCard
+                  label="Card cover / spend"
+                  value={formatPence(cardCoverSpendPence)}
+                  tone="neutral"
+                  detail="Card pot cover plus net card spend after repayments."
+                  icon={<CreditCard size={17} aria-hidden="true" />}
+                  breakdown={getCardCoverSpendBreakdown(summary)}
+                  open={openMetric === 'card-cover-spend'}
+                  onOpenChange={(isOpen) =>
+                    setOpenMetric((current) => isOpen ? 'card-cover-spend' : current === 'card-cover-spend' ? null : current)
+                  }
+                />
+              )}
+              <MetricCard
+                label={hasCardCoverSpend ? 'Available after cards' : 'Safe to spend'}
                 value={formatPence(summary.moneyLeftPence)}
                 tone={summary.moneyLeftPence < 0 ? 'bad' : 'good'}
+                detail={hasCardCoverSpend ? 'Remaining after card cover and other planned costs.' : 'Remaining after planned costs.'}
                 breakdown={getMoneyLeftBreakdown(summary)}
-                open={openMetric === 'money-left'}
+                open={openMetric === 'safe-to-spend'}
                 onOpenChange={(isOpen) =>
-                  setOpenMetric((current) => isOpen ? 'money-left' : current === 'money-left' ? null : current)
+                  setOpenMetric((current) => isOpen ? 'safe-to-spend' : current === 'safe-to-spend' ? null : current)
                 }
               />
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-            <p className="text-base font-semibold text-slate-950">
+          <Card as="div" variant="soft" className="border-dashed p-8 text-center">
+            <p className="text-base font-semibold text-[var(--color-text-primary)]">
               {snapshot.payPeriods.length > 0 ? 'No active pay period selected' : 'No paycheck plan yet'}
             </p>
-            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">
+            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--color-text-muted)]">
               {snapshot.payPeriods.length > 0
                 ? 'Use the pay-period dropdown to review a saved paycheck window.'
-                : 'Enter your pay and recurring payments to get one clear dashboard total.'}
+                : 'Create your first paycheck plan to see your pay, planned costs, and money left.'}
             </p>
-          </div>
+          </Card>
         )}
-      </Panel>
+      </section>
       {viewedPeriod && (
         <SectionGrid variant="wideLeft" className="gap-6">
           <Panel
@@ -407,7 +473,7 @@ export function DashboardPage({
                           isIgnored
                             ? 'rounded-2xl border border-slate-200/90 bg-slate-50/80 px-3 py-3 opacity-75'
                             : isDone
-                              ? 'rounded-2xl border border-emerald-200/90 bg-emerald-50 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] px-3 py-3 shadow-sm shadow-emerald-100/70'
+                              ? 'rounded-2xl border border-emerald-200/90 bg-emerald-50 px-3 py-3 shadow-sm shadow-emerald-100/70'
                               : 'rounded-2xl border border-slate-200/90 bg-white/95 px-3 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200'
                         }
                       >
@@ -478,14 +544,15 @@ export function DashboardPage({
                             type="button"
                             aria-label={`Ignore Payment for ${item.ignoreLabel}`}
                             aria-pressed={isIgnored}
+                            title={isIgnored ? 'Restore payment' : 'Ignore payment'}
                             onClick={() => toggleIgnoredPayment(item, !isIgnored)}
                             className={
                               isIgnored
-                                ? 'inline-flex min-h-8 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
-                                : 'inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 text-xs font-semibold text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
+                                ? 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-50 text-amber-800 transition hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500'
+                                : 'inline-flex min-h-8 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400'
                             }
                           >
-                            Ignore Payment
+                            {isIgnored ? <RotateCcw size={15} aria-hidden="true" /> : <EyeOff size={15} aria-hidden="true" />}
                           </button>
                         </div>
                         {item.canSelectFundingPot && eligibleFundingPots.length > 0 && !isIgnored && (
@@ -553,15 +620,16 @@ export function DashboardPage({
               </div>
             )}
           </Panel>
-          <NextPaycheckOutgoingsPanel
-            period={outgoingPreviewPeriod}
-            summary={outgoingPreviewSummary}
-            offset={outgoingPreviewOffset}
-            isOpen={isNextOutgoingsOpen}
-            onToggleOpen={() => setIsNextOutgoingsOpen((current) => !current)}
-            onPrevious={() => setOutgoingPreviewOffset((current) => current - 1)}
-            onNext={() => setOutgoingPreviewOffset((current) => current + 1)}
-          />
+          <div className="space-y-6">
+            <NextPaycheckOutgoingsPanel
+              period={outgoingPreviewPeriod}
+              summary={outgoingPreviewSummary}
+              offset={outgoingPreviewOffset}
+              onPrevious={() => setOutgoingPreviewOffset((current) => current - 1)}
+              onNext={() => setOutgoingPreviewOffset((current) => current + 1)}
+            />
+            <RecentActivityPanel items={recentActivityItems} />
+          </div>
         </SectionGrid>
       )}
     </div>
@@ -601,83 +669,31 @@ function ChecklistProgressCard({
     ? Math.round((completedAmountPence / totalAmountPence) * 100)
     : countPercent
   const openCount = Math.max(0, activeCount - completedCount)
+  const statusLine = openCount > 0
+    ? `${formatPence(remainingAmountPence)} left to sort`
+    : activeCount > 0
+      ? 'Everything active is sorted'
+      : 'Nothing left to sort'
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#ecfdf5,#f8fafc_55%,#ecfeff)] shadow-[0_18px_45px_rgba(16,185,129,0.12)]">
-      <div className="grid gap-4 p-4 md:grid-cols-[auto_1fr] md:items-center">
-        <div className="flex items-center gap-4">
-          <div
-            className="relative flex size-20 shrink-0 items-center justify-center rounded-full shadow-inner shadow-emerald-200/80"
-            style={{ background: `conic-gradient(#10b981 ${countPercent * 3.6}deg, #dbeafe 0deg)` }}
-            aria-hidden="true"
-          >
-            <div className="flex size-14 items-center justify-center rounded-full border border-white/80 bg-white text-lg font-semibold tracking-[-0.02em] text-slate-950 shadow-sm">
-              {countPercent}%
-            </div>
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Checklist progress</p>
-            <p className="mt-1 text-xl font-semibold tracking-[-0.02em] text-slate-950">
-              {completedCount} of {activeCount} sorted
-            </p>
-            <p className="mt-1 text-sm leading-5 text-slate-600">
-              {openCount > 0
-                ? `${openCount} item${openCount === 1 ? '' : 's'} still need attention.`
-                : 'Every active set-aside is complete.'}
-            </p>
-          </div>
+    <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {completedCount} of {activeCount} sorted
+          </p>
+          <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+            {statusLine}
+            {ignoredCount > 0 ? ` · ${ignoredCount} ignored for this paycheck` : ''}
+          </p>
         </div>
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          <ChecklistProgressStat
-            icon={<CheckCircle2 size={16} />}
-            label="Done"
-            value={formatPence(completedAmountPence)}
-            className="border-emerald-200/90 bg-white/80 text-emerald-700"
-          />
-          <ChecklistProgressStat
-            icon={<Clock3 size={16} />}
-            label="Left"
-            value={formatPence(remainingAmountPence)}
-            className="border-amber-200/90 bg-white/80 text-amber-700"
-          />
-          <ChecklistProgressStat
-            icon={<EyeOff size={16} />}
-            label="Ignored"
-            value={`${ignoredCount}`}
-            className="border-slate-200/90 bg-white/80 text-slate-500"
-          />
+        <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-[var(--color-text-muted)]">
+          <span>{countPercent}% complete</span>
+          <span aria-hidden="true">/</span>
+          <span>{formatPence(completedAmountPence)} covered</span>
         </div>
       </div>
-      <div className="border-t border-emerald-100/80 bg-white/55 p-4">
-        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          <span>Amount covered</span>
-          <span>{formatPence(completedAmountPence)} of {formatPence(totalAmountPence)}</span>
-        </div>
-        <ProgressRail percent={amountPercent} trackClassName="bg-white shadow-slate-200/80" />
-      </div>
-    </div>
-  )
-}
-
-function ChecklistProgressStat({
-  icon,
-  label,
-  value,
-  className,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-  className: string
-}) {
-  return (
-    <div className={`rounded-xl border p-3 shadow-sm shadow-slate-200/60 ${className}`}>
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
-        {icon}
-        {label}
-      </div>
-      <p className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-950">{value}</p>
+      <ProgressRail percent={amountPercent} trackClassName="mt-3 bg-white shadow-none" />
     </div>
   )
 }
@@ -686,139 +702,261 @@ function NextPaycheckOutgoingsPanel({
   period,
   summary,
   offset,
-  isOpen,
-  onToggleOpen,
   onPrevious,
   onNext,
 }: {
   period: PayPeriod | null
   summary: PayPeriodCostSummary
   offset: number
-  isOpen: boolean
-  onToggleOpen: () => void
   onPrevious: () => void
   onNext: () => void
 }) {
   const periodDescription = period
     ? `${period.startDate} to ${period.endDate}`
     : 'Create a paycheck plan to preview future outgoings.'
-  const outgoingItems = summary.items.filter((item) => item.amountPence !== 0)
-  const toggleLabel = isOpen ? 'Hide next paycheck outgoings' : 'Show next paycheck outgoings'
+  const obligationItems = getUsefulObligationItems(summary.items)
+  const obligationTotalPence = obligationItems.reduce((totalPence, item) => totalPence + Math.max(0, item.amountPence), 0)
 
   return (
     <Panel
       title="What you owe next paycheck"
-      accent="amber"
+      accent="slate"
       description={periodDescription}
+      density="compact"
       action={
         <div className="flex w-full shrink-0 items-center justify-between gap-2">
-          <button
-            type="button"
-            aria-label="Previous paycheck preview"
-            onClick={onPrevious}
-            className="inline-flex min-h-9 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-          >
+          <IconButton label="Previous paycheck preview" size="sm" onClick={onPrevious}>
             <ChevronLeft size={16} aria-hidden="true" />
-          </button>
+          </IconButton>
           <span className="hidden min-w-32 rounded-lg border border-slate-200/90 bg-white/90 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-sm shadow-slate-200/60 sm:inline-block">
             {formatPaycheckOffsetLabel(offset)}
           </span>
-          <button
-            type="button"
-            aria-label="Next paycheck preview"
-            onClick={onNext}
-            className="inline-flex min-h-9 w-9 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 text-slate-600 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-          >
+          <IconButton label="Next paycheck preview" size="sm" onClick={onNext}>
             <ChevronRight size={16} aria-hidden="true" />
-          </button>
+          </IconButton>
         </div>
       }
     >
       {period ? (
         <div className="space-y-3">
-          <div className="grid gap-3">
-            <div className="rounded-2xl border border-amber-200/90 bg-[linear-gradient(135deg,#fff7ed,#fffbeb)] p-4 shadow-[0_14px_35px_rgba(245,158,11,0.11)]">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Total outgoing</p>
-              <p className="mt-2 text-3xl font-semibold tracking-[-0.02em] text-slate-950">{formatPence(summary.totalCostsPence)}</p>
-              <p className="mt-1 text-sm text-amber-800">{outgoingItems.length} payments in this paycheck window</p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/80 p-3 shadow-sm shadow-emerald-100/60">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Money left estimate</p>
-                <p className={summary.moneyLeftPence < 0 ? 'mt-1 text-lg font-semibold text-red-700' : 'mt-1 text-lg font-semibold text-emerald-700'}>
-                  {formatPence(summary.moneyLeftPence)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-cyan-200/90 bg-cyan-50/70 p-3 shadow-sm shadow-cyan-100/60">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paycheck</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">{formatPaycheckOffsetLabel(offset)}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              aria-label={toggleLabel}
-              aria-expanded={isOpen}
-              onClick={onToggleOpen}
-              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-slate-900 bg-slate-950 px-4 text-sm font-semibold text-white shadow-[0_10px_26px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
-            >
-              <CalendarDays size={16} aria-hidden="true" />
-              {isOpen ? 'Hide payments' : 'Show payments'}
-              <ChevronDown size={16} aria-hidden="true" className={isOpen ? 'rotate-180 transition' : 'transition'} />
-            </button>
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              {obligationItems.length} obligation{obligationItems.length === 1 ? '' : 's'}
+            </p>
+            <p className="text-sm font-semibold text-[var(--color-text-primary)]">{formatPence(obligationTotalPence)}</p>
           </div>
 
-          {isOpen && (
-            <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-3 shadow-inner shadow-slate-200/50">
-              {outgoingItems.length > 0 ? (
-                <ul className="divide-y divide-slate-200">
-                  {outgoingItems.map((item) => (
-                    <li key={item.id} className="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto]">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-950">{item.label}</p>
-                        <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                          {item.date} · {formatCostSource(item.source)}
-                        </p>
-                        {item.coverBreakdown && item.coverBreakdown.length > 0 && (
-                          <ul className="mt-2 space-y-1 rounded-lg border border-slate-200/90 bg-white/90 px-2.5 py-2 shadow-sm shadow-slate-200/60">
-                            {item.coverBreakdown.map((line) => (
-                              <li key={line.id} className="flex items-start justify-between gap-3 text-xs">
-                                <span className="min-w-0">
-                                  <span className="block truncate font-semibold text-slate-700">{line.label}</span>
-                                  <span className="block leading-4 text-slate-500">
-                                    {line.date} · {line.detail}
-                                  </span>
-                                </span>
-                                <span className={line.amountPence < 0 ? 'shrink-0 font-semibold text-emerald-700' : 'shrink-0 font-semibold text-slate-800'}>
-                                  {line.amountPence < 0 ? '-' : ''}
-                                  {formatPence(Math.abs(line.amountPence))}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                      <p className={item.amountPence < 0 ? 'text-sm font-semibold text-emerald-700' : 'text-sm font-semibold text-slate-950'}>
-                        {item.amountPence < 0 ? '-' : ''}
-                        {formatPence(Math.abs(item.amountPence))}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="rounded-lg border border-dashed border-slate-200/90 bg-white/90 px-3 py-3 text-sm text-slate-500">
-                  No outgoing payments are dated inside this paycheck window yet.
-                </p>
-              )}
-            </div>
+          {obligationItems.length > 0 ? (
+            <ul className="space-y-2">
+              {obligationItems.map((item) => (
+                <li key={item.id}>
+                  <PaymentRow
+                    title={item.label}
+                    source={formatCostSource(item.source)}
+                    date={item.date}
+                    amount={formatSignedPence(item.amountPence)}
+                  />
+                  {item.coverBreakdown && item.coverBreakdown.length > 0 && (
+                    <ul className="mt-2 space-y-1 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-2.5 py-2">
+                      {item.coverBreakdown.map((line) => (
+                        <li key={line.id} className="flex items-start justify-between gap-3 text-xs">
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold text-[var(--color-text-secondary)]">{line.label}</span>
+                            <span className="block leading-4 text-[var(--color-text-muted)]">
+                              {line.date} · {line.detail}
+                            </span>
+                          </span>
+                          <span className="shrink-0 font-semibold text-[var(--color-text-primary)]">
+                            {formatSignedPence(line.amountPence)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState
+              title="No bills, debts, or card payments in this preview."
+              description="Move through the paycheck preview or add an obligation to see it here."
+              icon={<CalendarDays size={18} aria-hidden="true" />}
+              className="p-4"
+            />
           )}
         </div>
       ) : (
-        <p className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/80 p-3 text-sm text-slate-500">
-          No paycheck is selected, so there is no future period to preview yet.
-        </p>
+        <EmptyState
+          title="No paycheck selected"
+          description="Choose a paycheck before previewing upcoming obligations."
+          icon={<CalendarDays size={18} aria-hidden="true" />}
+          className="p-4"
+        />
       )}
     </Panel>
   )
+}
+
+function RecentActivityPanel({ items }: { items: OverviewActivityItem[] }) {
+  return (
+    <Panel
+      title="Recent activity"
+      accent="slate"
+      density="compact"
+      description="Real movement recorded in this paycheck."
+    >
+      {items.length > 0 ? (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li key={item.id}>
+              <TransactionRow
+                title={item.title}
+                description={item.description}
+                date={item.date}
+                amount={formatActivityPence(item.amountPence)}
+                tone={item.tone}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState
+          title="No recent activity for this paycheck."
+          description="Logged spending, pot top-ups, and repayments will appear here once they exist."
+          icon={<ReceiptText size={18} aria-hidden="true" />}
+          className="p-4"
+        />
+      )}
+    </Panel>
+  )
+}
+
+function getUsefulObligationItems(
+  items: PayPeriodCostSummary['items'],
+): PayPeriodCostSummary['items'] {
+  const usefulSources = new Set<PayPeriodCostSummary['items'][number]['source']>([
+    'recurring',
+    'saved_payment',
+    'debt_minimum',
+    'credit_card_pot',
+    'linked_credit_card_pot',
+    'credit_card_repayment',
+  ])
+
+  return items
+    .filter((item) => item.amountPence !== 0 && usefulSources.has(item.source))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label))
+}
+
+function getRecentOverviewActivityItems(
+  snapshot: PlannerSnapshot,
+  period: PayPeriod,
+): OverviewActivityItem[] {
+  const transactionItems: OverviewActivityItem[] = snapshot.transactions
+    .filter((transaction) =>
+      transaction.payPeriodId === period.id ||
+      isIsoDateInPeriod(transaction.date, period),
+    )
+    .map((transaction) => {
+      const accountName = transaction.paymentMethod === 'credit_card'
+        ? getCardName(snapshot, transaction.creditCardId)
+        : getPotName(snapshot, transaction.potId)
+      const amountPence = transaction.type === 'spending'
+        ? -Math.abs(transaction.amountPence)
+        : transaction.amountPence
+
+      return {
+        id: `transaction-${transaction.id}`,
+        title: transaction.note || formatTransactionType(transaction.type),
+        description: `${formatTransactionType(transaction.type)} · ${accountName}`,
+        date: transaction.date,
+        amountPence,
+        tone: amountPence > 0 ? 'success' : 'neutral',
+        sortKey: `${transaction.date}-${transaction.createdAt}`,
+      }
+    })
+  const allocationItems: OverviewActivityItem[] = snapshot.potAllocations
+    .filter((allocation) => allocation.payPeriodId === period.id)
+    .map((allocation) => {
+      const potName = getPotName(snapshot, allocation.potId)
+
+      return {
+        id: `allocation-${allocation.id}`,
+        title: `${potName} top-up`,
+        description: `${formatPotAllocationActivitySource(allocation.source)} · ${potName}`,
+        date: period.payday,
+        amountPence: allocation.amountPence,
+        tone: 'success',
+        sortKey: `${period.payday}-${allocation.createdAt}`,
+      }
+    })
+  const repaymentItems: OverviewActivityItem[] = snapshot.creditCardRepayments
+    .filter((repayment) => isIsoDateInPeriod(repayment.date, period))
+    .map((repayment) => {
+      const cardName = getCardName(snapshot, repayment.creditCardId)
+
+      return {
+        id: `card-repayment-${repayment.id}`,
+        title: repayment.note || `${cardName} repayment`,
+        description: `Card repayment · ${cardName}`,
+        date: repayment.date,
+        amountPence: -Math.abs(repayment.amountPence),
+        tone: 'neutral',
+        sortKey: `${repayment.date}-${repayment.createdAt}`,
+      }
+    })
+
+  return [...transactionItems, ...allocationItems, ...repaymentItems]
+    .sort((a, b) => b.sortKey.localeCompare(a.sortKey))
+    .slice(0, 6)
+}
+
+function isIsoDateInPeriod(date: string, period: PayPeriod): boolean {
+  return date >= period.startDate && date <= period.endDate
+}
+
+function formatSignedPence(amountPence: number): string {
+  if (amountPence < 0) {
+    return `-${formatPence(Math.abs(amountPence))}`
+  }
+
+  return formatPence(amountPence)
+}
+
+function formatActivityPence(amountPence: number): string {
+  if (amountPence < 0) {
+    return `-${formatPence(Math.abs(amountPence))}`
+  }
+
+  return `+${formatPence(amountPence)}`
+}
+
+function formatTransactionType(type: PlannerSnapshot['transactions'][number]['type']): string {
+  if (type === 'spending') {
+    return 'Spending'
+  }
+
+  if (type === 'allocation') {
+    return 'Allocation'
+  }
+
+  if (type === 'transfer') {
+    return 'Transfer'
+  }
+
+  return 'Adjustment'
+}
+
+function formatPotAllocationActivitySource(source: PlannerSnapshot['potAllocations'][number]['source']): string {
+  if (source === 'recurring') {
+    return 'Recurring reserve'
+  }
+
+  if (source === 'pot_auto') {
+    return 'Auto top-up'
+  }
+
+  return 'Pot top-up'
 }
 
 function formatPayPeriodOption(period: PayPeriod): string {
@@ -1011,10 +1149,10 @@ function getTotalPayBreakdown(
   endDate: string,
 ): CalculationBreakdown {
   return {
-    formula: 'Total pay is the income saved on the active paycheck plan.',
+    formula: 'Income is the pay saved on the active paycheck plan.',
     lines: [
       {
-        label: 'Saved paycheck income',
+        label: 'Income',
         value: formatPence(summary.payReceivedPence),
         detail: `${startDate} to ${endDate}`,
         tone: 'result',
@@ -1026,7 +1164,7 @@ function getTotalPayBreakdown(
 
 function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
   return {
-    formula: 'Total costs = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit pots + credit-card net.',
+    formula: 'Planned costs = recurring + saved payments + manual spending + pot top-ups + debt reserves + debt due + credit pots + credit-card net.',
     lines: [
       {
         label: 'Recurring not on cards',
@@ -1089,7 +1227,7 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
         tone: 'result',
       },
       {
-        label: 'Total costs',
+        label: 'Planned costs',
         value: formatPence(summary.totalCostsPence),
         tone: 'result',
       },
@@ -1098,22 +1236,48 @@ function getTotalCostsBreakdown(summary: PayPeriodCostSummary): CalculationBreak
   }
 }
 
-function getMoneyLeftBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
+function getCardCoverSpendBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
   return {
-    formula: 'Money left = total pay - total costs.',
+    formula: 'Card cover / spend = credit card pots + net card usage.',
     lines: [
       {
-        label: 'Total pay',
+        label: 'Card pot cover',
+        value: formatPence(summary.creditCardPotsPence),
+        detail: 'Money set aside from this paycheck for card cover.',
+        tone: 'add',
+      },
+      {
+        label: 'Net card spend',
+        value: formatPence(summary.creditCardNetPence),
+        detail: 'Card charges after repayments, never below zero.',
+        tone: 'add',
+      },
+      {
+        label: 'Card cover / spend',
+        value: formatPence(summary.creditCardPotsPence + summary.creditCardNetPence),
+        tone: 'result',
+      },
+    ],
+    note: 'Only shown when card-related costs exist in this pay period.',
+  }
+}
+
+function getMoneyLeftBreakdown(summary: PayPeriodCostSummary): CalculationBreakdown {
+  return {
+    formula: 'Money left this pay period = income - planned costs.',
+    lines: [
+      {
+        label: 'Income',
         value: formatPence(summary.payReceivedPence),
         tone: 'add',
       },
       {
-        label: 'Total costs',
+        label: 'Planned costs',
         value: `-${formatPence(summary.totalCostsPence)}`,
         tone: 'subtract',
       },
       {
-        label: 'Money left',
+        label: 'Money left this pay period',
         value: formatPence(summary.moneyLeftPence),
         tone: 'result',
       },

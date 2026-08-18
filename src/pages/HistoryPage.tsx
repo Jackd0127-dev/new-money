@@ -135,10 +135,10 @@ function HistoryStat({
 }) {
   const toneClassName =
     tone === 'emerald'
-      ? 'border-emerald-200 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] text-emerald-700'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
       : tone === 'violet'
-        ? 'border-violet-200 bg-[linear-gradient(135deg,#ffffff,#f5f3ff)] text-violet-700'
-        : 'border-blue-200 bg-[linear-gradient(135deg,#ffffff,#eff6ff)] text-blue-700'
+        ? 'border-violet-200 bg-violet-50 text-violet-700'
+        : 'border-blue-200 bg-blue-50 text-blue-700'
 
   return (
     <div className={`min-w-0 rounded-2xl border p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)] ${toneClassName}`}>

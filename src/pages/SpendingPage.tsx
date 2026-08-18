@@ -5,7 +5,6 @@ import {
   CreditCard,
   PenLine,
   ReceiptText,
-  Sparkles,
   Trash2,
   WalletCards,
 } from 'lucide-react'
@@ -19,14 +18,16 @@ import type {
 } from '../hooks/usePlannerData'
 import {
   Button,
-  CalculationDetails,
+  EmptyState,
   Field,
-  MoneyMetric,
+  IconButton,
   Panel,
+  Pill,
+  ProgressBar,
   SectionGrid,
   SelectInput,
   TextInput,
-  type CalculationBreakdown,
+  TransactionRow,
 } from '../components/ui'
 import type { PaymentMethod, PayPeriod } from '../types/models'
 
@@ -67,17 +68,16 @@ export function SpendingPage({
   const selectedTransactionGroup = selectedPayPeriod
     ? groupedTransactions.find((group) => group.id === selectedPayPeriod.id) ?? null
     : groupedTransactions[0] ?? null
+  const selectedPeriodTransactions = selectedTransactionGroup?.transactions ?? []
   const selectedPeriodSpendPence = selectedTransactionGroup?.totalPence ?? 0
-  const todaySpendPence = snapshot.transactions
-    .filter((transaction) => transaction.date === today)
-    .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
-  const linkedCardSpendPence = snapshot.transactions
+  const selectedPeriodEntryCount = selectedPeriodTransactions.length
+  const linkedCardSpendPence = selectedPeriodTransactions
     .filter((transaction) => transaction.paymentMethod === 'credit_card' || transaction.creditCardId)
     .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
-  const potLinkedSpendPence = snapshot.transactions
+  const potLinkedSpendPence = selectedPeriodTransactions
     .filter((transaction) => transaction.potId && transaction.paymentMethod !== 'credit_card' && !transaction.creditCardId)
     .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
-  const unlinkedSpendPence = snapshot.transactions
+  const unlinkedSpendPence = selectedPeriodTransactions
     .filter((transaction) => !transaction.potId && !transaction.creditCardId && transaction.paymentMethod !== 'credit_card')
     .reduce((totalPence, transaction) => totalPence + transaction.amountPence, 0)
   const recentTransactions = [...snapshot.transactions]
@@ -159,38 +159,18 @@ export function SpendingPage({
 
   return (
     <div className="space-y-6">
-      <SpendingCommandCenter
-        today={today}
-        selectedPayPeriod={selectedPayPeriod ?? null}
-        selectedPeriodSpendPence={selectedPeriodSpendPence}
-        selectedPeriodEntryCount={selectedTransactionGroup?.transactions.length ?? 0}
-        todaySpendPence={todaySpendPence}
-        linkedCardSpendPence={linkedCardSpendPence}
-        potLinkedSpendPence={potLinkedSpendPence}
-        unlinkedSpendPence={unlinkedSpendPence}
-        recentTransactions={recentTransactions}
-        snapshot={snapshot}
-      />
+      <SectionGrid variant="wideLeft" className="gap-5 lg:items-start">
+        <SpendingHero
+          selectedPayPeriod={selectedPayPeriod ?? null}
+          selectedPeriodSpendPence={selectedPeriodSpendPence}
+          selectedPeriodEntryCount={selectedPeriodEntryCount}
+          linkedCardSpendPence={linkedCardSpendPence}
+          potLinkedSpendPence={potLinkedSpendPence}
+          unlinkedSpendPence={unlinkedSpendPence}
+          recentTransactions={recentTransactions}
+          snapshot={snapshot}
+        />
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <MoneyMetric
-          label="Today logged"
-          value={formatSpendTotal(todaySpendPence)}
-          tone={todaySpendPence > 0 ? 'bad' : 'neutral'}
-          breakdown={getSpendingMetricBreakdown('Today logged', snapshot.transactions.filter((transaction) => transaction.date === today), snapshot)}
-        />
-        <MoneyMetric
-          label={selectedPayPeriod ? 'Selected paycheck' : 'Latest paycheck'}
-          value={formatSpendTotal(selectedPeriodSpendPence)}
-          tone={selectedPeriodSpendPence > 0 ? 'warning' : 'neutral'}
-        />
-        <MoneyMetric
-          label="Card-linked spend"
-          value={formatSpendTotal(linkedCardSpendPence)}
-          tone={linkedCardSpendPence > 0 ? 'primary' : 'neutral'}
-        />
-      </div>
-      <SectionGrid variant="wideRight">
         <Panel
           title={editingTransactionId ? 'Edit spending entry' : 'Quick spend'}
           description="Log money quickly, with an optional pot or credit card link."
@@ -207,7 +187,7 @@ export function SpendingPage({
                   key={quickAmount}
                   type="button"
                   onClick={() => setAmount(quickAmount)}
-                  className="rounded-2xl border border-slate-200/90 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm shadow-slate-200/60 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
+                  className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-semibold text-[var(--color-text-secondary)] transition hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-soft)]"
                 >
                   {formatPence(parsePoundsToPence(quickAmount))}
                 </button>
@@ -272,7 +252,7 @@ export function SpendingPage({
                     key={recentNote}
                     type="button"
                     onClick={() => setNote(recentNote)}
-                    className="rounded-2xl border border-slate-200/70 bg-white/[0.85] px-3 py-2 text-sm font-medium text-slate-700 shadow-sm shadow-slate-200/50 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white"
+                    className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-soft)]"
                   >
                     {recentNote}
                   </button>
@@ -281,7 +261,7 @@ export function SpendingPage({
             )}
             <div className="flex flex-wrap gap-3">
               <Button onClick={submitTransaction} disabled={!canSubmitSpend}>
-                {editingTransactionId ? 'Save spending' : 'Log spending'}
+                {editingTransactionId ? 'Save spending' : 'Log spend'}
               </Button>
               {editingTransactionId && (
                 <Button variant="secondary" onClick={resetForm}>
@@ -304,111 +284,125 @@ export function SpendingPage({
             </div>
           </div>
         </Panel>
-
-        <Panel
-          title="Spending by pay period"
-          description="Manual spending is grouped into the pay period containing its date."
-          accent="rose"
-          density="compact"
-        >
-          <div className="space-y-3 xl:max-h-[720px] xl:overflow-y-auto xl:pr-1">
-            {groupedTransactions.length > 0 ? (
-              groupedTransactions.map((group, index) => (
-                <details
-                  key={group.id}
-                  open={group.isSelected || (!selectedPayPeriod && index === 0)}
-                  className={
-                    group.isSelected
-                      ? 'group rounded-2xl border border-slate-950 bg-white/95 shadow-[0_14px_35px_rgba(15,23,42,0.08)]'
-                      : 'group rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_12px_30px_rgba(15,23,42,0.05)]'
-                  }
-                >
-                  <summary className="cursor-pointer list-none px-4 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-slate-950">{group.label}</p>
-                          {group.isSelected && (
-                            <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
-                              Viewing
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1 text-xs text-slate-500">{group.transactions.length} entries</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-red-700">-{formatPence(group.totalPence)}</p>
-                        <ChevronDown size={17} className="shrink-0 text-slate-400 transition group-open:rotate-180" />
-                      </div>
-                    </div>
-                  </summary>
-                  <div className="border-t border-slate-100 p-3">
-                    <CalculationDetails breakdown={getSpendingGroupBreakdown(group, snapshot)} />
-                  </div>
-                  <div className="divide-y divide-slate-100">
-                    {group.transactions.map((transaction) => {
-                      return (
-                        <div key={transaction.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-950">{transaction.note}</p>
-                            <p className="text-xs text-slate-500">
-                              {transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <p className="text-sm font-semibold text-red-700">-{formatPence(transaction.amountPence)}</p>
-                            <Button
-                              variant="secondary"
-                              onClick={() => startEditingTransaction(transaction.id)}
-                              aria-label={`Edit ${transaction.note}`}
-                            >
-                              <PenLine size={16} />
-                            </Button>
-                            <Button
-                              variant="danger"
-                              onClick={() => {
-                                if (window.confirm(`Delete ${transaction.note}?`)) {
-                                  void actions.deleteTransaction(transaction.id)
-                                }
-                              }}
-                              aria-label={`Delete ${transaction.note}`}
-                            >
-                              <Trash2 size={16} />
-                            </Button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </details>
-              ))
-            ) : (
-              <p className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-500">No spending entries yet.</p>
-            )}
-          </div>
-        </Panel>
       </SectionGrid>
+
+      <Panel
+        title="Spending by pay period"
+        description="Manual spending is grouped into the pay period containing its date."
+        accent="slate"
+        density="compact"
+      >
+        <div className="space-y-3 xl:max-h-[720px] xl:overflow-y-auto xl:pr-1">
+          {groupedTransactions.length > 0 ? (
+            groupedTransactions.map((group, index) => (
+              <details
+                key={group.id}
+                open={group.isSelected || (!selectedPayPeriod && index === 0)}
+                className={
+                  group.isSelected
+                    ? 'group rounded-[var(--radius-card)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-none'
+                    : 'group rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-none'
+                }
+              >
+                <summary className="cursor-pointer list-none px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-[var(--color-text-primary)]">{group.label}</p>
+                        {group.isSelected && (
+                          <Pill tone="neutral">Viewing</Pill>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        {formatTransactionCount(group.transactions.length)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-[var(--color-danger)]">{formatSpendTotal(group.totalPence)}</p>
+                      <ChevronDown size={17} className="shrink-0 text-[var(--color-text-muted)] transition group-open:rotate-180" />
+                    </div>
+                  </div>
+                </summary>
+                <div className="border-t border-[var(--color-border)] p-3">
+                  {group.transactions.length > 0 ? (
+                    <ul className="space-y-2">
+                      {group.transactions.map((transaction) => (
+                        <li key={transaction.id}>
+                          <TransactionRow
+                            title={transaction.note}
+                            description={getTransactionLinkLabel(transaction, snapshot)}
+                            date={transaction.date}
+                            amount={formatSpendTotal(transaction.amountPence)}
+                            tone="danger"
+                            action={
+                              <div className="flex items-center gap-1">
+                                <IconButton
+                                  label={`Edit ${transaction.note}`}
+                                  size="sm"
+                                  variant="subtle"
+                                  onClick={() => startEditingTransaction(transaction.id)}
+                                  title={`Edit ${transaction.note}`}
+                                >
+                                  <PenLine size={15} aria-hidden="true" />
+                                </IconButton>
+                                <IconButton
+                                  label={`Delete ${transaction.note}`}
+                                  size="sm"
+                                  variant="subtle"
+                                  className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+                                  onClick={() => {
+                                    if (window.confirm(`Delete ${transaction.note}?`)) {
+                                      void actions.deleteTransaction(transaction.id)
+                                    }
+                                  }}
+                                  title={`Delete ${transaction.note}`}
+                                >
+                                  <Trash2 size={15} aria-hidden="true" />
+                                </IconButton>
+                              </div>
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState
+                      title="No spending yet."
+                      description="Log your first payment to see it grouped by paycheck."
+                      icon={<ReceiptText size={18} aria-hidden="true" />}
+                      className="p-4"
+                    />
+                  )}
+                </div>
+              </details>
+            ))
+          ) : (
+            <EmptyState
+              title="No spending yet."
+              description="Log your first payment to see it grouped by paycheck."
+              icon={<ReceiptText size={18} aria-hidden="true" />}
+              className="p-4"
+            />
+          )}
+        </div>
+      </Panel>
     </div>
   )
 }
 
-function SpendingCommandCenter({
-  today,
+function SpendingHero({
   selectedPayPeriod,
   selectedPeriodSpendPence,
   selectedPeriodEntryCount,
-  todaySpendPence,
   linkedCardSpendPence,
   potLinkedSpendPence,
   unlinkedSpendPence,
   recentTransactions,
   snapshot,
 }: {
-  today: string
   selectedPayPeriod: PayPeriod | null
   selectedPeriodSpendPence: number
   selectedPeriodEntryCount: number
-  todaySpendPence: number
   linkedCardSpendPence: number
   potLinkedSpendPence: number
   unlinkedSpendPence: number
@@ -418,102 +412,80 @@ function SpendingCommandCenter({
   const routedSpendPence = linkedCardSpendPence + potLinkedSpendPence
   const allSpendPence = routedSpendPence + unlinkedSpendPence
   const routedPercent = allSpendPence > 0 ? Math.round((routedSpendPence / allSpendPence) * 100) : 0
-  const cardWidth = allSpendPence > 0 ? `${Math.min(100, Math.round((linkedCardSpendPence / allSpendPence) * 100))}%` : '0%'
-  const potWidth = allSpendPence > 0 ? `${Math.min(100, Math.round((potLinkedSpendPence / allSpendPence) * 100))}%` : '0%'
-  const unlinkedWidth = allSpendPence > 0 ? `${Math.min(100, Math.round((unlinkedSpendPence / allSpendPence) * 100))}%` : '0%'
   const periodLabel = selectedPayPeriod
     ? `${selectedPayPeriod.startDate} to ${selectedPayPeriod.endDate}`
-    : 'No paycheck selected'
+    : 'Latest spending period'
 
   return (
-    <section className="max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-900 bg-[linear-gradient(135deg,#020617_0%,#111827_48%,#3a1830_100%)] text-white shadow-[0_24px_70px_rgba(15,23,42,0.24)]">
-      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.44fr)]">
+    <section
+      aria-label="Spending hero"
+      className="fintech-surface relative max-w-full min-w-0 overflow-hidden rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]"
+    >
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[var(--color-deep-navy)]" aria-hidden="true" />
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-2xl border border-rose-300/25 bg-rose-300/10 text-rose-100 shadow-inner shadow-white/10">
-              <ReceiptText size={20} />
-            </span>
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-xl font-semibold text-white">Spending command desk</h2>
-              <p className="mt-1 text-sm leading-5 text-slate-300">{periodLabel}</p>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SpendCommandMetric
-              icon={<CalendarDays size={17} />}
-              label="Today"
-              value={formatSpendTotal(todaySpendPence)}
-              detail={today}
-            />
-            <SpendCommandMetric
-              icon={<WalletCards size={17} />}
-              label="Paycheck spend"
-              value={formatSpendTotal(selectedPeriodSpendPence)}
-              detail={`${selectedPeriodEntryCount} entr${selectedPeriodEntryCount === 1 ? 'y' : 'ies'} in view`}
-              tone="amber"
-            />
-            <SpendCommandMetric
-              icon={<CreditCard size={17} />}
-              label="Card route"
-              value={formatSpendTotal(linkedCardSpendPence)}
-              detail="Feeds card cover and future direct debits"
-              tone="cyan"
-            />
-            <SpendCommandMetric
-              icon={<Sparkles size={17} />}
-              label="Routed"
-              value={`${routedPercent}%`}
-              detail={`${formatSpendTotal(routedSpendPence)} linked to cards or pots`}
-              tone="emerald"
-            />
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
-              <span>Spend routing</span>
-              <span>{formatSpendTotal(allSpendPence)} total logged</span>
-            </div>
-            <div className="mt-4 overflow-hidden rounded-full bg-slate-950/50 p-1 shadow-inner shadow-slate-950">
-              <div className="flex h-3 overflow-hidden rounded-full bg-white/10">
-                <div className="bg-cyan-300" style={{ width: cardWidth }} />
-                <div className="bg-emerald-300" style={{ width: potWidth }} />
-                <div className="bg-rose-300" style={{ width: unlinkedWidth }} />
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                <ReceiptText size={15} className="text-[var(--color-emerald)]" />
+                Spent this pay period
               </div>
+              <p className="mt-3 text-4xl font-semibold leading-tight text-[var(--color-text-primary)]">
+                {formatSpendTotal(selectedPeriodSpendPence)}
+              </p>
+              <p className="mt-2 text-sm leading-5 text-[var(--color-text-muted)]">{periodLabel}</p>
             </div>
-            <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-300 sm:grid-cols-3">
-              <SpendRouteLabel colorClass="bg-cyan-300" label="Cards" value={formatSpendTotal(linkedCardSpendPence)} />
-              <SpendRouteLabel colorClass="bg-emerald-300" label="Pots" value={formatSpendTotal(potLinkedSpendPence)} />
-              <SpendRouteLabel colorClass="bg-rose-300" label="Unlinked" value={formatSpendTotal(unlinkedSpendPence)} />
-            </div>
+            <Pill tone={selectedPeriodEntryCount > 0 ? 'warning' : 'neutral'} icon={<CalendarDays size={14} />}>
+              {formatTransactionCount(selectedPeriodEntryCount)}
+            </Pill>
           </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-2">
+            <SpendingHeroStat
+              icon={<WalletCards size={16} />}
+              label="Routed"
+              value={formatPence(routedSpendPence)}
+              detail={`${routedPercent}% linked to pots or cards`}
+            />
+            <SpendingHeroStat
+              icon={<CreditCard size={16} />}
+              label="Unlinked"
+              value={formatPence(unlinkedSpendPence)}
+              detail={unlinkedSpendPence > 0 ? 'Can be routed later if needed' : 'Every transaction in view is linked'}
+            />
+          </div>
+
+          <ProgressBar
+            label="Spending routing"
+            percent={routedPercent}
+            className="mt-5"
+            color="var(--color-emerald)"
+            trackClassName="bg-[rgba(11,61,46,0.08)]"
+          />
         </div>
 
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-inner shadow-white/10">
+        <div className="min-w-0 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-4 xl:w-[300px]">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-rose-100/80">Recent payments</p>
-              <p className="mt-2 text-3xl font-semibold text-white">{recentTransactions.length}</p>
-            </div>
-            <span className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-rose-50">
-              Latest entries
-            </span>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Recent payments</p>
+            <Pill tone="neutral">{recentTransactions.length}</Pill>
           </div>
-          <div className="mt-5 space-y-3">
+          <div className="mt-4 space-y-2">
             {recentTransactions.length > 0 ? (
               recentTransactions.map((transaction) => (
-                <div key={transaction.id} className="rounded-xl border border-white/10 bg-slate-950/25 p-3">
+                <div key={transaction.id} className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">{transaction.note}</p>
-                      <p className="mt-0.5 text-xs text-slate-400">{transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}</p>
+                      <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{transaction.note}</p>
+                      <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                        {transaction.date} · {getTransactionLinkLabel(transaction, snapshot)}
+                      </p>
                     </div>
-                    <p className="text-sm font-semibold text-rose-100">{formatSpendTotal(transaction.amountPence)}</p>
+                    <p className="text-sm font-semibold text-[var(--color-danger)]">{formatSpendTotal(transaction.amountPence)}</p>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="rounded-xl border border-dashed border-white/15 bg-slate-950/25 p-4 text-sm text-slate-300">
+              <div className="rounded-[var(--radius-control)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-[var(--color-text-muted)]">
                 Log spend to build recent payments.
               </div>
             )}
@@ -524,48 +496,29 @@ function SpendingCommandCenter({
   )
 }
 
-function SpendCommandMetric({
+function SpendingHeroStat({
   icon,
   label,
   value,
   detail,
-  tone = 'rose',
 }: {
   icon: ReactNode
   label: string
   value: string
   detail: string
-  tone?: 'rose' | 'amber' | 'cyan' | 'emerald'
 }) {
-  const toneClassName =
-    tone === 'amber'
-      ? 'border-amber-300/20 bg-amber-300/10 text-amber-100'
-      : tone === 'cyan'
-        ? 'border-cyan-300/20 bg-cyan-300/10 text-cyan-100'
-        : tone === 'emerald'
-          ? 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100'
-          : 'border-rose-300/20 bg-rose-300/10 text-rose-100'
-
   return (
-    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-3 shadow-inner shadow-white/10 sm:p-4">
-      <div className={`mb-3 flex size-8 items-center justify-center rounded-xl sm:size-9 ${toneClassName}`}>
-        {icon}
+    <div className="min-w-0 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{label}</p>
+          <p className="mt-2 text-2xl font-semibold text-[var(--color-text-primary)]">{value}</p>
+        </div>
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-surface-soft)] text-[var(--color-emerald)]">
+          {icon}
+        </span>
       </div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-white sm:text-2xl">{value}</p>
-      <p className="mt-2 text-[11px] leading-5 text-slate-400 sm:text-xs">{detail}</p>
-    </div>
-  )
-}
-
-function SpendRouteLabel({ colorClass, label, value }: { colorClass: string; label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-950/25 px-3 py-2">
-      <span className="flex items-center gap-2">
-        <span className={`size-2 rounded-full ${colorClass}`} />
-        {label}
-      </span>
-      <span className="text-white">{value}</span>
+      <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">{detail}</p>
     </div>
   )
 }
@@ -577,56 +530,6 @@ interface TransactionGroup {
   totalPence: number
   isSelected: boolean
   sortDate: string
-}
-
-function getSpendingGroupBreakdown(group: TransactionGroup, snapshot: PlannerSnapshot): CalculationBreakdown {
-  return {
-    formula: 'Period spending total = every manual spending entry in this dropdown.',
-    lines:
-      group.transactions.length > 0
-        ? [
-            ...group.transactions.map((transaction) => ({
-              label: transaction.note,
-              value: formatPence(transaction.amountPence),
-              detail: `${transaction.date} · ${getTransactionLinkLabel(transaction, snapshot)}`,
-              tone: 'add' as const,
-            })),
-            {
-              label: 'Period spending total',
-              value: formatPence(group.totalPence),
-              tone: 'result' as const,
-            },
-          ]
-        : [{ label: 'No spending entries', value: formatPence(0), tone: 'result' }],
-  }
-}
-
-function getSpendingMetricBreakdown(
-  label: string,
-  transactions: PlannerSnapshot['transactions'],
-  snapshot: PlannerSnapshot,
-): CalculationBreakdown {
-  const totalPence = transactions.reduce((sum, transaction) => sum + transaction.amountPence, 0)
-
-  return {
-    formula: `${label} = manual spending entries in this view.`,
-    lines:
-      transactions.length > 0
-        ? [
-            ...transactions.map((transaction) => ({
-              label: transaction.note,
-              value: formatPence(transaction.amountPence),
-              detail: `${transaction.date} · ${getTransactionLinkLabel(transaction, snapshot)}`,
-              tone: 'add' as const,
-            })),
-            {
-              label,
-              value: formatPence(totalPence),
-              tone: 'result' as const,
-            },
-          ]
-        : [{ label: 'No spending entries', value: formatPence(0), tone: 'result' }],
-  }
 }
 
 function groupTransactionsByPeriod(
@@ -688,6 +591,10 @@ function groupTransactionsByPeriod(
 
 function formatSpendTotal(amountPence: number): string {
   return amountPence > 0 ? `-${formatPence(amountPence)}` : formatPence(0)
+}
+
+function formatTransactionCount(count: number): string {
+  return `${count} transaction${count === 1 ? '' : 's'}`
 }
 
 function getQuickSpendLinkFields(

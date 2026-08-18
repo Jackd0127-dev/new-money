@@ -830,6 +830,7 @@ describe('credit card allocation', () => {
       repayments,
       creditCardPots,
       payPeriod,
+      asOfDate: '2026-05-24',
     })
 
     expect(summary.totalActualOwedPence).toBe(3000)

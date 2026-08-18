@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useMemo, useState } from 'react'
 import { clsx } from 'clsx'
 import { CheckCircle2, Loader2, Send, Settings2, X } from 'lucide-react'
 
@@ -10,7 +10,7 @@ import {
   type AssistantActionProposal,
   type AssistantActionStatus,
 } from '../domain/assistantActions'
-import { getAppTodayIso } from '../domain/money'
+import { formatPence, getAppTodayIso, getPayPeriodCostSummary } from '../domain/money'
 import {
   createAssistantMessage,
   createConversationHistory,
@@ -54,6 +54,11 @@ export function AiPlanPage({
     createConversation,
   } = useAssistantConversations()
   const viewedPeriod = selectedPayPeriod ?? null
+  const proposedActions = useMemo(
+    () => messages.flatMap((message) => message.proposedActions ?? []),
+    [messages],
+  )
+  const hasInsightsRail = Boolean(viewedPeriod || proposedActions.length > 0)
 
   async function confirmAssistantAction(action: AssistantActionProposal) {
     const validationError = getAssistantActionValidationError(action, snapshot)
@@ -121,7 +126,7 @@ export function AiPlanPage({
         createAssistantMessage({
           role: 'assistant',
           ...createUnavailableResponse(
-            'Sign in from Settings to ask AI.',
+            `Sign in from Settings to ask ${profile.name}.`,
             'Authentication is required before any planner data is sent to an AI provider.',
           ),
         }),
@@ -173,7 +178,12 @@ export function AiPlanPage({
 
   return (
     <div className="mx-auto max-w-6xl min-w-0 space-y-6">
-      <section className="grid h-[min(700px,calc(100vh-9rem))] min-h-[520px] max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur md:grid-cols-[230px_1fr]">
+      <section
+        className={clsx(
+          'grid h-[min(620px,calc(100dvh-21rem))] min-h-[420px] max-w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200/90 bg-white/[0.94] shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur md:h-[min(700px,calc(100vh-9rem))] md:min-h-[520px] md:grid-cols-[230px_minmax(0,1fr)]',
+          hasInsightsRail && 'xl:grid-cols-[230px_minmax(0,1fr)_260px]',
+        )}
+      >
         <ConversationSidebar
           conversations={conversations}
           activeConversationId={activeConversation.id}
@@ -182,14 +192,14 @@ export function AiPlanPage({
         />
 
         <div className="flex min-h-0 flex-col">
-          <div className="ai-assistant-header p-4 text-white">
+          <div className="ai-assistant-header p-3 text-white md:p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="flex min-w-0 items-center gap-4">
                 <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/95 text-xs font-black text-slate-950 shadow-lg shadow-slate-950/20">
                   {profile.avatar}
                 </span>
                 <div className="min-w-0">
-                  <h2 className="truncate text-xl font-semibold">{profile.name}</h2>
+                  <h2 className="truncate text-lg font-semibold md:text-xl">{profile.name}</h2>
                   <p className="mt-1 text-sm text-white/75">Saved money chats with confirmable actions.</p>
                 </div>
               </div>
@@ -202,18 +212,18 @@ export function AiPlanPage({
 
           {isCustomizing && (
             <div className="grid gap-3 border-b border-slate-200/90 bg-slate-50/80 p-3 md:grid-cols-[1fr_140px]">
-              <Field label="AI name">
+              <Field label="Assistant name">
                 <TextInput
                   value={profile.name}
                   onChange={(event) => setProfile({ ...profile, name: event.target.value })}
-                  placeholder="AI"
+                  placeholder="Jimbo"
                 />
               </Field>
               <Field label="PFP / initials">
                 <TextInput
                   value={profile.avatar}
                   onChange={(event) => setProfile({ ...profile, avatar: event.target.value })}
-                  placeholder="AI"
+                  placeholder="J"
                 />
               </Field>
             </div>
@@ -221,10 +231,16 @@ export function AiPlanPage({
 
           <div
             role="log"
-            aria-label="AI conversation messages"
+            aria-label={`${profile.name} conversation messages`}
             className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50/80 p-3 md:p-4"
           >
-            <AssistantIntroBubble name={profile.name} avatar={profile.avatar} />
+            {messages.length === 0 && (
+              <AssistantEmptyState
+                name={profile.name}
+                avatar={profile.avatar}
+                onPromptSelect={setDraft}
+              />
+            )}
 
             {messages.map((message) => (
               <MessageBubble
@@ -243,12 +259,12 @@ export function AiPlanPage({
 
           <form onSubmit={sendMessage} className="border-t border-slate-200/90 bg-white/95 p-3">
             <label htmlFor="ai-plan-chat-input" className="sr-only">
-              Message AI
+              Message {profile.name}
             </label>
             <div className="flex items-end gap-2 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-2 shadow-inner shadow-slate-200/60 focus-within:border-cyan-400 focus-within:ring-4 focus-within:ring-cyan-100">
               <textarea
                 id="ai-plan-chat-input"
-                aria-label="Message AI"
+                aria-label={`Message ${profile.name}`}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 rows={2}
@@ -266,6 +282,15 @@ export function AiPlanPage({
             </div>
           </form>
         </div>
+
+        {hasInsightsRail && (
+          <JimboInsightsRail
+            snapshot={snapshot}
+            selectedPayPeriod={viewedPeriod}
+            proposedActions={proposedActions}
+            actionStatuses={actionStatuses}
+          />
+        )}
       </section>
     </div>
   )
@@ -283,8 +308,8 @@ function ConversationSidebar({
   onCreateConversation: () => void
 }) {
   return (
-    <aside className="flex max-h-36 min-h-0 flex-col border-b border-slate-200/90 bg-slate-950 text-white md:max-h-none md:border-b-0 md:border-r md:border-slate-900">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 p-3">
+    <aside className="flex max-h-28 min-h-0 flex-col border-b border-slate-200/90 bg-slate-950 text-white md:max-h-none md:border-b-0 md:border-r md:border-slate-900">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5 md:p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Chats</p>
         <button
           type="button"
@@ -319,17 +344,45 @@ function ConversationSidebar({
   )
 }
 
-function AssistantIntroBubble({ name, avatar }: { name: string; avatar: string }) {
+const suggestedPrompts = [
+  'Can I afford this before payday?',
+  'Which bills are due before payday?',
+  'Why is my money left low?',
+  'What is my payment priority?',
+  'How much card cover do I need?',
+]
+
+function AssistantEmptyState({
+  name,
+  avatar,
+  onPromptSelect,
+}: {
+  name: string
+  avatar: string
+  onPromptSelect: (prompt: string) => void
+}) {
   return (
     <article className="flex items-end gap-3">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">
         {avatar}
       </span>
-      <div className="max-w-[82%] rounded-3xl rounded-bl-md border border-slate-200/90 bg-white/95 px-4 py-3 text-sm leading-6 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+      <div className="max-w-[88%] rounded-3xl rounded-bl-md border border-slate-200/90 bg-white/95 px-4 py-3 text-sm leading-6 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
         <p className="font-semibold text-slate-950">{name}</p>
         <p className="mt-1">
-          I can access all of your payments and give you a detailed plan depending on your needs.
+          Ask {name} about this pay period, what is due before payday, and where the next pound should go.
         </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {suggestedPrompts.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onPromptSelect(prompt)}
+              className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
       </div>
     </article>
   )
@@ -384,7 +437,9 @@ function MessageBubble({
             : 'rounded-bl-md border border-slate-200/90 bg-white/95 text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]',
         )}
       >
-        <p className={clsx('whitespace-pre-wrap', isUser ? 'text-white' : 'text-slate-800')}>{message.answer}</p>
+        <p className={clsx('whitespace-pre-wrap', isUser ? 'text-white' : 'text-slate-800')}>
+          {renderHighlightedMessage(message.answer, isUser)}
+        </p>
         {!isUser && message.proposedActions && message.proposedActions.length > 0 && (
           <div className="mt-3 space-y-2">
             {message.proposedActions.map((action) => (
@@ -402,6 +457,134 @@ function MessageBubble({
       </div>
     </article>
   )
+}
+
+function JimboInsightsRail({
+  snapshot,
+  selectedPayPeriod,
+  proposedActions,
+  actionStatuses,
+}: {
+  snapshot: PlannerSnapshot
+  selectedPayPeriod: PayPeriod | null
+  proposedActions: AssistantActionProposal[]
+  actionStatuses: Record<string, AssistantActionStatus>
+}) {
+  const summary = selectedPayPeriod
+    ? getPayPeriodCostSummary({
+        payPeriod: selectedPayPeriod,
+        recurringPayments: snapshot.recurringPayments,
+        creditCards: snapshot.creditCards,
+        customPayments: snapshot.customPayments,
+        transactions: snapshot.transactions,
+        debts: snapshot.debts,
+        creditCardRepayments: snapshot.creditCardRepayments,
+        creditCardPots: snapshot.creditCardPots,
+        debtReserves: snapshot.debtReserves,
+        pots: snapshot.pots,
+        potAllocations: snapshot.potAllocations,
+        asOfDate: getAppTodayIso(snapshot.settings),
+      })
+    : null
+  const pendingActions = proposedActions.filter((action) => {
+    const status = actionStatuses[action.id]
+
+    return !status || status.state === 'pending' || status.state === 'error'
+  })
+
+  return (
+    <aside
+      aria-label="Jimbo insights"
+      className="hidden min-h-0 flex-col gap-3 border-l border-slate-200 bg-slate-50/80 p-3 xl:flex"
+    >
+      {summary && selectedPayPeriod && (
+        <section className="rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm shadow-slate-200/60">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pay period</p>
+          <p className="mt-1 text-sm font-semibold text-slate-950">
+            {selectedPayPeriod.startDate} to {selectedPayPeriod.endDate}
+          </p>
+          <div className="mt-3 grid gap-2">
+            <InsightLine label="Income" value={formatPence(summary.payReceivedPence)} />
+            <InsightLine label="Planned costs" value={formatPence(summary.totalCostsPence)} />
+            <InsightLine
+              label="Money left"
+              value={formatPence(summary.moneyLeftPence)}
+              tone={summary.moneyLeftPence < 0 ? 'warning' : 'good'}
+            />
+            <InsightLine label="Card cover" value={formatPence(summary.creditCardPotsPence)} />
+          </div>
+        </section>
+      )}
+
+      {pendingActions.length > 0 && (
+        <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 shadow-sm shadow-emerald-100/60">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Action queue</p>
+          <p className="mt-1 text-sm font-semibold text-slate-950">
+            {pendingActions.length} confirmable action{pendingActions.length === 1 ? '' : 's'}
+          </p>
+          <div className="mt-2 space-y-1">
+            {pendingActions.slice(0, 3).map((action) => (
+              <p key={action.id} className="truncate rounded-lg bg-white/80 px-2 py-1.5 text-xs font-semibold text-slate-700">
+                {action.label}
+              </p>
+            ))}
+          </div>
+        </section>
+      )}
+    </aside>
+  )
+}
+
+function InsightLine({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'good' | 'warning'
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <span
+        className={clsx(
+          'text-xs font-semibold',
+          tone === 'neutral' && 'text-slate-950',
+          tone === 'good' && 'text-emerald-700',
+          tone === 'warning' && 'text-amber-700',
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function renderHighlightedMessage(text: string, isUser: boolean) {
+  const parts = text.split(/([+-]?£\d[\d,]*(?:\.\d{2})?|\b\d+%)/g)
+
+  return parts.map((part, index) => {
+    if (!part) {
+      return null
+    }
+
+    if (/^[+-]?£\d[\d,]*(?:\.\d{2})?$|^\d+%$/.test(part)) {
+      return (
+        <span
+          key={`${part}-${index}`}
+          className={clsx(
+            'rounded-md px-1 py-0.5 font-semibold',
+            isUser ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-800',
+          )}
+        >
+          {part}
+        </span>
+      )
+    }
+
+    return part
+  })
 }
 
 function AssistantActionCard({
@@ -423,7 +606,7 @@ function AssistantActionCard({
   const details = getAssistantActionDetails(action, snapshot)
 
   return (
-    <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-cyan-50 p-3 text-slate-800 shadow-sm">
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-slate-800 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Confirm action</p>
@@ -521,14 +704,14 @@ async function getAssistantErrorMessage(response: Response): Promise<string> {
       reason?: unknown
     }
     const parts = [
-      typeof body.error === 'string' ? body.error : `AI helper request failed with ${response.status}`,
+      typeof body.error === 'string' ? body.error : `Assistant helper request failed with ${response.status}`,
       typeof body.provider === 'string' ? `Provider: ${body.provider}` : '',
       typeof body.reason === 'string' ? body.reason : '',
     ].filter(Boolean)
 
     return parts.join(' - ')
   } catch {
-    return `AI helper request failed with ${response.status}`
+    return `Assistant helper request failed with ${response.status}`
   }
 }
 

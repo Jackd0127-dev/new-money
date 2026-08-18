@@ -35,7 +35,6 @@ interface AssistantConversationStore {
 }
 
 const assistantConversationStorageKey = 'new-money.assistant-conversations.v1'
-const assistantConversationEventName = 'new-money.assistant-conversations.updated'
 const maxSavedConversations = 20
 const maxMessagesPerConversation = 60
 
@@ -43,23 +42,15 @@ export function useAssistantConversations() {
   const [store, setStore] = useState<AssistantConversationStore>(() => readAssistantConversationStore())
 
   useEffect(() => {
-    function handleConversationEvent(event: Event) {
-      if (event instanceof CustomEvent && isAssistantConversationStore(event.detail)) {
-        setStore(cleanAssistantConversationStore(event.detail))
-      }
-    }
-
     function handleStorageEvent(event: StorageEvent) {
       if (event.key === assistantConversationStorageKey) {
         setStore(readAssistantConversationStore())
       }
     }
 
-    window.addEventListener(assistantConversationEventName, handleConversationEvent)
     window.addEventListener('storage', handleStorageEvent)
 
     return () => {
-      window.removeEventListener(assistantConversationEventName, handleConversationEvent)
       window.removeEventListener('storage', handleStorageEvent)
     }
   }, [])
@@ -73,7 +64,6 @@ export function useAssistantConversations() {
       const next = cleanAssistantConversationStore(updater(current))
 
       writeAssistantConversationStore(next)
-      notifyAssistantConversations(next)
 
       return next
     })
@@ -198,14 +188,6 @@ function writeAssistantConversationStore(store: AssistantConversationStore): voi
   } catch {
     // The active chat still works in memory if local storage is unavailable.
   }
-}
-
-function notifyAssistantConversations(store: AssistantConversationStore): void {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  window.dispatchEvent(new CustomEvent(assistantConversationEventName, { detail: store }))
 }
 
 function createDefaultConversationStore(): AssistantConversationStore {

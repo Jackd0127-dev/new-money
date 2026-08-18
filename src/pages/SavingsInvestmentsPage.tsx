@@ -32,13 +32,26 @@ export function SavingsInvestmentsPage({
       : 0
   const totalSavedPence = eligiblePots.reduce((total, pot) => total + Math.max(0, pot.balancePence), 0)
   const targetPence = eligiblePots.reduce((total, pot) => total + Math.max(0, pot.targetPence ?? 0), 0)
-  const selectedPeriodAllocationPence = selectedPayPeriod
-    ? snapshot.potAllocations
-        .filter((allocation) => allocation.payPeriodId === selectedPayPeriod.id && eligiblePots.some((pot) => pot.id === allocation.potId))
-        .reduce((total, allocation) => total + Math.max(0, allocation.amountPence), 0)
-    : 0
+  const selectedPeriodAllocationByPotId = useMemo(() => {
+    const allocations = new Map<string, number>()
+    if (!selectedPayPeriod) {
+      return allocations
+    }
+
+    const eligiblePotIds = new Set(eligiblePots.map((pot) => pot.id))
+    snapshot.potAllocations.forEach((allocation) => {
+      if (allocation.payPeriodId !== selectedPayPeriod.id || !eligiblePotIds.has(allocation.potId)) {
+        return
+      }
+      allocations.set(allocation.potId, (allocations.get(allocation.potId) ?? 0) + Math.max(0, allocation.amountPence))
+    })
+
+    return allocations
+  }, [eligiblePots, selectedPayPeriod, snapshot.potAllocations])
+  const selectedPeriodAllocationPence = Array.from(selectedPeriodAllocationByPotId.values()).reduce((total, amount) => total + amount, 0)
   const allocationPreviewPence = selectedPot ? existingAllocationPence + Math.max(0, amountPence) : 0
   const canSubmit = Boolean(selectedPayPeriod && selectedPot && amountPence > 0)
+  const hasAllocationPreview = Boolean(selectedPot && amountPence > 0)
 
   async function submitAllocation() {
     if (!selectedPayPeriod || !selectedPot || amountPence <= 0) {
@@ -64,12 +77,12 @@ export function SavingsInvestmentsPage({
       </div>
 
       <Panel
-        title="Savings & Investments"
+        title="Savings"
         description={selectedPayPeriod ? `Set money aside from ${selectedPayPeriod.payday} pay.` : 'Create or select a paycheck first.'}
         accent="emerald"
         density="compact"
       >
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)]">
+        <div className={hasAllocationPreview ? 'grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)]' : 'grid gap-4'}>
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]">
             <Field label="Savings or investment pot">
               <SelectInput value={selectedPotId} onChange={(event) => setSelectedPotId(event.target.value)}>
@@ -96,19 +109,25 @@ export function SavingsInvestmentsPage({
               </Button>
             </div>
           </div>
-          <AllocationPreviewCard
-            selectedPot={selectedPot}
-            amountPence={amountPence}
-            existingAllocationPence={existingAllocationPence}
-            allocationPreviewPence={allocationPreviewPence}
-            selectedPayPeriod={selectedPayPeriod ?? null}
-          />
+          {hasAllocationPreview && (
+            <AllocationPreviewCard
+              selectedPot={selectedPot}
+              amountPence={amountPence}
+              existingAllocationPence={existingAllocationPence}
+              allocationPreviewPence={allocationPreviewPence}
+              selectedPayPeriod={selectedPayPeriod ?? null}
+            />
+          )}
         </div>
       </Panel>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {eligiblePots.map((pot) => (
-          <SavingsPotCard key={pot.id} pot={pot} />
+          <SavingsPotCard
+            key={pot.id}
+            pot={pot}
+            currentSetAsidePence={selectedPeriodAllocationByPotId.get(pot.id) ?? 0}
+          />
         ))}
         {eligiblePots.length === 0 && (
           <Panel title="No savings pots yet" accent="slate" density="compact">
@@ -136,7 +155,7 @@ function AllocationPreviewCard({
   const amountLabel = amountPence > 0 ? formatPence(amountPence) : formatPence(0)
 
   return (
-    <div className="rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#ffffff,#ecfdf5)] p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
+    <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Allocation preview</p>
@@ -171,7 +190,7 @@ function AllocationPreviewCard({
   )
 }
 
-function SavingsPotCard({ pot }: { pot: Pot }) {
+function SavingsPotCard({ pot, currentSetAsidePence }: { pot: Pot; currentSetAsidePence: number }) {
   const targetPence = Math.max(0, pot.targetPence ?? 0)
   const progressPercent = targetPence > 0
     ? Math.round((Math.max(0, pot.balancePence) / targetPence) * 100)
@@ -208,6 +227,11 @@ function SavingsPotCard({ pot }: { pot: Pot }) {
           {targetDeltaPence > 0
             ? `${formatPence(targetDeltaPence)} left to target.`
             : `${formatPence(Math.abs(targetDeltaPence))} over target.`}
+        </p>
+      )}
+      {currentSetAsidePence > 0 && (
+        <p className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+          This paycheck set-aside {formatPence(currentSetAsidePence)}
         </p>
       )}
       </div>

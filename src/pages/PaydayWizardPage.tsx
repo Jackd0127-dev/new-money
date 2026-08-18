@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CalendarDays, CheckCircle2, Clock3, WalletCards } from 'lucide-react'
+import { AlertTriangle, Banknote, CalendarDays, CheckCircle2, Clock3, ReceiptText, WalletCards } from 'lucide-react'
 
 import {
   calculatePaycheckAmount,
@@ -11,16 +11,14 @@ import {
 import type { PlannerActions, PlannerSnapshot } from '../hooks/usePlannerData'
 import { PayPeriodHistoryPanel } from './HistoryPage'
 import {
-  Button,
+  ActionButton,
   Field,
-  MoneyMetric,
+  MetricCard,
   Panel,
-  ProgressRail,
+  Pill,
   SectionGrid,
   SelectInput,
   TextInput,
-  type CalculationBreakdown,
-  type CalculationLine,
 } from '../components/ui'
 import type { PayFrequency, PayPeriod } from '../types/models'
 
@@ -60,7 +58,12 @@ export function PaydayWizardPage({
     hourlyRatePence,
   })
   const canSubmit = hasValidPayday && incomePence > 0
-  const actualOverrideDifferencePence = actualAmountPence === null ? 0 : actualAmountPence - calculatedPence
+  const allocationSummary = getPaydayAllocationSummary(snapshot, existingPeriod, incomePence)
+  const periodDisplay = period ? `${period.startDate} to ${period.endDate}` : 'Choose a valid payday'
+  const payToPlanDescription =
+    actualAmountPence === null
+      ? `${hours || 0} hours at ${formatPence(hourlyRatePence)}`
+      : `Actual received replaces the ${formatPence(calculatedPence)} hours estimate.`
 
   function loadPayday(nextPayday: string) {
     const draft = getPaydayDraft(snapshot, nextPayday)
@@ -91,29 +94,8 @@ export function PaydayWizardPage({
 
   return (
     <div className="min-w-0 space-y-6">
-      <div className="grid gap-3 md:grid-cols-3">
-        <PaydayOverviewMetric
-          label="Estimate"
-          value={formatPence(calculatedPence)}
-          caption={`${hours || 0} hours at ${formatPence(hourlyRatePence)}`}
-          tone="neutral"
-        />
-        <PaydayOverviewMetric
-          label="Override"
-          value={actualAmountPence === null ? 'Unused' : formatSignedPence(actualOverrideDifferencePence)}
-          caption={actualAmountPence === null ? 'using hours estimate' : 'difference from estimate'}
-          tone={actualAmountPence === null || actualOverrideDifferencePence >= 0 ? 'good' : 'warning'}
-        />
-        <PaydayOverviewMetric
-          label="Plan state"
-          value={existingPeriod ? 'Update' : 'New'}
-          caption={canSubmit ? 'ready to save' : 'needs pay details'}
-          tone={canSubmit ? 'good' : 'warning'}
-        />
-      </div>
-
-      <SectionGrid variant="wideLeft" className="gap-4">
-        <Panel title="Pay details" description="Enter pay details for this payday." accent="emerald" density="compact">
+      <SectionGrid variant="wideLeft" className="gap-5 lg:items-start">
+        <Panel title="Pay planning" description="Build the paycheque plan from payroll details." accent="emerald" density="compact">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Payday">
               <TextInput
@@ -158,7 +140,7 @@ export function PaydayWizardPage({
                 }}
               />
             </Field>
-            <Field label="Actual received" hint="Optional. If payroll differs, this overrides the estimate.">
+            <Field label="Actual received">
               <TextInput
                 inputMode="decimal"
                 placeholder="Leave blank"
@@ -170,61 +152,86 @@ export function PaydayWizardPage({
               />
             </Field>
             <Field label="Pay period">
-              <TextInput value={period ? `${period.startDate} to ${period.endDate}` : 'Choose a valid payday'} disabled />
+              <TextInput value={periodDisplay} disabled />
             </Field>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <PaydayInfoTile
+              icon={<CalendarDays size={16} />}
+              label="Payday"
+              value={hasValidPayday ? payday : 'Invalid'}
+            />
+            <PaydayInfoTile
+              icon={<Clock3 size={16} />}
+              label="Frequency"
+              value={payFrequency}
+              capitalize
+            />
+            <PaydayInfoTile
+              icon={<CheckCircle2 size={16} />}
+              label="Save mode"
+              value={existingPeriod ? 'Update saved plan' : 'New plan'}
+            />
           </div>
         </Panel>
 
-        <Panel title="Pay summary" description={period ? `${period.startDate} to ${period.endDate}` : 'Choose a valid payday.'} accent="blue" density="compact">
+        <Panel
+          title="Pay plan summary"
+          description={period ? periodDisplay : 'Choose a valid payday.'}
+          accent={allocationSummary.isOverallocated ? 'amber' : 'blue'}
+          density="compact"
+          className="lg:sticky lg:top-24"
+        >
           <div className="space-y-4">
-            <MoneyMetric
+            <MetricCard
               label="Pay to plan"
               value={formatPence(incomePence)}
               tone="primary"
-              breakdown={getPayToPlanBreakdown({
-                actualAmountPence,
-                calculatedPence,
-                hourlyRatePence,
-                hours,
-                incomePence,
-              })}
+              detail={payToPlanDescription}
             />
 
-            <div className="overflow-hidden rounded-2xl border border-emerald-200/90 bg-[linear-gradient(135deg,#f0fdf4,#ecfeff)] p-4 shadow-[0_18px_45px_rgba(15,23,42,0.07)]">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Paycheck flow</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-950">
-                    {period ? `${period.startDate} to ${period.endDate}` : 'Waiting for a valid payday'}
-                  </p>
-                </div>
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/80 text-emerald-700 shadow-sm shadow-emerald-100/60">
-                  <WalletCards size={18} />
-                </span>
-              </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <PaydayFlowStep icon={<CalendarDays size={15} />} label="Payday" value={hasValidPayday ? payday : 'Invalid'} />
-                <PaydayFlowStep icon={<Clock3 size={15} />} label="Frequency" value={payFrequency} />
-                <PaydayFlowStep icon={<CheckCircle2 size={15} />} label="Status" value={existingPeriod ? 'Updating' : 'New plan'} />
-              </div>
-              <ProgressRail
-                percent={canSubmit ? 100 : hasValidPayday ? 58 : 24}
-                color="#10b981"
-                className="mt-4"
-                trackClassName="bg-white/80 shadow-emerald-100"
+            <div className="grid gap-3">
+              <PaydaySummaryRow
+                icon={<ReceiptText size={16} />}
+                label="Reserved bills"
+                value={formatPence(allocationSummary.reservedBillsPence)}
+                detail={existingPeriod ? 'Saved recurring reserves for this payday.' : 'No saved bills yet.'}
+              />
+              <PaydaySummaryRow
+                icon={<WalletCards size={16} />}
+                label="Manual allocations"
+                value={formatPence(allocationSummary.manualAllocationsPence)}
+                detail={existingPeriod ? 'Saved pot top-ups and manual allocations.' : 'No manual allocations yet.'}
+              />
+              <PaydaySummaryRow
+                icon={<Banknote size={16} />}
+                label="Left unassigned"
+                value={formatPence(allocationSummary.leftUnassignedPence)}
+                detail={`${formatPence(allocationSummary.allocatedPence)} allocated from this paycheque.`}
+                tone={allocationSummary.isOverallocated ? 'warning' : 'success'}
               />
             </div>
 
+            {allocationSummary.isOverallocated && (
+              <div className="flex gap-3 rounded-[var(--radius-control)] border border-[color:rgba(183,121,31,0.28)] bg-[color:rgba(183,121,31,0.08)] p-3 text-sm text-[var(--color-warning)]" role="alert">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                <p className="font-medium">
+                  This paycheque is overallocated by {formatPence(allocationSummary.overallocatedPence)}.
+                </p>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={!canSubmit || saved} onClick={submitPlan}>
-                {existingPeriod ? 'Update paycheck plan' : 'Confirm paycheck plan'}
-              </Button>
-                <span className="rounded-2xl border border-slate-200/90 bg-white/90 px-3 py-2 text-sm font-medium capitalize text-slate-700 shadow-sm shadow-slate-200/60">
+              <ActionButton disabled={!canSubmit || saved} onClick={submitPlan}>
+                {existingPeriod ? 'Update paycheque plan' : 'Confirm paycheque plan'}
+              </ActionButton>
+              <Pill tone={canSubmit ? 'success' : 'warning'} icon={<WalletCards size={14} />} className="capitalize">
                 {payFrequency} plan
-              </span>
+              </Pill>
               {saved && (
-                <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700">
-                  <CheckCircle2 size={18} />
+                <span className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-success)]">
+                  <CheckCircle2 size={18} aria-hidden="true" />
                   Saved locally
                 </span>
               )}
@@ -238,105 +245,66 @@ export function PaydayWizardPage({
   )
 }
 
-function PaydayFlowStep({
+function PaydayInfoTile({
   icon,
   label,
   value,
+  capitalize = false,
 }: {
   icon: ReactNode
   label: string
   value: string
+  capitalize?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-white/70 bg-white/[0.78] px-3 py-2 shadow-sm shadow-emerald-100/50">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        <span className="text-emerald-700">{icon}</span>
+    <div className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-2">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        <span className="text-[var(--color-emerald)]">{icon}</span>
         {label}
       </div>
-      <p className="mt-1 truncate text-sm font-semibold capitalize text-slate-950">{value}</p>
+      <p className={['mt-1 truncate text-sm font-semibold text-[var(--color-text-primary)]', capitalize ? 'capitalize' : ''].join(' ')}>
+        {value}
+      </p>
     </div>
   )
 }
 
-function PaydayOverviewMetric({
+function PaydaySummaryRow({
+  icon,
   label,
   value,
-  caption,
-  tone,
+  detail,
+  tone = 'neutral',
 }: {
+  icon: ReactNode
   label: string
   value: string
-  caption: string
-  tone: 'neutral' | 'good' | 'warning'
+  detail: string
+  tone?: 'neutral' | 'success' | 'warning'
 }) {
   return (
-    <div
-      className={[
-        'min-w-0 rounded-2xl border bg-white/95 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.055)]',
-        tone === 'neutral' ? 'border-slate-200/90' : '',
-        tone === 'good' ? 'border-emerald-200/90' : '',
-        tone === 'warning' ? 'border-amber-200/90' : '',
-      ].join(' ')}
-    >
-      <p className={tone === 'warning' ? 'text-xs font-semibold uppercase text-amber-700' : tone === 'good' ? 'text-xs font-semibold uppercase text-emerald-700' : 'text-xs font-semibold uppercase text-slate-500'}>{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
-      <p className="mt-1 text-xs font-medium text-slate-500">{caption}</p>
+    <div className="flex items-start justify-between gap-3 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <div className="flex min-w-0 gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-surface-soft)] text-[var(--color-emerald)]">
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[var(--color-text-primary)]">{label}</p>
+          <p className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">{detail}</p>
+        </div>
+      </div>
+      <p
+        className={[
+          'shrink-0 text-sm font-semibold',
+          tone === 'warning' ? 'text-[var(--color-warning)]' : '',
+          tone === 'success' ? 'text-[var(--color-success)]' : '',
+          tone === 'neutral' ? 'text-[var(--color-text-primary)]' : '',
+        ].join(' ')}
+      >
+        {value}
+      </p>
     </div>
   )
-}
-
-function getPayToPlanBreakdown({
-  actualAmountPence,
-  calculatedPence,
-  hourlyRatePence,
-  hours,
-  incomePence,
-}: {
-  actualAmountPence: number | null
-  calculatedPence: number
-  hourlyRatePence: number
-  hours: number
-  incomePence: number
-}): CalculationBreakdown {
-  const lines: CalculationLine[] = [
-    {
-      label: 'Hours worked',
-      value: String(hours),
-      tone: 'muted' as const,
-    },
-    {
-      label: 'Hourly rate',
-      value: formatPence(hourlyRatePence),
-      tone: 'muted' as const,
-    },
-    {
-      label: 'Hours estimate',
-      value: formatPence(calculatedPence),
-      detail: `${hours} hours × ${formatPence(hourlyRatePence)} per hour.`,
-      tone: 'add' as const,
-    },
-  ]
-
-  if (actualAmountPence !== null) {
-    lines.push({
-      label: 'Actual received override',
-      value: formatPence(actualAmountPence),
-      detail: 'Because actual received is filled in, this replaces the hours estimate.',
-      tone: 'result' as const,
-    })
-  }
-
-  lines.push({
-    label: 'Pay to plan',
-    value: formatPence(incomePence),
-    tone: 'result' as const,
-  })
-
-  return {
-    formula: actualAmountPence === null ? 'Pay to plan = hours worked × hourly rate.' : 'Pay to plan = actual received.',
-    lines,
-    note: 'This is the income saved to the paycheck plan when you confirm or update it.',
-  }
 }
 
 function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
@@ -366,16 +334,28 @@ function getPaydayDraft(snapshot: PlannerSnapshot, payday: string) {
   }
 }
 
-function formatSignedPence(amountPence: number): string {
-  if (amountPence > 0) {
-    return `+${formatPence(amountPence)}`
-  }
+function getPaydayAllocationSummary(snapshot: PlannerSnapshot, period: PayPeriod | null, incomePence: number) {
+  const allocations = period
+    ? snapshot.potAllocations.filter((allocation) => allocation.payPeriodId === period.id)
+    : []
+  const reservedBillsPence = allocations
+    .filter((allocation) => allocation.source === 'recurring' || Boolean(allocation.recurringPaymentId))
+    .reduce((total, allocation) => total + allocation.amountPence, 0)
+  const manualAllocationsPence = allocations
+    .filter((allocation) => allocation.source !== 'recurring' && !allocation.recurringPaymentId)
+    .reduce((total, allocation) => total + allocation.amountPence, 0)
+  const allocatedPence = reservedBillsPence + manualAllocationsPence
+  const leftUnassignedPence = incomePence - allocatedPence
+  const overallocatedPence = Math.max(0, -leftUnassignedPence)
 
-  if (amountPence < 0) {
-    return `-${formatPence(Math.abs(amountPence))}`
+  return {
+    reservedBillsPence,
+    manualAllocationsPence,
+    allocatedPence,
+    leftUnassignedPence,
+    overallocatedPence,
+    isOverallocated: overallocatedPence > 0,
   }
-
-  return formatPence(0)
 }
 
 function isValidIsoDateInput(value: string): boolean {

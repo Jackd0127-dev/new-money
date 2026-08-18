@@ -54,12 +54,12 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
   }
 
   return (
-    <main className="flex min-h-dvh min-w-0 items-center justify-center overflow-x-hidden bg-[radial-gradient(circle_at_12%_10%,rgba(45,212,191,0.20),transparent_26%),linear-gradient(180deg,#f8fbff_0%,#eef5f7_48%,#f7fafc_100%)] px-4 py-6 text-slate-950 sm:px-6">
+    <main className="flex min-h-dvh min-w-0 items-center justify-center overflow-x-hidden bg-[var(--color-app-bg)] px-4 py-6 text-slate-950 sm:px-6">
       <section
         aria-label="Sign in to Money Manager"
         className="grid min-w-0 w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200/80 bg-white/95 shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur lg:grid-cols-[0.95fr_1.05fr]"
       >
-        <div className="min-w-0 bg-[radial-gradient(circle_at_20%_12%,rgba(16,185,129,0.24),transparent_30%),linear-gradient(180deg,#06122a_0%,#071a2d_56%,#06101f_100%)] px-5 py-7 text-white sm:px-8 sm:py-10">
+        <div className="min-w-0 bg-[var(--color-deep-navy)] px-5 py-7 text-white sm:px-8 sm:py-10">
           <div className="flex items-center gap-3">
             <div className="flex size-11 items-center justify-center rounded-lg bg-white p-2 text-slate-950 shadow-lg shadow-emerald-950/20">
               <img src="/favicon.svg" alt="" className="size-full" />
@@ -151,7 +151,7 @@ export function AuthScreen({ auth }: { auth: FirebaseAuthController }) {
                 </Button>
               </div>
 
-              <div className="rounded-lg border border-slate-200/90 bg-[linear-gradient(135deg,#f8fafc,#ffffff)] p-3 shadow-inner shadow-slate-200/50">
+              <div className="rounded-lg border border-slate-200/90 bg-slate-50 p-3 shadow-inner shadow-slate-200/50">
                 <div className="grid gap-3">
                   <Field label="Email">
                     <TextInput

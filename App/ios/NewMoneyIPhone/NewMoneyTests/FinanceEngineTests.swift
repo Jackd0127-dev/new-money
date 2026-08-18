@@ -257,6 +257,16 @@ final class FinanceEngineTests: XCTestCase {
         )
 
         let spend = try! XCTUnwrap(store.snapshot.transactions.first { $0.paymentMethod == .bankAccount })
+        store.setTransactionRefundAmount(id: spend.id, amountPence: 1_000)
+        let partiallyRefundedSpend = try! XCTUnwrap(store.snapshot.transactions.first { $0.id == spend.id })
+        XCTAssertTrue(partiallyRefundedSpend.isPartiallyRefunded)
+        XCTAssertEqual(partiallyRefundedSpend.effectiveRefundedAmountPence, 1_000)
+        XCTAssertEqual(partiallyRefundedSpend.netAmountPence, 1_500)
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
+            303_500
+        )
+
         store.setTransactionRefunded(id: spend.id, refunded: true)
         XCTAssertEqual(
             PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot),
@@ -271,6 +281,81 @@ final class FinanceEngineTests: XCTestCase {
             PlannerDerivedData.bankAccountBalance(account: reconciled, snapshot: store.snapshot),
             400_000
         )
+    }
+
+    @MainActor
+    func testPartialCardRepaymentRefundRestoresOnlyTheReturnedPotAmount() async {
+        let settings = makeManualSettings(today: "2026-06-01")
+        let card = makeCreditCard(
+            id: "card-partial-refund",
+            name: "Everyday card",
+            openingBalancePence: 5_000,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-06-20",
+            dueDay: 1
+        )
+        let pot = makePot(id: "pot-card-refund", name: "Card pot", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let repayment = CreditCardRepayment(
+            id: "repayment-partial-refund",
+            creditCardId: card.id,
+            amountPence: 1_000,
+            date: "2026-06-01",
+            note: "Card payment",
+            source: .manual,
+            potId: pot.id,
+            potContributionPence: 1_000,
+            potContributions: [CreditCardPotContribution(potId: pot.id, amountPence: 1_000)],
+            paycheckContributionPence: 0,
+            createdAt: "2026-06-01T00:00:00.000Z",
+            updatedAt: "2026-06-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            creditCards: [card],
+            creditCardRepayments: [repayment]
+        )))
+
+        await store.load()
+        store.setCardRepaymentRefundAmount(id: repayment.id, amountPence: 400)
+
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 400)
+        XCTAssertEqual(store.snapshot.creditCardRepayments.first(where: { $0.id == repayment.id })?.netAmountPence, 600)
+        XCTAssertTrue(store.snapshot.creditCardRepayments.first(where: { $0.id == repayment.id })?.isPartiallyRefunded == true)
+
+        store.setCardRepaymentRefunded(id: repayment.id, refunded: true)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 1_000)
+        XCTAssertTrue(store.snapshot.creditCardRepayments.first(where: { $0.id == repayment.id })?.isRefunded == true)
+
+        store.setCardRepaymentRefunded(id: repayment.id, refunded: false)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+        XCTAssertFalse(store.snapshot.creditCardRepayments.first(where: { $0.id == repayment.id })?.hasRefund == true)
+    }
+
+    @MainActor
+    func testPartialDebtPaymentRefundRestoresOnlyTheReturnedDebtBalance() async {
+        let settings = makeManualSettings(today: "2026-06-01")
+        let debt = makeDebt(id: "debt-partial-refund", name: "Loan", currentBalancePence: 10_000, dueDate: "2026-06-30")
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: settings, debts: [debt])))
+
+        await store.load()
+        store.recordDebtPayment(debtId: debt.id, amountPence: 4_000, date: "2026-06-01", note: "Payment")
+        let payment = try! XCTUnwrap(store.snapshot.debtPayments.first)
+        XCTAssertEqual(store.snapshot.debts.first?.currentBalancePence, 6_000)
+
+        store.setDebtPaymentRefundAmount(id: payment.id, amountPence: 1_500)
+        XCTAssertEqual(store.snapshot.debts.first?.currentBalancePence, 7_500)
+        XCTAssertEqual(store.snapshot.debtPayments.first?.netAmountPence, 2_500)
+        XCTAssertTrue(store.snapshot.debtPayments.first?.isPartiallyRefunded == true)
+
+        store.setDebtPaymentRefunded(id: payment.id, refunded: true)
+        XCTAssertEqual(store.snapshot.debts.first?.currentBalancePence, 10_000)
+        XCTAssertTrue(store.snapshot.debtPayments.first?.isRefunded == true)
+
+        store.setDebtPaymentRefunded(id: payment.id, refunded: false)
+        XCTAssertEqual(store.snapshot.debts.first?.currentBalancePence, 6_000)
+        XCTAssertFalse(store.snapshot.debtPayments.first?.hasRefund == true)
     }
 
     @MainActor
@@ -1453,12 +1538,183 @@ final class FinanceEngineTests: XCTestCase {
             store.snapshot.recurringPaymentOccurrenceOverrides.first(where: {
                 $0.paymentId == bill.id && $0.scheduledDueDate == "2026-06-10"
             })?.state,
-            .refunded
+            .cancelled
         )
 
         XCTAssertFalse(store.applyDueLinkedPotObligations(asOf: "2026-06-10"))
         XCTAssertFalse(store.snapshot.transactions.contains { $0.id == transactionId })
         XCTAssertEqual(store.snapshot.pots.first?.balancePence, 4000)
+    }
+
+    @MainActor
+    func testRecurringBillPartialRefundRestoresOnlyReturnedAmountAndCanFollowFullRefund() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50_000)
+        let pot = makePot(id: "pot-bill-refund", name: "Bills", balancePence: 3_000, targetPence: nil)
+        let bill = makeRecurringPayment(
+            id: "bill-partial-refund",
+            name: "Broadband",
+            amountPence: 1_000,
+            dueDay: 10,
+            potId: pot.id,
+            createdAt: "2026-06-01T00:00:00.000Z"
+        )
+        let transaction = Transaction(
+            id: "recurring-\(bill.id)-2026-06-10",
+            potId: pot.id,
+            payPeriodId: period.id,
+            amountPence: bill.amountPence,
+            type: .spending,
+            paymentMethod: .pot,
+            creditCardId: nil,
+            recurringPaymentId: bill.id,
+            date: "2026-06-10",
+            note: bill.name,
+            createdAt: "2026-06-10T09:00:00.000Z",
+            updatedAt: "2026-06-10T09:00:00.000Z",
+            deletedAt: nil
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            recurringPayments: [bill],
+            payPeriods: [period],
+            transactions: [transaction]
+        )))
+
+        await store.load()
+        store.setRecurringBillOccurrenceRefundAmount(paymentId: bill.id, scheduledDueDate: "2026-06-10", amountPence: 400)
+
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 3_400)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id })?.netAmountPence, 600)
+        XCTAssertEqual(
+            PlannerDerivedData.resolvedRecurringOccurrences(
+                snapshot: store.snapshot,
+                payments: [bill],
+                startDate: "2026-06-10",
+                endDate: "2026-06-10"
+            ).first?.amountPence,
+            600
+        )
+
+        store.setRecurringBillOccurrenceRefunded(paymentId: bill.id, scheduledDueDate: "2026-06-10", refunded: true)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 4_000)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id && $0.deletedAt == nil })?.amountPence, 1_000)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id && $0.deletedAt == nil })?.refundedAmountPence, 1_000)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id && $0.deletedAt == nil })?.netAmountPence, 0)
+
+        store.setRecurringBillOccurrenceRefundAmount(paymentId: bill.id, scheduledDueDate: "2026-06-10", amountPence: 250)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 3_250)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id && $0.deletedAt == nil })?.amountPence, 1_000)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id && $0.deletedAt == nil })?.netAmountPence, 750)
+        XCTAssertEqual(
+            store.snapshot.recurringPaymentOccurrenceOverrides.first(where: {
+                $0.paymentId == bill.id && $0.scheduledDueDate == "2026-06-10"
+            })?.refundedAmountPence,
+            250
+        )
+
+        store.clearRecurringBillOccurrenceAdjustment(paymentId: bill.id, scheduledDueDate: "2026-06-10")
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 3_000)
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == transaction.id && $0.deletedAt == nil })?.amountPence, 1_000)
+        XCTAssertNil(
+            store.snapshot.recurringPaymentOccurrenceOverrides.first(where: {
+                $0.paymentId == bill.id && $0.scheduledDueDate == "2026-06-10"
+            })?.refundedAmountPence
+        )
+    }
+
+    @MainActor
+    func testRecurringCreditCardBillPartialRefundCreatesCreditAndUpdatesRunningBalance() async throws {
+        let today = FinanceEngine.toIsoDate(Date())
+        let statementDate = FinanceEngine.addIsoDays(date: today, days: 5)
+        let nextCycleDate = FinanceEngine.monthlyDate(
+            onOrAfter: FinanceEngine.addIsoDays(date: today, days: 1),
+            day: FinanceEngine.dayOfMonth(today)
+        )
+        let settings = makeManualSettings(today: today)
+        let card = makeCreditCard(
+            id: "card-barclays-refund",
+            name: "Barclays",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: statementDate,
+            dueDay: 1,
+            createdAt: "\(FinanceEngine.addIsoDays(date: today, days: -14))T00:00:00.000Z"
+        )
+        let bill = makeRecurringPayment(
+            id: "recurring-barclays-refund",
+            name: "Recurring card bill",
+            amountPence: 1_000,
+            dueDay: FinanceEngine.dayOfMonth(today),
+            potId: nil,
+            creditCardId: card.id,
+            createdAt: "\(FinanceEngine.addIsoDays(date: today, days: -14))T00:00:00.000Z"
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            recurringPayments: [bill],
+            creditCards: [card]
+        )))
+
+        await store.load()
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 1_000)
+
+        let generatedTransactionId = "card-recurring-\(bill.id)-\(today)"
+        store.setTransactionRefundAmount(id: generatedTransactionId, amountPence: 145)
+
+        let charge = try XCTUnwrap(store.snapshot.transactions.first {
+            $0.deletedAt == nil && $0.id == generatedTransactionId
+        })
+        XCTAssertEqual(charge.amountPence, 1_000)
+        XCTAssertEqual(charge.refundedAmountPence, 145)
+        XCTAssertEqual(charge.netAmountPence, 855)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 855)
+        XCTAssertEqual(
+            store.snapshot.recurringPaymentOccurrenceOverrides.first {
+                $0.paymentId == bill.id && $0.scheduledDueDate == today
+            }?.refundedAmountPence,
+            145
+        )
+
+        _ = store.applyDueLinkedPotObligations(asOf: today)
+        XCTAssertEqual(
+            store.snapshot.transactions.first { $0.deletedAt == nil && $0.id == generatedTransactionId }?.refundedAmountPence,
+            145,
+            "Recurring reconciliation must not erase a refund saved from Edit spending."
+        )
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 855)
+        XCTAssertEqual(
+            PlannerDerivedData.creditCardOwedSummary(
+                card: card,
+                snapshot: store.snapshot,
+                payPeriod: nil,
+                asOfDate: today
+            ).actualOwedPence,
+            855
+        )
+
+        let statement = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementSummaries(
+                snapshot: store.snapshot,
+                asOfDate: statementDate
+            ).first { $0.cardId == card.id }
+        )
+        XCTAssertEqual(statement.calculatedAmountPence, 855)
+        XCTAssertTrue(statement.transactions.contains {
+            $0.source == .recurring && $0.amountPence == 1_000
+        })
+        XCTAssertTrue(statement.transactions.contains {
+            $0.source == .refund && $0.amountPence == -145 && $0.name == "Recurring card bill refund"
+        })
+
+        let nextCycle = PlannerDerivedData.resolvedRecurringOccurrences(
+            snapshot: store.snapshot,
+            payments: [bill],
+            startDate: nextCycleDate,
+            endDate: nextCycleDate
+        )
+        XCTAssertEqual(nextCycle.first?.amountPence, 1_000)
     }
 
     @MainActor
@@ -6054,6 +6310,68 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testPartialCardSpendRefundKeepsOnlyTheNetAmountFunded() async {
+        let settings = makeManualSettings(today: "2026-06-10")
+        let period = makePayPeriod(
+            id: "period-june",
+            startDate: "2026-06-01",
+            endDate: "2026-06-30",
+            payday: "2026-06-01",
+            incomePence: 50_000
+        )
+        let card = makeCreditCard(
+            id: "card-partial-spend-refund",
+            name: "Everyday card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-06-20",
+            dueDay: 1
+        )
+        let pot = makePot(
+            id: "pot-partial-spend-refund",
+            name: "Everyday card pot",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let spend = makeTransaction(
+            id: "txn-partial-spend-refund",
+            cardId: card.id,
+            amountPence: 1_000,
+            date: "2026-06-10",
+            note: "Returned order"
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            payPeriods: [period],
+            transactions: [spend],
+            creditCards: [card]
+        )))
+
+        await store.load()
+        XCTAssertTrue(store.setCardSpendFundingCompleted(transactionId: spend.id, payPeriodId: period.id, completed: true))
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 1_000)
+
+        store.setTransactionRefundAmount(id: spend.id, amountPence: 400)
+        XCTAssertEqual(store.snapshot.transactions.first?.netAmountPence, 600)
+        XCTAssertEqual(store.snapshot.potAllocations.first?.amountPence, 600)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 600)
+
+        store.setTransactionRefunded(id: spend.id, refunded: true)
+        XCTAssertTrue(store.snapshot.potAllocations.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 0)
+
+        store.setTransactionRefundAmount(id: spend.id, amountPence: 250)
+        XCTAssertEqual(store.snapshot.potAllocations.first?.amountPence, 750)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 750)
+
+        store.setTransactionRefunded(id: spend.id, refunded: false)
+        XCTAssertEqual(store.snapshot.potAllocations.first?.amountPence, 1_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 1_000)
+    }
+
+    @MainActor
     func testFundedCardSpendRefusesUnsafeReverseEditAndDeleteWhenPotMoneyIsUnavailable() async {
         let settings = makeManualSettings(today: "2026-06-01")
         let period = makePayPeriod(id: "period-june", startDate: "2026-06-01", endDate: "2026-06-30", payday: "2026-06-01", incomePence: 50000)
@@ -7196,7 +7514,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(events.map(\.date), ["2026-07-03", "2026-07-13"])
     }
 
-    func testHomeDueEventsUsesStableOverridesAndFiltersCancelledOrOutOfWindowItems() {
+    func testHomeDueEventsUsesStableOverridesAndRetainsCancelledItemsInWindow() {
         let today = "2026-07-10"
         let period = makePayPeriod(id: "period-july", startDate: today, endDate: "2026-08-09", payday: today, incomePence: 100000)
         var snapshot = makeSnapshot(
@@ -7220,7 +7538,144 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(moved?.date, "2026-07-11")
         XCTAssertEqual(moved?.amountPence, 7250)
         XCTAssertEqual(moved?.status, .completed)
-        XCTAssertFalse(events.contains { $0.title == "Cancelled" || $0.title == "Later" || $0.title == "Old" })
+        XCTAssertEqual(events.first { $0.title == "Cancelled" }?.status, .cancelled)
+        XCTAssertEqual(events.first { $0.title == "Old" }?.status, .cancelled)
+        XCTAssertFalse(events.contains { $0.title == "Later" })
+    }
+
+    func testHomeDueEventsRetainsCancelledDebtAndFullyRefundedRecurringBill() {
+        let today = "2026-07-10"
+        let debt = makeDebt(id: "cancelled-debt", name: "Cancelled loan payment", currentBalancePence: 50_000, dueDate: today)
+        let debtCycle = makeDebtScheduleItem(
+            id: "cancelled-debt-cycle",
+            debtId: debt.id,
+            dueDate: today,
+            amountPence: 3_000,
+            status: .cancelled
+        )
+        let bill = makeRecurringPayment(
+            id: "refunded-banner-bill",
+            name: "Refunded subscription",
+            amountPence: 1_000,
+            dueDay: 10,
+            potId: nil
+        )
+        let refundedCharge = Transaction(
+            id: "recurring-\(bill.id)-\(today)",
+            potId: nil,
+            payPeriodId: nil,
+            amountPence: 1_000,
+            type: .spending,
+            paymentMethod: .income,
+            creditCardId: nil,
+            recurringPaymentId: bill.id,
+            date: today,
+            note: bill.name,
+            refundedAt: "2026-07-10T12:00:00.000Z",
+            refundedAmountPence: 1_000,
+            createdAt: "2026-07-10T09:00:00.000Z",
+            updatedAt: "2026-07-10T12:00:00.000Z",
+            deletedAt: nil
+        )
+        var snapshot = makeSnapshot(
+            recurringPayments: [bill],
+            transactions: [refundedCharge],
+            debts: [debt],
+            debtPaymentScheduleItems: [debtCycle]
+        )
+        snapshot.recurringPaymentOccurrenceOverrides = [
+            RecurringPaymentOccurrenceOverride(
+                id: "refunded-banner-override",
+                paymentId: bill.id,
+                scheduledDueDate: today,
+                state: .refunded,
+                actualDueDate: nil,
+                amountPenceOverride: nil,
+                refundedAmountPence: 1_000,
+                reversedGeneratedTransactionIds: [],
+                createdAt: today,
+                updatedAt: today,
+                deletedAt: nil
+            )
+        ]
+
+        let events = PlannerDerivedData.homeDueEvents(snapshot: snapshot, asOfDate: today)
+
+        XCTAssertEqual(events.first { $0.title == debt.name }?.status, .cancelled)
+        XCTAssertEqual(events.first { $0.title == bill.name }?.status, .refunded)
+    }
+
+    func testHomeDueEventsTreatsLegacyRecurringCancellationAsCancelledNotRefunded() {
+        let today = "2026-08-15"
+        let bill = makeRecurringPayment(
+            id: "legacy-capcut",
+            name: "Capcut",
+            amountPence: 1_099,
+            dueDay: 15,
+            potId: nil
+        )
+        var snapshot = makeSnapshot(recurringPayments: [bill])
+        snapshot.recurringPaymentOccurrenceOverrides = [
+            RecurringPaymentOccurrenceOverride(
+                id: "legacy-capcut-cancelled",
+                paymentId: bill.id,
+                scheduledDueDate: today,
+                state: .refunded,
+                actualDueDate: nil,
+                amountPenceOverride: nil,
+                reversedGeneratedTransactionIds: ["recurring-\(bill.id)-\(today)"],
+                createdAt: today,
+                updatedAt: today,
+                deletedAt: nil
+            )
+        ]
+
+        let event = PlannerDerivedData.homeDueEvents(snapshot: snapshot, asOfDate: today)
+            .first { $0.title == bill.name }
+
+        XCTAssertEqual(event?.status, .cancelled)
+        XCTAssertFalse(snapshot.transactions.contains(where: \.hasRefund))
+    }
+
+    @MainActor
+    func testCancellingRecurringOccurrenceDoesNotCreateRefundMetadata() async {
+        let today = "2026-08-15"
+        let bill = makeRecurringPayment(
+            id: "cancelled-capcut",
+            name: "Capcut",
+            amountPence: 1_099,
+            dueDay: 17,
+            potId: nil
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: makeManualSettings(today: today),
+            recurringPayments: [bill]
+        )))
+
+        await store.load()
+        store.setRecurringBillOccurrenceRefundAmount(
+            paymentId: bill.id,
+            scheduledDueDate: "2026-08-17",
+            amountPence: 1_099
+        )
+        XCTAssertFalse(store.snapshot.recurringPaymentOccurrenceOverrides.contains {
+            $0.paymentId == bill.id && $0.scheduledDueDate == "2026-08-17"
+        })
+        XCTAssertEqual(store.errorMessage, "A refund can only be logged after this bill has been charged.")
+
+        store.cancelRecurringBillOccurrence(paymentId: bill.id, scheduledDueDate: "2026-08-17")
+
+        let occurrenceOverride = store.snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.paymentId == bill.id && $0.scheduledDueDate == "2026-08-17"
+        }
+        XCTAssertEqual(occurrenceOverride?.state, .cancelled)
+        XCTAssertNil(occurrenceOverride?.refundedAmountPence)
+        XCTAssertFalse(store.snapshot.transactions.contains(where: \.hasRefund))
+        XCTAssertEqual(
+            PlannerDerivedData.homeDueEvents(snapshot: store.snapshot, asOfDate: today)
+                .first { $0.title == bill.name }?.status,
+            .cancelled
+        )
     }
 
     func testIncomeOccurrenceStatesPreserveProjectedIncomeButChangeLiveCashExplicitly() {
@@ -7864,6 +8319,7 @@ final class FinanceEngineTests: XCTestCase {
             RecurringPaymentOccurrenceOverride(id: "awaiting", paymentId: recurring.id, scheduledDueDate: "2026-07-03", state: .awaitingPayment, actualDueDate: nil, amountPenceOverride: nil, reversedGeneratedTransactionIds: [], createdAt: "2026-07-03", updatedAt: "2026-07-03", deletedAt: nil),
             RecurringPaymentOccurrenceOverride(id: "moved", paymentId: recurring.id, scheduledDueDate: "2026-07-10", state: .confirmed, actualDueDate: "2026-07-12", amountPenceOverride: 5500, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil),
             RecurringPaymentOccurrenceOverride(id: "refund", paymentId: recurring.id, scheduledDueDate: "2026-07-17", state: .refunded, actualDueDate: nil, amountPenceOverride: nil, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil),
+            RecurringPaymentOccurrenceOverride(id: "partial-refund", paymentId: recurring.id, scheduledDueDate: "2026-07-24", state: .normal, actualDueDate: nil, amountPenceOverride: nil, refundedAmountPence: 1_500, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil),
             RecurringPaymentOccurrenceOverride(id: "refund-once", paymentId: refundedOnce.id, scheduledDueDate: "2026-07-11", state: .refunded, actualDueDate: nil, amountPenceOverride: nil, reversedGeneratedTransactionIds: [], createdAt: "2026-07-10", updatedAt: "2026-07-10", deletedAt: nil)
         ]
 
@@ -7871,13 +8327,13 @@ final class FinanceEngineTests: XCTestCase {
             snapshot: snapshot,
             payments: snapshot.recurringPayments,
             asOfDate: "2026-07-10",
-            limitPerPayment: 2
+            limitPerPayment: 3
         )
 
-        XCTAssertEqual(occurrences.map(\.payment.id), ["bill", "bill"])
-        XCTAssertEqual(occurrences.map(\.scheduledDueDate), ["2026-07-03", "2026-07-10"])
-        XCTAssertEqual(occurrences.map(\.dueDate), ["2026-07-03", "2026-07-12"])
-        XCTAssertEqual(occurrences.map(\.amountPence), [4000, 5500])
+        XCTAssertEqual(occurrences.map(\.payment.id), ["bill", "bill", "bill"])
+        XCTAssertEqual(occurrences.map(\.scheduledDueDate), ["2026-07-03", "2026-07-10", "2026-07-24"])
+        XCTAssertEqual(occurrences.map(\.dueDate), ["2026-07-03", "2026-07-12", "2026-07-24"])
+        XCTAssertEqual(occurrences.map(\.amountPence), [4000, 5500, 2500])
         XCTAssertTrue(occurrences[0].isAwaitingPayment)
         XCTAssertFalse(occurrences.contains { $0.scheduledDueDate == "2026-07-17" })
     }

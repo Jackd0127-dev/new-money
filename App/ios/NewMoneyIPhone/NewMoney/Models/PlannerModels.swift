@@ -407,6 +407,7 @@ enum RecurringPaymentOccurrenceState: String, Codable, Equatable, Sendable {
     case normal
     case awaitingPayment
     case confirmed
+    case cancelled
     case refunded
 }
 
@@ -419,10 +420,21 @@ struct RecurringPaymentOccurrenceOverride: Codable, Equatable, Identifiable, Sen
     var state: RecurringPaymentOccurrenceState
     var actualDueDate: String?
     var amountPenceOverride: Int? = nil
+    /// The portion returned for this occurrence. Legacy `.refunded` overrides
+    /// without an amount still resolve as a full refund.
+    var refundedAmountPence: Int? = nil
     var reversedGeneratedTransactionIds: [String]
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
+
+    func effectiveRefundedAmountPence(originalAmountPence: Int) -> Int {
+        let original = max(0, originalAmountPence)
+        if let refundedAmountPence {
+            return min(original, max(0, refundedAmountPence))
+        }
+        return state == .refunded ? original : 0
+    }
 }
 
 enum IncomeOccurrenceSourceKind: String, Codable, Equatable, Sendable {
@@ -569,6 +581,9 @@ struct Transaction: Codable, Equatable, Identifiable, Sendable {
     /// A refund preserves the original record for audit/history while removing
     /// its cash, pot, and card-balance effect.
     var refundedAt: String? = nil
+    /// Nil on legacy full refunds. New refunds store the exact returned amount
+    /// so partial refunds only reverse that portion of the payment.
+    var refundedAmountPence: Int? = nil
     /// Funding allocations removed with a refunded card spend, retained so an
     /// accidental refund toggle can put the exact checklist funding back.
     var refundedCardSpendFundingPayPeriodIds: [String]? = nil
@@ -576,7 +591,15 @@ struct Transaction: Codable, Equatable, Identifiable, Sendable {
     var updatedAt: String
     var deletedAt: String?
 
-    var isRefunded: Bool { refundedAt != nil }
+    var effectiveRefundedAmountPence: Int {
+        guard refundedAt != nil else { return 0 }
+        return min(max(0, amountPence), max(0, refundedAmountPence ?? amountPence))
+    }
+
+    var netAmountPence: Int { max(0, amountPence - effectiveRefundedAmountPence) }
+    var hasRefund: Bool { effectiveRefundedAmountPence > 0 }
+    var isPartiallyRefunded: Bool { hasRefund && netAmountPence > 0 }
+    var isRefunded: Bool { hasRefund && netAmountPence == 0 }
 }
 
 struct Debt: Codable, Equatable, Identifiable, Sendable {
@@ -754,11 +777,32 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     var recalculationMode: DebtRecalculationMode?
     /// Nil on existing snapshots; populated when the payment is reversed by a refund.
     var refundedAt: String? = nil
+    var refundedAmountPence: Int? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
 
-    var isRefunded: Bool { refundedAt != nil }
+    var effectiveRefundedAmountPence: Int {
+        guard refundedAt != nil else { return 0 }
+        return min(max(0, amountPence), max(0, refundedAmountPence ?? amountPence))
+    }
+
+    var netAmountPence: Int { max(0, amountPence - effectiveRefundedAmountPence) }
+    var effectivePrincipalPaidPence: Int { proportionalNetComponent(principalPaidPence) }
+    var effectiveInterestPaidPence: Int { proportionalNetComponent(interestPaidPence) }
+    var effectiveFeePaidPence: Int { proportionalNetComponent(feePaidPence) }
+    var hasRefund: Bool { effectiveRefundedAmountPence > 0 }
+    var isPartiallyRefunded: Bool { hasRefund && netAmountPence > 0 }
+    var isRefunded: Bool { hasRefund && netAmountPence == 0 }
+
+    private func proportionalNetComponent(_ componentPence: Int) -> Int {
+        guard amountPence > 0, netAmountPence > 0 else { return 0 }
+        if netAmountPence == amountPence { return max(0, componentPence) }
+        return min(
+            max(0, componentPence),
+            Int((Double(max(0, componentPence)) * Double(netAmountPence) / Double(amountPence)).rounded())
+        )
+    }
 
     init(
         id: String,
@@ -775,7 +819,9 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
         principalPaidPence: Int? = nil,
         interestPaidPence: Int = 0,
         feePaidPence: Int = 0,
-        recalculationMode: DebtRecalculationMode? = nil
+        recalculationMode: DebtRecalculationMode? = nil,
+        refundedAt: String? = nil,
+        refundedAmountPence: Int? = nil
     ) {
         let amount = max(0, abs(amountPence))
         let interest = max(0, interestPaidPence)
@@ -792,13 +838,15 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
         self.interestPaidPence = interest
         self.feePaidPence = fee
         self.recalculationMode = recalculationMode
+        self.refundedAt = refundedAt
+        self.refundedAmountPence = refundedAmountPence
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, debtId, amountPence, date, note, sourcePotId, paymentType, scheduleItemId, principalPaidPence, interestPaidPence, feePaidPence, recalculationMode, refundedAt, createdAt, updatedAt, deletedAt
+        case id, debtId, amountPence, date, note, sourcePotId, paymentType, scheduleItemId, principalPaidPence, interestPaidPence, feePaidPence, recalculationMode, refundedAt, refundedAmountPence, createdAt, updatedAt, deletedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -819,9 +867,10 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
             principalPaidPence: try container.decodeIfPresent(Int.self, forKey: .principalPaidPence),
             interestPaidPence: try container.decodeIfPresent(Int.self, forKey: .interestPaidPence) ?? 0,
             feePaidPence: try container.decodeIfPresent(Int.self, forKey: .feePaidPence) ?? 0,
-            recalculationMode: try container.decodeIfPresent(DebtRecalculationMode.self, forKey: .recalculationMode)
+            recalculationMode: try container.decodeIfPresent(DebtRecalculationMode.self, forKey: .recalculationMode),
+            refundedAt: try container.decodeIfPresent(String.self, forKey: .refundedAt),
+            refundedAmountPence: try container.decodeIfPresent(Int.self, forKey: .refundedAmountPence)
         )
-        self.refundedAt = try container.decodeIfPresent(String.self, forKey: .refundedAt)
     }
 }
 
@@ -952,11 +1001,20 @@ struct CreditCardRepayment: Codable, Equatable, Identifiable, Sendable {
     /// Nil on existing snapshots; a refund leaves the repayment visible but no
     /// longer reduces the card balance or statement due.
     var refundedAt: String? = nil
+    var refundedAmountPence: Int? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
 
-    var isRefunded: Bool { refundedAt != nil }
+    var effectiveRefundedAmountPence: Int {
+        guard refundedAt != nil else { return 0 }
+        return min(max(0, amountPence), max(0, refundedAmountPence ?? amountPence))
+    }
+
+    var netAmountPence: Int { max(0, amountPence - effectiveRefundedAmountPence) }
+    var hasRefund: Bool { effectiveRefundedAmountPence > 0 }
+    var isPartiallyRefunded: Bool { hasRefund && netAmountPence > 0 }
+    var isRefunded: Bool { hasRefund && netAmountPence == 0 }
 }
 
 struct CreditCardPotContribution: Codable, Equatable, Sendable {

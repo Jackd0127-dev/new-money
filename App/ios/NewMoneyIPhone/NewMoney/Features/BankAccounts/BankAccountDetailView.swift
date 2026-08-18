@@ -206,7 +206,7 @@ struct BankAccountDetailView: View {
                 id: "transaction-\(transaction.id)",
                 title: transaction.note.isEmpty ? "Bank payment" : transaction.note,
                 date: transaction.date,
-                amountPence: -max(0, transaction.amountPence)
+                amountPence: -transaction.netAmountPence
             )
         }
 

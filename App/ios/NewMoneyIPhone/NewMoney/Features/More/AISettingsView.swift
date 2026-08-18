@@ -10,7 +10,11 @@ struct AISettingsView: View {
             navigationMode: .inline,
             toolbarMode: .none
         ) {
-            AppCard {
+            SettingsPanel(
+                title: "Assistant",
+                subtitle: "Choose a provider and tailor its guidance.",
+                systemImage: "sparkles"
+            ) {
                 Picker("Provider", selection: providerBinding) {
                     ForEach(AIProvider.allCases) { provider in
                         Text(provider.rawValue.capitalized).tag(provider)

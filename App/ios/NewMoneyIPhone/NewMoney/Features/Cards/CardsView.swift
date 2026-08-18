@@ -1128,6 +1128,30 @@ struct CardDetailView: View {
                 )
             }
 
+        let refunds = store.snapshot.transactions
+            .filter {
+                $0.deletedAt == nil &&
+                    $0.type == .spending &&
+                    $0.creditCardId == currentCard.id &&
+                    $0.hasRefund
+            }
+            .compactMap { transaction -> CardPaymentAllocationRow? in
+                guard let refundedAt = transaction.refundedAt else { return nil }
+                let refundDate = String(refundedAt.prefix(10))
+                guard FinanceEngine.isIsoDate(refundDate) else { return nil }
+                let transactionName = transaction.note.isBlank ? "Card spending" : transaction.note
+                return CardPaymentAllocationRow(
+                    id: "history-refund-\(transaction.id)-\(refundDate)",
+                    title: "\(transactionName) refund",
+                    detail: friendlyDate(refundDate),
+                    amount: "+\(MoneyParser.formatPence(transaction.effectiveRefundedAmountPence))",
+                    amountColor: AppTheme.Colors.success,
+                    context: "Refund",
+                    symbol: "arrow.uturn.backward.circle.fill",
+                    sortDate: refundDate
+                )
+            }
+
         let repayments = store.snapshot.creditCardRepayments
             .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
             .map { repayment in
@@ -1135,7 +1159,7 @@ struct CardDetailView: View {
                     id: "history-repayment-\(repayment.id)",
                     title: repayment.note.isBlank ? "Card payment" : repayment.note,
                     detail: friendlyDate(repayment.date),
-                    amount: MoneyParser.formatPence(repayment.amountPence),
+                    amount: MoneyParser.formatPence(repayment.netAmountPence),
                     amountColor: AppTheme.Colors.success,
                     context: "Payment",
                     symbol: "arrow.down.circle",
@@ -1158,7 +1182,7 @@ struct CardDetailView: View {
                 )
             }
 
-        return (recurring + custom + spending + repayments + coverPots).sorted { $0.sortDate > $1.sortDate }
+        return (recurring + custom + spending + refunds + repayments + coverPots).sorted { $0.sortDate > $1.sortDate }
     }
 
     private func recurringSortDate(_ payment: RecurringPayment) -> String {
@@ -1488,12 +1512,12 @@ struct CardPaymentFlowSheetView: View {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(repayment.note.isBlank ? "Card payment" : repayment.note)
                                                 .foregroundStyle(AppTheme.Colors.primaryText)
-                                            Text(repayment.date)
+                                            Text(cardRepaymentSubtitle(repayment))
                                                 .font(.caption)
-                                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                                .foregroundStyle(repayment.hasRefund ? AppTheme.Colors.success : AppTheme.Colors.secondaryText)
                                         }
                                         Spacer()
-                                        Text(MoneyParser.formatPence(repayment.amountPence))
+                                        Text(MoneyParser.formatPence(repayment.netAmountPence))
                                             .foregroundStyle(repayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
                                     }
                                 }
@@ -1560,6 +1584,15 @@ struct CardPaymentFlowSheetView: View {
 private struct CardRepaymentDetailView: View {
     @ObservedObject var store: PlannerStore
     var repayment: CreditCardRepayment
+    @State private var refundEnabled: Bool
+    @State private var refundAmount: String
+
+    init(store: PlannerStore, repayment: CreditCardRepayment) {
+        self.store = store
+        self.repayment = repayment
+        _refundEnabled = State(initialValue: repayment.hasRefund)
+        _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: repayment.effectiveRefundedAmountPence))
+    }
 
     private var currentRepayment: CreditCardRepayment {
         store.snapshot.creditCardRepayments.first(where: { $0.id == repayment.id }) ?? repayment
@@ -1569,18 +1602,25 @@ private struct CardRepaymentDetailView: View {
         ScrollView {
             AppCard(glow: true) {
                 SectionTitle("Card payment")
-                MetricRow(label: "Amount", value: MoneyParser.formatPence(currentRepayment.amountPence), valueColor: currentRepayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
+                MetricRow(label: "Original amount", value: MoneyParser.formatPence(currentRepayment.amountPence))
+                MetricRow(label: "Net payment", value: MoneyParser.formatPence(currentRepayment.netAmountPence), valueColor: currentRepayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
                 MetricRow(label: "Date", value: currentRepayment.date)
                 MetricRow(label: "Note", value: currentRepayment.note.isBlank ? "Card payment" : currentRepayment.note)
-                Toggle("This payment was refunded", isOn: Binding(
-                    get: { currentRepayment.isRefunded },
-                    set: { store.setCardRepaymentRefunded(id: repayment.id, refunded: $0) }
-                ))
-                .tint(AppTheme.Colors.primaryOrange)
-                if currentRepayment.isRefunded {
-                    Text("This payment is retained in history but no longer reduces the card balance or statement due.")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.Colors.success)
+                AppDivider()
+                SectionTitle("Refund")
+                RefundAmountEditor(
+                    originalAmountPence: currentRepayment.amountPence,
+                    isEnabled: $refundEnabled,
+                    amount: $refundAmount
+                )
+                Text("Only the returned amount is added back to the card balance and statement due. The payment remains in history.")
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                PrimaryButton(title: "Save refund", systemImage: "arrow.uturn.backward", isDisabled: !refundIsValid) {
+                    store.setCardRepaymentRefundAmount(
+                        id: repayment.id,
+                        amountPence: refundEnabled ? MoneyParser.parsePoundsToPence(refundAmount) : 0
+                    )
                 }
             }
             .padding(AppTheme.Spacing.lg)
@@ -1589,6 +1629,20 @@ private struct CardRepaymentDetailView: View {
         .navigationTitle("Card payment")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    private var refundIsValid: Bool {
+        guard refundEnabled else { return currentRepayment.hasRefund }
+        let amountPence = MoneyParser.parsePoundsToPence(refundAmount)
+        return amountPence > 0 && amountPence <= currentRepayment.amountPence
+    }
+}
+
+private func cardRepaymentSubtitle(_ repayment: CreditCardRepayment) -> String {
+    guard repayment.hasRefund else { return repayment.date }
+    let status = repayment.isPartiallyRefunded
+        ? "Refunded \(MoneyParser.formatPence(repayment.effectiveRefundedAmountPence))"
+        : "Refunded"
+    return "\(repayment.date) · \(status)"
 }
 
 private struct CardPaymentAllocationRowCard: View {

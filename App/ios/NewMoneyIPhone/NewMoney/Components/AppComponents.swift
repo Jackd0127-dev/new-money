@@ -22,6 +22,114 @@ struct AppCard<Content: View>: View {
     }
 }
 
+/// A denser, icon-led surface for profile and settings navigation.
+struct CompactMenuCard<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.Gradients.card)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
+                .stroke(AppTheme.Colors.border, lineWidth: 1)
+        )
+        .shadow(color: AppTheme.Colors.shadow.opacity(0.75), radius: 8, y: 4)
+    }
+}
+
+struct CompactMenuRow: View {
+    var title: String
+    var subtitle: String? = nil
+    var systemImage: String
+    var tint: Color = AppTheme.Colors.primaryOrange
+    var isDestructive = false
+    var showsDisclosure = true
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isDestructive ? AppTheme.Colors.danger : tint)
+                .frame(width: 34, height: 34)
+                .background((isDestructive ? AppTheme.Colors.danger : tint).opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isDestructive ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+struct SettingsPanel<Content: View>: View {
+    var title: String
+    var subtitle: String
+    var systemImage: String
+    var tint: Color = AppTheme.Colors.primaryOrange
+    var isDestructive = false
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isDestructive ? AppTheme.Colors.danger : tint)
+                    .frame(width: 34, height: 34)
+                    .background((isDestructive ? AppTheme.Colors.danger : tint).opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isDestructive ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+            }
+
+            AppDivider()
+            content
+        }
+        .padding(AppTheme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.Gradients.card)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
+                .stroke(isDestructive ? AppTheme.Colors.danger.opacity(0.25) : AppTheme.Colors.border, lineWidth: 1)
+        )
+        .shadow(color: AppTheme.Colors.shadow.opacity(0.75), radius: 8, y: 4)
+    }
+}
+
 struct PrimaryButton: View {
     var title: String
     var systemImage: String?
@@ -197,6 +305,84 @@ struct MoneyField: View {
         TextField(title, text: $text)
             .keyboardType(.decimalPad)
             .textFieldStyle(AppTextFieldStyle())
+    }
+}
+
+struct RefundAmountEditor: View {
+    var originalAmountPence: Int
+    @Binding var isEnabled: Bool
+    @Binding var amount: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Toggle(isOn: enabledBinding) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Refund received")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text("Full or partial")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+            }
+            .tint(AppTheme.Colors.success)
+
+            if isEnabled {
+                MoneyField(title: "Refund amount", text: $amount)
+
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    Text("Maximum \(MoneyParser.formatPence(originalAmountPence))")
+                        .font(.caption)
+                        .foregroundStyle(isValid ? AppTheme.Colors.secondaryText : AppTheme.Colors.danger)
+
+                    Spacer()
+
+                    Button("Full amount") {
+                        amount = Self.inputValue(for: originalAmountPence)
+                    }
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .buttonStyle(.plain)
+                }
+
+                if let statusText {
+                    Label(statusText, systemImage: "arrow.uturn.backward.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.success)
+                }
+            }
+        }
+        .animation(AppTheme.Animation.standard, value: isEnabled)
+    }
+
+    var parsedAmountPence: Int {
+        isEnabled ? MoneyParser.parsePoundsToPence(amount) : 0
+    }
+
+    var isValid: Bool {
+        !isEnabled || (parsedAmountPence > 0 && parsedAmountPence <= originalAmountPence)
+    }
+
+    static func inputValue(for amountPence: Int) -> String {
+        amountPence > 0 ? String(format: "%.2f", Double(amountPence) / 100) : ""
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding {
+            isEnabled
+        } set: { newValue in
+            isEnabled = newValue
+            if newValue && MoneyParser.parsePoundsToPence(amount) <= 0 {
+                amount = Self.inputValue(for: originalAmountPence)
+            }
+        }
+    }
+
+    private var statusText: String? {
+        guard isValid else { return nil }
+        return parsedAmountPence == originalAmountPence
+            ? "Full refund"
+            : "Partial refund · \(MoneyParser.formatPence(parsedAmountPence))"
     }
 }
 

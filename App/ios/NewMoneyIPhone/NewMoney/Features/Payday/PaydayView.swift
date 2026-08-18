@@ -124,7 +124,7 @@ struct PaydayView: View {
     }
 
     private var selectedPeriodSpendPence: Int {
-        selectedPeriodTransactions.reduce(0) { $0 + $1.amountPence }
+        selectedPeriodTransactions.reduce(0) { $0 + $1.netAmountPence }
     }
 
     private var periodLabel: String {
@@ -160,7 +160,7 @@ struct PaydayView: View {
                 sortDate: period?.startDate ?? transaction.date
             )
             group.transactions.append(transaction)
-            group.totalPence += transaction.amountPence
+            group.totalPence += transaction.netAmountPence
             groups[id] = group
         }
 

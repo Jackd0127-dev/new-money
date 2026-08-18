@@ -266,13 +266,14 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(ProfileMenuPresentationPolicy.animatesFromBottom)
         XCTAssertFalse(ProfileMenuPresentationPolicy.avoidsSystemNavigationBar)
         XCTAssertTrue(ProfileMenuPresentationPolicy.usesCompactActionRows)
-        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionIcons)
+        XCTAssertTrue(ProfileMenuPresentationPolicy.showsActionIcons)
         XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionSubtitles)
-        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionDisclosureIndicators)
-        XCTAssertFalse(ProfileMenuPresentationPolicy.showsActionDividers)
-        XCTAssertTrue(ProfileMenuPresentationPolicy.usesSeparateDestructiveActionCards)
-        XCTAssertEqual(ProfileMenuPresentationPolicy.actionRowMinimumHeight, 58)
-        XCTAssertEqual(ProfileMenuPresentationPolicy.actionCardCornerRadius, AppTheme.Radius.xl)
+        XCTAssertTrue(ProfileMenuPresentationPolicy.showsActionDisclosureIndicators)
+        XCTAssertTrue(ProfileMenuPresentationPolicy.showsActionDividers)
+        XCTAssertFalse(ProfileMenuPresentationPolicy.usesSeparateDestructiveActionCards)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.actionRowMinimumHeight, 54)
+        XCTAssertEqual(ProfileMenuPresentationPolicy.actionCardCornerRadius, AppTheme.Radius.lg)
+        XCTAssertTrue(ProfileMenuAction.allCases.allSatisfy { !$0.symbol.isEmpty && !$0.subtitle.isEmpty })
     }
 
     func testSettingsUsesDedicatedDestinationForEveryRequestedSection() {
@@ -283,9 +284,53 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(SettingsLayoutPolicy.usesDirectNavigationDestinations)
         XCTAssertTrue(SettingsLayoutPolicy.usesSingleRoundedRouteCard)
         XCTAssertFalse(SettingsLayoutPolicy.showsSectionHeaders)
-        XCTAssertFalse(SettingsLayoutPolicy.showsRouteDividers)
-        XCTAssertFalse(SettingsLayoutPolicy.showsRouteDisclosureIndicators)
-        XCTAssertEqual(SettingsLayoutPolicy.routeRowMinimumHeight, 58)
+        XCTAssertTrue(SettingsLayoutPolicy.showsRouteDividers)
+        XCTAssertTrue(SettingsLayoutPolicy.showsRouteDisclosureIndicators)
+        XCTAssertEqual(SettingsLayoutPolicy.routeRowMinimumHeight, 54)
+        XCTAssertTrue(SettingsRoute.allCases.allSatisfy { !$0.symbol.isEmpty && !$0.subtitle.isEmpty })
+    }
+
+    @MainActor
+    func testProfileAndSettingsRenderAtPhoneViewport() async {
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.basicDataSnapshot))
+        await store.load()
+        let authSession = FirebaseAuthSession()
+
+        attachRenderedView(
+            NavigationStack {
+                ProfileMenuScreenView(store: store)
+            }
+            .environmentObject(authSession),
+            name: "profile-compact-menu"
+        )
+
+        attachRenderedView(
+            NavigationStack {
+                SettingsView(store: store, navigationMode: .inline, toolbarMode: .none)
+            },
+            name: "settings-compact-menu"
+        )
+    }
+
+    @MainActor
+    private func attachRenderedView<Content: View>(_ view: Content, name: String) {
+        let frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIHostingController(rootView: view)
+        let window = UIWindow(frame: frame)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = frame
+        host.view.layoutIfNeeded()
+
+        let image = UIGraphicsImageRenderer(size: frame.size).image { _ in
+            host.view.drawHierarchy(in: frame, afterScreenUpdates: true)
+        }
+        XCTAssertEqual(image.size, frame.size)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        window.isHidden = true
     }
 
     func testAccountsScreenUsesNativeCarouselAndHalfHeightCreateSheet() {

@@ -74,7 +74,7 @@ enum FinanceEngine {
     static func getPotBalanceAfterTransactionRemoval(_ pot: Pot, transaction: Transaction) -> Int {
         switch transaction.type {
         case .spending:
-            return pot.balancePence + abs(transaction.amountPence)
+            return pot.balancePence + transaction.netAmountPence
         case .allocation:
             return pot.balancePence - abs(transaction.amountPence)
         case .transfer, .adjustment:
@@ -232,7 +232,7 @@ enum FinanceEngine {
         let activeDebtIds = Set(activeDebts.map(\.id))
         let paidFromPayments = payments
             .filter { activeDebtIds.contains($0.debtId) && !$0.isRefunded }
-            .reduce(0) { $0 + $1.amountPence }
+            .reduce(0) { $0 + $1.netAmountPence }
         let due = activeDebts.reduce(0) { total, debt in
             total + getDebtDueAmountAfterReservesAndLinkedPotsPence(debt: debt, reserves: reserves, pots: pots)
         }

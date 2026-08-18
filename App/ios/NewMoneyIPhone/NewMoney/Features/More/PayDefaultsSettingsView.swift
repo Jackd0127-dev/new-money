@@ -12,7 +12,12 @@ struct PayDefaultsSettingsView: View {
             navigationMode: .inline,
             toolbarMode: .none
         ) {
-            AppCard {
+            SettingsPanel(
+                title: "Default pay details",
+                subtitle: "Used when creating new paycheck plans.",
+                systemImage: "banknote",
+                tint: AppTheme.Colors.success
+            ) {
                 Picker("Pay frequency", selection: payFrequencyBinding) {
                     ForEach(PayFrequency.allCases) { frequency in
                         Text(frequency.rawValue.capitalized).tag(frequency)

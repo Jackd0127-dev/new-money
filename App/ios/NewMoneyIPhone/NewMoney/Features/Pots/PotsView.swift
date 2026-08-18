@@ -802,7 +802,7 @@ private struct PotTimelineEvent: Identifiable, Equatable {
                     return nil
                 }
 
-                let signedAmount = transaction.type == .spending ? -transaction.amountPence : transaction.amountPence
+                let signedAmount = transaction.type == .spending ? -transaction.netAmountPence : transaction.amountPence
                 let recurringName = transaction.recurringPaymentId.flatMap { recurringById[$0]?.name }
                 let title = transaction.type == .spending ? "Paid from \(pot.name)" : "Added to \(pot.name)"
                 let fallbackDetail = transaction.type == .spending ? "Recorded payment" : "Pot top-up"
@@ -1409,7 +1409,7 @@ struct PotHistorySheetView: View {
                     potName: pot.name,
                     date: transaction.date,
                     detail: transaction.note.potTrimmed.isEmpty ? "Recorded payment" : transaction.note,
-                    amountPence: transaction.amountPence,
+                    amountPence: transaction.netAmountPence,
                     kind: .payment,
                     source: .transaction(transaction.id)
                 )

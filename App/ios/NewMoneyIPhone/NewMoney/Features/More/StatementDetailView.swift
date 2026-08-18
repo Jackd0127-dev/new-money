@@ -205,6 +205,15 @@ struct StatementDetailView: View {
         if sourceTotal(.custom) > 0 {
             items.append(.init(label: "One-off payments", value: MoneyParser.formatPence(sourceTotal(.custom))))
         }
+        if sourceTotal(.refund) < 0 {
+            items.append(
+                .init(
+                    label: "Refund credits",
+                    value: MoneyParser.formatPence(sourceTotal(.refund)),
+                    valueColor: AppTheme.Colors.success
+                )
+            )
+        }
         items.append(
             .init(
                 label: "Tracked transaction total",
@@ -249,6 +258,8 @@ struct StatementDetailView: View {
             "Bill"
         case .custom:
             "One-off payment"
+        case .refund:
+            "Refund credit"
         }
     }
 
@@ -262,6 +273,8 @@ struct StatementDetailView: View {
             "calendar.badge.clock"
         case .custom:
             "calendar.badge.plus"
+        case .refund:
+            "arrow.uturn.backward.circle.fill"
         }
     }
 

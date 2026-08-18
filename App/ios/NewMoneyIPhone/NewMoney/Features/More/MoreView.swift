@@ -1319,14 +1319,25 @@ struct ActivityView: View {
         let spending = snapshot.transactions
             .filter { $0.type == .spending && $0.deletedAt == nil }
             .map { transaction in
-                let amount = "-\(MoneyParser.formatPence(transaction.amountPence))"
+                let amount = "-\(MoneyParser.formatPence(transaction.netAmountPence))"
                 let date = activityDisplayDate(transaction.date)
                 var detailRows = [
-                    ActivityDetailRow(label: "Amount", value: amount, valueColor: AppTheme.Colors.orangeHighlight),
+                    ActivityDetailRow(label: "Net amount", value: amount, valueColor: AppTheme.Colors.orangeHighlight),
                     ActivityDetailRow(label: "Date", value: date),
                     ActivityDetailRow(label: "Type", value: formattedActivityLabel(transaction.type.rawValue)),
                     ActivityDetailRow(label: "Payment method", value: activityPaymentMethodLabel(transaction.paymentMethod))
                 ]
+
+                if transaction.hasRefund {
+                    detailRows.insert(
+                        ActivityDetailRow(
+                            label: transaction.isPartiallyRefunded ? "Partial refund" : "Refund",
+                            value: MoneyParser.formatPence(transaction.effectiveRefundedAmountPence),
+                            valueColor: AppTheme.Colors.success
+                        ),
+                        at: 1
+                    )
+                }
 
                 if let potId = transaction.potId {
                     detailRows.append(ActivityDetailRow(label: "Pot", value: potsById[potId]?.name ?? potId))
@@ -2125,7 +2136,7 @@ private enum ActivityTimelineData {
                     detail: route,
                     typeLabel: isSpending ? "Spend" : prettyLabel(transaction.type.rawValue),
                     secondaryLabel: transaction.paymentMethod?.displayName,
-                    amountPence: transaction.amountPence,
+                    amountPence: transaction.type == .spending ? transaction.netAmountPence : transaction.amountPence,
                     amountStyle: isSpending ? .negative : .positive,
                     color: isSpending ? AppTheme.Colors.neonMoneyDown : AppTheme.Colors.neonMoneyUp,
                     symbol: isSpending ? "receipt" : "arrow.left.arrow.right"
@@ -2142,7 +2153,7 @@ private enum ActivityTimelineData {
                     detail: cardsById[payment.creditCardId]?.name ?? "Credit card",
                     typeLabel: "Credit",
                     secondaryLabel: payment.source.map { prettyLabel($0.rawValue) } ?? "Manual",
-                    amountPence: payment.amountPence,
+                    amountPence: payment.netAmountPence,
                     amountStyle: .positive,
                     color: AppTheme.Colors.success,
                     symbol: "creditcard.and.123"
@@ -2210,7 +2221,7 @@ private enum ActivityTimelineData {
                     detail: debtsById[payment.debtId]?.name ?? "Debt",
                     typeLabel: "Debt",
                     secondaryLabel: prettyLabel(payment.paymentType.rawValue),
-                    amountPence: payment.amountPence,
+                    amountPence: payment.netAmountPence,
                     amountStyle: .positive,
                     color: AppTheme.Colors.success,
                     symbol: "checkmark.shield"
@@ -2812,7 +2823,7 @@ struct ActivityYearlyNetChartData: Equatable {
             else {
                 return nil
             }
-            return ActivityYearAmount(month: month, amountPence: abs(transaction.amountPence))
+            return ActivityYearAmount(month: month, amountPence: transaction.netAmountPence)
         }
 
         let incomeByMonth = groupedAmounts(incomeEvents)
@@ -4172,8 +4183,12 @@ struct DateSimulationCard: View {
     @State private var manualDate = Date()
 
     var body: some View {
-        AppCard(glow: store.snapshot.settings.appDateMode == .manual) {
-            SectionTitle("Date simulation")
+        SettingsPanel(
+            title: "Planner date",
+            subtitle: "Use today automatically or preview another date.",
+            systemImage: "calendar.badge.clock",
+            tint: store.snapshot.settings.appDateMode == .manual ? AppTheme.Colors.primaryOrange : AppTheme.Colors.success
+        ) {
             MetricRow(label: "Today", value: FinanceEngine.formatShortDateLabel(store.todayIso), valueColor: store.snapshot.settings.appDateMode == .manual ? AppTheme.Colors.primaryOrange : AppTheme.Colors.success)
             Picker("Date mode", selection: dateModeBinding) {
                 ForEach(AppDateMode.allCases) { mode in

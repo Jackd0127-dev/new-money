@@ -12,7 +12,12 @@ struct AccountSettingsView: View {
             navigationMode: .inline,
             toolbarMode: .none
         ) {
-            AppCard {
+            SettingsPanel(
+                title: "Signed-in account",
+                subtitle: "Your login identity and cloud-sync status.",
+                systemImage: "person.crop.circle",
+                tint: AppTheme.Colors.success
+            ) {
                 if let user = currentAuthUser {
                     MetricRow(label: "Provider", value: user.providerLabel, valueColor: AppTheme.Colors.success)
                     if let email = user.email {
@@ -28,22 +33,39 @@ struct AccountSettingsView: View {
             }
 
             if currentAuthUser != nil {
-                AppCard {
+                SettingsPanel(
+                    title: "Account actions",
+                    subtitle: "Sign out or permanently delete your login.",
+                    systemImage: "exclamationmark.shield",
+                    tint: AppTheme.Colors.danger,
+                    isDestructive: true
+                ) {
                     VStack(spacing: 0) {
-                        Button(ProfileMenuPresentationPolicy.logOutActionTitle, role: .destructive) {
+                        Button(role: .destructive) {
                             showLogOutConfirmation = true
+                        } label: {
+                            CompactMenuRow(
+                                title: ProfileMenuPresentationPolicy.logOutActionTitle,
+                                systemImage: "rectangle.portrait.and.arrow.right",
+                                isDestructive: true,
+                                showsDisclosure: false
+                            )
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
 
                         AppDivider()
 
-                        Button("Delete Account", role: .destructive) {
+                        Button(role: .destructive) {
                             showDeleteAccountAlert = true
+                        } label: {
+                            CompactMenuRow(
+                                title: "Delete Account",
+                                systemImage: "person.crop.circle.badge.minus",
+                                isDestructive: true,
+                                showsDisclosure: false
+                            )
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(AppTheme.Colors.danger)
                 }
             }
         }

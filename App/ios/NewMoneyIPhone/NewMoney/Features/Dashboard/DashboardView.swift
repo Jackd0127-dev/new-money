@@ -716,6 +716,14 @@ private struct HomeDueEventRow: View {
                     } else if event.status == .awaiting {
                         Image(systemName: "clock.badge.exclamationmark.fill")
                             .font(.caption)
+                    } else if event.status == .cancelled {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.danger)
+                    } else if event.status == .refunded {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.success)
                     }
                 }
                 Text("\(relativeDateLabel) · \(event.sourceLabel) · \(event.cycleLabel)")
@@ -734,7 +742,7 @@ private struct HomeDueEventRow: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.secondaryText)
             }
-            .foregroundStyle(event.direction == .incoming ? AppTheme.Colors.success : AppTheme.Colors.primaryText)
+            .foregroundStyle(amountTone)
 
             Image(systemName: "slider.horizontal.3")
                 .font(.caption.weight(.bold))
@@ -748,12 +756,26 @@ private struct HomeDueEventRow: View {
     }
 
     private var eventTone: Color {
-        if event.status == .awaiting {
+        if event.status == .cancelled {
+            AppTheme.Colors.danger
+        } else if event.status == .refunded {
+            AppTheme.Colors.success
+        } else if event.status == .awaiting {
             AppTheme.Colors.warning
         } else if event.direction == .incoming {
             AppTheme.Colors.success
         } else {
             AppTheme.Colors.accent
+        }
+    }
+
+    private var amountTone: Color {
+        if event.status == .cancelled {
+            AppTheme.Colors.tertiaryText
+        } else if event.status == .refunded || event.direction == .incoming {
+            AppTheme.Colors.success
+        } else {
+            AppTheme.Colors.primaryText
         }
     }
 
@@ -774,6 +796,7 @@ private enum HomeDueEditorStatus: String, CaseIterable, Identifiable {
     case awaiting
     case completed
     case cancelled
+    case refunded
 
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
@@ -785,18 +808,36 @@ private struct HomeDueEventEditorView: View {
     let event: HomeDueEvent
     @State private var date: Date
     @State private var amount: String
+    @State private var refundAmount: String
     @State private var status: HomeDueEditorStatus
 
     init(store: PlannerStore, event: HomeDueEvent) {
         self.store = store
         self.event = event
         _date = State(initialValue: FinanceEngine.parseDate(event.date))
-        _amount = State(initialValue: String(format: "%.2f", Double(event.amountPence) / 100))
+        let recurringRefund: (gross: Int, refunded: Int)?
+        if case .recurringBill(let paymentId, let scheduledDueDate) = event.source,
+           let payment = store.snapshot.recurringPayments.first(where: { $0.id == paymentId }) {
+            let override = store.snapshot.recurringPaymentOccurrenceOverrides.first {
+                $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+            }
+            let gross = override?.amountPenceOverride ?? payment.amountPence
+            recurringRefund = (gross, override?.effectiveRefundedAmountPence(originalAmountPence: gross) ?? 0)
+        } else {
+            recurringRefund = nil
+        }
+        let grossAmount = recurringRefund?.gross ?? event.amountPence
+        let existingRefundAmount = recurringRefund?.refunded ?? 0
+        let initialRefundAmount = existingRefundAmount > 0 ? existingRefundAmount : grossAmount
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: grossAmount))
+        _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: initialRefundAmount))
         let initialStatus: HomeDueEditorStatus
         switch event.status {
         case .scheduled: initialStatus = .scheduled
         case .awaiting: initialStatus = .awaiting
         case .completed: initialStatus = .completed
+        case .cancelled: initialStatus = .cancelled
+        case .refunded: initialStatus = .refunded
         }
         _status = State(initialValue: initialStatus)
     }
@@ -814,10 +855,17 @@ private struct HomeDueEventEditorView: View {
 
                 Section("Update") {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    MoneyField(title: "Amount", text: $amount)
+                    if isRecurringRefund {
+                        MoneyField(title: "Refund amount", text: $refundAmount)
+                        Text("Choose the amount actually returned. The rest of this bill stays counted for this cycle.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        MoneyField(title: "Amount", text: $amount)
+                    }
                     Picker("Status", selection: $status) {
                         ForEach(availableStatuses) { option in
-                            Text(option.title).tag(option)
+                            Text(statusTitle(option)).tag(option)
                         }
                     }
                 }
@@ -840,7 +888,7 @@ private struct HomeDueEventEditorView: View {
                         save()
                         dismiss()
                     }
-                    .disabled(MoneyParser.parsePoundsToPence(amount) <= 0)
+                    .disabled(!enteredAmountIsValid)
                 }
             }
         }
@@ -848,10 +896,25 @@ private struct HomeDueEventEditorView: View {
 
     private var availableStatuses: [HomeDueEditorStatus] {
         switch event.source {
+        case .recurringBill:
+            hasGeneratedRecurringCharge
+                ? HomeDueEditorStatus.allCases
+                : [.scheduled, .awaiting, .completed, .cancelled]
         case .cardStatement, .cardDirectDebit:
             [.scheduled, .awaiting, .completed]
         default:
-            HomeDueEditorStatus.allCases
+            [.scheduled, .awaiting, .completed, .cancelled]
+        }
+    }
+
+    private var hasGeneratedRecurringCharge: Bool {
+        guard case .recurringBill(let paymentId, let scheduledDueDate) = event.source else { return false }
+        let generatedIds = [
+            "recurring-\(paymentId)-\(scheduledDueDate)",
+            "card-recurring-\(paymentId)-\(scheduledDueDate)"
+        ]
+        return store.snapshot.transactions.contains {
+            $0.deletedAt == nil && generatedIds.contains($0.id)
         }
     }
 
@@ -879,6 +942,21 @@ private struct HomeDueEventEditorView: View {
                 amountPence: amountPence
             )
         case .recurringBill(let paymentId, let scheduledDueDate):
+            if status == .cancelled {
+                store.cancelRecurringBillOccurrence(
+                    paymentId: paymentId,
+                    scheduledDueDate: scheduledDueDate
+                )
+                return
+            }
+            if status == .refunded {
+                store.setRecurringBillOccurrenceRefundAmount(
+                    paymentId: paymentId,
+                    scheduledDueDate: scheduledDueDate,
+                    amountPence: MoneyParser.parsePoundsToPence(refundAmount)
+                )
+                return
+            }
             store.setRecurringBillOccurrenceAmount(paymentId: paymentId, scheduledDueDate: scheduledDueDate, amountPence: amountPence)
             switch status {
             case .scheduled:
@@ -887,8 +965,8 @@ private struct HomeDueEventEditorView: View {
                 store.markRecurringBillOccurrenceAwaiting(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
             case .completed:
                 store.confirmRecurringBillOccurrence(paymentId: paymentId, scheduledDueDate: scheduledDueDate, actualDueDate: dateIso)
-            case .cancelled:
-                store.setRecurringBillOccurrenceRefunded(paymentId: paymentId, scheduledDueDate: scheduledDueDate, refunded: true)
+            case .cancelled, .refunded:
+                break
             }
         case .savedPayment(let paymentId):
             store.updateCustomPaymentOccurrence(
@@ -914,7 +992,7 @@ private struct HomeDueEventEditorView: View {
                 store.markCreditCardStatementAwaiting(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
             case .completed:
                 store.confirmCreditCardStatement(cardId: cardId, scheduledStatementDate: scheduledStatementDate, actualStatementDate: dateIso)
-            case .cancelled:
+            case .cancelled, .refunded:
                 break
             }
         case .cardDirectDebit(let cardId, let scheduledStatementDate):
@@ -926,10 +1004,28 @@ private struct HomeDueEventEditorView: View {
                 store.markCreditCardDirectDebitAwaiting(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
             case .completed:
                 store.confirmCreditCardDirectDebit(cardId: cardId, scheduledStatementDate: scheduledStatementDate, actualDirectDebitDate: dateIso)
-            case .cancelled:
+            case .cancelled, .refunded:
                 break
             }
         }
+    }
+
+    private var isRecurringRefund: Bool {
+        guard status == .refunded else { return false }
+        if case .recurringBill = event.source { return true }
+        return false
+    }
+
+    private var enteredAmountIsValid: Bool {
+        if isRecurringRefund {
+            let refundPence = MoneyParser.parsePoundsToPence(refundAmount)
+            return refundPence > 0 && refundPence <= MoneyParser.parsePoundsToPence(amount)
+        }
+        return MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private func statusTitle(_ option: HomeDueEditorStatus) -> String {
+        return option.title
     }
 
     private var incomeState: IncomeOccurrenceState {
@@ -938,6 +1034,7 @@ private struct HomeDueEventEditorView: View {
         case .awaiting: .awaiting
         case .completed: .confirmed
         case .cancelled: .cancelled
+        case .refunded: .normal
         }
     }
 }
@@ -1367,7 +1464,7 @@ struct DashboardMonthlySpendChartData: Equatable {
             else {
                 continue
             }
-            buckets[transactionDay, default: 0] += transaction.amountPence
+            buckets[transactionDay, default: 0] += transaction.netAmountPence
         }
 
         let points = (1...max(daysInMonth, 1)).map { day in
@@ -3231,20 +3328,20 @@ private struct DebtsBreakdownView: View {
     private func debtPaymentRow(_ payment: DebtPayment) -> some View {
         AppCard {
             HStack(spacing: AppTheme.Spacing.md) {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: payment.hasRefund ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
                     .font(.title3)
                     .foregroundStyle(AppTheme.Colors.success)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(debtName(for: payment.debtId))
                         .font(.headline)
                         .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text("\(payment.date) · \(payment.note.isBlank ? "Payment" : payment.note)")
+                    Text(payment.hasRefund ? "\(payment.date) · Refunded \(MoneyParser.formatPence(payment.effectiveRefundedAmountPence))" : "\(payment.date) · \(payment.note.isBlank ? "Payment" : payment.note)")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.secondaryText)
                         .lineLimit(1)
                 }
                 Spacer()
-                Text("-\(MoneyParser.formatPence(payment.amountPence))")
+                Text("-\(MoneyParser.formatPence(payment.netAmountPence))")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.success)
                 Image(systemName: "chevron.right")
@@ -3483,7 +3580,7 @@ private struct DebtDetailScreenView: View {
                 EmptyStateView(title: "No payments yet", message: "Debt payments will appear here.", systemImage: "checkmark.circle")
             } else {
                 ForEach(payments) { payment in
-                    MetricRow(label: payment.date, value: MoneyParser.formatPence(payment.amountPence), valueColor: AppTheme.Colors.success)
+                    MetricRow(label: payment.date, value: MoneyParser.formatPence(payment.netAmountPence), valueColor: payment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
                 }
             }
         }
@@ -3580,7 +3677,7 @@ private struct DebtDetailScreenView: View {
     }
 }
 
-private struct DebtPaymentEditSheetView: View {
+struct DebtPaymentEditSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var payment: DebtPayment
@@ -3588,6 +3685,8 @@ private struct DebtPaymentEditSheetView: View {
     @State private var amount: String
     @State private var paymentDate: Date
     @State private var note: String
+    @State private var refundEnabled: Bool
+    @State private var refundAmount: String
     @State private var showDeleteAlert = false
 
     init(store: PlannerStore, payment: DebtPayment) {
@@ -3597,6 +3696,8 @@ private struct DebtPaymentEditSheetView: View {
         _amount = State(initialValue: Self.formatMoneyInput(payment.amountPence))
         _paymentDate = State(initialValue: payment.date.isoDate)
         _note = State(initialValue: payment.note)
+        _refundEnabled = State(initialValue: payment.hasRefund)
+        _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: payment.effectiveRefundedAmountPence))
     }
 
     var body: some View {
@@ -3634,7 +3735,8 @@ private struct DebtPaymentEditSheetView: View {
     private var summaryCard: some View {
         AppCard(glow: true) {
             MetricRow(label: "Debt", value: debtName(for: currentPayment.debtId))
-            MetricRow(label: "Amount", value: MoneyParser.formatPence(currentPayment.amountPence), valueColor: AppTheme.Colors.success)
+            MetricRow(label: "Original amount", value: MoneyParser.formatPence(currentPayment.amountPence))
+            MetricRow(label: "Net payment", value: MoneyParser.formatPence(currentPayment.netAmountPence), valueColor: currentPayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
             MetricRow(label: "Date", value: currentPayment.date)
             MetricRow(label: "Note", value: currentPayment.note.isBlank ? "Payment" : currentPayment.note)
         }
@@ -3653,16 +3755,6 @@ private struct DebtPaymentEditSheetView: View {
             DatePicker("Payment date", selection: $paymentDate, displayedComponents: .date)
                 .tint(AppTheme.Colors.primaryOrange)
             TextField("Note", text: $note).textFieldStyle(AppTextFieldStyle())
-            Toggle("This payment was refunded", isOn: Binding(
-                get: { currentPayment.isRefunded },
-                set: { store.setDebtPaymentRefunded(id: payment.id, refunded: $0) }
-            ))
-            .tint(AppTheme.Colors.primaryOrange)
-            if currentPayment.isRefunded {
-                Text("The debt balance and repayment plan have been restored. This record remains for your history.")
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.Colors.success)
-            }
             PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSave) {
                 store.updateDebtPayment(
                     id: payment.id,
@@ -3670,6 +3762,22 @@ private struct DebtPaymentEditSheetView: View {
                     amountPence: MoneyParser.parsePoundsToPence(amount),
                     date: paymentDate.isoDateString,
                     note: note
+                )
+            }
+            AppDivider()
+            SectionTitle("Refund")
+            RefundAmountEditor(
+                originalAmountPence: currentPayment.amountPence,
+                isEnabled: $refundEnabled,
+                amount: $refundAmount
+            )
+            Text("Only the refunded amount is restored to the debt balance and repayment plan. The payment remains in history.")
+                .font(.footnote)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+            PrimaryButton(title: "Save refund", systemImage: "arrow.uturn.backward", isDisabled: !refundIsValid) {
+                store.setDebtPaymentRefundAmount(
+                    id: payment.id,
+                    amountPence: refundEnabled ? MoneyParser.parsePoundsToPence(refundAmount) : 0
                 )
             }
         }
@@ -3689,8 +3797,14 @@ private struct DebtPaymentEditSheetView: View {
     }
 
     private var canSave: Bool {
-        guard !currentPayment.isRefunded else { return false }
+        guard !currentPayment.hasRefund else { return false }
         return !debtId.isEmpty && MoneyParser.parsePoundsToPence(amount) > 0
+    }
+
+    private var refundIsValid: Bool {
+        guard refundEnabled else { return currentPayment.hasRefund }
+        let amountPence = MoneyParser.parsePoundsToPence(refundAmount)
+        return amountPence > 0 && amountPence <= currentPayment.amountPence
     }
 
     private func debtName(for id: String) -> String {

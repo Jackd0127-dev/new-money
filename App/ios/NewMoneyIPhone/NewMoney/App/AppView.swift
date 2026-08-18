@@ -28,6 +28,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .credit: "creditcard.trianglebadge.exclamationmark"
         }
     }
+
 }
 
 struct PlannerTabPresentationKey: Hashable {
@@ -273,6 +274,16 @@ enum ProfileMenuAction: String, CaseIterable, Identifiable {
         case .settings: "gearshape"
         }
     }
+
+    var tint: Color {
+        switch self {
+        case .income: AppTheme.Colors.success
+        case .accounts: AppTheme.Colors.primaryOrange
+        case .statements: AppTheme.Colors.warning
+        case .faq: AppTheme.Colors.accent
+        case .settings: AppTheme.Colors.secondaryText
+        }
+    }
 }
 
 enum ProfileMenuPresentationStyle: Equatable {
@@ -309,13 +320,13 @@ enum ProfileMenuPresentationPolicy {
     static let animatesFromBottom = false
     static let avoidsSystemNavigationBar = false
     static let usesCompactActionRows = true
-    static let showsActionIcons = false
+    static let showsActionIcons = true
     static let showsActionSubtitles = false
-    static let showsActionDisclosureIndicators = false
-    static let showsActionDividers = false
-    static let usesSeparateDestructiveActionCards = true
-    static let actionRowMinimumHeight: CGFloat = 58
-    static let actionCardCornerRadius: CGFloat = AppTheme.Radius.xl
+    static let showsActionDisclosureIndicators = true
+    static let showsActionDividers = true
+    static let usesSeparateDestructiveActionCards = false
+    static let actionRowMinimumHeight: CGFloat = 54
+    static let actionCardCornerRadius: CGFloat = AppTheme.Radius.lg
 }
 
 private enum AppSheetDestination: String, Identifiable {
@@ -842,7 +853,7 @@ private struct AddMenuSheetView: View {
     }
 }
 
-private struct ProfileMenuScreenView: View {
+struct ProfileMenuScreenView: View {
     @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     @State private var isLogOutConfirmationPresented = false
@@ -903,18 +914,21 @@ private struct ProfileMenuScreenView: View {
     }
 
     private var profileHeader: some View {
-        VStack(spacing: AppTheme.Spacing.sm) {
+        VStack(spacing: 6) {
             profileAvatar
 
             Text(activeAccountName)
-                .font(.title2.weight(.bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(AppTheme.Colors.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.76)
+
+            Text("Active planner")
+                .font(.caption)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, AppTheme.Spacing.sm)
-        .padding(.bottom, AppTheme.Spacing.md)
+        .padding(.vertical, AppTheme.Spacing.sm)
     }
 
     private var profileAvatar: some View {
@@ -923,7 +937,7 @@ private struct ProfileMenuScreenView: View {
                 PlannerAccountAvatarCircle(
                     account: activeAccount,
                     image: store.plannerAccountAvatarImage(for: activeAccount),
-                    size: 86
+                    size: 66
                 )
             } else {
                 fallbackProfileAvatar
@@ -933,55 +947,55 @@ private struct ProfileMenuScreenView: View {
     }
 
     private var actionsCard: some View {
-        AppCard(cornerRadius: ProfileMenuPresentationPolicy.actionCardCornerRadius) {
-            VStack(spacing: 0) {
-                ForEach(ProfileMenuAction.allCases, id: \.rawValue) { action in
-                    NavigationLink {
-                        profileDestination(for: action)
-                    } label: {
-                        ProfileMenuActionRow(action: action)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("profile-menu-\(action.rawValue)")
+        CompactMenuCard {
+            ForEach(Array(ProfileMenuAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
+                NavigationLink {
+                    profileDestination(for: action)
+                } label: {
+                    ProfileMenuActionRow(action: action)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("profile-menu-\(action.rawValue)")
+
+                if index < ProfileMenuAction.allCases.count - 1 {
+                    AppDivider()
+                        .padding(.leading, 50)
                 }
             }
         }
     }
 
     private var signOutCard: some View {
-        VStack(spacing: AppTheme.Spacing.md) {
-            AppCard(cornerRadius: ProfileMenuPresentationPolicy.actionCardCornerRadius) {
+        CompactMenuCard {
+            VStack(spacing: 0) {
                 Button(role: .destructive) {
                     isLogOutConfirmationPresented = true
                 } label: {
-                    HStack {
-                        Text(authSession.isWorking ? "Logging Out…" : ProfileMenuPresentationPolicy.logOutActionTitle)
-                            .font(.body)
-                        Spacer()
-                    }
-                    .frame(minHeight: ProfileMenuPresentationPolicy.actionRowMinimumHeight)
-                    .contentShape(Rectangle())
+                    CompactMenuRow(
+                        title: authSession.isWorking ? "Logging Out…" : ProfileMenuPresentationPolicy.logOutActionTitle,
+                        systemImage: "rectangle.portrait.and.arrow.right",
+                        isDestructive: true,
+                        showsDisclosure: false
+                    )
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(AppTheme.Colors.danger)
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-sign-out")
-            }
 
-            AppCard(cornerRadius: ProfileMenuPresentationPolicy.actionCardCornerRadius) {
+                AppDivider()
+                    .padding(.leading, 50)
+
                 Button(role: .destructive) {
                     isFirstResetConfirmationPresented = true
                 } label: {
-                    HStack {
-                        Text(authSession.isWorking ? "Resetting Data…" : ProfileMenuPresentationPolicy.resetDataActionTitle)
-                            .font(.body)
-                        Spacer()
-                    }
-                    .frame(minHeight: ProfileMenuPresentationPolicy.actionRowMinimumHeight)
-                    .contentShape(Rectangle())
+                    CompactMenuRow(
+                        title: authSession.isWorking ? "Resetting Data…" : ProfileMenuPresentationPolicy.resetDataActionTitle,
+                        systemImage: "trash",
+                        isDestructive: true,
+                        showsDisclosure: false
+                    )
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(AppTheme.Colors.danger)
                 .disabled(authSession.isWorking)
                 .accessibilityIdentifier("profile-reset-data")
             }
@@ -996,7 +1010,7 @@ private struct ProfileMenuScreenView: View {
                 .font(.title.weight(.bold))
                 .foregroundStyle(AppTheme.Colors.controlText)
         }
-        .frame(width: 86, height: 86)
+        .frame(width: 66, height: 66)
         .overlay(
             Circle()
                 .stroke(AppTheme.Colors.primaryText.opacity(0.18), lineWidth: 1)
@@ -1035,15 +1049,11 @@ private struct ProfileMenuActionRow: View {
     var action: ProfileMenuAction
 
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            Text(action.title)
-                .font(.body)
-                .foregroundStyle(AppTheme.Colors.primaryText)
-
-            Spacer(minLength: AppTheme.Spacing.sm)
-        }
-        .frame(minHeight: ProfileMenuPresentationPolicy.actionRowMinimumHeight)
-        .contentShape(Rectangle())
+        CompactMenuRow(
+            title: action.title,
+            systemImage: action.symbol,
+            tint: action.tint
+        )
     }
 }
 

@@ -950,8 +950,9 @@ final class PlannerStore: ObservableObject {
             now: DateUtilities.nowIsoString()
         )
         upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
-            $0.state = .refunded
+            $0.state = .cancelled
             $0.actualDueDate = nil
+            $0.refundedAmountPence = nil
             $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
         }
         snapshot.transactions.removeAll { reversedIds.contains($0.id) }
@@ -974,31 +975,78 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
-    /// Keeps the payment in history, but reverses every derived financial effect.
-    /// Toggling it off reapplies the original payment without creating a duplicate.
+    /// Keeps the payment in history while reversing only the amount actually
+    /// returned. A legacy boolean call remains as a full-refund convenience.
     func setTransactionRefunded(id: String, refunded: Bool) {
-        guard let index = snapshot.transactions.firstIndex(where: { $0.id == id }),
-              snapshot.transactions[index].type == .spending,
-              snapshot.transactions[index].isRefunded != refunded
+        guard let transaction = snapshot.transactions.first(where: { $0.id == id }) else { return }
+        setTransactionRefundAmount(id: id, amountPence: refunded ? transaction.amountPence : 0)
+    }
+
+    func setTransactionRefundAmount(id: String, amountPence: Int) {
+        guard let transaction = snapshot.transactions.first(where: { $0.id == id }),
+              transaction.type == .spending
         else { return }
 
+        // Generated recurring charges are rebuilt from their immutable
+        // occurrence override. Persist the refund there first or the next
+        // reconciliation pass would silently restore the old no-refund value.
+        if let paymentId = transaction.recurringPaymentId,
+           let scheduledDueDate = recurringScheduledDueDate(for: transaction, paymentId: paymentId) {
+            setRecurringBillOccurrenceRefundAmount(
+                paymentId: paymentId,
+                scheduledDueDate: scheduledDueDate,
+                amountPence: amountPence
+            )
+            return
+        }
+
+        setStandaloneTransactionRefundAmount(id: id, amountPence: amountPence)
+    }
+
+    private func setStandaloneTransactionRefundAmount(id: String, amountPence: Int) {
+        guard let index = snapshot.transactions.firstIndex(where: { $0.id == id }),
+              snapshot.transactions[index].type == .spending
+        else { return }
+
+        let requestedRefundPence = min(snapshot.transactions[index].amountPence, max(0, abs(amountPence)))
+        let previousRefundPence = snapshot.transactions[index].effectiveRefundedAmountPence
+        guard requestedRefundPence != previousRefundPence else { return }
+
         let now = DateUtilities.nowIsoString()
-        if refunded {
-            let transaction = snapshot.transactions[index]
-            guard let fundingPayPeriodIds = removeCardSpendFundingAllocations(transactionId: transaction.id, now: now) else { return }
-            restorePotBalanceAfterRemovingTransaction(transaction, now: now)
+        let refundDeltaPence = requestedRefundPence - previousRefundPence
+        if snapshot.transactions[index].paymentMethod == .pot,
+           let potId = snapshot.transactions[index].potId,
+           let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId }) {
+            if refundDeltaPence < 0 && snapshot.pots[potIndex].balancePence < abs(refundDeltaPence) {
+                errorMessage = "Unable to reduce this refund because the linked pot no longer has enough money."
+                return
+            }
+            snapshot.pots[potIndex].balancePence += refundDeltaPence
+            snapshot.pots[potIndex].updatedAt = now
+        }
+
+        let previouslyFundedPayPeriodIds = snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds ?? []
+        guard let removedFundingPayPeriodIds = removeCardSpendFundingAllocations(
+            transactionId: snapshot.transactions[index].id,
+            now: now
+        ) else { return }
+        let fundingPayPeriodIds = Array(Set(previouslyFundedPayPeriodIds + removedFundingPayPeriodIds)).sorted()
+
+        if requestedRefundPence > 0 {
             snapshot.transactions[index].refundedAt = now
+            snapshot.transactions[index].refundedAmountPence = requestedRefundPence
             snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds = fundingPayPeriodIds
             snapshot.transactions[index].updatedAt = now
         } else {
-            let fundingPayPeriodIds = snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds ?? []
             snapshot.transactions[index].refundedAt = nil
+            snapshot.transactions[index].refundedAmountPence = nil
             snapshot.transactions[index].refundedCardSpendFundingPayPeriodIds = nil
             snapshot.transactions[index].updatedAt = now
-            let transaction = snapshot.transactions[index]
-            applyPotBalanceForTransaction(transaction)
-            restoreCardSpendFundingAllocations(transactionId: transaction.id, payPeriodIds: fundingPayPeriodIds)
         }
+        restoreCardSpendFundingAllocations(
+            transactionId: snapshot.transactions[index].id,
+            payPeriodIds: fundingPayPeriodIds
+        )
         persist()
     }
 
@@ -1055,6 +1103,7 @@ final class PlannerStore: ObservableObject {
         upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
             $0.state = .awaitingPayment
             $0.actualDueDate = nil
+            $0.refundedAmountPence = nil
             $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
         }
         persist()
@@ -1072,6 +1121,7 @@ final class PlannerStore: ObservableObject {
         upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
             $0.state = .confirmed
             $0.actualDueDate = actualDueDate
+            $0.refundedAmountPence = nil
             $0.reversedGeneratedTransactionIds = Array(Set(
                 $0.reversedGeneratedTransactionIds + reversedIds
             )).sorted()
@@ -1081,6 +1131,7 @@ final class PlannerStore: ObservableObject {
             fromDueDate: previousEffectiveDate,
             toDueDate: actualDueDate
         )
+        reapplyRecurringBillOccurrenceIfDue(paymentId: paymentId, effectiveDueDate: actualDueDate)
         persist()
     }
 
@@ -1090,29 +1141,97 @@ final class PlannerStore: ObservableObject {
         upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
             $0.state = .normal
             $0.actualDueDate = nil
+            $0.refundedAmountPence = nil
         }
         moveRecurringBillFundingReferences(
             paymentId: paymentId,
             fromDueDate: previousEffectiveDate,
             toDueDate: scheduledDueDate
         )
+        reapplyRecurringBillOccurrenceIfDue(paymentId: paymentId, effectiveDueDate: scheduledDueDate)
         persist()
     }
 
     func setRecurringBillOccurrenceRefunded(paymentId: String, scheduledDueDate: String, refunded: Bool) {
+        guard let payment = snapshot.recurringPayments.first(where: { $0.id == paymentId }) else { return }
+        let override = snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+        }
+        let grossAmountPence = override?.amountPenceOverride ?? payment.amountPence
+        setRecurringBillOccurrenceRefundAmount(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate,
+            amountPence: refunded ? grossAmountPence : 0
+        )
+    }
+
+    func cancelRecurringBillOccurrence(paymentId: String, scheduledDueDate: String) {
+        guard FinanceEngine.isIsoDate(scheduledDueDate),
+              snapshot.recurringPayments.contains(where: {
+                  $0.id == paymentId && $0.active && $0.deletedAt == nil
+              })
+        else { return }
+
+        let reversedIds = reverseGeneratedRecurringBillTransactions(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate
+        )
+        removeRecurringBillFundingAllocations(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate,
+            now: DateUtilities.nowIsoString()
+        )
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.state = .cancelled
+            $0.actualDueDate = nil
+            $0.refundedAmountPence = nil
+            $0.reversedGeneratedTransactionIds = Array(Set(
+                $0.reversedGeneratedTransactionIds + reversedIds
+            )).sorted()
+        }
+        persist()
+    }
+
+    func setRecurringBillOccurrenceRefundAmount(paymentId: String, scheduledDueDate: String, amountPence: Int) {
         guard FinanceEngine.isIsoDate(scheduledDueDate) else { return }
-        if refunded {
-            let reversedIds = reverseGeneratedRecurringBillTransactions(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
-            upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
-                $0.state = .refunded
-                $0.actualDueDate = nil
-                $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
-            }
-        } else {
-            upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
-                $0.state = .normal
-                $0.actualDueDate = nil
-            }
+        guard let payment = snapshot.recurringPayments.first(where: { $0.id == paymentId && $0.deletedAt == nil }) else { return }
+        let existingOverride = snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+        }
+        let grossAmountPence = max(0, existingOverride?.amountPenceOverride ?? payment.amountPence)
+        let refundAmountPence = min(grossAmountPence, max(0, abs(amountPence)))
+        let generatedIds = [
+            recurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate),
+            cardRecurringTransactionId(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+        ]
+        let hasRecordedCharge = generatedIds.contains { transactionId in
+            snapshot.transactions.contains { $0.id == transactionId && $0.deletedAt == nil }
+        }
+        guard refundAmountPence == 0 || hasRecordedCharge else {
+            errorMessage = "A refund can only be logged after this bill has been charged."
+            return
+        }
+
+        upsertRecurringBillOccurrenceOverride(paymentId: paymentId, scheduledDueDate: scheduledDueDate) {
+            $0.state = refundAmountPence >= grossAmountPence && grossAmountPence > 0 ? .refunded : .normal
+            $0.actualDueDate = nil
+            $0.refundedAmountPence = refundAmountPence > 0 ? refundAmountPence : nil
+        }
+
+        for transactionId in generatedIds where snapshot.transactions.contains(where: { $0.id == transactionId && $0.deletedAt == nil }) {
+            // Keep the original charge as an auditable ledger movement and add
+            // the exact returned amount as its refund credit. Full refunds no
+            // longer erase a charge that genuinely reached the account/card.
+            setStandaloneTransactionRefundAmount(id: transactionId, amountPence: refundAmountPence)
+        }
+
+        // Legacy full refunds removed the generated charge. If the refund is
+        // later reduced or cleared, recreate the gross charge with its refund
+        // metadata so the net movement and history are both correct.
+        if refundAmountPence < grossAmountPence && !generatedIds.contains(where: { transactionId in
+            snapshot.transactions.contains { $0.id == transactionId && $0.deletedAt == nil }
+        }) {
+            reapplyRecurringBillOccurrenceIfDue(paymentId: paymentId, effectiveDueDate: scheduledDueDate)
         }
         persist()
     }
@@ -1124,7 +1243,29 @@ final class PlannerStore: ObservableObject {
             $0.amountPenceOverride = amountPence
             $0.reversedGeneratedTransactionIds = Array(Set($0.reversedGeneratedTransactionIds + reversedIds)).sorted()
         }
+        if let effectiveDueDate = recurringBillOccurrenceEffectiveDate(
+            paymentId: paymentId,
+            scheduledDueDate: scheduledDueDate
+        ) {
+            reapplyRecurringBillOccurrenceIfDue(paymentId: paymentId, effectiveDueDate: effectiveDueDate)
+        }
         persist()
+    }
+
+    private func reapplyRecurringBillOccurrenceIfDue(paymentId: String, effectiveDueDate: String) {
+        guard effectiveDueDate <= todayIso,
+              let payment = snapshot.recurringPayments.first(where: {
+                  $0.id == paymentId && $0.active && $0.deletedAt == nil
+              })
+        else { return }
+
+        if payment.creditCardId != nil {
+            _ = applyDueCreditCardRecurringPayments(asOf: todayIso)
+        } else if payment.potId != nil {
+            _ = applyDueRecurringPotPayments(asOf: todayIso)
+        } else {
+            _ = applyDueBankAccountRecurringPayments(asOf: todayIso)
+        }
     }
 
     private func upsertRecurringBillOccurrenceOverride(
@@ -1744,40 +1885,91 @@ final class PlannerStore: ObservableObject {
     }
 
     func setCardRepaymentRefunded(id: String, refunded: Bool) {
+        guard let repayment = snapshot.creditCardRepayments.first(where: { $0.id == id }) else { return }
+        setCardRepaymentRefundAmount(id: id, amountPence: refunded ? repayment.amountPence : 0)
+    }
+
+    func setCardRepaymentRefundAmount(id: String, amountPence: Int) {
         guard let index = snapshot.creditCardRepayments.firstIndex(where: { $0.id == id }),
-              snapshot.creditCardRepayments[index].isRefunded != refunded
+              snapshot.creditCardRepayments[index].deletedAt == nil
         else { return }
+        let refundAmountPence = min(snapshot.creditCardRepayments[index].amountPence, max(0, abs(amountPence)))
+        let previousRefundPence = snapshot.creditCardRepayments[index].effectiveRefundedAmountPence
+        guard refundAmountPence != previousRefundPence else { return }
         let now = DateUtilities.nowIsoString()
         let repayment = snapshot.creditCardRepayments[index]
-        guard adjustPotBalancesForCardRepaymentRefund(repayment, refunded: refunded, now: now) else { return }
-        snapshot.creditCardRepayments[index].refundedAt = refunded ? now : nil
+        guard adjustPotBalancesForCardRepaymentRefund(
+            repayment,
+            previousRefundPence: previousRefundPence,
+            refundAmountPence: refundAmountPence,
+            now: now
+        ) else { return }
+        snapshot.creditCardRepayments[index].refundedAt = refundAmountPence > 0 ? now : nil
+        snapshot.creditCardRepayments[index].refundedAmountPence = refundAmountPence > 0 ? refundAmountPence : nil
         snapshot.creditCardRepayments[index].updatedAt = now
         persist()
     }
 
-    private func adjustPotBalancesForCardRepaymentRefund(_ repayment: CreditCardRepayment, refunded: Bool, now: String) -> Bool {
+    private func adjustPotBalancesForCardRepaymentRefund(
+        _ repayment: CreditCardRepayment,
+        previousRefundPence: Int,
+        refundAmountPence: Int,
+        now: String
+    ) -> Bool {
         let contributions = repayment.potContributions ?? repayment.potId.map {
             [CreditCardPotContribution(potId: $0, amountPence: repayment.potContributionPence ?? repayment.amountPence)]
         } ?? []
-        let amountsByPot = contributions.reduce(into: [String: Int]()) { result, contribution in
-            result[contribution.potId, default: 0] += max(0, contribution.amountPence)
+        let previousByPot = proportionalRefundAmounts(
+            contributions: contributions,
+            paymentAmountPence: repayment.amountPence,
+            refundAmountPence: previousRefundPence
+        )
+        let nextByPot = proportionalRefundAmounts(
+            contributions: contributions,
+            paymentAmountPence: repayment.amountPence,
+            refundAmountPence: refundAmountPence
+        )
+        let potIds = Set(previousByPot.keys).union(nextByPot.keys)
+        let deltasByPot = potIds.reduce(into: [String: Int]()) { result, potId in
+            result[potId] = nextByPot[potId, default: 0] - previousByPot[potId, default: 0]
         }
-        if !refunded {
-            for (potId, amount) in amountsByPot {
-                guard let index = snapshot.pots.firstIndex(where: { $0.id == potId }),
-                      snapshot.pots[index].balancePence >= amount
-                else {
-                    errorMessage = "Unable to restore this card payment because its source pot no longer has enough money."
-                    return false
-                }
+        for (potId, delta) in deltasByPot where delta < 0 {
+            guard let index = snapshot.pots.firstIndex(where: { $0.id == potId }),
+                  snapshot.pots[index].balancePence >= abs(delta)
+            else {
+                errorMessage = "Unable to reduce this card-payment refund because its source pot no longer has enough money."
+                return false
             }
         }
-        for (potId, amount) in amountsByPot {
+        for (potId, delta) in deltasByPot where delta != 0 {
             guard let index = snapshot.pots.firstIndex(where: { $0.id == potId }) else { continue }
-            snapshot.pots[index].balancePence += refunded ? amount : -amount
+            snapshot.pots[index].balancePence += delta
             snapshot.pots[index].updatedAt = now
         }
         return true
+    }
+
+    private func proportionalRefundAmounts(
+        contributions: [CreditCardPotContribution],
+        paymentAmountPence: Int,
+        refundAmountPence: Int
+    ) -> [String: Int] {
+        let paymentAmountPence = max(0, paymentAmountPence)
+        let refundAmountPence = min(paymentAmountPence, max(0, refundAmountPence))
+        guard paymentAmountPence > 0, refundAmountPence > 0 else { return [:] }
+
+        return contributions.reduce(into: [String: Int]()) { result, contribution in
+            let contributionAmountPence = max(0, contribution.amountPence)
+            let refundedContributionPence: Int
+            if refundAmountPence == paymentAmountPence {
+                refundedContributionPence = contributionAmountPence
+            } else {
+                refundedContributionPence = Int(
+                    (Double(contributionAmountPence) * Double(refundAmountPence) / Double(paymentAmountPence)).rounded()
+                )
+            }
+            result[contribution.potId, default: 0] += min(contributionAmountPence, refundedContributionPence)
+        }
     }
 
     func addCustomPayment(name: String, amountPence: Int, dueDate: String, creditCardId: String?) {
@@ -2161,6 +2353,7 @@ final class PlannerStore: ObservableObject {
 
         let now = DateUtilities.nowIsoString()
         let existingPayment = snapshot.debtPayments[paymentIndex]
+        guard !existingPayment.hasRefund else { return }
 
         if existingPayment.debtId != debtId,
            let targetDebt = snapshot.debts.first(where: { $0.id == debtId }),
@@ -2196,18 +2389,27 @@ final class PlannerStore: ObservableObject {
     }
 
     func setDebtPaymentRefunded(id: String, refunded: Bool) {
+        guard let payment = snapshot.debtPayments.first(where: { $0.id == id }) else { return }
+        setDebtPaymentRefundAmount(id: id, amountPence: refunded ? payment.amountPence : 0)
+    }
+
+    func setDebtPaymentRefundAmount(id: String, amountPence: Int) {
         guard let index = snapshot.debtPayments.firstIndex(where: { $0.id == id }),
-              snapshot.debtPayments[index].isRefunded != refunded
+              snapshot.debtPayments[index].deletedAt == nil
         else { return }
+        let refundAmountPence = min(snapshot.debtPayments[index].amountPence, max(0, abs(amountPence)))
+        let previousRefundPence = snapshot.debtPayments[index].effectiveRefundedAmountPence
+        guard refundAmountPence != previousRefundPence else { return }
         let now = DateUtilities.nowIsoString()
         let payment = snapshot.debtPayments[index]
-        if refunded {
-            restoreDebtPaymentAmount(payment, now: now)
-            snapshot.debtPayments[index].refundedAt = now
+        let refundDeltaPence = refundAmountPence - previousRefundPence
+        if refundDeltaPence > 0 {
+            restoreDebtAmount(debtId: payment.debtId, amountPence: refundDeltaPence, now: now)
         } else {
-            applyDebtPaymentAmount(debtId: payment.debtId, amountPence: payment.amountPence, now: now)
-            snapshot.debtPayments[index].refundedAt = nil
+            applyDebtPaymentAmount(debtId: payment.debtId, amountPence: abs(refundDeltaPence), now: now)
         }
+        snapshot.debtPayments[index].refundedAt = refundAmountPence > 0 ? now : nil
+        snapshot.debtPayments[index].refundedAmountPence = refundAmountPence > 0 ? refundAmountPence : nil
         snapshot.debtPayments[index].updatedAt = now
         persist()
     }
@@ -2580,6 +2782,10 @@ final class PlannerStore: ObservableObject {
                     paymentId: payment.id,
                     scheduledDueDate: occurrence.scheduledDueDate
                 )
+                let ledgerAmounts = recurringTransactionLedgerAmounts(
+                    payment: payment,
+                    scheduledDueDate: occurrence.scheduledDueDate
+                )
                 if let existingIndex = snapshot.transactions.firstIndex(where: {
                     $0.id == transactionId && $0.deletedAt == nil
                 }) {
@@ -2595,6 +2801,15 @@ final class PlannerStore: ObservableObject {
                         snapshot.transactions[existingIndex].updatedAt = now
                         changed = true
                     }
+                    if synchronizeRecurringTransactionLedger(
+                        at: existingIndex,
+                        grossAmountPence: ledgerAmounts.gross,
+                        refundedAmountPence: ledgerAmounts.refunded,
+                        refundedAt: ledgerAmounts.refundedAt,
+                        now: now
+                    ) {
+                        changed = true
+                    }
                     continue
                 }
 
@@ -2606,7 +2821,7 @@ final class PlannerStore: ObservableObject {
                             payPeriods: snapshot.payPeriods,
                             date: occurrence.dueDate
                         )?.id,
-                        amountPence: occurrence.amountPence,
+                        amountPence: ledgerAmounts.gross,
                         type: .spending,
                         paymentMethod: .bankAccount,
                         creditCardId: nil,
@@ -2614,6 +2829,8 @@ final class PlannerStore: ObservableObject {
                         recurringPaymentId: payment.id,
                         date: occurrence.dueDate,
                         note: payment.name,
+                        refundedAt: ledgerAmounts.refundedAt,
+                        refundedAmountPence: ledgerAmounts.refunded > 0 ? ledgerAmounts.refunded : nil,
                         createdAt: now,
                         updatedAt: now,
                         deletedAt: nil
@@ -2641,9 +2858,27 @@ final class PlannerStore: ObservableObject {
             for occurrence in occurrences {
                 guard !occurrence.isAwaitingPayment else { continue }
                 let transactionId = recurringTransactionId(paymentId: payment.id, scheduledDueDate: occurrence.scheduledDueDate)
+                let ledgerAmounts = recurringTransactionLedgerAmounts(
+                    payment: payment,
+                    scheduledDueDate: occurrence.scheduledDueDate
+                )
 
-                guard !snapshot.transactions.contains(where: { $0.id == transactionId && $0.deletedAt == nil }),
-                      let potId = payment.potId,
+                if let existingIndex = snapshot.transactions.firstIndex(where: {
+                    $0.id == transactionId && $0.deletedAt == nil
+                }) {
+                    if synchronizeRecurringTransactionLedger(
+                        at: existingIndex,
+                        grossAmountPence: ledgerAmounts.gross,
+                        refundedAmountPence: ledgerAmounts.refunded,
+                        refundedAt: ledgerAmounts.refundedAt,
+                        now: now
+                    ) {
+                        changed = true
+                    }
+                    continue
+                }
+
+                guard let potId = payment.potId,
                       let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived }),
                       occurrence.amountPence > 0
                 else { continue }
@@ -2653,13 +2888,15 @@ final class PlannerStore: ObservableObject {
                         id: transactionId,
                         potId: potId,
                         payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: occurrence.dueDate)?.id,
-                        amountPence: occurrence.amountPence,
+                        amountPence: ledgerAmounts.gross,
                         type: .spending,
                         paymentMethod: .pot,
                         creditCardId: nil,
                         recurringPaymentId: payment.id,
                         date: occurrence.dueDate,
                         note: payment.name,
+                        refundedAt: ledgerAmounts.refundedAt,
+                        refundedAmountPence: ledgerAmounts.refunded > 0 ? ledgerAmounts.refunded : nil,
                         createdAt: now,
                         updatedAt: now,
                         deletedAt: nil
@@ -2693,6 +2930,10 @@ final class PlannerStore: ObservableObject {
                 else { continue }
 
                 let transactionId = cardRecurringTransactionId(paymentId: payment.id, scheduledDueDate: occurrence.scheduledDueDate)
+                let ledgerAmounts = recurringTransactionLedgerAmounts(
+                    payment: payment,
+                    scheduledDueDate: occurrence.scheduledDueDate
+                )
                 if let existingTransactionIndex = cardRecurringTransactionIndex(
                     transactionId: transactionId,
                     paymentId: payment.id,
@@ -2711,6 +2952,15 @@ final class PlannerStore: ObservableObject {
                         snapshot.transactions[existingTransactionIndex].updatedAt = now
                         changed = true
                     }
+                    if synchronizeRecurringTransactionLedger(
+                        at: existingTransactionIndex,
+                        grossAmountPence: ledgerAmounts.gross,
+                        refundedAmountPence: ledgerAmounts.refunded,
+                        refundedAt: ledgerAmounts.refundedAt,
+                        now: now
+                    ) {
+                        changed = true
+                    }
                     continue
                 }
 
@@ -2719,13 +2969,15 @@ final class PlannerStore: ObservableObject {
                         id: transactionId,
                         potId: fundedCardBillPotId(payment: payment, occurrence: occurrence),
                         payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: occurrence.dueDate)?.id,
-                        amountPence: occurrence.amountPence,
+                        amountPence: ledgerAmounts.gross,
                         type: .spending,
                         paymentMethod: .creditCard,
                         creditCardId: cardId,
                         recurringPaymentId: payment.id,
                         date: occurrence.dueDate,
                         note: payment.name,
+                        refundedAt: ledgerAmounts.refundedAt,
+                        refundedAmountPence: ledgerAmounts.refunded > 0 ? ledgerAmounts.refunded : nil,
                         createdAt: now,
                         updatedAt: now,
                         deletedAt: nil
@@ -3037,6 +3289,46 @@ final class PlannerStore: ObservableObject {
         }
 
         return createdDate <= todayIso ? createdDate : todayIso
+    }
+
+    private func recurringTransactionLedgerAmounts(
+        payment: RecurringPayment,
+        scheduledDueDate: String
+    ) -> (gross: Int, refunded: Int, refundedAt: String?) {
+        let occurrenceOverride = snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil &&
+                $0.paymentId == payment.id &&
+                $0.scheduledDueDate == scheduledDueDate
+        }
+        let gross = max(0, occurrenceOverride?.amountPenceOverride ?? payment.amountPence)
+        let refunded = occurrenceOverride?.effectiveRefundedAmountPence(originalAmountPence: gross) ?? 0
+        return (
+            gross: gross,
+            refunded: min(gross, max(0, refunded)),
+            refundedAt: refunded > 0 ? occurrenceOverride?.updatedAt : nil
+        )
+    }
+
+    @discardableResult
+    private func synchronizeRecurringTransactionLedger(
+        at index: Int,
+        grossAmountPence: Int,
+        refundedAmountPence: Int,
+        refundedAt: String?,
+        now: String
+    ) -> Bool {
+        let normalizedRefund = min(max(0, grossAmountPence), max(0, refundedAmountPence))
+        let normalizedRefundDate = normalizedRefund > 0 ? refundedAt ?? now : nil
+        guard snapshot.transactions[index].amountPence != grossAmountPence ||
+                snapshot.transactions[index].effectiveRefundedAmountPence != normalizedRefund ||
+                snapshot.transactions[index].refundedAt != normalizedRefundDate
+        else { return false }
+
+        snapshot.transactions[index].amountPence = grossAmountPence
+        snapshot.transactions[index].refundedAt = normalizedRefundDate
+        snapshot.transactions[index].refundedAmountPence = normalizedRefund > 0 ? normalizedRefund : nil
+        snapshot.transactions[index].updatedAt = now
+        return true
     }
 
     private func recurringTransactionId(paymentId: String, scheduledDueDate: String) -> String {
@@ -4164,10 +4456,14 @@ final class PlannerStore: ObservableObject {
     }
 
     private func restoreDebtPaymentAmount(_ payment: DebtPayment, now: String) {
-        guard let index = snapshot.debts.firstIndex(where: { $0.id == payment.debtId }) else { return }
+        restoreDebtAmount(debtId: payment.debtId, amountPence: payment.netAmountPence, now: now)
+    }
+
+    private func restoreDebtAmount(debtId: String, amountPence: Int, now: String) {
+        guard let index = snapshot.debts.firstIndex(where: { $0.id == debtId }) else { return }
         let restoredBalancePence = min(
             snapshot.debts[index].originalAmountPence,
-            snapshot.debts[index].currentBalancePence + abs(payment.amountPence)
+            snapshot.debts[index].currentBalancePence + abs(amountPence)
         )
         snapshot.debts[index].currentBalancePence = restoredBalancePence
         snapshot.debts[index].status = restoredBalancePence > 0 ? .active : .paidOff

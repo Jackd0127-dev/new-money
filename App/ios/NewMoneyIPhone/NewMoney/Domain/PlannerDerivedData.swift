@@ -18,6 +18,8 @@ enum HomeDueEventStatus: String, Equatable, Sendable {
     case scheduled
     case awaiting
     case completed
+    case cancelled
+    case refunded
 }
 
 enum HomeDueEventSource: Equatable, Sendable {
@@ -212,6 +214,7 @@ enum CreditCardStatementTransactionSource: Equatable, Sendable {
     case spending
     case recurring
     case custom
+    case refund
 }
 
 struct CreditCardStatementTransaction: Identifiable, Equatable, Sendable {
@@ -499,16 +502,16 @@ enum DebtPlannerEngine {
     }
 
     static func snapshot(for debt: Debt, scheduleItems: [DebtPaymentScheduleItem], payments: [DebtPayment], date: String) -> DebtSnapshot {
-        let dayPayments = payments.filter { $0.debtId == debt.id && $0.date == date }
-        let paymentsMade = dayPayments.reduce(0) { $0 + $1.amountPence }
-        let interest = dayPayments.reduce(0) { $0 + $1.interestPaidPence }
+        let dayPayments = payments.filter { $0.debtId == debt.id && $0.date == date && !$0.isRefunded }
+        let paymentsMade = dayPayments.reduce(0) { $0 + $1.netAmountPence }
+        let interest = dayPayments.reduce(0) { $0 + $1.effectiveInterestPaidPence }
         let remainingScheduled = scheduleItems
             .filter { $0.debtId == debt.id && $0.status != .paid && $0.status != .cancelled }
             .reduce(0) { $0 + max(0, $1.plannedAmountPence - $1.paidAmountPence) }
         return DebtSnapshot(
             date: date,
             debtId: debt.id,
-            openingBalancePence: debt.currentBalancePence + dayPayments.reduce(0) { $0 + $1.principalPaidPence },
+            openingBalancePence: debt.currentBalancePence + dayPayments.reduce(0) { $0 + $1.effectivePrincipalPaidPence },
             interestAccruedPence: interest,
             paymentsMadePence: paymentsMade,
             closingBalancePence: debt.currentBalancePence,
@@ -880,7 +883,7 @@ enum PlannerDerivedData {
                 $0.paymentMethod == .income &&
                 isIsoDate($0.date, in: payPeriod)
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) { $0 + $1.netAmountPence }
 
         let unlinkedPotFundingPence = snapshot.potAllocations
             .filter {
@@ -906,7 +909,7 @@ enum PlannerDerivedData {
                 $0.sourcePotId == nil &&
                 isIsoDate($0.date, in: payPeriod)
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) { $0 + $1.netAmountPence }
 
         let paycheckFundedCardRepaymentsPence = snapshot.creditCardRepayments
             .filter {
@@ -966,9 +969,9 @@ enum PlannerDerivedData {
 
             switch transaction.type {
             case .spending:
-                return total + max(0, transaction.amountPence)
+                return total + transaction.netAmountPence
             case .allocation:
-                return total + max(0, transaction.amountPence)
+                return total + transaction.netAmountPence
             case .transfer, .adjustment:
                 return total
             }
@@ -1345,7 +1348,7 @@ enum PlannerDerivedData {
                     0,
                     existingNonChecklistBalancePence - openingBalanceCoveragePence
                 )
-                let amountPence = max(0, transaction.amountPence - availableCardSpendCoveragePence)
+                let amountPence = max(0, transaction.netAmountPence - availableCardSpendCoveragePence)
                 let transactionName = transaction.note.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 guard amountPence > 0 || matchingFundingPence > 0 else { return nil }
@@ -2117,11 +2120,11 @@ enum PlannerDerivedData {
                     asOfDate: asOfDate
                 )
                 let calculatedActualPence = breakdown
-                    .filter { $0.source == .openingStatement || $0.source == .spending }
-                    .reduce(0) { $0 + max(0, $1.amountPence) }
+                    .filter { $0.source == .openingStatement || $0.source == .spending || $0.source == .refund }
+                    .reduce(0) { $0 + $1.amountPence }
                 let calculatedForecastPence = breakdown
                     .filter { $0.source != .repayment }
-                    .reduce(0) { $0 + max(0, $1.amountPence) }
+                    .reduce(0) { $0 + $1.amountPence }
                 let confirmedAmountPence = creditCardCycleConfirmedAmountPence(
                     snapshot: snapshot,
                     cardId: card.id,
@@ -2191,7 +2194,7 @@ enum PlannerDerivedData {
                         includesCycleStart: includesCycleStart,
                         asOfDate: asOfDate
                     )
-                    let calculatedAmountPence = transactions.reduce(0) { $0 + max(0, $1.amountPence) }
+                    let calculatedAmountPence = max(0, transactions.reduce(0) { $0 + $1.amountPence })
                     let confirmedAmountPence = creditCardCycleConfirmedAmountPence(
                         snapshot: snapshot,
                         cardId: card.id,
@@ -2293,7 +2296,7 @@ enum PlannerDerivedData {
 
                 return repayment.date > statementDate && repayment.date <= directDebitDate
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) { $0 + $1.netAmountPence }
     }
 
     private static func creditCardCycleAmount(
@@ -2354,7 +2357,10 @@ enum PlannerDerivedData {
         var presentKeys = Set(scheduledOccurrences.map { "\($0.payment.id)-\($0.scheduledDueDate)" })
 
         for override in overrides {
-            guard override.state != .refunded else { continue }
+            let grossAmountPence = override.amountPenceOverride ?? paymentsById[override.paymentId]?.amountPence ?? 0
+            guard override.state != .cancelled,
+                  override.effectiveRefundedAmountPence(originalAmountPence: grossAmountPence) < grossAmountPence
+            else { continue }
             let effectiveDate = override.state == .confirmed ? override.actualDueDate : override.scheduledDueDate
             guard let payment = paymentsById[override.paymentId],
                   let effectiveDate,
@@ -2389,12 +2395,19 @@ enum PlannerDerivedData {
                 case .confirmed:
                     guard let actualDueDate = override.actualDueDate, FinanceEngine.isIsoDate(actualDueDate) else { return occurrence }
                     resolved.dueDate = actualDueDate
-                case .refunded:
+                case .cancelled:
                     return nil
+                case .refunded:
+                    break
                 }
                 if let amountPenceOverride = override.amountPenceOverride {
                     resolved.amountPence = max(0, amountPenceOverride)
                 }
+                resolved.amountPence = max(
+                    0,
+                    resolved.amountPence - override.effectiveRefundedAmountPence(originalAmountPence: resolved.amountPence)
+                )
+                guard resolved.amountPence > 0 else { return nil }
                 return resolved
             }
             .filter { ($0.dueDate >= startDate && $0.dueDate <= endDate) || $0.isAwaitingPayment }
@@ -2433,7 +2446,9 @@ enum PlannerDerivedData {
                         .filter {
                             $0.deletedAt == nil &&
                             $0.paymentId == payment.id &&
-                            $0.state != .refunded
+                            $0.effectiveRefundedAmountPence(
+                                originalAmountPence: $0.amountPenceOverride ?? payment.amountPence
+                            ) < ($0.amountPenceOverride ?? payment.amountPence)
                         }
                         .compactMap(\.actualDueDate)
                         .max()
@@ -2528,11 +2543,11 @@ enum PlannerDerivedData {
     static func cardBalance(card: CreditCard, snapshot: PlannerSnapshot) -> Int {
         let opening = card.openingBalancePence ?? 0
         let cardSpending = snapshot.transactions
-            .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id && $0.paymentMethod == .creditCard }
-            .reduce(0) { $0 + abs($1.amountPence) }
+            .filter { $0.deletedAt == nil && $0.creditCardId == card.id && $0.paymentMethod == .creditCard }
+            .reduce(0) { $0 + $1.netAmountPence }
         let repayments = snapshot.creditCardRepayments
             .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id }
-            .reduce(0) { $0 + $1.amountPence }
+            .reduce(0) { $0 + $1.netAmountPence }
 
         return max(0, opening + cardSpending - repayments)
     }
@@ -2675,7 +2690,7 @@ enum PlannerDerivedData {
                 PeriodCostItem(
                     id: "transaction-\($0.id)",
                     label: $0.note.isEmpty ? "Manual spend" : $0.note,
-                    amountPence: $0.amountPence,
+                    amountPence: $0.netAmountPence,
                     date: $0.date,
                     source: .manualSpend,
                     creditCardId: $0.paymentMethod == .creditCard ? $0.creditCardId : nil,
@@ -2860,7 +2875,7 @@ enum PlannerDerivedData {
                 $0.recurringPaymentId == nil &&
                 isIsoDate($0.date, in: payPeriod)
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) { $0 + $1.netAmountPence }
 
         let activeDebtIds = Set(
             snapshot.debts
@@ -2883,7 +2898,7 @@ enum PlannerDerivedData {
                 activeDebtIds.contains($0.debtId) &&
                 isIsoDate($0.date, in: payPeriod)
             }
-            .reduce(0) { $0 + max(0, $1.amountPence) }
+            .reduce(0) { $0 + $1.netAmountPence }
 
         let calculationDate = asOfDate ?? FinanceEngine.getAppTodayIso(settings: snapshot.settings)
         let openingCardPaymentPence = cardOpeningBalanceFundingChecklistItems(
@@ -3152,8 +3167,8 @@ enum PlannerDerivedData {
             CalendarEvent(id: "custom-\($0.id)", date: $0.dueDate, title: $0.name, amountPence: $0.amountPence, type: .savedPayment, detail: $0.status.rawValue)
         }
 
-        events += snapshot.transactions.map {
-            CalendarEvent(id: "transaction-\($0.id)", date: $0.date, title: $0.note.isEmpty ? "Spending" : $0.note, amountPence: $0.amountPence, type: .spending, detail: $0.paymentMethod?.rawValue ?? $0.type.rawValue)
+        events += snapshot.transactions.filter { $0.deletedAt == nil }.map {
+            CalendarEvent(id: "transaction-\($0.id)", date: $0.date, title: $0.note.isEmpty ? "Spending" : $0.note, amountPence: $0.type == .spending ? $0.netAmountPence : $0.amountPence, type: .spending, detail: $0.paymentMethod?.rawValue ?? $0.type.rawValue)
         }
 
         events += debtScheduleItems(snapshot: snapshot, payPeriod: nil)
@@ -3167,12 +3182,12 @@ enum PlannerDerivedData {
             CalendarEvent(id: "reserve-\($0.id)", date: $0.payday, title: "Debt reserve", amountPence: $0.amountPence, type: .debtReserve, detail: $0.status.rawValue)
         }
 
-        events += snapshot.debtPayments.map {
-            CalendarEvent(id: "debt-payment-\($0.id)", date: $0.date, title: "Debt payment", amountPence: $0.amountPence, type: .debtPayment, detail: $0.note)
+        events += snapshot.debtPayments.filter { $0.deletedAt == nil }.map {
+            CalendarEvent(id: "debt-payment-\($0.id)", date: $0.date, title: "Debt payment", amountPence: $0.netAmountPence, type: .debtPayment, detail: $0.note)
         }
 
-        events += snapshot.creditCardRepayments.map {
-            CalendarEvent(id: "card-payment-\($0.id)", date: $0.date, title: "Card repayment", amountPence: $0.amountPence, type: .cardPayment, detail: $0.note)
+        events += snapshot.creditCardRepayments.filter { $0.deletedAt == nil }.map {
+            CalendarEvent(id: "card-payment-\($0.id)", date: $0.date, title: "Card repayment", amountPence: $0.netAmountPence, type: .cardPayment, detail: $0.note)
         }
 
         events += snapshot.potAllocations.compactMap { allocation in
@@ -3228,7 +3243,8 @@ enum PlannerDerivedData {
             switch override?.state {
             case .awaiting: .awaiting
             case .confirmed: .completed
-            case .normal, .cancelled, .none: .scheduled
+            case .cancelled: .cancelled
+            case .normal, .none: .scheduled
             }
         }
 
@@ -3237,7 +3253,6 @@ enum PlannerDerivedData {
             let paycheck = snapshot.paychecks.first { $0.deletedAt == nil && $0.payPeriodId == period.id }
             let sourceId = paycheck?.id ?? period.id
             let override = incomeOverride(kind: .paycheck, id: sourceId, scheduledDate: period.payday)
-            guard override?.state != .cancelled else { continue }
             let date = incomeDate(override, scheduledDate: period.payday)
             guard isInWindow(date) else { continue }
             let baseAmount = paycheck.map { $0.actualAmountPence ?? $0.calculatedAmountPence } ?? period.incomePence
@@ -3257,7 +3272,6 @@ enum PlannerDerivedData {
 
         for income in snapshot.oneOffIncomes where income.deletedAt == nil {
             let override = incomeOverride(kind: .oneOffIncome, id: income.id, scheduledDate: income.date)
-            guard override?.state != .cancelled else { continue }
             let date = incomeDate(override, scheduledDate: income.date)
             guard isInWindow(date) else { continue }
             events.append(HomeDueEvent(
@@ -3285,6 +3299,20 @@ enum PlannerDerivedData {
                 $0.paymentId == occurrence.payment.id &&
                 $0.scheduledDueDate == occurrence.scheduledDueDate
             }
+            let originalAmountPence = occurrenceOverride?.amountPenceOverride ?? occurrence.payment.amountPence
+            let refundedAmountPence = occurrenceOverride?.effectiveRefundedAmountPence(
+                originalAmountPence: originalAmountPence
+            ) ?? 0
+            let status: HomeDueEventStatus
+            if occurrence.isAwaitingPayment {
+                status = .awaiting
+            } else if refundedAmountPence > 0 {
+                status = .refunded
+            } else if occurrenceOverride?.state == .confirmed {
+                status = .completed
+            } else {
+                status = .scheduled
+            }
             events.append(HomeDueEvent(
                 id: "home-recurring-\(occurrence.id)",
                 scheduledDate: occurrence.scheduledDueDate,
@@ -3292,16 +3320,50 @@ enum PlannerDerivedData {
                 title: occurrence.payment.name,
                 amountPence: occurrence.amountPence,
                 direction: .outgoing,
-                status: occurrence.isAwaitingPayment
-                    ? .awaiting
-                    : (occurrenceOverride?.state == .confirmed ? .completed : .scheduled),
+                status: status,
                 sourceLabel: "Recurring bill",
                 cycleLabel: "\(occurrence.payment.frequency.rawValue.capitalized) · scheduled \(occurrence.scheduledDueDate)",
                 source: .recurringBill(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
             ))
         }
 
-        for payment in snapshot.customPayments where payment.deletedAt == nil && payment.status != .archived && isInWindow(payment.dueDate) {
+        let activeRecurringPayments = Dictionary(uniqueKeysWithValues: snapshot.recurringPayments
+            .filter { $0.active && $0.deletedAt == nil }
+            .map { ($0.id, $0) })
+        for occurrenceOverride in snapshot.recurringPaymentOccurrenceOverrides where occurrenceOverride.deletedAt == nil {
+            guard let payment = activeRecurringPayments[occurrenceOverride.paymentId] else { continue }
+            let grossAmountPence = max(0, occurrenceOverride.amountPenceOverride ?? payment.amountPence)
+            let refundedAmountPence = occurrenceOverride.effectiveRefundedAmountPence(originalAmountPence: grossAmountPence)
+            let generatedTransactionIds = [
+                "recurring-\(payment.id)-\(occurrenceOverride.scheduledDueDate)",
+                "card-recurring-\(payment.id)-\(occurrenceOverride.scheduledDueDate)"
+            ]
+            let hasRecordedRefund = snapshot.transactions.contains {
+                $0.deletedAt == nil && generatedTransactionIds.contains($0.id) && $0.hasRefund
+            }
+            let isCancelled = occurrenceOverride.state == .cancelled ||
+                (occurrenceOverride.state == .refunded && !hasRecordedRefund)
+            let isFullRecordedRefund = refundedAmountPence >= grossAmountPence && hasRecordedRefund
+            guard grossAmountPence > 0,
+                  isCancelled || isFullRecordedRefund,
+                  isInWindow(occurrenceOverride.scheduledDueDate)
+            else { continue }
+
+            events.append(HomeDueEvent(
+                id: "home-recurring-\(payment.id)-\(occurrenceOverride.scheduledDueDate)",
+                scheduledDate: occurrenceOverride.scheduledDueDate,
+                date: occurrenceOverride.scheduledDueDate,
+                title: payment.name,
+                amountPence: grossAmountPence,
+                direction: .outgoing,
+                status: isCancelled ? .cancelled : .refunded,
+                sourceLabel: "Recurring bill",
+                cycleLabel: "\(payment.frequency.rawValue.capitalized) · scheduled \(occurrenceOverride.scheduledDueDate)",
+                source: .recurringBill(paymentId: payment.id, scheduledDueDate: occurrenceOverride.scheduledDueDate)
+            ))
+        }
+
+        for payment in snapshot.customPayments where payment.deletedAt == nil && isInWindow(payment.dueDate) {
             events.append(HomeDueEvent(
                 id: "home-saved-\(payment.id)",
                 scheduledDate: payment.dueDate,
@@ -3309,7 +3371,7 @@ enum PlannerDerivedData {
                 title: payment.name,
                 amountPence: max(0, payment.amountPence),
                 direction: .outgoing,
-                status: payment.status == .paid ? .completed : .scheduled,
+                status: payment.status == .paid ? .completed : (payment.status == .archived ? .cancelled : .scheduled),
                 sourceLabel: "Saved payment",
                 cycleLabel: "One-off · \(payment.dueDate)",
                 source: .savedPayment(paymentId: payment.id)
@@ -3318,8 +3380,8 @@ enum PlannerDerivedData {
 
         let debtsById = Dictionary(uniqueKeysWithValues: snapshot.debts.filter { $0.deletedAt == nil }.map { ($0.id, $0) })
         for item in debtScheduleItems(snapshot: snapshot, payPeriod: nil)
-            where item.deletedAt == nil && item.status != .cancelled {
-            guard let debt = debtsById[item.debtId], debt.status.isActiveLike || item.status == .paid else { continue }
+            where item.deletedAt == nil {
+            guard let debt = debtsById[item.debtId], debt.status.isActiveLike || item.status == .paid || item.status == .cancelled else { continue }
             let effectiveDate = item.paidDate ?? item.dueDate
             guard isInWindow(effectiveDate) else { continue }
             events.append(HomeDueEvent(
@@ -3329,7 +3391,11 @@ enum PlannerDerivedData {
                 title: debt.name,
                 amountPence: max(0, item.plannedAmountPence),
                 direction: .outgoing,
-                status: item.status == .paid ? .completed : (item.status == .overdue || item.status == .missed ? .awaiting : .scheduled),
+                status: item.status == .paid
+                    ? .completed
+                    : (item.status == .cancelled
+                        ? .cancelled
+                        : (item.status == .overdue || item.status == .missed ? .awaiting : .scheduled)),
                 sourceLabel: "Debt payment",
                 cycleLabel: "Scheduled \(item.dueDate)",
                 source: .debtPayment(scheduleItemId: item.id, debtId: item.debtId)
@@ -3849,15 +3915,20 @@ enum PlannerDerivedData {
     }
 
     private static func creditCardRepaymentPaycheckContribution(_ repayment: CreditCardRepayment) -> Int {
+        let originalContributionPence: Int
         if let paycheckContributionPence = repayment.paycheckContributionPence {
-            return max(0, paycheckContributionPence)
+            originalContributionPence = max(0, paycheckContributionPence)
+        } else if repayment.source == .linkedPotStatement || repayment.id.hasPrefix("linked-card-pot-repayment-") {
+            originalContributionPence = 0
+        } else {
+            originalContributionPence = max(0, repayment.amountPence)
         }
 
-        if repayment.source == .linkedPotStatement || repayment.id.hasPrefix("linked-card-pot-repayment-") {
-            return 0
-        }
-
-        return max(0, repayment.amountPence)
+        guard repayment.amountPence > 0 else { return 0 }
+        return min(
+            originalContributionPence,
+            Int((Double(originalContributionPence) * Double(repayment.netAmountPence) / Double(repayment.amountPence)).rounded())
+        )
     }
 
     private static func eventRankForCostItem(_ source: PeriodCostItemSource) -> Int {
@@ -3893,6 +3964,7 @@ private enum CreditCardStatementLineSource {
     case spending
     case recurring
     case custom
+    case refund
     case repayment
 }
 
@@ -4031,7 +4103,7 @@ private extension PlannerDerivedData {
                         occurrenceDate: recurringItem.dueDate,
                         payPeriodId: recurringItem.payPeriodId
                     )
-                    separatelyFundedPence = isExcluded ? 0 : min(transaction.amountPence, recurringItem.amountPence)
+                    separatelyFundedPence = isExcluded ? 0 : min(transaction.netAmountPence, recurringItem.amountPence)
                 } else if transaction.recurringPaymentId != nil {
                     separatelyFundedPence = 0
                 } else if let spendItem = cardSpendItemsByTransaction[transaction.id] {
@@ -4042,12 +4114,12 @@ private extension PlannerDerivedData {
                         occurrenceDate: spendItem.transactionDate,
                         payPeriodId: spendItem.payPeriodId
                     )
-                    separatelyFundedPence = isExcluded ? 0 : min(transaction.amountPence, spendItem.amountPence)
+                    separatelyFundedPence = isExcluded ? 0 : min(transaction.netAmountPence, spendItem.amountPence)
                 } else {
                     separatelyFundedPence = 0
                 }
 
-                let includedPence = max(0, transaction.amountPence - separatelyFundedPence)
+                let includedPence = max(0, transaction.netAmountPence - separatelyFundedPence)
                 guard includedPence > 0 else { return nil }
                 return CardPaymentBreakdownComponent(
                     id: "card-payment-transaction-\(item.id)-\(transaction.id)",
@@ -4518,12 +4590,12 @@ private extension PlannerDerivedData {
                 $0.deletedAt == nil &&
                 $0.creditCardId == cardId &&
                 $0.date <= asOfDate &&
-                $0.amountPence > 0 &&
+                $0.netAmountPence > 0 &&
                 ($0.statementDate == statementDate || ($0.statementDate == nil && $0.directDebitDate == allocation.creditCardDirectDebitDate))
             }
             guard !hasStatementRepayment else { return 0 }
 
-            return max(max(0, allocation.amountPence), max(0, transaction.amountPence))
+            return max(max(0, allocation.amountPence), transaction.netAmountPence)
 
         case .cardOpeningBalanceFunding:
             guard allocation.creditCardId == cardId,
@@ -4535,7 +4607,7 @@ private extension PlannerDerivedData {
                 $0.creditCardId == cardId &&
                 ($0.directDebitDate ?? $0.date) == directDebitDate &&
                 $0.date <= asOfDate &&
-                $0.amountPence > 0
+                $0.netAmountPence > 0
             }
             guard !hasOpeningRepayment else { return 0 }
 
@@ -4685,7 +4757,7 @@ private extension PlannerDerivedData {
                 $0.creditCardId == item.cardId &&
                 ($0.directDebitDate ?? $0.date) == item.directDebitDate &&
                 $0.date <= asOfDate &&
-                $0.amountPence > 0
+                $0.netAmountPence > 0
             }
             .map(\.date)
             .sorted()
@@ -4721,7 +4793,7 @@ private extension PlannerDerivedData {
                 $0.creditCardId == item.cardId &&
                 ($0.directDebitDate ?? $0.date) == item.directDebitDate &&
                 $0.date <= asOfDate &&
-                $0.amountPence > 0
+                $0.netAmountPence > 0
             }
             .map(\.date)
             .sorted()
@@ -4770,12 +4842,15 @@ private extension PlannerDerivedData {
         let recurringNames = snapshot.recurringPayments.reduce(into: [String: String]()) { result, payment in
             result[payment.id] = payment.name
         }
-        var transactions = snapshot.transactions
+        let cardTransactions = snapshot.transactions
             .filter {
                 $0.deletedAt == nil &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
-                $0.creditCardId == card.id &&
+                $0.creditCardId == card.id
+            }
+        var transactions = cardTransactions
+            .filter {
                 (includesCycleStart ? $0.date >= cycleStart : $0.date > cycleStart) &&
                 $0.date <= statementDate &&
                 $0.date <= asOfDate
@@ -4791,6 +4866,26 @@ private extension PlannerDerivedData {
                     source: transaction.recurringPaymentId == nil ? .spending : .recurring
                 )
             }
+
+        transactions += cardTransactions.compactMap { transaction -> CreditCardStatementTransaction? in
+            guard transaction.hasRefund,
+                  let refundDate = transaction.refundedAt?.prefixDate,
+                  (includesCycleStart ? refundDate >= cycleStart : refundDate > cycleStart),
+                  refundDate <= statementDate,
+                  refundDate <= asOfDate
+            else { return nil }
+
+            let trimmedNote = transaction.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            let recurringName = transaction.recurringPaymentId.flatMap { recurringNames[$0] }
+            let baseName = recurringName ?? (trimmedNote.isEmpty ? "Card spending" : trimmedNote)
+            return CreditCardStatementTransaction(
+                id: "refund-\(transaction.id)-\(refundDate)",
+                name: "\(baseName) refund",
+                date: refundDate,
+                amountPence: -transaction.effectiveRefundedAmountPence,
+                source: .refund
+            )
+        }
 
         if statementDate == card.statementDate,
            statementDate <= asOfDate {
@@ -5001,7 +5096,7 @@ private extension PlannerDerivedData {
             .map {
                 CreditCardAllocationItem(
                     creditCardId: $0.creditCardId,
-                    amountPence: $0.amountPence,
+                    amountPence: $0.netAmountPence,
                     date: $0.date,
                     source: .spending
                 )
@@ -5012,7 +5107,7 @@ private extension PlannerDerivedData {
             .map {
                 CreditCardAllocationItem(
                     creditCardId: $0.creditCardId,
-                    amountPence: -$0.amountPence,
+                    amountPence: -$0.netAmountPence,
                     date: $0.date,
                     source: .repayment
                 )
@@ -5032,15 +5127,15 @@ private extension PlannerDerivedData {
         repayments: [CreditCardRepayment],
         asOfDate: String
     ) -> [CreditCardAllocationItem] {
-        let transactions = transactions
+        let cardTransactions = transactions
             .filter {
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
-                $0.deletedAt == nil &&
-                !$0.isRefunded &&
-                $0.date <= asOfDate
+                $0.deletedAt == nil
             }
+        let chargeItems = cardTransactions
+            .filter { $0.date <= asOfDate }
             .map {
                 CreditCardAllocationItem(
                     creditCardId: card.id,
@@ -5049,19 +5144,31 @@ private extension PlannerDerivedData {
                     source: .spending
                 )
             }
+        let refundItems = cardTransactions.compactMap { transaction -> CreditCardAllocationItem? in
+            guard transaction.hasRefund,
+                  let refundDate = transaction.refundedAt?.prefixDate,
+                  refundDate <= asOfDate
+            else { return nil }
+            return CreditCardAllocationItem(
+                creditCardId: card.id,
+                amountPence: -transaction.effectiveRefundedAmountPence,
+                date: refundDate,
+                source: .spending
+            )
+        }
 
         let repayments = repayments
             .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id && $0.date <= asOfDate }
             .map {
                 CreditCardAllocationItem(
                     creditCardId: card.id,
-                    amountPence: -$0.amountPence,
+                    amountPence: -$0.netAmountPence,
                     date: $0.date,
                     source: .repayment
                 )
             }
 
-        return (transactions + repayments).sorted { $0.date < $1.date }
+        return (chargeItems + refundItems + repayments).sorted { $0.date < $1.date }
     }
 
     static func forecastCreditCardItems(cardItems: [CreditCardAllocationItem], asOfDate: String) -> [CreditCardAllocationItem] {
@@ -5140,7 +5247,6 @@ private extension PlannerDerivedData {
         let actualRecurringKeys = Set(snapshot.transactions
             .filter {
                 $0.type == .spending &&
-                !$0.isRefunded &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
                 $0.recurringPaymentId != nil &&
@@ -5191,7 +5297,7 @@ private extension PlannerDerivedData {
                     ($0.statementDate == nil && $0.date > statementDate)
                 )
             }
-            .map { CreditCardStatementLine(amountPence: -$0.amountPence, date: $0.date, source: .repayment) }
+            .map { CreditCardStatementLine(amountPence: -$0.netAmountPence, date: $0.date, source: .repayment) }
 
         return capStatementRepaymentsToStatementDue(actualLines + recurringLines + customLines + repaymentLines)
     }
@@ -5203,9 +5309,12 @@ private extension PlannerDerivedData {
             }
             return lhs.date < rhs.date
         }
-        var remainingStatementDuePence = sortedLines
-            .filter { $0.source != .repayment && $0.amountPence > 0 }
-            .reduce(0) { $0 + $1.amountPence }
+        var remainingStatementDuePence = max(
+            0,
+            sortedLines
+                .filter { $0.source != .repayment }
+                .reduce(0) { $0 + $1.amountPence }
+        )
 
         return sortedLines.map { line in
             guard line.source == .repayment, line.amountPence < 0 else { return line }
@@ -5228,17 +5337,32 @@ private extension PlannerDerivedData {
         includesCycleStart: Bool,
         asOfDate: String
     ) -> [CreditCardStatementLine] {
-        transactions
-            .filter {
+        let cardTransactions = transactions.filter {
                 $0.type == .spending &&
-                !$0.isRefunded &&
                 $0.paymentMethod == .creditCard &&
-                $0.creditCardId == card.id &&
+                $0.creditCardId == card.id
+            }
+        let chargeLines = cardTransactions
+            .filter {
                 (includesCycleStart ? $0.date >= cycleStart : $0.date > cycleStart) &&
                 $0.date <= statementDate &&
                 $0.date <= asOfDate
             }
             .map { CreditCardStatementLine(amountPence: $0.amountPence, date: $0.date, source: .spending) }
+        let refundLines = cardTransactions.compactMap { transaction -> CreditCardStatementLine? in
+            guard transaction.hasRefund,
+                  let refundDate = transaction.refundedAt?.prefixDate,
+                  (includesCycleStart ? refundDate >= cycleStart : refundDate > cycleStart),
+                  refundDate <= statementDate,
+                  refundDate <= asOfDate
+            else { return nil }
+            return CreditCardStatementLine(
+                amountPence: -transaction.effectiveRefundedAmountPence,
+                date: refundDate,
+                source: .refund
+            )
+        }
+        return chargeLines + refundLines
     }
 
     static func statementedOpeningBalancePence(card: CreditCard) -> Int {

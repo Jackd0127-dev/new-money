@@ -10,7 +10,12 @@ struct MoneyLeftSettingsView: View {
             navigationMode: .inline,
             toolbarMode: .none
         ) {
-            AppCard {
+            SettingsPanel(
+                title: "Balance calculation",
+                subtitle: "Control what contributes to Money left.",
+                systemImage: "gauge",
+                tint: AppTheme.Colors.success
+            ) {
                 Toggle("Include pots in Money left", isOn: includePotsBinding)
                     .tint(AppTheme.Colors.success)
                     .foregroundStyle(AppTheme.Colors.primaryText)

@@ -11,17 +11,28 @@ struct DataSettingsView: View {
             navigationMode: .inline,
             toolbarMode: .none
         ) {
-            AppCard {
+            SettingsPanel(
+                title: "Local planner data",
+                subtitle: "Clear this iPhone without deleting your login.",
+                systemImage: "externaldrive.badge.xmark",
+                tint: AppTheme.Colors.danger,
+                isDestructive: true
+            ) {
                 Text("Resetting local data clears paychecks, pots, bills, cards, debts, spending, history, date simulation, and saved settings from this iPhone.")
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
 
-                Button("Reset local data", role: .destructive) {
+                Button(role: .destructive) {
                     showResetAlert = true
+                } label: {
+                    CompactMenuRow(
+                        title: "Reset local data",
+                        systemImage: "trash",
+                        isDestructive: true,
+                        showsDisclosure: false
+                    )
                 }
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .buttonStyle(.plain)
-                .foregroundStyle(AppTheme.Colors.danger)
             }
         }
         .navigationTopDividerHidden()

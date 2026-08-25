@@ -23,6 +23,9 @@ struct DashboardHomeLayoutPolicy {
     static let quickRoutesPlacement = "besideAccounts"
     static let monthlyChartNavigation = "horizontalSwipe"
     static let monthlyChartShowsArrow = false
+    static let monthlyChartPresentation = "compactLine"
+    static let monthlyChartShowsProgressRing = false
+    static let monthlyChartHeight: CGFloat = 140
     static let homeSections: [DashboardHomeSection] = [
         .dueEvents,
         .hero,
@@ -248,6 +251,7 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
                 .frame(minHeight: 44)
+                .zIndex(1)
                 .accessibilityLabel("\(dueBannerTitle(events)). \(isDueEventsExpanded ? "Collapse" : "Expand")")
 
                 if isDueEventsExpanded {
@@ -270,10 +274,12 @@ struct DashboardView: View {
                             }
                         }
                     }
+                    .zIndex(0)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .background(AppTheme.Gradients.softAccentSurface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
                     .stroke(AppTheme.Colors.border, lineWidth: 1)
@@ -1435,11 +1441,6 @@ struct DashboardMonthlySpendChartData: Equatable {
     var daysInMonth: Int
     var points: [DashboardMonthlySpendChartPoint]
 
-    var progressFraction: Double {
-        guard daysInMonth > 0 else { return 0 }
-        return min(1, max(0, Double(daysElapsed) / Double(daysInMonth)))
-    }
-
     var hasSpending: Bool {
         totalPence > 0
     }
@@ -1590,7 +1591,7 @@ private struct DashboardMonthlySpendChartView: View {
 
     var body: some View {
         AppCard(glow: data.hasSpending) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
                     VStack(alignment: .leading, spacing: 7) {
                         Text(mode.title)
@@ -1609,13 +1610,15 @@ private struct DashboardMonthlySpendChartView: View {
 
                     Spacer(minLength: AppTheme.Spacing.sm)
 
-                    VStack(alignment: .trailing, spacing: AppTheme.Spacing.sm) {
-                        DashboardMonthProgressBadge(progress: data.progressFraction, label: "\(data.daysElapsed)/\(data.daysInMonth)")
-                    }
+                    chartModeControl
                 }
 
                 ZStack {
-                    DashboardSpendBarGraph(data: data, selectedDay: $selectedDay)
+                    DashboardSpendLineGraph(
+                        data: data,
+                        showsFuture: mode == .allOutgoings,
+                        selectedDay: $selectedDay
+                    )
                         .id(mode)
                         .transition(reduceMotion
                             ? .opacity
@@ -1624,19 +1627,24 @@ private struct DashboardMonthlySpendChartView: View {
                                 removal: .move(edge: transitionMovesForward ? .leading : .trailing)
                             ))
                 }
-                .frame(height: 218)
+                .frame(height: DashboardHomeLayoutPolicy.monthlyChartHeight)
                 .clipped()
-
-                DashboardChartLegend(categories: visibleCategories)
 
                 if let selectedPoint {
                     DashboardSelectedDayBreakdown(point: selectedPoint)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    DashboardChartMetricPill(label: "Daily avg", value: MoneyParser.formatPence(data.averageDailyPence), color: AppTheme.Colors.primaryOrange)
-                    DashboardChartMetricPill(label: "Highest", value: MoneyParser.formatPence(data.highestDailyPence), color: AppTheme.Colors.warning)
+                HStack(spacing: AppTheme.Spacing.xl) {
+                    DashboardChartMetric(label: "Daily avg", value: MoneyParser.formatPence(data.averageDailyPence))
+                    DashboardChartMetric(label: "Highest", value: MoneyParser.formatPence(data.highestDailyPence), color: AppTheme.Colors.warning)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, AppTheme.Spacing.sm)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(AppTheme.Colors.divider)
+                        .frame(height: 1)
                 }
             }
         }
@@ -1657,6 +1665,36 @@ private struct DashboardMonthlySpendChartView: View {
                 break
             }
         }
+    }
+
+    private var chartModeControl: some View {
+        HStack(spacing: 0) {
+            Button {
+                switchChart(forward: false)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 32, height: 44)
+            }
+            .accessibilityLabel("Previous chart")
+
+            Text(mode == .manualSpends ? "Daily" : "Outgoings")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .lineLimit(1)
+                .frame(minWidth: 42)
+
+            Button {
+                switchChart(forward: true)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 32, height: 44)
+            }
+            .accessibilityLabel("Next chart")
+        }
+        .foregroundStyle(AppTheme.Colors.secondaryText)
+        .buttonStyle(.plain)
     }
 
     private func handleHorizontalSwipe(_ value: DragGesture.Value) {
@@ -1680,18 +1718,14 @@ private struct DashboardMonthlySpendChartView: View {
         }
     }
 
-    private var visibleCategories: [DashboardOutgoingCategory] {
-        let available = Set(data.points.flatMap(\.segments).map(\.category))
-        return DashboardOutgoingCategory.allCases.filter { available.contains($0) }
-    }
-
     private var selectedPoint: DashboardMonthlySpendChartPoint? {
         selectedDay.flatMap { day in data.points.first { $0.day == day } }
     }
 }
 
-private struct DashboardSpendBarGraph: View {
+private struct DashboardSpendLineGraph: View {
     var data: DashboardMonthlySpendChartData
+    var showsFuture: Bool
     @Binding var selectedDay: Int?
 
     var body: some View {
@@ -1704,18 +1738,26 @@ private struct DashboardSpendBarGraph: View {
             )
             .foregroundStyle(AppTheme.Colors.elevatedSurface.opacity(0.48))
 
-            ForEach(data.points) { point in
-                ForEach(point.segments) { segment in
-                    BarMark(
+            ForEach(plottedPoints) { point in
+                LineMark(
+                    x: .value("Day", point.day),
+                    y: .value("Amount", point.amountPence)
+                )
+                .interpolationMethod(.linear)
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                .opacity(point.isFuture ? 0.58 : 1)
+                .accessibilityLabel("Day \(point.day)")
+                .accessibilityValue(MoneyParser.formatPence(point.amountPence))
+
+                if point.amountPence > 0 {
+                    PointMark(
                         x: .value("Day", point.day),
-                        y: .value("Amount", segment.amountPence),
-                        width: .ratio(0.74),
-                        stacking: .standard
+                        y: .value("Amount", point.amountPence)
                     )
-                    .foregroundStyle(segment.category.color)
+                    .symbolSize(selectedDay == point.day ? 70 : 34)
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
                     .opacity(point.isFuture ? 0.58 : 1)
-                    .accessibilityLabel("Day \(point.day), \(segment.category.title)")
-                    .accessibilityValue(MoneyParser.formatPence(segment.amountPence))
                 }
             }
 
@@ -1758,7 +1800,11 @@ private struct DashboardSpendBarGraph: View {
             }
         }
         .chartXSelection(value: $selectedDay)
-        .accessibilityLabel("Daily stacked monthly outgoings chart")
+        .accessibilityLabel("Daily monthly outgoings line chart")
+    }
+
+    private var plottedPoints: [DashboardMonthlySpendChartPoint] {
+        showsFuture ? data.points : data.points.filter { !$0.isFuture }
     }
 
     private var dayTicks: [Int] {
@@ -1769,43 +1815,6 @@ private struct DashboardSpendBarGraph: View {
         let pounds = Double(pence) / 100
         if pounds >= 1_000 { return "£\(String(format: "%.1fk", pounds / 1_000))" }
         return "£\(Int(pounds.rounded()))"
-    }
-}
-
-private struct DashboardChartLegend: View {
-    var categories: [DashboardOutgoingCategory]
-
-    var body: some View {
-        if !categories.isEmpty {
-            ViewThatFits(in: .horizontal) {
-                legendRow
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(categories) { category in
-                        legendItem(category)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var legendRow: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            ForEach(categories) { category in
-                legendItem(category)
-            }
-        }
-    }
-
-    private func legendItem(_ category: DashboardOutgoingCategory) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(category.color).frame(width: 7, height: 7)
-            Text(category.title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.Colors.secondaryText)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(category.title) category")
     }
 }
 
@@ -1842,38 +1851,10 @@ private struct DashboardSelectedDayBreakdown: View {
     }
 }
 
-private struct DashboardMonthProgressBadge: View {
-    var progress: Double
-    var label: String
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(AppTheme.Colors.border, lineWidth: 7)
-            Circle()
-                .trim(from: 0, to: progress)
-                .stroke(
-                    AppTheme.Gradients.primary,
-                    style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 1) {
-                Text(label)
-                    .font(.caption2.weight(.black))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                Text("days")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
-            }
-        }
-        .frame(width: 64, height: 64)
-    }
-}
-
-private struct DashboardChartMetricPill: View {
+private struct DashboardChartMetric: View {
     var label: String
     var value: String
-    var color: Color
+    var color: Color = AppTheme.Colors.primaryText
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1886,15 +1867,6 @@ private struct DashboardChartMetricPill: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
         }
-        .padding(.horizontal, AppTheme.Spacing.sm)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.11))
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
-                .stroke(color.opacity(0.18), lineWidth: 1)
-        )
     }
 }
 

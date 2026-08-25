@@ -33,6 +33,10 @@ struct AccountsLayoutPolicy {
     static let profileGraphMetric = "monthlySavedSpentActivity"
     static let profileGraphShowsMetricPills = false
     static let profileGraphUsesContinuousAnimation = false
+    static let profileGraphPresentation = "compactLine"
+    static let profileGraphInterpolation = "linear"
+    static let profileGraphShowsAreaFill = false
+    static let profileGraphHeight: CGFloat = 140
     static let carouselUsesVerticalLift = false
     static var profilePulseCardCornerRadius: CGFloat { AppTheme.Radius.md }
     static let carouselItemWidth: CGFloat = 154
@@ -708,7 +712,7 @@ private struct AccountProfilePulseCard: View {
             }
 
             AccountProfileLineGraph(profile: profile)
-                .frame(height: 164)
+                .frame(height: AccountsLayoutPolicy.profileGraphHeight)
 
             AccountProfileMiniTimeline(profile: profile)
         }
@@ -743,28 +747,11 @@ private struct AccountProfileLineGraph: View {
 
         Chart {
             ForEach(Array(monthLabels.indices), id: \.self) { index in
-                AreaMark(
-                    x: .value("Month", index),
-                    yStart: .value("Baseline", 0),
-                    yEnd: .value("Put aside", savedValues[index])
-                )
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [
-                            AppTheme.Colors.neonMoneyUp.opacity(0.2),
-                            AppTheme.Colors.neonMoneyUp.opacity(0.02)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-
                 LineMark(
                     x: .value("Month", index),
                     y: .value("Put aside", savedValues[index])
                 )
-                .interpolationMethod(.catmullRom)
+                .interpolationMethod(.linear)
                 .foregroundStyle(AppTheme.Colors.neonMoneyUp)
                 .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
 
@@ -772,7 +759,7 @@ private struct AccountProfileLineGraph: View {
                     x: .value("Month", index),
                     y: .value("Spent", spentValues[index])
                 )
-                .interpolationMethod(.catmullRom)
+                .interpolationMethod(.linear)
                 .foregroundStyle(AppTheme.Colors.neonMoneyDown)
                 .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
 
@@ -781,14 +768,14 @@ private struct AccountProfileLineGraph: View {
                     y: .value("Put aside", savedValues[index])
                 )
                 .foregroundStyle(AppTheme.Colors.neonMoneyUp)
-                .symbolSize(index == monthLabels.indices.last ? 34 : 16)
+                .symbolSize(index == monthLabels.indices.last ? 42 : 24)
 
                 PointMark(
                     x: .value("Month", index),
                     y: .value("Spent", spentValues[index])
                 )
                 .foregroundStyle(AppTheme.Colors.neonMoneyDown)
-                .symbolSize(index == monthLabels.indices.last ? 34 : 16)
+                .symbolSize(index == monthLabels.indices.last ? 42 : 24)
             }
         }
         .chartLegend(.hidden)
@@ -818,11 +805,6 @@ private struct AccountProfileLineGraph: View {
                     }
                 }
             }
-        }
-        .chartPlotStyle { plotArea in
-            plotArea
-                .background(AppTheme.Colors.elevatedSurface.opacity(0.3))
-                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous))
         }
         .accessibilityLabel("Money put aside and spent over the last six months")
         .accessibilityValue(

@@ -4361,6 +4361,113 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(availability.forecastAvailablePence, -5300)
     }
 
+    func testCreditCardBalanceHistoryCurrentGroupReconcilesExactBalance() throws {
+        let card = makeCreditCard(
+            id: "card-ledger",
+            name: "Ledger Card",
+            openingBalancePence: 5_000,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-20",
+            dueDay: 15,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        var spend = makeTransaction(
+            id: "txn-ledger-spend",
+            cardId: card.id,
+            amountPence: 3_000,
+            date: "2026-08-10",
+            note: "Card spend"
+        )
+        spend.refundedAt = "2026-08-12T10:00:00.000Z"
+        spend.refundedAmountPence = 500
+        let repayment = CreditCardRepayment(
+            id: "repayment-ledger",
+            creditCardId: card.id,
+            amountPence: 1_000,
+            date: "2026-08-15",
+            note: "Card payment",
+            refundedAt: "2026-08-16T10:00:00.000Z",
+            refundedAmountPence: 200,
+            createdAt: "2026-08-15T10:00:00.000Z",
+            updatedAt: "2026-08-16T10:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            transactions: [spend],
+            creditCards: [card],
+            creditCardRepayments: [repayment]
+        )
+
+        let history = CreditCardBalanceHistoryData.make(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: "2026-08-19"
+        )
+
+        XCTAssertEqual(history.currentBalancePence, 6_700)
+        XCTAssertEqual(history.currentSection.balancePence, history.currentBalancePence)
+        XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, history.currentBalancePence)
+        XCTAssertEqual(history.currentSection.entries.map(\.kind), [.openingBalance, .charge, .refund, .repayment, .repaymentRefund])
+        XCTAssertEqual(history.currentSection.entries.map(\.amountPence), [5_000, 3_000, -500, -1_000, 200])
+    }
+
+    func testCreditCardBalanceHistoryGroupsPaymentWithMatchingStatement() throws {
+        let card = makeCreditCard(
+            id: "card-statement-ledger",
+            name: "Statement Ledger",
+            openingBalancePence: 10_000,
+            openingStatementBalancePence: 10_000,
+            statementDate: "2026-06-20",
+            dueDay: 1,
+            createdAt: "2026-06-01T00:00:00.000Z"
+        )
+        let statementSpend = makeTransaction(
+            id: "txn-statement-spend",
+            cardId: card.id,
+            amountPence: 2_000,
+            date: "2026-06-10",
+            note: "Statement spend"
+        )
+        let currentSpend = makeTransaction(
+            id: "txn-current-spend",
+            cardId: card.id,
+            amountPence: 3_000,
+            date: "2026-06-25",
+            note: "Current spend"
+        )
+        let repayment = CreditCardRepayment(
+            id: "repayment-statement-ledger",
+            creditCardId: card.id,
+            amountPence: 12_000,
+            date: "2026-07-01",
+            note: "June statement payment",
+            statementDate: "2026-06-20",
+            directDebitDate: "2026-07-01",
+            createdAt: "2026-07-01T10:00:00.000Z",
+            updatedAt: "2026-07-01T10:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(
+            transactions: [statementSpend, currentSpend],
+            creditCards: [card],
+            creditCardRepayments: [repayment]
+        )
+
+        let history = CreditCardBalanceHistoryData.make(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: "2026-07-05"
+        )
+        let juneStatement = try XCTUnwrap(history.statementSections.first)
+
+        XCTAssertEqual(history.currentBalancePence, 3_000)
+        XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, 3_000)
+        XCTAssertEqual(history.currentSection.entries.map(\.kind), [.charge])
+        XCTAssertEqual(juneStatement.statementDate, "2026-06-20")
+        XCTAssertTrue(juneStatement.entries.contains { $0.kind == .repayment && $0.amountPence == -12_000 })
+        XCTAssertEqual(juneStatement.entries.reduce(0) { $0 + $1.amountPence }, 0)
+    }
+
     func testBasicDataAugustOverLimitAvailabilityIsSigned() {
         let snapshot = DefaultData.basicDataSnapshot
         let period = makePayPeriod(id: "period-august", startDate: "2026-08-01", endDate: "2026-08-31", payday: "2026-08-01", incomePence: 100000)

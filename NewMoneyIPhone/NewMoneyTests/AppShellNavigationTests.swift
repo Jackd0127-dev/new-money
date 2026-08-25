@@ -350,6 +350,10 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AccountsLayoutPolicy.profileGraphMetric, "monthlySavedSpentActivity")
         XCTAssertFalse(AccountsLayoutPolicy.profileGraphShowsMetricPills)
         XCTAssertFalse(AccountsLayoutPolicy.profileGraphUsesContinuousAnimation)
+        XCTAssertEqual(AccountsLayoutPolicy.profileGraphPresentation, "compactLine")
+        XCTAssertEqual(AccountsLayoutPolicy.profileGraphInterpolation, "linear")
+        XCTAssertFalse(AccountsLayoutPolicy.profileGraphShowsAreaFill)
+        XCTAssertEqual(AccountsLayoutPolicy.profileGraphHeight, 140)
         XCTAssertFalse(AccountsLayoutPolicy.carouselUsesVerticalLift)
         XCTAssertEqual(AccountsLayoutPolicy.profilePulseCardCornerRadius, AppTheme.Radius.md)
         XCTAssertEqual(AccountsLayoutPolicy.carouselItemWidth, 154)
@@ -442,6 +446,11 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(CardsLayoutPolicy.detailToolbarTitle, "Payment")
         XCTAssertEqual(CardsLayoutPolicy.detailToolbarStyle, "textButton")
         XCTAssertEqual(CardsLayoutPolicy.repaymentFlowPlacement, "cardDetailToolbar")
+        XCTAssertEqual(CardsLayoutPolicy.balanceHistoryToolbarActionId, "card-detail-balance-history")
+        XCTAssertEqual(CardsLayoutPolicy.balanceHistoryToolbarSymbol, "list.bullet.rectangle")
+        XCTAssertEqual(CardsLayoutPolicy.balanceHistoryPresentation, "toolbarToggle")
+        XCTAssertTrue(CardsLayoutPolicy.balanceHistoryIncludesCurrentBalance)
+        XCTAssertTrue(CardsLayoutPolicy.balanceHistoryGroupsByStatement)
         XCTAssertEqual(DebtsLayoutPolicy.toolbarActionId, "add")
         XCTAssertEqual(DebtsLayoutPolicy.addFlowPlacement, "debtsSectionToolbar")
         XCTAssertEqual(StatementsLayoutPolicy.toolbarActionId, "edit-toolbar-action")
@@ -607,6 +616,10 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.futurePresentation, "unusedAxisSpace")
         XCTAssertTrue(ActivityYearlyNetChartLayoutPolicy.currentMonthMarkerFollowsActualLine)
         XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.monthCount, 12)
+        XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.presentation, "compactLine")
+        XCTAssertFalse(ActivityYearlyNetChartLayoutPolicy.showsProgressRing)
+        XCTAssertFalse(ActivityYearlyNetChartLayoutPolicy.showsAreaFill)
+        XCTAssertEqual(ActivityYearlyNetChartLayoutPolicy.chartHeight, 140)
     }
 
     @MainActor
@@ -812,6 +825,9 @@ final class DashboardSpendingChartTests: XCTestCase {
         XCTAssertEqual(DashboardHomeLayoutPolicy.quickRoutesPlacement, "besideAccounts")
         XCTAssertEqual(DashboardHomeLayoutPolicy.monthlyChartNavigation, "horizontalSwipe")
         XCTAssertFalse(DashboardHomeLayoutPolicy.monthlyChartShowsArrow)
+        XCTAssertEqual(DashboardHomeLayoutPolicy.monthlyChartPresentation, "compactLine")
+        XCTAssertFalse(DashboardHomeLayoutPolicy.monthlyChartShowsProgressRing)
+        XCTAssertEqual(DashboardHomeLayoutPolicy.monthlyChartHeight, 140)
         XCTAssertTrue(DashboardHomeLayoutPolicy.moneyLeftDetailSections.contains(.spendingSnapshot))
         XCTAssertEqual(DashboardHomeLayoutPolicy.moneyLeftDetailPresentation, .navigationPush)
     }

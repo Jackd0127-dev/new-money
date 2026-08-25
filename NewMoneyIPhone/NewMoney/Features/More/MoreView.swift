@@ -2748,10 +2748,6 @@ struct ActivityYearlyNetChartData: Equatable {
         return maxValue == graphMinPence ? maxValue + 1 : maxValue
     }
 
-    var progressLabel: String {
-        "\(currentMonth)/12"
-    }
-
     static func make(snapshot: PlannerSnapshot, todayIso: String) -> ActivityYearlyNetChartData {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
@@ -2938,6 +2934,10 @@ enum ActivityYearlyNetChartLayoutPolicy {
     static let futurePresentation = "unusedAxisSpace"
     static let currentMonthMarkerFollowsActualLine = true
     static let monthCount = 12
+    static let presentation = "compactLine"
+    static let showsProgressRing = false
+    static let showsAreaFill = false
+    static let chartHeight: CGFloat = 140
 }
 
 private func signedMoney(_ amountPence: Int) -> String {
@@ -2955,30 +2955,24 @@ private struct ActivityYearlyNetCard: View {
 
     var body: some View {
         AppCard(glow: data.hasData) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
-                HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("Overall income this year")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
-                            .textCase(.uppercase)
-                        Text(signedMoney(data.currentNetPence))
-                            .font(.system(.title, design: .rounded, weight: .bold))
-                            .foregroundStyle(data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        Text(data.hasData ? "Total income minus total spending in \(data.year) so far" : "No income or spending recorded in \(data.year)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                    }
-
-                    Spacer(minLength: AppTheme.Spacing.sm)
-
-                    ActivityYearProgressBadge(progress: Double(data.currentMonth) / 12, label: data.progressLabel)
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Overall income this year")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                        .textCase(.uppercase)
+                    Text(signedMoney(data.currentNetPence))
+                        .font(.system(.title, design: .rounded, weight: .bold))
+                        .foregroundStyle(data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(data.hasData ? "Total income minus total spending in \(data.year) so far" : "No income or spending recorded in \(data.year)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
 
                 ActivityYearNetLineGraph(data: data)
-                    .frame(height: 148)
+                    .frame(height: ActivityYearlyNetChartLayoutPolicy.chartHeight)
 
                 ActivityYearMetricStrip(data: data)
             }
@@ -2992,21 +2986,18 @@ private struct ActivityYearMetricStrip: View {
     var data: ActivityYearlyNetChartData
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: AppTheme.Spacing.sm) {
-                metrics
-            }
-            VStack(spacing: AppTheme.Spacing.sm) {
-                metrics
-            }
+        HStack(spacing: AppTheme.Spacing.lg) {
+            ActivityChartMetric(label: "Total income", value: MoneyParser.formatPence(data.totalIncomePence), color: AppTheme.Colors.success)
+            ActivityChartMetric(label: "Total spent", value: MoneyParser.formatPence(data.totalSpentPence), color: AppTheme.Colors.danger)
+            ActivityChartMetric(label: "Net", value: signedMoney(data.currentNetPence), color: data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
         }
-    }
-
-    @ViewBuilder
-    private var metrics: some View {
-        ActivityChartMetricPill(label: "Total income", value: MoneyParser.formatPence(data.totalIncomePence), color: AppTheme.Colors.success)
-        ActivityChartMetricPill(label: "Total spent", value: MoneyParser.formatPence(data.totalSpentPence), color: AppTheme.Colors.danger)
-        ActivityChartMetricPill(label: "Net", value: signedMoney(data.currentNetPence), color: data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, AppTheme.Spacing.sm)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppTheme.Colors.divider)
+                .frame(height: 1)
+        }
     }
 }
 
@@ -3119,10 +3110,7 @@ private struct ActivityYearlyNetMonthRow: View {
 }
 
 private struct ActivityYearNetLineGraph: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var data: ActivityYearlyNetChartData
-    @State private var drawProgress = 0.0
-    @State private var revealOpacity = 1.0
 
     private var trendColor: Color {
         data.currentNetPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange
@@ -3138,40 +3126,34 @@ private struct ActivityYearNetLineGraph: View {
             ZStack(alignment: .topLeading) {
                 graphGrid
 
-                ActivityYearNetAreaShape(
-                    points: activePoints,
-                    minValue: minValue,
-                    maxValue: maxValue
-                )
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                lineColor.opacity(data.hasData ? 0.22 : 0.08),
-                                lineColor.opacity(data.hasData ? 0.08 : 0.03),
-                                .clear
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .opacity(reduceMotion ? revealOpacity : drawProgress)
-
                 ActivityYearNetLineShape(
                     points: activePoints,
                     minValue: minValue,
                     maxValue: maxValue
                 )
-                    .trim(from: 0, to: drawProgress)
                     .stroke(
                         lineColor,
-                        style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
                     )
-                    .shadow(color: data.hasData ? AppTheme.Colors.accentGlow.opacity(0.5) : .clear, radius: 7, y: 3)
-                    .opacity(revealOpacity)
 
-                if let currentPoint = activePoints.last {
-                    currentMonthMarker(point: currentPoint, size: proxy.size, minValue: minValue, maxValue: maxValue, color: lineColor)
-                        .opacity(revealOpacity)
+                ForEach(activePoints) { point in
+                    Circle()
+                        .fill(lineColor)
+                        .frame(width: point.isCurrentMonth ? 9 : 6, height: point.isCurrentMonth ? 9 : 6)
+                        .overlay {
+                            if point.isCurrentMonth {
+                                Circle()
+                                    .stroke(AppTheme.Colors.primaryText.opacity(0.72), lineWidth: 1.5)
+                            }
+                        }
+                        .position(pointPosition(
+                            month: point.month,
+                            cumulativeNetPence: point.cumulativeNetPence,
+                            size: proxy.size,
+                            minValue: minValue,
+                            maxValue: maxValue
+                        ))
+                        .accessibilityHidden(true)
                 }
 
                 HStack {
@@ -3185,12 +3167,6 @@ private struct ActivityYearNetLineGraph: View {
                 .foregroundStyle(AppTheme.Colors.tertiaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .offset(y: 18)
-            }
-            .onAppear {
-                startAnimation()
-            }
-            .onChange(of: data.id) { _, _ in
-                startAnimation()
             }
         }
         .accessibilityElement(children: .ignore)
@@ -3211,39 +3187,6 @@ private struct ActivityYearNetLineGraph: View {
         .padding(.bottom, 8)
     }
 
-    private func currentMonthMarker(point: ActivityYearlyNetChartPoint, size: CGSize, minValue: Int, maxValue: Int, color: Color) -> some View {
-        let position = pointPosition(
-            month: point.month,
-            cumulativeNetPence: point.cumulativeNetPence,
-            size: size,
-            minValue: minValue,
-            maxValue: maxValue
-        )
-
-        return ZStack {
-            Text("Now")
-                .font(.caption2.weight(.black))
-                .foregroundStyle(AppTheme.Colors.controlText)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .background(color, in: Capsule())
-                .shadow(color: color.opacity(0.55), radius: 8, y: 3)
-                .offset(y: -27)
-
-            Circle()
-                .fill(color.opacity(0.16))
-                .frame(width: 28, height: 28)
-
-            Circle()
-                .fill(color)
-                .frame(width: 12, height: 12)
-                .overlay(Circle().stroke(AppTheme.Colors.primaryText.opacity(0.72), lineWidth: 2))
-                .shadow(color: color.opacity(0.72), radius: 10, y: 4)
-        }
-        .position(position)
-        .accessibilityHidden(true)
-    }
-
     private func pointPosition(month: Int, cumulativeNetPence: Int, size: CGSize, minValue: Int, maxValue: Int) -> CGPoint {
         let drawingHeight = max(size.height - 26, 1)
         let clampedMonth = min(max(month, 1), 12)
@@ -3252,22 +3195,6 @@ private struct ActivityYearNetLineGraph: View {
         let normalized = CGFloat(cumulativeNetPence - minValue) / range
         let y = drawingHeight - (normalized * drawingHeight)
         return CGPoint(x: x, y: max(8, min(drawingHeight, y)))
-    }
-
-    private func startAnimation() {
-        guard !reduceMotion else {
-            drawProgress = 1
-            revealOpacity = 0
-            withAnimation(.easeOut(duration: 0.2)) {
-                revealOpacity = 1
-            }
-            return
-        }
-        revealOpacity = 1
-        drawProgress = 0
-        withAnimation(.easeOut(duration: 0.75)) {
-            drawProgress = 1
-        }
     }
 }
 
@@ -3308,68 +3235,22 @@ private struct ActivityYearNetLineShape: Shape {
     }
 }
 
-private struct ActivityYearNetAreaShape: Shape {
-    var points: [ActivityYearlyNetChartPoint]
-    var minValue: Int
-    var maxValue: Int
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard !points.isEmpty else { return path }
-
-        for (index, point) in points.enumerated() {
-            let position = pointPosition(month: point.month, cumulativeNetPence: point.cumulativeNetPence, rect: rect)
-            if index == 0 {
-                path.move(to: position)
-            } else {
-                path.addLine(to: position)
-            }
-        }
-
-        let lastX = pointPosition(month: points.last?.month ?? 1, cumulativeNetPence: points.last?.cumulativeNetPence ?? 0, rect: rect).x
-        let firstX = pointPosition(month: points[0].month, cumulativeNetPence: points[0].cumulativeNetPence, rect: rect).x
-        path.addLine(to: CGPoint(x: lastX, y: rect.maxY - 18))
-        path.addLine(to: CGPoint(x: firstX, y: rect.maxY - 18))
-        path.closeSubpath()
-        return path
-    }
-
-    private func pointPosition(month: Int, cumulativeNetPence: Int, rect: CGRect) -> CGPoint {
-        let drawingHeight = max(rect.height - 26, 1)
-        let clampedMonth = min(max(month, 1), 12)
-        let x = rect.minX + CGFloat(clampedMonth - 1) / 11 * rect.width
-        let range = CGFloat(max(maxValue - minValue, 1))
-        let normalized = CGFloat(cumulativeNetPence - minValue) / range
-        let y = rect.minY + drawingHeight - (normalized * drawingHeight)
-        return CGPoint(x: x, y: max(rect.minY + 8, min(rect.minY + drawingHeight, y)))
-    }
-}
-
-private struct ActivityYearProgressBadge: View {
-    var progress: Double
+private struct ActivityChartMetric: View {
     var label: String
+    var value: String
+    var color: Color
 
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(AppTheme.Colors.border, lineWidth: 6)
-            Circle()
-                .trim(from: 0, to: min(max(progress, 0), 1))
-                .stroke(
-                    AppTheme.Gradients.primary,
-                    style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 1) {
-                Text(label)
-                    .font(.caption2.weight(.black))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-                Text("months")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .frame(width: 60, height: 60)
     }
 }
 

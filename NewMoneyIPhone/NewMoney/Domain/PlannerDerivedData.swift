@@ -2095,7 +2095,10 @@ enum PlannerDerivedData {
                 let breakdown = creditCardStatementBreakdown(
                     card: card,
                     snapshot: snapshot,
-                    statementDate: asOfDate,
+                    // An awaiting statement has not closed yet, so the live reserve
+                    // includes movements recorded through today. Confirmed statements
+                    // remain half-open and exclude their actual production date.
+                    statementDate: FinanceEngine.addIsoDays(date: asOfDate, days: 1),
                     previousStatementDate: cycle.previousStatementDate,
                     nextStatementDate: addIsoMonthsClamped(date: cycle.scheduledStatementDate, months: 1),
                     directDebitDate: cycle.directDebitDate,
@@ -2195,13 +2198,11 @@ enum PlannerDerivedData {
                     if cycle.statementDate > asOfDate && !cycle.isStatementHeld { break }
 
                     let cycleEnd = cycle.isStatementHeld ? asOfDate : cycle.statementDate
-                    let includesCycleStart = cycle.cycleStartDate == (card.createdAt.prefixDate ?? cycle.statementDate)
                     let transactions = creditCardStatementTransactions(
                         card: card,
                         snapshot: snapshot,
                         cycleStart: cycle.cycleStartDate,
                         statementDate: cycleEnd,
-                        includesCycleStart: includesCycleStart,
                         asOfDate: asOfDate
                     )
                     let calculatedAmountPence = max(0, transactions.reduce(0) { $0 + $1.amountPence })
@@ -4887,7 +4888,6 @@ private extension PlannerDerivedData {
         snapshot: PlannerSnapshot,
         cycleStart: String,
         statementDate: String,
-        includesCycleStart: Bool,
         asOfDate: String
     ) -> [CreditCardStatementTransaction] {
         let recurringNames = snapshot.recurringPayments.reduce(into: [String: String]()) { result, payment in
@@ -4902,8 +4902,8 @@ private extension PlannerDerivedData {
             }
         var transactions = cardTransactions
             .filter {
-                (includesCycleStart ? $0.date >= cycleStart : $0.date > cycleStart) &&
-                $0.date <= statementDate &&
+                $0.date >= cycleStart &&
+                $0.date < statementDate &&
                 $0.date <= asOfDate
             }
             .map { transaction in
@@ -4921,8 +4921,8 @@ private extension PlannerDerivedData {
         transactions += cardTransactions.compactMap { transaction -> CreditCardStatementTransaction? in
             guard transaction.hasRefund,
                   let refundDate = transaction.refundedAt?.prefixDate,
-                  (includesCycleStart ? refundDate >= cycleStart : refundDate > cycleStart),
-                  refundDate <= statementDate,
+                  refundDate >= cycleStart,
+                  refundDate < statementDate,
                   refundDate <= asOfDate
             else { return nil }
 
@@ -4985,7 +4985,7 @@ private extension PlannerDerivedData {
         else { return nil }
 
         for _ in 0..<240 {
-            if statementDate >= chargeDate {
+            if statementDate > chargeDate {
                 return statementDate
             }
 
@@ -5004,7 +5004,7 @@ private extension PlannerDerivedData {
             .first { cycle in
                 cycle.directDebitDate >= chargeDate &&
                 (
-                    cycle.statementDate >= chargeDate ||
+                cycle.statementDate > chargeDate ||
                     (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
                 )
             }?
@@ -5061,7 +5061,7 @@ private extension PlannerDerivedData {
         else { return nil }
 
         for _ in 0..<240 {
-            if statementDate >= chargeDate {
+            if statementDate > chargeDate {
                 return creditCardDirectDebitDate(statementDate: statementDate, dueDay: dueDay)
             }
             statementDate = addIsoMonthsClamped(date: statementDate, months: 1)
@@ -5082,7 +5082,7 @@ private extension PlannerDerivedData {
                 // repayment date. That later charge belongs to the next cycle.
                 cycle.directDebitDate >= chargeDate &&
                 (
-                    cycle.statementDate >= chargeDate ||
+                    cycle.statementDate > chargeDate ||
                     (cycle.isStatementHeld && cycle.scheduledStatementDate <= chargeDate)
                 )
             }?
@@ -5243,28 +5243,23 @@ private extension PlannerDerivedData {
     ) -> [CreditCardStatementLine] {
         let actualLines: [CreditCardStatementLine]
         let cycleStart: String
-        let includesCycleStart: Bool
 
         if let previousStatementDate {
             cycleStart = previousStatementDate
-            includesCycleStart = false
             actualLines = creditCardSpendingStatementLines(
                 card: card,
                 transactions: snapshot.transactions,
                 cycleStart: cycleStart,
                 statementDate: statementDate,
-                includesCycleStart: includesCycleStart,
                 asOfDate: asOfDate
             )
         } else {
             cycleStart = card.createdAt.prefixDate ?? statementDate
-            includesCycleStart = true
             var firstCycleLines = creditCardSpendingStatementLines(
                 card: card,
                 transactions: snapshot.transactions,
                 cycleStart: cycleStart,
                 statementDate: statementDate,
-                includesCycleStart: includesCycleStart,
                 asOfDate: asOfDate
             )
             let openingStatementPence = statementedOpeningBalancePence(card: card)
@@ -5301,14 +5296,14 @@ private extension PlannerDerivedData {
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
                 $0.recurringPaymentId != nil &&
-                (includesCycleStart ? $0.date >= cycleStart : $0.date > cycleStart) &&
-                $0.date <= statementDate
+                $0.date >= cycleStart &&
+                $0.date < statementDate
             }
             .compactMap { transaction in
                 transaction.recurringPaymentId.map { "\($0):\(transaction.date)" }
             })
 
-        let forecastCycleStart = includesCycleStart ? cycleStart : FinanceEngine.addIsoDays(date: cycleStart, days: 1)
+        let forecastCycleStart = cycleStart
         let currentPayPeriod = currentOrLatestPayPeriod(snapshot.payPeriods, today: asOfDate)
         let recurringForecastStart = max(forecastCycleStart, currentPayPeriod?.startDate ?? forecastCycleStart)
         let recurringForecastEnd = min(statementDate, currentPayPeriod?.endDate ?? statementDate)
@@ -5333,8 +5328,8 @@ private extension PlannerDerivedData {
             .filter {
                 $0.status != .archived &&
                 $0.creditCardId == card.id &&
-                (includesCycleStart ? $0.dueDate >= cycleStart : $0.dueDate > cycleStart) &&
-                $0.dueDate <= statementDate
+                $0.dueDate >= cycleStart &&
+                $0.dueDate < statementDate
             }
             .map { CreditCardStatementLine(amountPence: $0.amountPence, date: $0.dueDate, source: .custom) }
 
@@ -5385,7 +5380,6 @@ private extension PlannerDerivedData {
         transactions: [Transaction],
         cycleStart: String,
         statementDate: String,
-        includesCycleStart: Bool,
         asOfDate: String
     ) -> [CreditCardStatementLine] {
         let cardTransactions = transactions.filter {
@@ -5395,16 +5389,16 @@ private extension PlannerDerivedData {
             }
         let chargeLines = cardTransactions
             .filter {
-                (includesCycleStart ? $0.date >= cycleStart : $0.date > cycleStart) &&
-                $0.date <= statementDate &&
+                $0.date >= cycleStart &&
+                $0.date < statementDate &&
                 $0.date <= asOfDate
             }
             .map { CreditCardStatementLine(amountPence: $0.amountPence, date: $0.date, source: .spending) }
         let refundLines = cardTransactions.compactMap { transaction -> CreditCardStatementLine? in
             guard transaction.hasRefund,
                   let refundDate = transaction.refundedAt?.prefixDate,
-                  (includesCycleStart ? refundDate >= cycleStart : refundDate > cycleStart),
-                  refundDate <= statementDate,
+                  refundDate >= cycleStart,
+                  refundDate < statementDate,
                   refundDate <= asOfDate
             else { return nil }
             return CreditCardStatementLine(

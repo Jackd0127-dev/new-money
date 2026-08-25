@@ -1884,6 +1884,67 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func updateCardRepayment(id: String, amountPence: Int, date: String, note: String) {
+        let amountPence = abs(amountPence)
+        guard amountPence > 0,
+              FinanceEngine.isIsoDate(date),
+              let index = snapshot.creditCardRepayments.firstIndex(where: { $0.id == id && $0.deletedAt == nil }),
+              !snapshot.creditCardRepayments[index].hasRefund
+        else { return }
+
+        let now = DateUtilities.nowIsoString()
+        let existing = snapshot.creditCardRepayments[index]
+        var updated = existing
+
+        if existing.source == .automaticStatement || existing.source == .linkedPotStatement {
+            let existingContributions = existing.potContributions ?? existing.potId.map {
+                [CreditCardPotContribution(potId: $0, amountPence: existing.potContributionPence ?? 0)]
+            } ?? []
+            for contribution in existingContributions where contribution.amountPence > 0 {
+                guard let potIndex = snapshot.pots.firstIndex(where: { $0.id == contribution.potId }) else { continue }
+                snapshot.pots[potIndex].balancePence += contribution.amountPence
+                snapshot.pots[potIndex].updatedAt = now
+            }
+
+            let nextContribution = deductLinkedCreditCardPots(
+                creditCardId: existing.creditCardId,
+                amountPence: amountPence,
+                now: now
+            )
+            updated.source = nextContribution.amountPence > 0 ? .linkedPotStatement : .automaticStatement
+            updated.potId = nextContribution.singlePotId
+            updated.potContributionPence = nextContribution.amountPence
+            updated.potContributions = nextContribution.potContributions
+            updated.paycheckContributionPence = max(0, amountPence - nextContribution.amountPence)
+            updated.directDebitDate = date
+        } else {
+            updated.paycheckContributionPence = amountPence
+        }
+
+        updated.amountPence = amountPence
+        updated.date = date
+        updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.updatedAt = now
+        snapshot.creditCardRepayments[index] = updated
+
+        if let statementDate = existing.statementDate {
+            let scheduledStatementDate = snapshot.creditCardCycleOverrides.first {
+                $0.deletedAt == nil &&
+                    $0.creditCardId == existing.creditCardId &&
+                    ($0.scheduledStatementDate == statementDate || $0.actualStatementDate == statementDate)
+            }?.scheduledStatementDate ?? statementDate
+            mutateCreditCardCycleOverride(
+                cardId: existing.creditCardId,
+                scheduledStatementDate: scheduledStatementDate
+            ) {
+                $0.directDebitState = .confirmed
+                $0.actualDirectDebitDate = date
+            }
+        } else {
+            persist()
+        }
+    }
+
     func setCardRepaymentRefunded(id: String, refunded: Bool) {
         guard let repayment = snapshot.creditCardRepayments.first(where: { $0.id == id }) else { return }
         setCardRepaymentRefundAmount(id: id, amountPence: refunded ? repayment.amountPence : 0)

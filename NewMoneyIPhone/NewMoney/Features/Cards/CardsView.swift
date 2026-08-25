@@ -890,12 +890,36 @@ enum CreditCardBalanceHistoryEntryKind: Equatable {
     case reconciliationAdjustment
 }
 
+enum CreditCardBalanceHistoryEditTarget: Equatable, Identifiable {
+    case transaction(String)
+    case recurring(paymentId: String, scheduledDueDate: String)
+    case repayment(String)
+    case statement(cardId: String, scheduledStatementDate: String)
+    case card(String)
+
+    var id: String {
+        switch self {
+        case .transaction(let id):
+            "transaction-\(id)"
+        case .recurring(let paymentId, let scheduledDueDate):
+            "recurring-\(paymentId)-\(scheduledDueDate)"
+        case .repayment(let id):
+            "repayment-\(id)"
+        case .statement(let cardId, let scheduledStatementDate):
+            "statement-\(cardId)-\(scheduledStatementDate)"
+        case .card(let id):
+            "card-\(id)"
+        }
+    }
+}
+
 struct CreditCardBalanceHistoryEntry: Identifiable, Equatable {
     var id: String
     var title: String
     var date: String
     var amountPence: Int
     var kind: CreditCardBalanceHistoryEntryKind
+    var editTarget: CreditCardBalanceHistoryEditTarget?
 }
 
 struct CreditCardBalanceHistorySection: Identifiable, Equatable {
@@ -931,17 +955,10 @@ struct CreditCardBalanceHistoryData: Equatable {
         let statementRepaymentIds = Set(statements.flatMap {
             matchedRepayments(for: $0, snapshot: snapshot, asOfDate: asOfDate).map(\.id)
         })
-        let outstandingStatementEntries = statements
-            .filter { $0.statementDate <= asOfDate && $0.unpaidAmountPence != 0 }
-            .map { statement in
-                CreditCardBalanceHistoryEntry(
-                    id: "current-statement-balance-\(statement.id)",
-                    title: "\(processedDate(statement.statementDate)) statement balance",
-                    date: statement.statementDate,
-                    amountPence: statement.unpaidAmountPence,
-                    kind: .statementBalance
-                )
-            }
+        let lockedStatementBalancePence = statements
+            .filter { $0.statementDate <= asOfDate }
+            .reduce(0) { $0 + $1.unpaidAmountPence }
+        let currentCycleBalancePence = currentBalancePence - lockedStatementBalancePence
         let movements = currentMovementEntries(
             card: card,
             snapshot: snapshot,
@@ -949,8 +966,8 @@ struct CreditCardBalanceHistoryData: Equatable {
             asOfDate: asOfDate,
             excludingRepaymentIds: statementRepaymentIds
         )
-        var currentEntries = (outstandingStatementEntries + movements).sorted(by: entrySort)
-        let unexplainedBalancePence = currentBalancePence - currentEntries.reduce(0) { $0 + $1.amountPence }
+        var currentEntries = movements
+        let unexplainedBalancePence = currentCycleBalancePence - currentEntries.reduce(0) { $0 + $1.amountPence }
         let createdDate = String(card.createdAt.prefix(10))
         let openingDate = latestStatementDate ?? (FinanceEngine.isIsoDate(createdDate) ? createdDate : asOfDate)
 
@@ -961,7 +978,8 @@ struct CreditCardBalanceHistoryData: Equatable {
                     title: latestStatementDate == nil ? "Opening balance" : "Unstatemented balance",
                     date: openingDate,
                     amountPence: unexplainedBalancePence,
-                    kind: .openingBalance
+                    kind: .openingBalance,
+                    editTarget: .card(card.id)
                 )
             )
         }
@@ -973,7 +991,7 @@ struct CreditCardBalanceHistoryData: Equatable {
                 id: "current-\(card.id)",
                 title: "Current balance",
                 subtitle: latestStatementDate.map { "Since \(shortDate($0))" } ?? "All recorded activity",
-                balancePence: currentBalancePence,
+                balancePence: currentCycleBalancePence,
                 statementDate: nil,
                 directDebitDate: nil,
                 status: nil,
@@ -991,11 +1009,7 @@ struct CreditCardBalanceHistoryData: Equatable {
         excludingRepaymentIds: Set<String>
     ) -> [CreditCardBalanceHistoryEntry] {
         func isCurrentTransaction(_ date: String) -> Bool {
-            date <= asOfDate && cutoffDate.map { date > $0 } ?? true
-        }
-
-        func isRecorded(_ date: String) -> Bool {
-            date <= asOfDate
+            date <= asOfDate && cutoffDate.map { date >= $0 } ?? true
         }
 
         let cardTransactions = snapshot.transactions.filter {
@@ -1012,7 +1026,8 @@ struct CreditCardBalanceHistoryData: Equatable {
                     title: $0.note.isBlank ? "Card spending" : $0.note,
                     date: $0.date,
                     amountPence: $0.amountPence,
-                    kind: .charge
+                    kind: .charge,
+                    editTarget: transactionEditTarget(for: $0, snapshot: snapshot)
                 )
             }
         let refunds = cardTransactions.compactMap { transaction -> CreditCardBalanceHistoryEntry? in
@@ -1026,7 +1041,8 @@ struct CreditCardBalanceHistoryData: Equatable {
                 title: "\(transaction.note.isBlank ? "Card spending" : transaction.note) refund",
                 date: refundDate,
                 amountPence: -transaction.effectiveRefundedAmountPence,
-                kind: .refund
+                kind: .refund,
+                editTarget: transactionEditTarget(for: transaction, snapshot: snapshot)
             )
         }
 
@@ -1036,14 +1052,15 @@ struct CreditCardBalanceHistoryData: Equatable {
                 !excludingRepaymentIds.contains($0.id)
         }
         let repayments = cardRepayments
-            .filter { isRecorded($0.date) }
+            .filter { isCurrentTransaction($0.date) }
             .map {
                 CreditCardBalanceHistoryEntry(
                     id: "current-repayment-\($0.id)",
                     title: $0.note.isBlank ? "Card payment" : $0.note,
                     date: $0.date,
                     amountPence: -$0.amountPence,
-                    kind: .repayment
+                    kind: .repayment,
+                    editTarget: .repayment($0.id)
                 )
             }
         let repaymentRefunds = cardRepayments.compactMap { repayment -> CreditCardBalanceHistoryEntry? in
@@ -1051,13 +1068,14 @@ struct CreditCardBalanceHistoryData: Equatable {
                   let refundedAt = repayment.refundedAt
             else { return nil }
             let refundDate = String(refundedAt.prefix(10))
-            guard FinanceEngine.isIsoDate(refundDate), isRecorded(refundDate) else { return nil }
+            guard FinanceEngine.isIsoDate(refundDate), isCurrentTransaction(refundDate) else { return nil }
             return CreditCardBalanceHistoryEntry(
                 id: "current-repayment-refund-\(repayment.id)-\(refundDate)",
                 title: "\(repayment.note.isBlank ? "Card payment" : repayment.note) returned",
                 date: refundDate,
                 amountPence: repayment.effectiveRefundedAmountPence,
-                kind: .repaymentRefund
+                kind: .repaymentRefund,
+                editTarget: .repayment(repayment.id)
             )
         }
 
@@ -1075,7 +1093,12 @@ struct CreditCardBalanceHistoryData: Equatable {
                 title: transaction.name,
                 date: transaction.date,
                 amountPence: transaction.amountPence,
-                kind: entryKind(for: transaction.source)
+                kind: entryKind(for: transaction.source),
+                editTarget: editTarget(
+                    for: transaction,
+                    cardId: statement.cardId,
+                    snapshot: snapshot
+                )
             )
         }
 
@@ -1086,7 +1109,11 @@ struct CreditCardBalanceHistoryData: Equatable {
                     title: "Bank statement adjustment",
                     date: statement.statementDate,
                     amountPence: statement.reconciliationAdjustmentPence,
-                    kind: .reconciliationAdjustment
+                    kind: .reconciliationAdjustment,
+                    editTarget: .statement(
+                        cardId: statement.cardId,
+                        scheduledStatementDate: statement.scheduledStatementDate
+                    )
                 )
             )
         }
@@ -1100,7 +1127,8 @@ struct CreditCardBalanceHistoryData: Equatable {
                     title: repayment.note.isBlank ? "Card payment" : repayment.note,
                     date: repayment.date,
                     amountPence: -repayment.amountPence,
-                    kind: .repayment
+                    kind: .repayment,
+                    editTarget: .repayment(repayment.id)
                 )
             )
             if repayment.hasRefund,
@@ -1113,7 +1141,8 @@ struct CreditCardBalanceHistoryData: Equatable {
                             title: "\(repayment.note.isBlank ? "Card payment" : repayment.note) returned",
                             date: refundDate,
                             amountPence: repayment.effectiveRefundedAmountPence,
-                            kind: .repaymentRefund
+                            kind: .repaymentRefund,
+                            editTarget: .repayment(repayment.id)
                         )
                     )
                 }
@@ -1162,6 +1191,54 @@ struct CreditCardBalanceHistoryData: Equatable {
         }
     }
 
+    private static func editTarget(
+        for statementTransaction: CreditCardStatementTransaction,
+        cardId: String,
+        snapshot: PlannerSnapshot
+    ) -> CreditCardBalanceHistoryEditTarget {
+        if let transaction = snapshot.transactions.first(where: {
+            $0.deletedAt == nil && $0.id == statementTransaction.id
+        }) {
+            return transactionEditTarget(for: transaction, snapshot: snapshot)
+        }
+        if statementTransaction.source == .refund,
+           let transaction = snapshot.transactions.first(where: { transaction in
+            guard transaction.deletedAt == nil,
+                     let refundedAt = transaction.refundedAt
+               else { return false }
+               let refundDate = String(refundedAt.prefix(10))
+               guard FinanceEngine.isIsoDate(refundDate) else { return false }
+               return "refund-\(transaction.id)-\(refundDate)" == statementTransaction.id
+           }) {
+            return transactionEditTarget(for: transaction, snapshot: snapshot)
+        }
+        return .card(cardId)
+    }
+
+    private static func transactionEditTarget(
+        for transaction: Transaction,
+        snapshot: PlannerSnapshot
+    ) -> CreditCardBalanceHistoryEditTarget {
+        guard let paymentId = transaction.recurringPaymentId else {
+            return .transaction(transaction.id)
+        }
+
+        for prefix in ["card-recurring-\(paymentId)-", "recurring-\(paymentId)-"]
+        where transaction.id.hasPrefix(prefix) {
+            let scheduledDueDate = String(transaction.id.dropFirst(prefix.count))
+            if FinanceEngine.isIsoDate(scheduledDueDate) {
+                return .recurring(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+            }
+        }
+
+        let scheduledDueDate = snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil &&
+                $0.paymentId == paymentId &&
+                ($0.actualDueDate == transaction.date || $0.scheduledDueDate == transaction.date)
+        }?.scheduledDueDate ?? transaction.date
+        return .recurring(paymentId: paymentId, scheduledDueDate: scheduledDueDate)
+    }
+
     private static func entrySort(_ lhs: CreditCardBalanceHistoryEntry, _ rhs: CreditCardBalanceHistoryEntry) -> Bool {
         if lhs.date == rhs.date { return lhs.id < rhs.id }
         return lhs.date < rhs.date
@@ -1205,6 +1282,7 @@ struct CardDetailView: View {
     @State private var isCycleAdjustmentPresented = false
     @State private var isCardEditPresented = false
     @State private var isDeleteConfirmationPresented = false
+    @State private var balanceHistoryEditTarget: CreditCardBalanceHistoryEditTarget?
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
@@ -1268,6 +1346,9 @@ struct CardDetailView: View {
             .sheet(isPresented: $isCardEditPresented) {
                 CreditCardEditFormView(store: store, card: currentCard)
             }
+            .sheet(item: $balanceHistoryEditTarget) { target in
+                CreditCardBalanceHistoryEditorSheet(store: store, target: target)
+            }
         }
     }
 
@@ -1329,12 +1410,16 @@ struct CardDetailView: View {
                     .foregroundStyle(AppTheme.Colors.secondaryText)
             }
 
-            CreditCardBalanceHistorySectionView(section: history.currentSection)
+            CreditCardBalanceHistorySectionView(section: history.currentSection) {
+                balanceHistoryEditTarget = $0
+            }
 
             if !history.statementSections.isEmpty {
                 SectionTitle("Statements")
                 ForEach(history.statementSections) { section in
-                    CreditCardBalanceHistorySectionView(section: section)
+                    CreditCardBalanceHistorySectionView(section: section) {
+                        balanceHistoryEditTarget = $0
+                    }
                 }
             }
         }
@@ -1750,10 +1835,15 @@ struct CardDetailView: View {
 private struct CreditCardBalanceHistorySectionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var section: CreditCardBalanceHistorySection
+    var onEdit: (CreditCardBalanceHistoryEditTarget) -> Void
     @State private var isExpanded: Bool
 
-    init(section: CreditCardBalanceHistorySection) {
+    init(
+        section: CreditCardBalanceHistorySection,
+        onEdit: @escaping (CreditCardBalanceHistoryEditTarget) -> Void
+    ) {
         self.section = section
+        self.onEdit = onEdit
         _isExpanded = State(
             initialValue: section.statementDate == nil || CardsLayoutPolicy.balanceHistoryStatementsDefaultExpanded
         )
@@ -1781,8 +1871,19 @@ private struct CreditCardBalanceHistorySectionView: View {
                     } else {
                         ForEach(section.entries) { entry in
                             AppDivider()
-                            CreditCardBalanceHistoryEntryRow(entry: entry)
+                            if let editTarget = entry.editTarget {
+                                Button {
+                                    onEdit(editTarget)
+                                } label: {
+                                    CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: true)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Opens this movement for editing")
                                 .accessibilityIdentifier("card-balance-entry-\(entry.id)")
+                            } else {
+                                CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: false)
+                                    .accessibilityIdentifier("card-balance-entry-\(entry.id)")
+                            }
                         }
                     }
                 }
@@ -1869,6 +1970,7 @@ private struct CreditCardBalanceHistorySectionView: View {
 
 private struct CreditCardBalanceHistoryEntryRow: View {
     var entry: CreditCardBalanceHistoryEntry
+    var showsEditIndicator: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
@@ -1895,7 +1997,16 @@ private struct CreditCardBalanceHistoryEntryRow: View {
                 .foregroundStyle(amountColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
+
+            if showsEditIndicator {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    .frame(width: 20, height: 44, alignment: .center)
+                    .accessibilityHidden(true)
+            }
         }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
@@ -1944,6 +2055,265 @@ private struct CreditCardBalanceHistoryEntryRow: View {
     }
 
     private func fullDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct CreditCardBalanceHistoryEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var target: CreditCardBalanceHistoryEditTarget
+
+    @ViewBuilder
+    var body: some View {
+        switch target {
+        case .transaction(let id):
+            if let transaction = store.snapshot.transactions.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                NavigationStack {
+                    SpendingTransactionDetailView(store: store, transaction: transaction)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Close") { dismiss() }
+                            }
+                        }
+                }
+            } else {
+                missingRecord
+            }
+        case .recurring(let paymentId, let scheduledDueDate):
+            if store.snapshot.recurringPayments.contains(where: { $0.id == paymentId && $0.deletedAt == nil }) {
+                CreditCardRecurringOccurrenceEditorView(
+                    store: store,
+                    paymentId: paymentId,
+                    scheduledDueDate: scheduledDueDate
+                )
+            } else {
+                missingRecord
+            }
+        case .repayment(let id):
+            if let repayment = store.snapshot.creditCardRepayments.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                NavigationStack {
+                    CardRepaymentDetailView(store: store, repayment: repayment)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Close") { dismiss() }
+                            }
+                        }
+                }
+            } else {
+                missingRecord
+            }
+        case .statement(let cardId, let scheduledStatementDate):
+            CreditCardStatementLedgerEditorView(
+                store: store,
+                cardId: cardId,
+                scheduledStatementDate: scheduledStatementDate
+            )
+        case .card(let id):
+            if let card = store.snapshot.creditCards.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                CreditCardEditFormView(store: store, card: card)
+            } else {
+                missingRecord
+            }
+        }
+    }
+
+    private var missingRecord: some View {
+        NavigationStack {
+            ContentUnavailableView(
+                "Movement unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text("This record is no longer available to edit.")
+            )
+            .premiumScreenBackground()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct CreditCardRecurringOccurrenceEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var paymentId: String
+    var scheduledDueDate: String
+    @State private var amount: String
+    @State private var date: Date
+    @State private var refundEnabled: Bool
+    @State private var refundAmount: String
+
+    init(store: PlannerStore, paymentId: String, scheduledDueDate: String) {
+        self.store = store
+        self.paymentId = paymentId
+        self.scheduledDueDate = scheduledDueDate
+        let payment = store.snapshot.recurringPayments.first { $0.id == paymentId }
+        let override = store.snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+        }
+        let grossAmountPence = override?.amountPenceOverride ?? payment?.amountPence ?? 0
+        let refundedAmountPence = override?.effectiveRefundedAmountPence(originalAmountPence: grossAmountPence) ?? 0
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: grossAmountPence))
+        _date = State(initialValue: FinanceEngine.parseDate(override?.actualDueDate ?? scheduledDueDate))
+        _refundEnabled = State(initialValue: refundedAmountPence > 0)
+        _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: refundedAmountPence > 0 ? refundedAmountPence : grossAmountPence))
+    }
+
+    private var payment: RecurringPayment? {
+        store.snapshot.recurringPayments.first { $0.id == paymentId && $0.deletedAt == nil }
+    }
+
+    private var occurrenceOverride: RecurringPaymentOccurrenceOverride? {
+        store.snapshot.recurringPaymentOccurrenceOverrides.first {
+            $0.deletedAt == nil && $0.paymentId == paymentId && $0.scheduledDueDate == scheduledDueDate
+        }
+    }
+
+    private var grossAmountPence: Int {
+        occurrenceOverride?.amountPenceOverride ?? payment?.amountPence ?? 0
+    }
+
+    private var refundedAmountPence: Int {
+        occurrenceOverride?.effectiveRefundedAmountPence(originalAmountPence: grossAmountPence) ?? 0
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Payment") {
+                    LabeledContent("Bill", value: payment?.name ?? "Card payment")
+                    LabeledContent("Scheduled", value: displayDate(scheduledDueDate))
+                    MoneyField(title: "Amount", text: $amount)
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                }
+
+                if refundedAmountPence > 0 {
+                    Section {
+                        Text("Original payment editing is locked while a refund is recorded. Remove the refund first if the original details need changing.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.Colors.warning)
+                    }
+                }
+
+                Section("Refund") {
+                    RefundAmountEditor(
+                        originalAmountPence: grossAmountPence,
+                        isEnabled: $refundEnabled,
+                        amount: $refundAmount
+                    )
+                    Button("Save refund") {
+                        store.setRecurringBillOccurrenceRefundAmount(
+                            paymentId: paymentId,
+                            scheduledDueDate: scheduledDueDate,
+                            amountPence: refundEnabled ? MoneyParser.parsePoundsToPence(refundAmount) : 0
+                        )
+                        dismiss()
+                    }
+                    .disabled(!refundIsValid)
+                }
+            }
+            .navigationTitle("Edit payment")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.setRecurringBillOccurrenceAmount(
+                            paymentId: paymentId,
+                            scheduledDueDate: scheduledDueDate,
+                            amountPence: MoneyParser.parsePoundsToPence(amount)
+                        )
+                        store.confirmRecurringBillOccurrence(
+                            paymentId: paymentId,
+                            scheduledDueDate: scheduledDueDate,
+                            actualDueDate: FinanceEngine.toIsoDate(date)
+                        )
+                        dismiss()
+                    }
+                    .disabled(refundedAmountPence > 0 || MoneyParser.parsePoundsToPence(amount) <= 0)
+                }
+            }
+        }
+    }
+
+    private var refundIsValid: Bool {
+        guard refundEnabled else { return refundedAmountPence > 0 }
+        let refundPence = MoneyParser.parsePoundsToPence(refundAmount)
+        return refundPence > 0 && refundPence <= grossAmountPence
+    }
+
+    private func displayDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct CreditCardStatementLedgerEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var cardId: String
+    var scheduledStatementDate: String
+    @State private var amount: String
+    @State private var statementDate: Date
+
+    init(store: PlannerStore, cardId: String, scheduledStatementDate: String) {
+        self.store = store
+        self.cardId = cardId
+        self.scheduledStatementDate = scheduledStatementDate
+        let summary = PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: store.snapshot,
+            asOfDate: store.todayIso
+        ).first { $0.cardId == cardId && $0.scheduledStatementDate == scheduledStatementDate }
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: summary?.statementAmountPence ?? 0))
+        _statementDate = State(initialValue: FinanceEngine.parseDate(summary?.statementDate ?? scheduledStatementDate))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Statement") {
+                    LabeledContent("Scheduled", value: displayDate(scheduledStatementDate))
+                    DatePicker("Processed date", selection: $statementDate, displayedComponents: .date)
+                    MoneyField(title: "Locked amount", text: $amount)
+                }
+                Section {
+                    Text("Changing this bank statement updates the locked statement, direct-debit amount, card balance, and every derived total.")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+            }
+            .navigationTitle("Edit statement")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.setCreditCardCycleAmount(
+                            cardId: cardId,
+                            scheduledStatementDate: scheduledStatementDate,
+                            amountPence: MoneyParser.parsePoundsToPence(amount)
+                        )
+                        store.confirmCreditCardStatement(
+                            cardId: cardId,
+                            scheduledStatementDate: scheduledStatementDate,
+                            actualStatementDate: FinanceEngine.toIsoDate(statementDate)
+                        )
+                        dismiss()
+                    }
+                    .disabled(MoneyParser.parsePoundsToPence(amount) <= 0)
+                }
+            }
+        }
+    }
+
+    private func displayDate(_ isoDate: String) -> String {
         FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }
@@ -2169,14 +2539,21 @@ struct CardPaymentFlowSheetView: View {
 }
 
 private struct CardRepaymentDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var repayment: CreditCardRepayment
+    @State private var amount: String
+    @State private var date: Date
+    @State private var note: String
     @State private var refundEnabled: Bool
     @State private var refundAmount: String
 
     init(store: PlannerStore, repayment: CreditCardRepayment) {
         self.store = store
         self.repayment = repayment
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: repayment.amountPence))
+        _date = State(initialValue: FinanceEngine.parseDate(repayment.date))
+        _note = State(initialValue: repayment.note)
         _refundEnabled = State(initialValue: repayment.hasRefund)
         _refundAmount = State(initialValue: RefundAmountEditor.inputValue(for: repayment.effectiveRefundedAmountPence))
     }
@@ -2189,10 +2566,26 @@ private struct CardRepaymentDetailView: View {
         ScrollView {
             AppCard(glow: true) {
                 SectionTitle("Card payment")
-                MetricRow(label: "Original amount", value: MoneyParser.formatPence(currentRepayment.amountPence))
+                MoneyField(title: "Amount", text: $amount)
+                DatePicker("Date", selection: $date, displayedComponents: .date)
+                    .tint(AppTheme.Colors.primaryOrange)
+                TextField("Note", text: $note)
+                    .textFieldStyle(AppTextFieldStyle())
                 MetricRow(label: "Net payment", value: MoneyParser.formatPence(currentRepayment.netAmountPence), valueColor: currentRepayment.isRefunded ? AppTheme.Colors.tertiaryText : AppTheme.Colors.success)
-                MetricRow(label: "Date", value: currentRepayment.date)
-                MetricRow(label: "Note", value: currentRepayment.note.isBlank ? "Card payment" : currentRepayment.note)
+                if currentRepayment.hasRefund {
+                    Text("Original payment editing is locked while a refund is recorded. Remove the refund first if the original details need changing.")
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.Colors.warning)
+                }
+                PrimaryButton(title: "Save changes", systemImage: "checkmark", isDisabled: !canSaveChanges) {
+                    store.updateCardRepayment(
+                        id: repayment.id,
+                        amountPence: MoneyParser.parsePoundsToPence(amount),
+                        date: FinanceEngine.toIsoDate(date),
+                        note: note
+                    )
+                    dismiss()
+                }
                 AppDivider()
                 SectionTitle("Refund")
                 RefundAmountEditor(
@@ -2208,6 +2601,7 @@ private struct CardRepaymentDetailView: View {
                         id: repayment.id,
                         amountPence: refundEnabled ? MoneyParser.parsePoundsToPence(refundAmount) : 0
                     )
+                    dismiss()
                 }
             }
             .padding(AppTheme.Spacing.lg)
@@ -2221,6 +2615,10 @@ private struct CardRepaymentDetailView: View {
         guard refundEnabled else { return currentRepayment.hasRefund }
         let amountPence = MoneyParser.parsePoundsToPence(refundAmount)
         return amountPence > 0 && amountPence <= currentRepayment.amountPence
+    }
+
+    private var canSaveChanges: Bool {
+        !currentRepayment.hasRefund && MoneyParser.parsePoundsToPence(amount) > 0
     }
 }
 

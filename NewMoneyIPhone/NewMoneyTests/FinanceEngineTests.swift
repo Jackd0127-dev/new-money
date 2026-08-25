@@ -2976,16 +2976,16 @@ final class FinanceEngineTests: XCTestCase {
         let cardsById = Dictionary(uniqueKeysWithValues: store.snapshot.creditCards.map { ($0.id, $0) })
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc1"]), snapshot: store.snapshot), 17200)
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc2"]), snapshot: store.snapshot), 36300)
-        XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc3"]), snapshot: store.snapshot), 22000)
-        XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc4"]), snapshot: store.snapshot), 37000)
-        XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc5"]), snapshot: store.snapshot), 28500)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc3"]), snapshot: store.snapshot), 44000)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc4"]), snapshot: store.snapshot), 42500)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: try XCTUnwrap(cardsById["card-cc5"]), snapshot: store.snapshot), 33000)
 
         let februaryFifthSummary = PlannerDerivedData.payPeriodCostSummary(
             snapshot: store.snapshot,
             payPeriod: februaryPeriod,
             asOfDate: "2027-02-05"
         )
-        XCTAssertEqual(februaryFifthSummary.projectedCostsPence, 468400)
+        XCTAssertEqual(februaryFifthSummary.projectedCostsPence, 496600)
 
         let februaryFifthItems = PlannerDerivedData.fundingChecklistPresentationItems(
             snapshot: store.snapshot,
@@ -3306,7 +3306,7 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testStatementRepaymentUsesFundedPreviousStatementDayChargeOnlyOnceAcrossCycles() async throws {
+    func testStatementDayChargesMoveToTheFollowingCycleAndRepayOnlyOnce() async throws {
         let settings = makeManualSettings(today: "2026-06-01")
         let period = makePayPeriod(id: "period-summer", startDate: "2026-06-01", endDate: "2026-07-31", payday: "2026-06-01", incomePence: 150000)
         let card = makeCreditCard(id: "card-main", name: "Barclays", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-10", dueDay: 15, createdAt: "2026-06-01T00:00:00.000Z")
@@ -3333,18 +3333,17 @@ final class FinanceEngineTests: XCTestCase {
         var june15Settings = store.snapshot.settings
         june15Settings.manualTodayIso = "2026-06-15"
         store.updateSettings(june15Settings)
-        let juneRepayment = try XCTUnwrap(store.snapshot.creditCardRepayments.first {
+        let juneRepayment = store.snapshot.creditCardRepayments.first {
             $0.creditCardId == card.id && $0.statementDate == "2026-06-10"
-        })
-        XCTAssertEqual(juneRepayment.amountPence, 20000)
-        XCTAssertEqual(juneRepayment.potContributionPence, 20000)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 30000)
+        }
+        XCTAssertNil(juneRepayment)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 50000)
 
         var july10Settings = store.snapshot.settings
         july10Settings.manualTodayIso = "2026-07-10"
         store.updateSettings(july10Settings)
         XCTAssertNil(store.snapshot.transactions.first { $0.recurringPaymentId == currentStatementDayBill.id }?.potId)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 30000)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 50000)
 
         var july15Settings = store.snapshot.settings
         july15Settings.manualTodayIso = "2026-07-15"
@@ -3352,9 +3351,9 @@ final class FinanceEngineTests: XCTestCase {
         let julyRepayment = try XCTUnwrap(store.snapshot.creditCardRepayments.first {
             $0.creditCardId == card.id && $0.statementDate == "2026-07-10"
         })
-        XCTAssertEqual(julyRepayment.amountPence, 30000)
-        XCTAssertEqual(julyRepayment.potContributionPence, 30000)
-        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 0)
+        XCTAssertEqual(julyRepayment.amountPence, 20000)
+        XCTAssertEqual(julyRepayment.potContributionPence, 20000)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 30000)
     }
 
     func testGroupedComplexJanMar2027ExplicitDateOccurrencesOnlyEmitWorkbookDates() {
@@ -3378,7 +3377,7 @@ final class FinanceEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testGroupedComplexJanMar2027OpeningAndStatementDayChargesUseWorkbookCycles() async throws {
+    func testGroupedComplexJanMar2027StatementDayChargesStartTheFollowingCycle() async throws {
         let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.groupedComplexJanMar2027Snapshot))
         await store.load()
 
@@ -3409,8 +3408,8 @@ final class FinanceEngineTests: XCTestCase {
 
         let cc3Statement = try statementSummary(in: store.snapshot, cardId: "card-cc3", statementDate: "2027-01-10", asOfDate: "2027-01-10")
         XCTAssertEqual(cc3Statement.directDebitDate, "2027-01-18")
-        XCTAssertEqual(cc3Statement.statementAmountPence, 55000)
-        XCTAssertEqual(cc3Statement.transactions.map(\.amountPence).reduce(0, +), 55000)
+        XCTAssertEqual(cc3Statement.statementAmountPence, 33000)
+        XCTAssertEqual(cc3Statement.transactions.map(\.amountPence).reduce(0, +), 33000)
 
         var january15Settings = store.snapshot.settings
         january15Settings.manualTodayIso = "2027-01-15"
@@ -3418,7 +3417,7 @@ final class FinanceEngineTests: XCTestCase {
 
         let cc2Statement = try statementSummary(in: store.snapshot, cardId: "card-cc2", statementDate: "2027-01-15", asOfDate: "2027-01-15")
         XCTAssertEqual(cc2Statement.directDebitDate, "2027-02-12")
-        XCTAssertEqual(cc2Statement.statementAmountPence, 24800)
+        XCTAssertEqual(cc2Statement.statementAmountPence, 21000)
 
         var january20Settings = store.snapshot.settings
         january20Settings.manualTodayIso = "2027-01-20"
@@ -3426,15 +3425,16 @@ final class FinanceEngineTests: XCTestCase {
 
         let cc4Statement = try statementSummary(in: store.snapshot, cardId: "card-cc4", statementDate: "2027-01-20", asOfDate: "2027-01-20")
         XCTAssertEqual(cc4Statement.directDebitDate, "2027-01-25")
-        XCTAssertEqual(cc4Statement.statementAmountPence, 18500)
+        XCTAssertEqual(cc4Statement.statementAmountPence, 13000)
 
         var january24Settings = store.snapshot.settings
         january24Settings.manualTodayIso = "2027-01-24"
         store.updateSettings(january24Settings)
 
-        let cc5Statement = try statementSummary(in: store.snapshot, cardId: "card-cc5", statementDate: "2027-01-24", asOfDate: "2027-01-24")
-        XCTAssertEqual(cc5Statement.directDebitDate, "2027-01-28")
-        XCTAssertEqual(cc5Statement.statementAmountPence, 4500)
+        XCTAssertNil(
+            PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: "2027-01-24")
+                .first { $0.cardId == "card-cc5" && $0.statementDate == "2027-01-24" }
+        )
     }
 
     func testOnceRecurringOccurrencesOnlyEmitExplicitDueDate() {
@@ -4409,6 +4409,78 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, history.currentBalancePence)
         XCTAssertEqual(history.currentSection.entries.map(\.kind), [.openingBalance, .charge, .refund, .repayment, .repaymentRefund])
         XCTAssertEqual(history.currentSection.entries.map(\.amountPence), [5_000, 3_000, -500, -1_000, 200])
+        XCTAssertEqual(history.currentSection.entries.map(\.editTarget), [
+            .card(card.id),
+            .transaction(spend.id),
+            .transaction(spend.id),
+            .repayment(repayment.id),
+            .repayment(repayment.id),
+        ])
+    }
+
+    func testCreditCardBalanceHistoryShowsCurrentRefundForAStatementedPurchase() throws {
+        let card = makeCreditCard(
+            id: "card-ledger-old-refund",
+            name: "Ledger Card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-13",
+            dueDay: 5,
+            createdAt: "2026-07-13T00:00:00.000Z"
+        )
+        var spend = makeTransaction(
+            id: "txn-ledger-old-refund",
+            cardId: card.id,
+            amountPence: 1_000,
+            date: "2026-08-01",
+            note: "Earlier purchase"
+        )
+        spend.refundedAt = "2026-08-20T10:00:00.000Z"
+        spend.refundedAmountPence = 300
+
+        let history = CreditCardBalanceHistoryData.make(
+            card: card,
+            snapshot: makeSnapshot(transactions: [spend], creditCards: [card]),
+            asOfDate: "2026-08-25"
+        )
+
+        XCTAssertEqual(history.currentBalancePence, 700)
+        XCTAssertEqual(history.statementSections.first?.balancePence, 1_000)
+        XCTAssertEqual(history.currentSection.balancePence, -300)
+        XCTAssertEqual(history.currentSection.entries.map(\.kind), [.refund])
+        XCTAssertEqual(history.currentSection.entries.map(\.amountPence), [-300])
+        XCTAssertEqual(history.currentSection.entries.first?.editTarget, .transaction(spend.id))
+    }
+
+    func testCreditCardBalanceHistoryRoutesGeneratedBillToOccurrenceEditor() throws {
+        let card = makeCreditCard(
+            id: "card-ledger-recurring",
+            name: "Ledger Card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-09-20",
+            dueDay: 15,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        var transaction = makeTransaction(
+            id: "card-recurring-bill-skin-2026-08-15",
+            cardId: card.id,
+            amountPence: 2_000,
+            date: "2026-08-15",
+            note: "Skin"
+        )
+        transaction.recurringPaymentId = "bill-skin"
+        let history = CreditCardBalanceHistoryData.make(
+            card: card,
+            snapshot: makeSnapshot(transactions: [transaction], creditCards: [card]),
+            asOfDate: "2026-08-25"
+        )
+
+        let charge = try XCTUnwrap(history.currentSection.entries.first { $0.kind == .charge })
+        XCTAssertEqual(
+            charge.editTarget,
+            .recurring(paymentId: "bill-skin", scheduledDueDate: "2026-08-15")
+        )
     }
 
     func testCreditCardBalanceHistoryGroupsPaymentWithMatchingStatement() throws {
@@ -4465,8 +4537,77 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(history.currentSection.entries.map(\.kind), [.charge])
         XCTAssertEqual(juneStatement.statementDate, "2026-06-20")
         XCTAssertEqual(juneStatement.balancePence, 12_000)
+        XCTAssertTrue(juneStatement.entries.contains { $0.editTarget == .transaction(statementSpend.id) })
         XCTAssertTrue(juneStatement.entries.contains { $0.kind == .repayment && $0.amountPence == -12_000 })
+        XCTAssertTrue(juneStatement.entries.contains { $0.editTarget == .repayment(repayment.id) })
         XCTAssertEqual(juneStatement.entries.reduce(0) { $0 + $1.amountPence }, 0)
+    }
+
+    @MainActor
+    func testEditingCardRepaymentRecalculatesCardAndLinkedPotFromCanonicalRecord() async throws {
+        let settings = makeManualSettings(today: "2026-08-25")
+        let card = makeCreditCard(
+            id: "card-edit-repayment",
+            name: "Editable Card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-09-15",
+            dueDay: 20
+        )
+        let spend = makeTransaction(
+            id: "txn-edit-repayment",
+            cardId: card.id,
+            amountPence: 5_000,
+            date: "2026-08-10",
+            note: "Card spend"
+        )
+        let pot = makePot(
+            id: "pot-edit-repayment",
+            name: "Card pot",
+            balancePence: 9_000,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let repayment = CreditCardRepayment(
+            id: "repayment-editable",
+            creditCardId: card.id,
+            amountPence: 1_000,
+            date: "2026-08-20",
+            note: "Original payment",
+            source: .linkedPotStatement,
+            potId: pot.id,
+            potContributionPence: 1_000,
+            potContributions: [CreditCardPotContribution(potId: pot.id, amountPence: 1_000)],
+            paycheckContributionPence: 0,
+            createdAt: "2026-08-20T00:00:00.000Z",
+            updatedAt: "2026-08-20T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            transactions: [spend],
+            creditCards: [card],
+            creditCardRepayments: [repayment]
+        )))
+
+        await store.load()
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 4_000)
+
+        store.updateCardRepayment(
+            id: repayment.id,
+            amountPence: 1_500,
+            date: "2026-08-21",
+            note: "Updated payment"
+        )
+
+        let updated = try XCTUnwrap(store.snapshot.creditCardRepayments.first { $0.id == repayment.id })
+        XCTAssertEqual(updated.amountPence, 1_500)
+        XCTAssertEqual(updated.date, "2026-08-21")
+        XCTAssertEqual(updated.note, "Updated payment")
+        XCTAssertEqual(updated.potContributionPence, 1_500)
+        XCTAssertEqual(store.snapshot.pots.first { $0.id == pot.id }?.balancePence, 8_500)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: store.snapshot), 3_500)
     }
 
     func testConfirmedStatementIncreaseReconcilesLiveCardBalance() throws {
@@ -4535,10 +4676,15 @@ final class FinanceEngineTests: XCTestCase {
         )
         let statement = try XCTUnwrap(history.statementSections.first)
 
-        XCTAssertEqual(history.currentSection.entries.first?.title, "13 August statement balance")
-        XCTAssertEqual(history.currentSection.entries.first?.amountPence, 7_917)
-        XCTAssertFalse(history.currentSection.entries.contains { $0.title == "Balance carried forward" })
-        XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, 23_448)
+        XCTAssertEqual(history.currentBalancePence, 23_448)
+        XCTAssertEqual(history.currentSection.balancePence, 15_531)
+        XCTAssertFalse(history.currentSection.entries.contains { $0.kind == .statementBalance })
+        XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, 15_531)
+        XCTAssertEqual(statement.balancePence, 7_917)
+        XCTAssertTrue(statement.entries.contains {
+            $0.kind == .reconciliationAdjustment &&
+                $0.editTarget == .statement(cardId: card.id, scheduledStatementDate: "2026-08-13")
+        })
         XCTAssertEqual(statement.title, "13 August processed")
         XCTAssertEqual(statement.directDebitDate, "2026-09-05")
     }
@@ -5707,7 +5853,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(payments.first?.actualDuePence, 21580)
     }
 
-    func testCreditCardStatementUsesOpeningBalanceAndIncludesStatementDaySpendInClosingCycle() {
+    func testCreditCardStatementLocksActivityBeforeStatementDayAndStartsNewCycleOnStatementDay() {
         let card = makeCreditCard(
             id: "card-everyday",
             name: "Everyday",
@@ -5733,7 +5879,7 @@ final class FinanceEngineTests: XCTestCase {
 
         XCTAssertEqual(payments.map(\.statementDate), ["2026-06-12", "2026-07-12"])
         XCTAssertEqual(payments.map(\.directDebitDate), ["2026-07-01", "2026-08-01"])
-        XCTAssertEqual(payments.map(\.actualDuePence), [17000, 0])
+        XCTAssertEqual(payments.map(\.actualDuePence), [12000, 5000])
     }
 
     func testLinkedCardUpcomingPaymentsRollFromFrozenStatementToLiveNextCycleSpend() {

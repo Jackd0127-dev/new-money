@@ -17,6 +17,9 @@ struct CardsLayoutPolicy {
     static let balanceHistoryPresentation = "toolbarToggle"
     static let balanceHistoryIncludesCurrentBalance = true
     static let balanceHistoryGroupsByStatement = true
+    static let balanceHistoryStatementsDefaultExpanded = false
+    static let balanceHistoryStatementHeading = "processedDate"
+    static let balanceHistoryDueDatePlacement = "trailingBelowAmount"
     static let detailTopPresentation = "floatingNoOuterCard"
     static let rowPresentation = "floatingNoOuterCard"
     static let activeCardCollapsedPresentation = "overlappedStack"
@@ -879,6 +882,7 @@ func creditCardDaySelectionValue(_ day: Int) -> String {
 
 enum CreditCardBalanceHistoryEntryKind: Equatable {
     case openingBalance
+    case statementBalance
     case charge
     case refund
     case repayment
@@ -900,6 +904,7 @@ struct CreditCardBalanceHistorySection: Identifiable, Equatable {
     var subtitle: String
     var balancePence: Int
     var statementDate: String?
+    var directDebitDate: String?
     var status: CreditCardStatementStatus?
     var entries: [CreditCardBalanceHistoryEntry]
 }
@@ -926,6 +931,17 @@ struct CreditCardBalanceHistoryData: Equatable {
         let statementRepaymentIds = Set(statements.flatMap {
             matchedRepayments(for: $0, snapshot: snapshot, asOfDate: asOfDate).map(\.id)
         })
+        let outstandingStatementEntries = statements
+            .filter { $0.statementDate <= asOfDate && $0.unpaidAmountPence != 0 }
+            .map { statement in
+                CreditCardBalanceHistoryEntry(
+                    id: "current-statement-balance-\(statement.id)",
+                    title: "\(processedDate(statement.statementDate)) statement balance",
+                    date: statement.statementDate,
+                    amountPence: statement.unpaidAmountPence,
+                    kind: .statementBalance
+                )
+            }
         let movements = currentMovementEntries(
             card: card,
             snapshot: snapshot,
@@ -933,23 +949,23 @@ struct CreditCardBalanceHistoryData: Equatable {
             asOfDate: asOfDate,
             excludingRepaymentIds: statementRepaymentIds
         )
-        let carriedBalancePence = currentBalancePence - movements.reduce(0) { $0 + $1.amountPence }
-        var currentEntries: [CreditCardBalanceHistoryEntry] = []
+        var currentEntries = (outstandingStatementEntries + movements).sorted(by: entrySort)
+        let unexplainedBalancePence = currentBalancePence - currentEntries.reduce(0) { $0 + $1.amountPence }
         let createdDate = String(card.createdAt.prefix(10))
         let openingDate = latestStatementDate ?? (FinanceEngine.isIsoDate(createdDate) ? createdDate : asOfDate)
 
-        if carriedBalancePence != 0 || movements.isEmpty {
+        if unexplainedBalancePence != 0 || currentEntries.isEmpty {
             currentEntries.append(
                 CreditCardBalanceHistoryEntry(
                     id: "current-opening-\(card.id)-\(latestStatementDate ?? asOfDate)",
-                    title: latestStatementDate == nil ? "Opening balance" : "Balance carried forward",
+                    title: latestStatementDate == nil ? "Opening balance" : "Unstatemented balance",
                     date: openingDate,
-                    amountPence: carriedBalancePence,
+                    amountPence: unexplainedBalancePence,
                     kind: .openingBalance
                 )
             )
         }
-        currentEntries.append(contentsOf: movements)
+        currentEntries.sort(by: entrySort)
 
         return CreditCardBalanceHistoryData(
             currentBalancePence: currentBalancePence,
@@ -959,6 +975,7 @@ struct CreditCardBalanceHistoryData: Equatable {
                 subtitle: latestStatementDate.map { "Since \(shortDate($0))" } ?? "All recorded activity",
                 balancePence: currentBalancePence,
                 statementDate: nil,
+                directDebitDate: nil,
                 status: nil,
                 entries: currentEntries
             ),
@@ -973,8 +990,12 @@ struct CreditCardBalanceHistoryData: Equatable {
         asOfDate: String,
         excludingRepaymentIds: Set<String>
     ) -> [CreditCardBalanceHistoryEntry] {
-        func isCurrent(_ date: String) -> Bool {
+        func isCurrentTransaction(_ date: String) -> Bool {
             date <= asOfDate && cutoffDate.map { date > $0 } ?? true
+        }
+
+        func isRecorded(_ date: String) -> Bool {
+            date <= asOfDate
         }
 
         let cardTransactions = snapshot.transactions.filter {
@@ -984,7 +1005,7 @@ struct CreditCardBalanceHistoryData: Equatable {
                 $0.creditCardId == card.id
         }
         let charges = cardTransactions
-            .filter { isCurrent($0.date) }
+            .filter { isCurrentTransaction($0.date) }
             .map {
                 CreditCardBalanceHistoryEntry(
                     id: "current-charge-\($0.id)",
@@ -999,7 +1020,7 @@ struct CreditCardBalanceHistoryData: Equatable {
                   let refundedAt = transaction.refundedAt
             else { return nil }
             let refundDate = String(refundedAt.prefix(10))
-            guard FinanceEngine.isIsoDate(refundDate), isCurrent(refundDate) else { return nil }
+            guard FinanceEngine.isIsoDate(refundDate), isCurrentTransaction(refundDate) else { return nil }
             return CreditCardBalanceHistoryEntry(
                 id: "current-refund-\(transaction.id)-\(refundDate)",
                 title: "\(transaction.note.isBlank ? "Card spending" : transaction.note) refund",
@@ -1015,7 +1036,7 @@ struct CreditCardBalanceHistoryData: Equatable {
                 !excludingRepaymentIds.contains($0.id)
         }
         let repayments = cardRepayments
-            .filter { isCurrent($0.date) }
+            .filter { isRecorded($0.date) }
             .map {
                 CreditCardBalanceHistoryEntry(
                     id: "current-repayment-\($0.id)",
@@ -1030,7 +1051,7 @@ struct CreditCardBalanceHistoryData: Equatable {
                   let refundedAt = repayment.refundedAt
             else { return nil }
             let refundDate = String(refundedAt.prefix(10))
-            guard FinanceEngine.isIsoDate(refundDate), isCurrent(refundDate) else { return nil }
+            guard FinanceEngine.isIsoDate(refundDate), isRecorded(refundDate) else { return nil }
             return CreditCardBalanceHistoryEntry(
                 id: "current-repayment-refund-\(repayment.id)-\(refundDate)",
                 title: "\(repayment.note.isBlank ? "Card payment" : repayment.note) returned",
@@ -1101,10 +1122,11 @@ struct CreditCardBalanceHistoryData: Equatable {
 
         return CreditCardBalanceHistorySection(
             id: "statement-\(statement.id)",
-            title: "\(shortDate(statement.statementDate)) statement",
+            title: "\(processedDate(statement.statementDate)) processed",
             subtitle: statementStatusLabel(statement.status),
-            balancePence: statement.unpaidAmountPence,
+            balancePence: statement.statementAmountPence,
             statementDate: statement.statementDate,
+            directDebitDate: statement.directDebitDate,
             status: statement.status,
             entries: entries.sorted(by: entrySort)
         )
@@ -1149,10 +1171,14 @@ struct CreditCardBalanceHistoryData: Equatable {
         FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
     }
 
+    private static func processedDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.wide))
+    }
+
     private static func statementStatusLabel(_ status: CreditCardStatementStatus) -> String {
         switch status {
         case .upcoming:
-            "Due"
+            ""
         case .paid:
             "Paid"
         case .overdue:
@@ -1722,41 +1748,109 @@ struct CardDetailView: View {
 }
 
 private struct CreditCardBalanceHistorySectionView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var section: CreditCardBalanceHistorySection
+    @State private var isExpanded: Bool
+
+    init(section: CreditCardBalanceHistorySection) {
+        self.section = section
+        _isExpanded = State(
+            initialValue: section.statementDate == nil || CardsLayoutPolicy.balanceHistoryStatementsDefaultExpanded
+        )
+    }
 
     var body: some View {
         AppCard {
-            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.sm) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(section.title)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
+            if section.statementDate == nil {
+                header
+            } else {
+                Button(action: toggleExpanded) {
+                    header
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(statementAccessibilityLabel)
+                .accessibilityHint(isExpanded ? "Collapses statement movements" : "Shows every recorded statement movement")
+            }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                    if section.entries.isEmpty {
+                        Text("No recorded movements")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    } else {
+                        ForEach(section.entries) { entry in
+                            AppDivider()
+                            CreditCardBalanceHistoryEntryRow(entry: entry)
+                                .accessibilityIdentifier("card-balance-entry-\(entry.id)")
+                        }
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(section.title)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                if !section.subtitle.isBlank {
                     Text(section.subtitle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(statusColor)
                 }
+            }
 
-                Spacer(minLength: AppTheme.Spacing.sm)
+            Spacer(minLength: AppTheme.Spacing.sm)
 
+            VStack(alignment: .trailing, spacing: 3) {
                 Text(MoneyParser.formatPence(section.balancePence))
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(section.balancePence > 0 ? AppTheme.Colors.primaryText : AppTheme.Colors.success)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-            }
-
-            if section.entries.isEmpty {
-                Text("No recorded movements")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
-            } else {
-                ForEach(section.entries) { entry in
-                    AppDivider()
-                    CreditCardBalanceHistoryEntryRow(entry: entry)
-                        .accessibilityIdentifier("card-balance-entry-\(entry.id)")
+                if let directDebitDate = section.directDebitDate {
+                    Text("Due \(compactDate(directDebitDate))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .lineLimit(1)
                 }
             }
+
+            if section.statementDate != nil {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .frame(width: 28, height: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityHidden(true)
+            }
         }
+        .contentShape(Rectangle())
+    }
+
+    private func toggleExpanded() {
+        let animation: Animation? = reduceMotion ? nil : .easeInOut(duration: 0.2)
+        withAnimation(animation) {
+            isExpanded.toggle()
+        }
+    }
+
+    private var statementAccessibilityLabel: String {
+        var parts = [section.title, MoneyParser.formatPence(section.balancePence)]
+        if let directDebitDate = section.directDebitDate {
+            parts.append("Due \(compactDate(directDebitDate))")
+        }
+        parts.append(isExpanded ? "Expanded" : "Collapsed")
+        return parts.joined(separator: ", ")
+    }
+
+    private func compactDate(_ isoDate: String) -> String {
+        FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated))
     }
 
     private var statusColor: Color {
@@ -1809,6 +1903,8 @@ private struct CreditCardBalanceHistoryEntryRow: View {
         switch entry.kind {
         case .openingBalance:
             "arrow.turn.down.right"
+        case .statementBalance:
+            "doc.text"
         case .charge:
             "creditcard"
         case .refund:
@@ -1828,7 +1924,7 @@ private struct CreditCardBalanceHistoryEntryRow: View {
             AppTheme.Colors.success
         case .repaymentRefund, .reconciliationAdjustment:
             entry.amountPence < 0 ? AppTheme.Colors.success : AppTheme.Colors.warning
-        case .openingBalance, .charge:
+        case .openingBalance, .statementBalance, .charge:
             AppTheme.Colors.primaryOrange
         }
     }

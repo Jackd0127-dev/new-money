@@ -1120,7 +1120,17 @@ enum PlannerDerivedData {
         let cardItems = creditCardAllocationItems(snapshot: snapshot, rangeStart: rangeStart, rangeEnd: rangeEnd)
             .filter { $0.creditCardId == card.id }
         let actualBalanceItems = actualCreditCardBalanceItems(card: card, transactions: snapshot.transactions, repayments: snapshot.creditCardRepayments, asOfDate: asOfDate)
-        let actualOwedPence = max(0, (card.openingBalancePence ?? 0) + actualBalanceItems.reduce(0) { $0 + $1.amountPence })
+        let statementReconciliationPence = creditCardBalanceReconciliationPence(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: asOfDate
+        )
+        let actualOwedPence = max(
+            0,
+            (card.openingBalancePence ?? 0) +
+                actualBalanceItems.reduce(0) { $0 + $1.amountPence } +
+                statementReconciliationPence
+        )
         let forecastDeltaPence = forecastCreditCardItems(cardItems: cardItems, asOfDate: asOfDate).reduce(0) { $0 + $1.amountPence }
         let forecastOwedPence = max(0, actualOwedPence + forecastDeltaPence)
 
@@ -2259,6 +2269,42 @@ enum PlannerDerivedData {
             }
     }
 
+    /// A confirmed statement can reveal spending that was not entered item by item.
+    /// Reconcile it against the live balance already recorded on the processing date so an
+    /// opening balance is not counted twice when the card was added after that statement.
+    private static func creditCardBalanceReconciliationPence(
+        card: CreditCard,
+        snapshot: PlannerSnapshot,
+        asOfDate: String
+    ) -> Int {
+        let balanceItems = actualCreditCardBalanceItems(
+            card: card,
+            transactions: snapshot.transactions,
+            repayments: snapshot.creditCardRepayments,
+            asOfDate: asOfDate
+        )
+        let confirmedStatements = creditCardStatementSummaries(snapshot: snapshot, asOfDate: asOfDate)
+            .filter { $0.cardId == card.id }
+            .filter { $0.confirmedAmountPence != nil }
+            .sorted { $0.statementDate < $1.statementDate }
+
+        var reconciliationPence = 0
+        for statement in confirmedStatements {
+            guard let confirmedAmountPence = statement.confirmedAmountPence else { continue }
+            let recordedBalanceOnStatementDate = max(
+                0,
+                (card.openingBalancePence ?? 0) +
+                    balanceItems
+                    .filter { $0.date <= statement.statementDate }
+                    .reduce(0) { $0 + $1.amountPence } +
+                    reconciliationPence
+            )
+            reconciliationPence += max(0, confirmedAmountPence - recordedBalanceOnStatementDate)
+        }
+
+        return reconciliationPence
+    }
+
     private static func creditCardCycleConfirmedAmountPence(
         snapshot: PlannerSnapshot,
         cardId: String,
@@ -2548,8 +2594,13 @@ enum PlannerDerivedData {
         let repayments = snapshot.creditCardRepayments
             .filter { $0.deletedAt == nil && !$0.isRefunded && $0.creditCardId == card.id }
             .reduce(0) { $0 + $1.netAmountPence }
+        let statementReconciliationPence = creditCardBalanceReconciliationPence(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: FinanceEngine.getAppTodayIso(settings: snapshot.settings)
+        )
 
-        return max(0, opening + cardSpending - repayments)
+        return max(0, opening + cardSpending - repayments + statementReconciliationPence)
     }
 
     static func findPayPeriod(payPeriods: [PayPeriod], date: String) -> PayPeriod? {

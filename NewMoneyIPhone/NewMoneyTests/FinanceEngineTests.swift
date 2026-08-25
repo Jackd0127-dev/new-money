@@ -4464,8 +4464,83 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, 3_000)
         XCTAssertEqual(history.currentSection.entries.map(\.kind), [.charge])
         XCTAssertEqual(juneStatement.statementDate, "2026-06-20")
+        XCTAssertEqual(juneStatement.balancePence, 12_000)
         XCTAssertTrue(juneStatement.entries.contains { $0.kind == .repayment && $0.amountPence == -12_000 })
         XCTAssertEqual(juneStatement.entries.reduce(0) { $0 + $1.amountPence }, 0)
+    }
+
+    func testConfirmedStatementIncreaseReconcilesLiveCardBalance() throws {
+        let card = makeCreditCard(
+            id: "card-processed-statement",
+            name: "Barclays",
+            openingBalancePence: 7_018,
+            openingStatementBalancePence: 0,
+            statementDate: "2026-08-13",
+            dueDay: 5,
+            createdAt: "2026-08-25T00:00:00.000Z"
+        )
+        let currentSpend = makeTransaction(
+            id: "txn-after-statement",
+            cardId: card.id,
+            amountPence: 15_531,
+            date: "2026-08-19",
+            note: "Current activity"
+        )
+        let confirmedStatement = CreditCardCycleOverride(
+            id: "override-processed-statement",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-08-13",
+            statementState: .normal,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 7_917,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-13T00:00:00.000Z",
+            updatedAt: "2026-08-13T00:00:00.000Z",
+            deletedAt: nil
+        )
+        var settings = DefaultData.defaultSettings
+        settings.appDateMode = .manual
+        settings.manualTodayIso = "2026-08-25"
+        let snapshot = makeSnapshot(
+            settings: settings,
+            transactions: [currentSpend],
+            creditCards: [card],
+            creditCardCycleOverrides: [confirmedStatement]
+        )
+
+        let summary = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementSummaries(
+                snapshot: snapshot,
+                asOfDate: "2026-08-25"
+            ).first
+        )
+        let owed = PlannerDerivedData.creditCardOwedSummary(
+            card: card,
+            snapshot: snapshot,
+            payPeriod: nil,
+            asOfDate: "2026-08-25"
+        )
+
+        XCTAssertEqual(summary.statementAmountPence, 7_917)
+        XCTAssertEqual(summary.reconciliationAdjustmentPence, 7_917)
+        XCTAssertEqual(owed.actualOwedPence, 23_448)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: snapshot), 23_448)
+
+        let history = CreditCardBalanceHistoryData.make(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: "2026-08-25"
+        )
+        let statement = try XCTUnwrap(history.statementSections.first)
+
+        XCTAssertEqual(history.currentSection.entries.first?.title, "13 August statement balance")
+        XCTAssertEqual(history.currentSection.entries.first?.amountPence, 7_917)
+        XCTAssertFalse(history.currentSection.entries.contains { $0.title == "Balance carried forward" })
+        XCTAssertEqual(history.currentSection.entries.reduce(0) { $0 + $1.amountPence }, 23_448)
+        XCTAssertEqual(statement.title, "13 August processed")
+        XCTAssertEqual(statement.directDebitDate, "2026-09-05")
     }
 
     func testBasicDataAugustOverLimitAvailabilityIsSigned() {
@@ -8120,7 +8195,7 @@ final class FinanceEngineTests: XCTestCase {
         store.useSnapshotForSimulation(snapshot)
         let summaries = PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: "2026-08-08")
         let aquaSummary = try XCTUnwrap(summaries.first { $0.cardId == aqua.id })
-        XCTAssertEqual(PlannerDerivedData.cardBalance(card: aqua, snapshot: snapshot), 95_521)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: aqua, snapshot: snapshot), 156_893)
         XCTAssertEqual(aquaSummary.calculatedAmountPence, 8_216)
         XCTAssertEqual(aquaSummary.statementAmountPence, 69_588)
         let dueItems = summaries

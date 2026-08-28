@@ -3648,34 +3648,67 @@ struct CalendarSheetView: View {
 enum HistoryLayoutPolicy {
     static let toolbarMode = "none"
     static let showsPlaceholderOptions = false
+    static let baselineLabel = "Baseline"
+    static let editedLabel = "Edited"
+    static let revertedLabel = "Reverted"
+}
+
+private enum HistoryAuditFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case moneyOut = "Money out"
+    case cards = "Cards"
+    case system = "System"
+
+    var id: String { rawValue }
 }
 
 struct HistoryView: View {
     @ObservedObject var store: PlannerStore
+    @State private var searchText = ""
+    @State private var filter: HistoryAuditFilter = .all
 
     var body: some View {
         ScreenScaffold(
             title: "History",
-            subtitle: "Closed and active paycheck plans with allocations.",
+            subtitle: "Every recorded change and the totals it affected.",
             navigationMode: .inline,
             toolbarMode: .none
         ) {
-            AppCard(glow: true) {
-                MetricRow(label: "Paychecks", value: "\(store.snapshot.paychecks.count)")
-                MetricRow(label: "Total income", value: MoneyParser.formatPence(store.snapshot.payPeriods.reduce(0) { $0 + $1.incomePence }), valueColor: AppTheme.Colors.success)
-                MetricRow(label: "Total allocated", value: MoneyParser.formatPence(store.snapshot.potAllocations.reduce(0) { $0 + $1.amountPence }), valueColor: AppTheme.Colors.primaryOrange)
+            VStack(spacing: AppTheme.Spacing.sm) {
+                TextField("Search payments, statements, bills...", text: $searchText)
+                    .textFieldStyle(AppTextFieldStyle())
+
+                Picker("History filter", selection: $filter) {
+                    ForEach(HistoryAuditFilter.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
 
-            if store.snapshot.payPeriods.isEmpty {
-                AppCard { EmptyStateView(title: "No history", message: "Paycheck plans and allocation breakdowns appear here.", systemImage: "clock") }
+            if filteredEvents.isEmpty {
+                AppCard {
+                    EmptyStateView(
+                        title: "No matching history",
+                        message: "Inputs, payments, statements, edits, and calculated changes appear here.",
+                        systemImage: "clock.arrow.circlepath"
+                    )
+                }
             } else {
-                ForEach(store.snapshot.payPeriods.sorted { $0.payday > $1.payday }) { period in
+                ForEach(groupedMonths, id: \.key) { month in
+                    SectionTitle("\(month.key)  \(month.events.count) events")
                     AppCard {
-                        MetricRow(label: "Payday", value: period.payday)
-                        MetricRow(label: "Income", value: MoneyParser.formatPence(period.incomePence), valueColor: AppTheme.Colors.success)
-                        MetricRow(label: "Allocated", value: MoneyParser.formatPence(allocations(for: period).reduce(0) { $0 + $1.amountPence }), valueColor: AppTheme.Colors.primaryOrange)
-                        ForEach(allocations(for: period)) { allocation in
-                            MetricRow(label: store.snapshot.pots.first(where: { $0.id == allocation.potId })?.name ?? "Pot", value: MoneyParser.formatPence(allocation.amountPence))
+                        ForEach(Array(month.events.enumerated()), id: \.element.id) { index, event in
+                            NavigationLink {
+                                HistoryAuditEventDetailView(store: store, eventId: event.id)
+                            } label: {
+                                HistoryAuditEventRow(event: event)
+                            }
+                            .buttonStyle(.plain)
+
+                            if index < month.events.count - 1 {
+                                AppDivider()
+                            }
                         }
                     }
                 }
@@ -3683,9 +3716,298 @@ struct HistoryView: View {
         }
     }
 
-    private func allocations(for period: PayPeriod) -> [PotAllocation] {
-        store.snapshot.potAllocations.filter { $0.payPeriodId == period.id }
+    private var filteredEvents: [PlannerAuditEvent] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return store.snapshot.auditEvents
+            .filter { event in
+                switch filter {
+                case .all:
+                    true
+                case .moneyOut:
+                    event.changes.contains { [.transaction, .recurringPayment, .debtPayment, .potAllocation].contains($0.recordKind) }
+                case .cards:
+                    event.changes.contains { [.creditCard, .creditCardCycle, .creditCardRepayment, .creditCardPot].contains($0.recordKind) }
+                case .system:
+                    event.origin == .system || event.action == .automatic
+                }
+            }
+            .filter { event in
+                guard !query.isEmpty else { return true }
+                return event.title.localizedStandardContains(query)
+                    || event.subtitle.localizedStandardContains(query)
+                    || event.changes.contains { $0.recordName.localizedStandardContains(query) }
+            }
+            .sorted { $0.occurredAt > $1.occurredAt }
     }
+
+    private var groupedMonths: [(key: String, events: [PlannerAuditEvent])] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return Dictionary(grouping: filteredEvents) { event in
+            formatter.string(from: FinanceEngine.parseDate(event.effectiveDate))
+        }
+        .map { (key: $0.key, events: $0.value.sorted { $0.occurredAt > $1.occurredAt }) }
+        .sorted { lhs, rhs in
+            (lhs.events.first?.effectiveDate ?? "") > (rhs.events.first?.effectiveDate ?? "")
+        }
+    }
+}
+
+private struct HistoryAuditEventRow: View {
+    var event: PlannerAuditEvent
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) {
+                    Text(event.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                        .lineLimit(1)
+                    HistoryAuditStatusPill(action: event.action)
+                }
+                Text("\(historyFullDate(event.effectiveDate)) · \(event.subtitle)")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                if let amountPence = event.amountPence {
+                    Text(MoneyParser.formatPence(amountPence))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(amountPence < 0 ? AppTheme.Colors.success : AppTheme.Colors.primaryText)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var symbol: String {
+        switch event.action {
+        case .baseline: "clock"
+        case .created: "plus"
+        case .edited: "pencil"
+        case .deleted: "trash"
+        case .reverted: "arrow.uturn.backward"
+        case .automatic: "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private var color: Color {
+        switch event.action {
+        case .reverted: AppTheme.Colors.success
+        case .deleted: AppTheme.Colors.danger
+        case .baseline: AppTheme.Colors.secondaryText
+        case .created, .edited, .automatic: AppTheme.Colors.primaryOrange
+        }
+    }
+}
+
+struct HistoryAuditStatusPill: View {
+    var action: PlannerAuditAction
+
+    var body: some View {
+        if let label {
+            Text(label)
+                .font(.system(size: 9, weight: .black))
+                .foregroundStyle(color)
+                .textCase(.uppercase)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(color.opacity(0.14), in: Capsule())
+                .accessibilityLabel(label)
+        }
+    }
+
+    private var label: String? {
+        switch action {
+        case .baseline: HistoryLayoutPolicy.baselineLabel
+        case .edited: HistoryLayoutPolicy.editedLabel
+        case .reverted: HistoryLayoutPolicy.revertedLabel
+        case .automatic: "Automatic"
+        case .created, .deleted: nil
+        }
+    }
+
+    private var color: Color {
+        switch action {
+        case .reverted: AppTheme.Colors.success
+        case .baseline: AppTheme.Colors.secondaryText
+        case .created, .edited, .deleted, .automatic: AppTheme.Colors.primaryOrange
+        }
+    }
+}
+
+private struct HistoryAuditEventDetailView: View {
+    @ObservedObject var store: PlannerStore
+    var eventId: String
+
+    private var event: PlannerAuditEvent? {
+        store.snapshot.auditEvents.first { $0.id == eventId }
+    }
+
+    var body: some View {
+        ScreenScaffold(
+            title: "Revision",
+            subtitle: event?.title ?? "History record",
+            navigationMode: .inline,
+            toolbarMode: .none,
+            titleDisplayMode: .inline
+        ) {
+            if let event, let primary = event.changes.first {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(PlannerAuditEngine.displayName(for: primary.recordKind))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                            .textCase(.uppercase)
+                        HistoryAuditStatusPill(action: event.action)
+                    }
+                    Text(primary.recordName)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    Text("\(historyFullDate(primary.effectiveDate)) · recorded \(historyFullDate(event.occurredAt))")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                }
+
+                SectionTitle("What changed")
+                HStack(spacing: 0) {
+                    HistoryAuditVersionColumn(title: "Previous", summary: AuditRecordSummary.make(kind: primary.recordKind, json: primary.beforeJSON))
+                    AppDivider().frame(width: 1)
+                    HistoryAuditVersionColumn(title: "Current", summary: AuditRecordSummary.make(kind: primary.recordKind, json: primary.afterJSON))
+                }
+                .padding(.vertical, AppTheme.Spacing.sm)
+
+                if !event.effects.isEmpty {
+                    SectionTitle("Affected results")
+                    AppCard {
+                        ForEach(event.effects) { effect in
+                            MetricRow(
+                                label: effect.label,
+                                value: signedMoney(effect.deltaPence),
+                                valueColor: effect.deltaPence < 0 ? AppTheme.Colors.success : AppTheme.Colors.primaryOrange
+                            )
+                        }
+                    }
+                }
+
+                SectionTitle("Versions")
+                AppCard {
+                    let versions = store.auditEvents(for: primary.recordKind, id: primary.recordId)
+                    ForEach(Array(versions.enumerated()), id: \.element.id) { index, version in
+                        HStack(spacing: AppTheme.Spacing.sm) {
+                            Circle()
+                                .fill(version.id == event.id ? AppTheme.Colors.primaryOrange : AppTheme.Colors.tertiaryText)
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(version.title)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(AppTheme.Colors.primaryText)
+                                Text(historyFullDate(version.occurredAt))
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                            }
+                            Spacer()
+                            if version.id != versions.first?.id,
+                               version.changes.first(where: { $0.recordKind == primary.recordKind && $0.recordId == primary.recordId })?.afterJSON != nil {
+                                Button("Restore") {
+                                    _ = store.restoreAuditRecord(kind: primary.recordKind, id: primary.recordId, to: version.id)
+                                }
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryOrange)
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        if index < versions.count - 1 { AppDivider() }
+                    }
+                }
+
+                if store.auditAction(for: primary.recordKind, id: primary.recordId) == .edited {
+                    SecondaryButton(title: "Reverse latest edit", systemImage: "arrow.uturn.backward") {
+                        _ = store.reverseLatestEdit(for: primary.recordKind, id: primary.recordId)
+                    }
+                }
+            } else {
+                AppCard {
+                    EmptyStateView(title: "History unavailable", message: "This revision could not be loaded.", systemImage: "exclamationmark.triangle")
+                }
+            }
+        }
+    }
+}
+
+private struct HistoryAuditVersionColumn: View {
+    var title: String
+    var summary: AuditRecordSummary?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+            Text(summary?.amountPence.map { MoneyParser.formatPence($0) } ?? "Not recorded")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Text(summary.map { "\($0.name) · \(historyFullDate($0.date))" } ?? "No earlier version")
+                .font(.caption)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppTheme.Spacing.sm)
+    }
+}
+
+private struct AuditRecordSummary {
+    var name: String
+    var date: String
+    var amountPence: Int?
+
+    static func make(kind: PlannerAuditRecordKind, json: String?) -> AuditRecordSummary? {
+        guard let json else { return nil }
+        switch kind {
+        case .transaction:
+            return PlannerAuditEngine.decode(Transaction.self, json: json).map { .init(name: $0.note.nilIfBlank ?? "Payment", date: $0.date, amountPence: $0.netAmountPence) }
+        case .recurringPayment:
+            return PlannerAuditEngine.decode(RecurringPayment.self, json: json).map { .init(name: $0.name, date: $0.dueDate ?? $0.updatedAt, amountPence: $0.amountPence) }
+        case .creditCardRepayment:
+            return PlannerAuditEngine.decode(CreditCardRepayment.self, json: json).map { .init(name: $0.note.nilIfBlank ?? "Card payment", date: $0.date, amountPence: $0.netAmountPence) }
+        case .creditCard:
+            return PlannerAuditEngine.decode(CreditCard.self, json: json).map { .init(name: $0.name, date: $0.statementDate ?? $0.updatedAt, amountPence: $0.openingBalancePence) }
+        case .creditCardCycle:
+            return PlannerAuditEngine.decode(CreditCardCycleOverride.self, json: json).map { .init(name: "Card statement", date: $0.actualStatementDate ?? $0.scheduledStatementDate, amountPence: $0.amountPenceOverride) }
+        case .paycheck:
+            return PlannerAuditEngine.decode(Paycheck.self, json: json).map { .init(name: "Paycheck", date: $0.updatedAt, amountPence: $0.actualAmountPence ?? $0.calculatedAmountPence) }
+        case .oneOffIncome:
+            return PlannerAuditEngine.decode(OneOffIncome.self, json: json).map { .init(name: $0.name, date: $0.date, amountPence: $0.amountPence) }
+        case .debtPayment:
+            return PlannerAuditEngine.decode(DebtPayment.self, json: json).map { .init(name: $0.note.nilIfBlank ?? "Debt payment", date: $0.date, amountPence: $0.netAmountPence) }
+        default:
+            return nil
+        }
+    }
+}
+
+private func signedMoney(_ pence: Int) -> String {
+    pence > 0 ? "+\(MoneyParser.formatPence(pence))" : MoneyParser.formatPence(pence)
+}
+
+private func historyFullDate(_ value: String) -> String {
+    let isoDate = String(value.prefix(10))
+    return FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
 }
 
 enum SettingsRoute: String, CaseIterable, Hashable {

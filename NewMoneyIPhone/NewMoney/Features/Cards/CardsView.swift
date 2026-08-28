@@ -9,7 +9,7 @@ enum CardsSection: String, Equatable {
 struct CardsLayoutPolicy {
     static let toolbarActionId = "add"
     static let detailToolbarActionId = "card-detail-add-payment"
-    static let detailToolbarTitle = "Payment"
+    static let detailToolbarTitle = "Pay"
     static let detailToolbarStyle = "textButton"
     static let repaymentFlowPlacement = "cardDetailToolbar"
     static let balanceHistoryToolbarActionId = "card-detail-balance-history"
@@ -1283,6 +1283,7 @@ struct CardDetailView: View {
     @State private var isCardEditPresented = false
     @State private var isDeleteConfirmationPresented = false
     @State private var balanceHistoryEditTarget: CreditCardBalanceHistoryEditTarget?
+    @State private var selectedStatementSection: CreditCardBalanceHistorySection?
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
@@ -1327,6 +1328,9 @@ struct CardDetailView: View {
                     .accessibilityLabel(selectedTab == .balanceHistory ? "Show card overview" : "Show balance history")
                     .accessibilityHint("Switches between the card overview and its statement-grouped balance ledger")
                 }
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
                 ToolbarItem(id: CardsLayoutPolicy.detailToolbarActionId, placement: .topBarTrailing) {
                     Button {
                         isCardPaymentPresented = true
@@ -1348,6 +1352,13 @@ struct CardDetailView: View {
             }
             .sheet(item: $balanceHistoryEditTarget) { target in
                 CreditCardBalanceHistoryEditorSheet(store: store, target: target)
+            }
+            .sheet(item: $selectedStatementSection) { section in
+                CreditCardStatementDetailEditorView(
+                    store: store,
+                    cardId: currentCard.id,
+                    scheduledStatementDate: section.statementDate ?? store.todayIso
+                )
             }
         }
     }
@@ -1410,16 +1421,22 @@ struct CardDetailView: View {
                     .foregroundStyle(AppTheme.Colors.secondaryText)
             }
 
-            CreditCardBalanceHistorySectionView(section: history.currentSection) {
-                balanceHistoryEditTarget = $0
-            }
+            CreditCardBalanceHistorySectionView(
+                store: store,
+                section: history.currentSection,
+                onOpenStatement: {},
+                onEdit: { balanceHistoryEditTarget = $0 }
+            )
 
             if !history.statementSections.isEmpty {
                 SectionTitle("Statements")
                 ForEach(history.statementSections) { section in
-                    CreditCardBalanceHistorySectionView(section: section) {
-                        balanceHistoryEditTarget = $0
-                    }
+                    CreditCardBalanceHistorySectionView(
+                        store: store,
+                        section: section,
+                        onOpenStatement: { selectedStatementSection = section },
+                        onEdit: { balanceHistoryEditTarget = $0 }
+                    )
                 }
             }
         }
@@ -1834,15 +1851,21 @@ struct CardDetailView: View {
 
 private struct CreditCardBalanceHistorySectionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject var store: PlannerStore
     var section: CreditCardBalanceHistorySection
+    var onOpenStatement: () -> Void
     var onEdit: (CreditCardBalanceHistoryEditTarget) -> Void
     @State private var isExpanded: Bool
 
     init(
+        store: PlannerStore,
         section: CreditCardBalanceHistorySection,
+        onOpenStatement: @escaping () -> Void,
         onEdit: @escaping (CreditCardBalanceHistoryEditTarget) -> Void
     ) {
+        self.store = store
         self.section = section
+        self.onOpenStatement = onOpenStatement
         self.onEdit = onEdit
         _isExpanded = State(
             initialValue: section.statementDate == nil || CardsLayoutPolicy.balanceHistoryStatementsDefaultExpanded
@@ -1854,12 +1877,25 @@ private struct CreditCardBalanceHistorySectionView: View {
             if section.statementDate == nil {
                 header
             } else {
-                Button(action: toggleExpanded) {
-                    header
+                HStack(spacing: 0) {
+                    Button(action: onOpenStatement) {
+                        header
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(statementAccessibilityLabel)")
+                    .accessibilityHint("Opens the complete statement and all editable movements")
+
+                    Button(action: toggleExpanded) {
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "Collapse statement" : "Expand statement")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(statementAccessibilityLabel)
-                .accessibilityHint(isExpanded ? "Collapses statement movements" : "Shows every recorded statement movement")
             }
 
             if isExpanded {
@@ -1875,13 +1911,17 @@ private struct CreditCardBalanceHistorySectionView: View {
                                 Button {
                                     onEdit(editTarget)
                                 } label: {
-                                    CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: true)
+                                    CreditCardBalanceHistoryEntryRow(
+                                        entry: entry,
+                                        showsEditIndicator: true,
+                                        auditAction: auditAction(for: entry.editTarget)
+                                    )
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityHint("Opens this movement for editing")
                                 .accessibilityIdentifier("card-balance-entry-\(entry.id)")
                             } else {
-                                CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: false)
+                                CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: false, auditAction: nil)
                                     .accessibilityIdentifier("card-balance-entry-\(entry.id)")
                             }
                         }
@@ -1921,16 +1961,8 @@ private struct CreditCardBalanceHistorySectionView: View {
                 }
             }
 
-            if section.statementDate != nil {
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                    .frame(width: 28, height: 44)
-                    .contentShape(Rectangle())
-                    .accessibilityHidden(true)
-            }
         }
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
     }
 
@@ -1966,11 +1998,36 @@ private struct CreditCardBalanceHistorySectionView: View {
             AppTheme.Colors.secondaryText
         }
     }
+
+    private func auditAction(for target: CreditCardBalanceHistoryEditTarget?) -> PlannerAuditAction? {
+        guard let target else { return nil }
+        switch target {
+        case .transaction(let id):
+            return store.auditAction(for: .transaction, id: id)
+        case .recurring(let paymentId, _):
+            return store.auditAction(for: .recurringPayment, id: paymentId)
+        case .repayment(let id):
+            return store.auditAction(for: .creditCardRepayment, id: id)
+        case .card(let id):
+            return store.auditAction(for: .creditCard, id: id)
+        case .statement(let cardId, let scheduledStatementDate):
+            return store.snapshot.auditEvents.reversed().first { event in
+                event.action != .baseline && event.changes.contains { change in
+                    guard change.recordKind == .creditCardCycle,
+                          let json = change.afterJSON ?? change.beforeJSON,
+                          let cycle = PlannerAuditEngine.decode(CreditCardCycleOverride.self, json: json)
+                    else { return false }
+                    return cycle.creditCardId == cardId && cycle.scheduledStatementDate == scheduledStatementDate
+                }
+            }?.action
+        }
+    }
 }
 
 private struct CreditCardBalanceHistoryEntryRow: View {
     var entry: CreditCardBalanceHistoryEntry
     var showsEditIndicator: Bool
+    var auditAction: PlannerAuditAction?
 
     var body: some View {
         HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
@@ -1982,9 +2039,14 @@ private struct CreditCardBalanceHistoryEntryRow: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
+                HStack(spacing: 7) {
+                    Text(entry.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    if let auditAction {
+                        HistoryAuditStatusPill(action: auditAction)
+                    }
+                }
                 Text(fullDate(entry.date))
                     .font(.caption)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
@@ -2056,6 +2118,133 @@ private struct CreditCardBalanceHistoryEntryRow: View {
 
     private func fullDate(_ isoDate: String) -> String {
         FinanceEngine.parseDate(isoDate).formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
+private struct CreditCardStatementDetailEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var cardId: String
+    var scheduledStatementDate: String
+    @State private var editTarget: CreditCardBalanceHistoryEditTarget?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+                    if let section {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Statement")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.cardEyebrow)
+                                .textCase(.uppercase)
+                            Text(section.title)
+                                .font(.title2.weight(.bold))
+                                .foregroundStyle(AppTheme.Colors.primaryText)
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(MoneyParser.formatPence(section.balancePence))
+                                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                                    .foregroundStyle(AppTheme.Colors.primaryText)
+                                Spacer()
+                                if let directDebitDate = section.directDebitDate {
+                                    Text("Due \(compactDate(directDebitDate))")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                                }
+                            }
+                        }
+
+                        if let statementTarget {
+                            SecondaryButton(title: "Edit statement total", systemImage: "pencil") {
+                                editTarget = statementTarget
+                            }
+                        }
+
+                        SectionTitle("Every statement movement")
+                        AppCard {
+                            if section.entries.isEmpty {
+                                EmptyStateView(
+                                    title: "No statement movements",
+                                    message: "Payments and adjustments included in this locked statement appear here.",
+                                    systemImage: "doc.text"
+                                )
+                            } else {
+                                ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
+                                    if let target = entry.editTarget {
+                                        Button {
+                                            editTarget = target
+                                        } label: {
+                                            CreditCardBalanceHistoryEntryRow(
+                                                entry: entry,
+                                                showsEditIndicator: true,
+                                                auditAction: auditAction(for: target)
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityHint("Opens this statement movement for editing")
+                                    } else {
+                                        CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: false, auditAction: nil)
+                                    }
+                                    if index < section.entries.count - 1 { AppDivider() }
+                                }
+                            }
+                        }
+                    } else {
+                        AppCard {
+                            EmptyStateView(
+                                title: "Statement unavailable",
+                                message: "This statement could not be rebuilt from the current ledger.",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                        }
+                    }
+                }
+                .padding(AppTheme.Spacing.lg)
+            }
+            .premiumScreenBackground()
+            .navigationTitle("Statement")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .sheet(item: $editTarget) { target in
+                CreditCardBalanceHistoryEditorSheet(store: store, target: target)
+            }
+        }
+    }
+
+    private var section: CreditCardBalanceHistorySection? {
+        guard let card = store.snapshot.creditCards.first(where: { $0.id == cardId }) else { return nil }
+        return CreditCardBalanceHistoryData.make(card: card, snapshot: store.snapshot, asOfDate: store.todayIso)
+            .statementSections
+            .first { $0.statementDate == scheduledStatementDate }
+    }
+
+    private var statementTarget: CreditCardBalanceHistoryEditTarget? {
+        section?.entries.compactMap(\.editTarget).first {
+            if case .statement = $0 { return true }
+            return false
+        }
+    }
+
+    private func auditAction(for target: CreditCardBalanceHistoryEditTarget) -> PlannerAuditAction? {
+        switch target {
+        case .transaction(let id): store.auditAction(for: .transaction, id: id)
+        case .recurring(let id, _): store.auditAction(for: .recurringPayment, id: id)
+        case .repayment(let id): store.auditAction(for: .creditCardRepayment, id: id)
+        case .card(let id): store.auditAction(for: .creditCard, id: id)
+        case .statement:
+            store.snapshot.auditEvents.reversed().first { event in
+                event.action != .baseline && event.changes.contains { $0.recordKind == .creditCardCycle }
+            }?.action
+        }
+    }
+
+    private func compactDate(_ value: String) -> String {
+        FinanceEngine.parseDate(value).formatted(.dateTime.day().month(.abbreviated).year())
     }
 }
 

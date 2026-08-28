@@ -28,6 +28,9 @@ final class PlannerStore: ObservableObject {
     private let repository: PlannerRepository
     private let accountRepository: PlannerAccountRepository?
     private var accountCollection: PlannerAccountCollection?
+    private var lastAuditedSnapshot: PlannerSnapshot?
+    private var pendingAuditOrigin: PlannerAuditOrigin = .user
+    private var pendingRestoredFromEventId: String?
 #if DEBUG
     private var suppressAutomaticDueCatchUpForSimulation = false
 #endif
@@ -146,9 +149,13 @@ final class PlannerStore: ObservableObject {
                 if prepareLoadedSnapshot() {
                     shouldPersist = true
                 }
+                if bootstrapAuditHistoryIfNeeded() {
+                    shouldPersist = true
+                }
                 if shouldPersist, let updatedCollection = updateActiveAccountSnapshot(snapshot) {
                     try await accountRepository.saveAccountCollection(updatedCollection)
                 }
+                lastAuditedSnapshot = snapshot
                 refreshCreditCardCycleReminders()
                 return
             }
@@ -172,9 +179,13 @@ final class PlannerStore: ObservableObject {
             if catchUpDueObligations(to: todayIso) {
                 shouldPersist = true
             }
+            if bootstrapAuditHistoryIfNeeded() {
+                shouldPersist = true
+            }
             if shouldPersist {
                 try await repository.saveSnapshot(snapshot)
             }
+            lastAuditedSnapshot = snapshot
             refreshCreditCardCycleReminders()
         } catch {
             errorMessage = "Unable to load local planner data."
@@ -184,6 +195,8 @@ final class PlannerStore: ObservableObject {
     func replaceSnapshot(_ replacement: PlannerSnapshot) async throws {
         let migration = DefaultData.migratedSnapshot(replacement)
         snapshot = migration.snapshot
+        _ = bootstrapAuditHistoryIfNeeded()
+        lastAuditedSnapshot = snapshot
         if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
             try await accountRepository.saveAccountCollection(collection)
         } else {
@@ -198,6 +211,10 @@ final class PlannerStore: ObservableObject {
         if prepareLoadedSnapshot(), let updatedCollection = updateActiveAccountSnapshot(snapshot) {
             collection = updatedCollection
         }
+        if bootstrapAuditHistoryIfNeeded(), let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+            collection = updatedCollection
+        }
+        lastAuditedSnapshot = snapshot
 
         if let accountRepository {
             try await accountRepository.saveAccountCollection(collection)
@@ -220,6 +237,7 @@ final class PlannerStore: ObservableObject {
 
     func resetLocalData() {
         snapshot = DefaultData.emptySnapshot
+        lastAuditedSnapshot = snapshot
         if let accountRepository, let collection = updateActiveAccountSnapshot(snapshot) {
             Task {
                 do {
@@ -258,6 +276,7 @@ final class PlannerStore: ObservableObject {
 
         snapshot = DefaultData.emptySnapshot
         applyAccountCollection(resetCollection)
+        lastAuditedSnapshot = snapshot
 
         if let accountRepository {
             try await accountRepository.resetAccountCollection()
@@ -303,6 +322,10 @@ final class PlannerStore: ObservableObject {
         if prepareLoadedSnapshot(), let updatedCollection = updateActiveAccountSnapshot(snapshot) {
             collection = updatedCollection
         }
+        if bootstrapAuditHistoryIfNeeded(), let updatedCollection = updateActiveAccountSnapshot(snapshot) {
+            collection = updatedCollection
+        }
+        lastAuditedSnapshot = snapshot
         try await accountRepository.saveAccountCollection(collection)
         markCloudSyncNeeded()
     }
@@ -325,6 +348,10 @@ final class PlannerStore: ObservableObject {
         if prepareLoadedSnapshot() {
             shouldPersist = true
         }
+        if bootstrapAuditHistoryIfNeeded() {
+            shouldPersist = true
+        }
+        lastAuditedSnapshot = snapshot
         if shouldPersist, let updatedCollection = updateActiveAccountSnapshot(snapshot) {
             collection = updatedCollection
         }
@@ -4100,6 +4127,13 @@ final class PlannerStore: ObservableObject {
         return shouldPersist
     }
 
+    @discardableResult
+    private func bootstrapAuditHistoryIfNeeded() -> Bool {
+        guard snapshot.auditEvents.isEmpty, snapshot.hasMeaningfulPlannerData else { return false }
+        snapshot.auditEvents = PlannerAuditEngine.baselineEvents(for: snapshot)
+        return !snapshot.auditEvents.isEmpty
+    }
+
     private func applyAccountCollection(_ collection: PlannerAccountCollection) {
         let sanitizedCollection = sanitizedAccountCollection(collection)
         applySelectedThemeIfNeeded(from: sanitizedCollection)
@@ -4107,6 +4141,7 @@ final class PlannerStore: ObservableObject {
         plannerAccounts = sanitizedCollection.accounts
         activePlannerAccountId = sanitizedCollection.activeAccountId
         snapshot = sanitizedCollection.activeAccount?.snapshot ?? DefaultData.emptySnapshot
+        lastAuditedSnapshot = snapshot
     }
 
     func accountCollectionForCloudUpload() -> PlannerAccountCollection {
@@ -4209,6 +4244,7 @@ final class PlannerStore: ObservableObject {
 #else
         _ = catchUpDueObligations(to: todayIso)
 #endif
+        recordPendingAuditEvent()
         refreshCreditCardCycleReminders()
         let snapshot = snapshot
         markCloudSyncNeeded()
@@ -4233,6 +4269,109 @@ final class PlannerStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func recordPendingAuditEvent() {
+        guard let before = lastAuditedSnapshot else {
+            lastAuditedSnapshot = snapshot
+            pendingAuditOrigin = .user
+            pendingRestoredFromEventId = nil
+            return
+        }
+
+        if let event = PlannerAuditEngine.event(
+            before: before,
+            after: snapshot,
+            origin: pendingAuditOrigin,
+            restoredFromEventId: pendingRestoredFromEventId
+        ) {
+            snapshot.auditEvents.append(event)
+        }
+        lastAuditedSnapshot = snapshot
+        pendingAuditOrigin = .user
+        pendingRestoredFromEventId = nil
+    }
+
+    func auditAction(for kind: PlannerAuditRecordKind, id: String) -> PlannerAuditAction? {
+        snapshot.auditEvents.reversed().first { event in
+            event.action != .baseline && event.changes.contains { $0.recordKind == kind && $0.recordId == id }
+        }?.action
+    }
+
+    func auditEvents(for kind: PlannerAuditRecordKind, id: String) -> [PlannerAuditEvent] {
+        snapshot.auditEvents
+            .filter { event in event.changes.contains { $0.recordKind == kind && $0.recordId == id } }
+            .sorted { $0.occurredAt > $1.occurredAt }
+    }
+
+    @discardableResult
+    func reverseLatestEdit(for kind: PlannerAuditRecordKind, id: String) -> Bool {
+        guard let event = snapshot.auditEvents.reversed().first(where: { candidate in
+            candidate.action != .baseline && candidate.changes.contains {
+                $0.recordKind == kind && $0.recordId == id && $0.beforeJSON != nil
+            }
+        }),
+        let change = event.changes.first(where: { $0.recordKind == kind && $0.recordId == id }),
+        applyAuditChange(change, json: change.beforeJSON)
+        else { return false }
+
+        pendingAuditOrigin = .restore
+        pendingRestoredFromEventId = event.id
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func restoreAuditRecord(kind: PlannerAuditRecordKind, id: String, to eventId: String) -> Bool {
+        guard let event = snapshot.auditEvents.first(where: { $0.id == eventId }),
+              let change = event.changes.first(where: { $0.recordKind == kind && $0.recordId == id }),
+              applyAuditChange(change, json: change.afterJSON)
+        else { return false }
+
+        pendingAuditOrigin = .restore
+        pendingRestoredFromEventId = event.id
+        persist()
+        return true
+    }
+
+    private func applyAuditChange(_ change: PlannerAuditChange, json: String?) -> Bool {
+        switch change.recordKind {
+        case .bankAccount: return replaceRecord(in: &snapshot.bankAccounts, id: change.recordId, json: json)
+        case .pot: return replaceRecord(in: &snapshot.pots, id: change.recordId, json: json)
+        case .recurringPayment: return replaceRecord(in: &snapshot.recurringPayments, id: change.recordId, json: json)
+        case .recurringOccurrence: return replaceRecord(in: &snapshot.recurringPaymentOccurrenceOverrides, id: change.recordId, json: json)
+        case .incomeOccurrence: return replaceRecord(in: &snapshot.incomeOccurrenceOverrides, id: change.recordId, json: json)
+        case .billGroup: return replaceRecord(in: &snapshot.billGroups, id: change.recordId, json: json)
+        case .payPeriod: return replaceRecord(in: &snapshot.payPeriods, id: change.recordId, json: json)
+        case .paycheck: return replaceRecord(in: &snapshot.paychecks, id: change.recordId, json: json)
+        case .oneOffIncome: return replaceRecord(in: &snapshot.oneOffIncomes, id: change.recordId, json: json)
+        case .potAllocation: return replaceRecord(in: &snapshot.potAllocations, id: change.recordId, json: json)
+        case .transaction: return replaceRecord(in: &snapshot.transactions, id: change.recordId, json: json)
+        case .debt: return replaceRecord(in: &snapshot.debts, id: change.recordId, json: json)
+        case .debtPayment: return replaceRecord(in: &snapshot.debtPayments, id: change.recordId, json: json)
+        case .debtReserve: return replaceRecord(in: &snapshot.debtReserves, id: change.recordId, json: json)
+        case .debtSchedule: return replaceRecord(in: &snapshot.debtPaymentScheduleItems, id: change.recordId, json: json)
+        case .creditCard: return replaceRecord(in: &snapshot.creditCards, id: change.recordId, json: json)
+        case .customPayment: return replaceRecord(in: &snapshot.customPayments, id: change.recordId, json: json)
+        case .creditCardRepayment: return replaceRecord(in: &snapshot.creditCardRepayments, id: change.recordId, json: json)
+        case .creditCardPot: return replaceRecord(in: &snapshot.creditCardPots, id: change.recordId, json: json)
+        case .creditCardCycle: return replaceRecord(in: &snapshot.creditCardCycleOverrides, id: change.recordId, json: json)
+        }
+    }
+
+    private func replaceRecord<T: Codable & Identifiable>(in records: inout [T], id: String, json: String?) -> Bool where T.ID == String {
+        guard let json else {
+            let oldCount = records.count
+            records.removeAll { $0.id == id }
+            return records.count != oldCount
+        }
+        guard let decoded = PlannerAuditEngine.decode(T.self, json: json) else { return false }
+        if let index = records.firstIndex(where: { $0.id == id }) {
+            records[index] = decoded
+        } else {
+            records.append(decoded)
+        }
+        return true
     }
 
     private func refreshCreditCardCycleReminders() {

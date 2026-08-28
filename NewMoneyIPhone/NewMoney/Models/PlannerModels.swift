@@ -1049,6 +1049,78 @@ struct DailyBrief: Codable, Equatable, Identifiable, Sendable {
     var deletedAt: String?
 }
 
+enum PlannerAuditRecordKind: String, Codable, CaseIterable, Sendable {
+    case bankAccount
+    case pot
+    case recurringPayment
+    case recurringOccurrence
+    case incomeOccurrence
+    case billGroup
+    case payPeriod
+    case paycheck
+    case oneOffIncome
+    case potAllocation
+    case transaction
+    case debt
+    case debtPayment
+    case debtReserve
+    case debtSchedule
+    case creditCard
+    case customPayment
+    case creditCardRepayment
+    case creditCardPot
+    case creditCardCycle
+}
+
+enum PlannerAuditAction: String, Codable, Sendable {
+    case baseline
+    case created
+    case edited
+    case deleted
+    case reverted
+    case automatic
+}
+
+enum PlannerAuditOrigin: String, Codable, Sendable {
+    case baseline
+    case user
+    case system
+    case restore
+}
+
+struct PlannerAuditEffect: Codable, Equatable, Identifiable, Sendable {
+    var label: String
+    var deltaPence: Int
+
+    var id: String { label }
+}
+
+struct PlannerAuditChange: Codable, Equatable, Identifiable, Sendable {
+    var recordKind: PlannerAuditRecordKind
+    var recordId: String
+    var recordName: String
+    var effectiveDate: String
+    var amountPence: Int?
+    var beforeJSON: String?
+    var afterJSON: String?
+
+    var id: String { "\(recordKind.rawValue):\(recordId)" }
+}
+
+struct PlannerAuditEvent: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var occurredAt: String
+    var effectiveDate: String
+    var action: PlannerAuditAction
+    var origin: PlannerAuditOrigin
+    var title: String
+    var subtitle: String
+    var amountPence: Int?
+    var changes: [PlannerAuditChange]
+    var effects: [PlannerAuditEffect]
+    var restoredFromEventId: String? = nil
+}
+
 struct PlannerSnapshot: Codable, Equatable, Sendable {
     var settings: Settings
     var pots: [Pot]
@@ -1074,6 +1146,7 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
     var oneOffIncomes: [OneOffIncome]
     var fundingChecklistExclusions: [FundingChecklistExclusion]
     var bankAccounts: [BankAccount]
+    var auditEvents: [PlannerAuditEvent]
 
     init(
         settings: Settings,
@@ -1099,7 +1172,8 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         dailyBriefs: [DailyBrief],
         oneOffIncomes: [OneOffIncome] = [],
         fundingChecklistExclusions: [FundingChecklistExclusion] = [],
-        bankAccounts: [BankAccount] = []
+        bankAccounts: [BankAccount] = [],
+        auditEvents: [PlannerAuditEvent] = []
     ) {
         self.settings = settings
         self.pots = pots
@@ -1125,10 +1199,11 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
         self.oneOffIncomes = oneOffIncomes
         self.fundingChecklistExclusions = fundingChecklistExclusions
         self.bankAccounts = bankAccounts
+        self.auditEvents = auditEvents
     }
 
     private enum CodingKeys: String, CodingKey {
-        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, incomeOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions, bankAccounts
+        case settings, pots, recurringPayments, recurringPaymentOccurrenceOverrides, incomeOccurrenceOverrides, billGroups, payPeriods, paychecks, potAllocations, transactions, debts, debtPayments, debtReserves, debtPaymentScheduleItems, debtSnapshots, creditCards, customPayments, creditCardRepayments, creditCardPots, creditCardCycleOverrides, dailyBriefs, oneOffIncomes, fundingChecklistExclusions, bankAccounts, auditEvents
     }
 
     init(from decoder: Decoder) throws {
@@ -1157,8 +1232,342 @@ struct PlannerSnapshot: Codable, Equatable, Sendable {
             dailyBriefs: try container.decodeIfPresent([DailyBrief].self, forKey: .dailyBriefs) ?? [],
             oneOffIncomes: try container.decodeIfPresent([OneOffIncome].self, forKey: .oneOffIncomes) ?? [],
             fundingChecklistExclusions: try container.decodeIfPresent([FundingChecklistExclusion].self, forKey: .fundingChecklistExclusions) ?? [],
-            bankAccounts: try container.decodeIfPresent([BankAccount].self, forKey: .bankAccounts) ?? []
+            bankAccounts: try container.decodeIfPresent([BankAccount].self, forKey: .bankAccounts) ?? [],
+            auditEvents: try container.decodeIfPresent([PlannerAuditEvent].self, forKey: .auditEvents) ?? []
         )
+    }
+}
+
+enum PlannerAuditEngine {
+    static func baselineEvents(for snapshot: PlannerSnapshot) -> [PlannerAuditEvent] {
+        var changes: [PlannerAuditChange] = []
+        appendBaseline(snapshot.transactions, kind: .transaction, to: &changes) { transaction in
+            descriptor(
+                name: transaction.note.nilIfBlank ?? "Payment",
+                date: transaction.date,
+                amountPence: transaction.netAmountPence
+            )
+        }
+        appendBaseline(snapshot.recurringPayments, kind: .recurringPayment, to: &changes) { payment in
+            descriptor(name: payment.name, date: payment.dueDate ?? payment.createdAt, amountPence: payment.amountPence)
+        }
+        appendBaseline(snapshot.creditCardRepayments, kind: .creditCardRepayment, to: &changes) { repayment in
+            descriptor(name: repayment.note.nilIfBlank ?? "Card payment", date: repayment.date, amountPence: repayment.netAmountPence)
+        }
+        appendBaseline(snapshot.creditCards, kind: .creditCard, to: &changes) { card in
+            descriptor(name: card.name, date: card.statementDate ?? card.createdAt, amountPence: card.openingBalancePence)
+        }
+        appendBaseline(snapshot.creditCardCycleOverrides, kind: .creditCardCycle, to: &changes) { cycle in
+            descriptor(name: "Card statement", date: cycle.actualStatementDate ?? cycle.scheduledStatementDate, amountPence: cycle.amountPenceOverride)
+        }
+        appendBaseline(snapshot.paychecks, kind: .paycheck, to: &changes) { paycheck in
+            descriptor(name: "Paycheck", date: paycheck.createdAt, amountPence: paycheck.actualAmountPence ?? paycheck.calculatedAmountPence)
+        }
+        appendBaseline(snapshot.oneOffIncomes, kind: .oneOffIncome, to: &changes) { income in
+            descriptor(name: income.name, date: income.date, amountPence: income.amountPence)
+        }
+        appendBaseline(snapshot.payPeriods, kind: .payPeriod, to: &changes) { period in
+            descriptor(name: "Pay period", date: period.payday, amountPence: period.incomePence)
+        }
+        appendBaseline(snapshot.potAllocations, kind: .potAllocation, to: &changes) { allocation in
+            descriptor(name: "Pot allocation", date: allocation.transactionDate ?? allocation.createdAt, amountPence: allocation.amountPence)
+        }
+        appendBaseline(snapshot.pots, kind: .pot, to: &changes) { pot in
+            descriptor(name: pot.name, date: pot.createdAt, amountPence: pot.balancePence)
+        }
+        appendBaseline(snapshot.bankAccounts, kind: .bankAccount, to: &changes) { account in
+            descriptor(name: account.name, date: account.createdAt, amountPence: PlannerDerivedData.bankAccountBalance(account: account, snapshot: snapshot))
+        }
+        appendBaseline(snapshot.debts, kind: .debt, to: &changes) { debt in
+            descriptor(name: debt.name, date: debt.dueDate.nilIfBlank ?? debt.createdAt, amountPence: debt.currentBalancePence)
+        }
+        appendBaseline(snapshot.debtPayments, kind: .debtPayment, to: &changes) { payment in
+            descriptor(name: payment.note.nilIfBlank ?? "Debt payment", date: payment.date, amountPence: payment.netAmountPence)
+        }
+        appendBaseline(snapshot.debtReserves, kind: .debtReserve, to: &changes) { reserve in
+            descriptor(name: reserve.note.nilIfBlank ?? "Debt reserve", date: reserve.payday, amountPence: reserve.amountPence)
+        }
+        appendBaseline(snapshot.customPayments, kind: .customPayment, to: &changes) { payment in
+            descriptor(name: payment.name, date: payment.dueDate, amountPence: payment.amountPence)
+        }
+        appendBaseline(snapshot.billGroups, kind: .billGroup, to: &changes) { group in
+            descriptor(name: group.name, date: group.createdAt, amountPence: nil)
+        }
+        appendBaseline(snapshot.recurringPaymentOccurrenceOverrides, kind: .recurringOccurrence, to: &changes) { occurrence in
+            descriptor(name: "Bill occurrence", date: occurrence.actualDueDate ?? occurrence.scheduledDueDate, amountPence: occurrence.amountPenceOverride)
+        }
+        appendBaseline(snapshot.incomeOccurrenceOverrides, kind: .incomeOccurrence, to: &changes) { occurrence in
+            descriptor(name: "Income occurrence", date: occurrence.actualDate ?? occurrence.scheduledDate, amountPence: occurrence.amountPenceOverride)
+        }
+        appendBaseline(snapshot.creditCardPots, kind: .creditCardPot, to: &changes) { pot in
+            descriptor(name: pot.name, date: pot.createdAt, amountPence: pot.amountPence)
+        }
+        appendBaseline(snapshot.debtPaymentScheduleItems, kind: .debtSchedule, to: &changes) { item in
+            descriptor(name: "Debt schedule", date: item.dueDate, amountPence: item.plannedAmountPence)
+        }
+
+        return changes.map { change in
+            PlannerAuditEvent(
+                id: "audit-baseline-\(change.recordKind.rawValue)-\(change.recordId)",
+                occurredAt: normalizedTimestamp(change.effectiveDate),
+                effectiveDate: change.effectiveDate,
+                action: .baseline,
+                origin: .baseline,
+                title: change.recordName,
+                subtitle: "Baseline \(displayName(for: change.recordKind))",
+                amountPence: change.amountPence,
+                changes: [change],
+                effects: []
+            )
+        }
+        .sorted { $0.occurredAt < $1.occurredAt }
+    }
+
+    static func event(
+        before: PlannerSnapshot,
+        after: PlannerSnapshot,
+        origin: PlannerAuditOrigin,
+        restoredFromEventId: String? = nil
+    ) -> PlannerAuditEvent? {
+        var changes: [PlannerAuditChange] = []
+        appendChanges(before.transactions, after.transactions, kind: .transaction, to: &changes) { item in
+            descriptor(name: item.note.nilIfBlank ?? "Payment", date: item.date, amountPence: item.netAmountPence)
+        }
+        appendChanges(before.recurringPayments, after.recurringPayments, kind: .recurringPayment, to: &changes) { item in
+            descriptor(name: item.name, date: item.dueDate ?? item.updatedAt, amountPence: item.amountPence)
+        }
+        appendChanges(before.creditCardRepayments, after.creditCardRepayments, kind: .creditCardRepayment, to: &changes) { item in
+            descriptor(name: item.note.nilIfBlank ?? "Card payment", date: item.date, amountPence: item.netAmountPence)
+        }
+        appendChanges(before.creditCards, after.creditCards, kind: .creditCard, to: &changes) { item in
+            descriptor(name: item.name, date: item.statementDate ?? item.updatedAt, amountPence: item.openingBalancePence)
+        }
+        appendChanges(before.creditCardCycleOverrides, after.creditCardCycleOverrides, kind: .creditCardCycle, to: &changes) { item in
+            descriptor(name: "Card statement", date: item.actualStatementDate ?? item.scheduledStatementDate, amountPence: item.amountPenceOverride)
+        }
+        appendChanges(before.paychecks, after.paychecks, kind: .paycheck, to: &changes) { item in
+            descriptor(name: "Paycheck", date: item.updatedAt, amountPence: item.actualAmountPence ?? item.calculatedAmountPence)
+        }
+        appendChanges(before.oneOffIncomes, after.oneOffIncomes, kind: .oneOffIncome, to: &changes) { item in
+            descriptor(name: item.name, date: item.date, amountPence: item.amountPence)
+        }
+        appendChanges(before.customPayments, after.customPayments, kind: .customPayment, to: &changes) { item in
+            descriptor(name: item.name, date: item.dueDate, amountPence: item.amountPence)
+        }
+        appendChanges(before.debtPayments, after.debtPayments, kind: .debtPayment, to: &changes) { item in
+            descriptor(name: item.note.nilIfBlank ?? "Debt payment", date: item.date, amountPence: item.netAmountPence)
+        }
+        appendChanges(before.debts, after.debts, kind: .debt, to: &changes) { item in
+            descriptor(name: item.name, date: item.dueDate.nilIfBlank ?? item.updatedAt, amountPence: item.currentBalancePence)
+        }
+        appendChanges(before.potAllocations, after.potAllocations, kind: .potAllocation, to: &changes) { item in
+            descriptor(name: "Pot allocation", date: item.transactionDate ?? item.updatedAt, amountPence: item.amountPence)
+        }
+        appendChanges(before.pots, after.pots, kind: .pot, to: &changes) { item in
+            descriptor(name: item.name, date: item.updatedAt, amountPence: item.balancePence)
+        }
+        appendChanges(before.bankAccounts, after.bankAccounts, kind: .bankAccount, to: &changes) { item in
+            descriptor(name: item.name, date: item.updatedAt, amountPence: item.openingBalancePence)
+        }
+        appendChanges(before.payPeriods, after.payPeriods, kind: .payPeriod, to: &changes) { item in
+            descriptor(name: "Pay period", date: item.payday, amountPence: item.incomePence)
+        }
+        appendChanges(before.recurringPaymentOccurrenceOverrides, after.recurringPaymentOccurrenceOverrides, kind: .recurringOccurrence, to: &changes) { item in
+            descriptor(name: "Bill occurrence", date: item.actualDueDate ?? item.scheduledDueDate, amountPence: item.amountPenceOverride)
+        }
+        appendChanges(before.incomeOccurrenceOverrides, after.incomeOccurrenceOverrides, kind: .incomeOccurrence, to: &changes) { item in
+            descriptor(name: "Income occurrence", date: item.actualDate ?? item.scheduledDate, amountPence: item.amountPenceOverride)
+        }
+        appendChanges(before.creditCardPots, after.creditCardPots, kind: .creditCardPot, to: &changes) { item in
+            descriptor(name: item.name, date: item.updatedAt, amountPence: item.amountPence)
+        }
+        appendChanges(before.debtReserves, after.debtReserves, kind: .debtReserve, to: &changes) { item in
+            descriptor(name: item.note.nilIfBlank ?? "Debt reserve", date: item.payday, amountPence: item.amountPence)
+        }
+        appendChanges(before.billGroups, after.billGroups, kind: .billGroup, to: &changes) { item in
+            descriptor(name: item.name, date: item.updatedAt, amountPence: nil)
+        }
+        appendChanges(before.debtPaymentScheduleItems, after.debtPaymentScheduleItems, kind: .debtSchedule, to: &changes) { item in
+            descriptor(name: "Debt schedule", date: item.dueDate, amountPence: item.plannedAmountPence)
+        }
+
+        guard let primary = changes.first else { return nil }
+        let action: PlannerAuditAction
+        switch origin {
+        case .restore:
+            action = .reverted
+        case .system:
+            action = .automatic
+        case .baseline:
+            action = .baseline
+        case .user:
+            if primary.beforeJSON == nil { action = .created }
+            else if primary.afterJSON == nil { action = .deleted }
+            else { action = .edited }
+        }
+
+        let timestamp = DateUtilities.nowIsoString()
+        return PlannerAuditEvent(
+            id: DateUtilities.newId(prefix: "planner-audit"),
+            occurredAt: timestamp,
+            effectiveDate: primary.effectiveDate,
+            action: action,
+            origin: origin,
+            title: eventTitle(name: primary.recordName, action: action),
+            subtitle: changes.count == 1
+                ? displayName(for: primary.recordKind)
+                : "\(displayName(for: primary.recordKind)) and \(changes.count - 1) linked changes",
+            amountPence: primary.amountPence,
+            changes: changes,
+            effects: effects(before: before, after: after),
+            restoredFromEventId: restoredFromEventId
+        )
+    }
+
+    static func decode<T: Decodable>(_ type: T.Type, json: String) -> T? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    static func displayName(for kind: PlannerAuditRecordKind) -> String {
+        switch kind {
+        case .bankAccount: "Bank account"
+        case .pot: "Pot"
+        case .recurringPayment: "Bill"
+        case .recurringOccurrence: "Bill occurrence"
+        case .incomeOccurrence: "Income occurrence"
+        case .billGroup: "Bill group"
+        case .payPeriod: "Pay period"
+        case .paycheck: "Paycheck"
+        case .oneOffIncome: "Income"
+        case .potAllocation: "Pot allocation"
+        case .transaction: "Payment"
+        case .debt: "Debt"
+        case .debtPayment: "Debt payment"
+        case .debtReserve: "Debt reserve"
+        case .debtSchedule: "Debt schedule"
+        case .creditCard: "Credit card"
+        case .customPayment: "Saved payment"
+        case .creditCardRepayment: "Card payment"
+        case .creditCardPot: "Card pot"
+        case .creditCardCycle: "Statement"
+        }
+    }
+
+    private struct Descriptor {
+        var name: String
+        var date: String
+        var amountPence: Int?
+    }
+
+    private static func descriptor(name: String, date: String, amountPence: Int?) -> Descriptor {
+        Descriptor(name: name, date: normalizedDate(date), amountPence: amountPence)
+    }
+
+    private static func appendBaseline<T: Codable & Equatable & Identifiable>(
+        _ values: [T],
+        kind: PlannerAuditRecordKind,
+        to changes: inout [PlannerAuditChange],
+        describe: (T) -> Descriptor
+    ) where T.ID == String {
+        for value in values {
+            let info = describe(value)
+            changes.append(
+                PlannerAuditChange(
+                    recordKind: kind,
+                    recordId: value.id,
+                    recordName: info.name,
+                    effectiveDate: info.date,
+                    amountPence: info.amountPence,
+                    beforeJSON: nil,
+                    afterJSON: encode(value)
+                )
+            )
+        }
+    }
+
+    private static func appendChanges<T: Codable & Equatable & Identifiable>(
+        _ oldValues: [T],
+        _ newValues: [T],
+        kind: PlannerAuditRecordKind,
+        to changes: inout [PlannerAuditChange],
+        describe: (T) -> Descriptor
+    ) where T.ID == String {
+        let oldById = Dictionary(uniqueKeysWithValues: oldValues.map { ($0.id, $0) })
+        let newById = Dictionary(uniqueKeysWithValues: newValues.map { ($0.id, $0) })
+        for id in Set(oldById.keys).union(newById.keys).sorted() {
+            let oldValue = oldById[id]
+            let newValue = newById[id]
+            guard oldValue != newValue, let sample = newValue ?? oldValue else { continue }
+            let info = describe(sample)
+            changes.append(
+                PlannerAuditChange(
+                    recordKind: kind,
+                    recordId: id,
+                    recordName: info.name,
+                    effectiveDate: info.date,
+                    amountPence: info.amountPence,
+                    beforeJSON: oldValue.map { encode($0) } ?? nil,
+                    afterJSON: newValue.map { encode($0) } ?? nil
+                )
+            )
+        }
+    }
+
+    private static func encode<T: Encodable>(_ value: T) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func effects(before: PlannerSnapshot, after: PlannerSnapshot) -> [PlannerAuditEffect] {
+        let beforeMetrics = metrics(before)
+        let afterMetrics = metrics(after)
+        return [
+            PlannerAuditEffect(label: "Card owed", deltaPence: afterMetrics.cardOwed - beforeMetrics.cardOwed),
+            PlannerAuditEffect(label: "Pot balances", deltaPence: afterMetrics.pots - beforeMetrics.pots),
+            PlannerAuditEffect(label: "Bank balances", deltaPence: afterMetrics.banks - beforeMetrics.banks),
+            PlannerAuditEffect(label: "Recorded spending", deltaPence: afterMetrics.spending - beforeMetrics.spending),
+            PlannerAuditEffect(label: "Recorded income", deltaPence: afterMetrics.income - beforeMetrics.income)
+        ].filter { $0.deltaPence != 0 }
+    }
+
+    private static func metrics(_ snapshot: PlannerSnapshot) -> (cardOwed: Int, pots: Int, banks: Int, spending: Int, income: Int) {
+        let cardOwed = snapshot.creditCards
+            .filter { !$0.archived && $0.deletedAt == nil }
+            .reduce(0) { $0 + PlannerDerivedData.cardBalance(card: $1, snapshot: snapshot) }
+        let pots = snapshot.pots.filter { !$0.archived && $0.deletedAt == nil }.reduce(0) { $0 + $1.balancePence }
+        let banks = snapshot.bankAccounts
+            .filter { !$0.archived && $0.deletedAt == nil }
+            .reduce(into: 0) { total, account in
+                total += PlannerDerivedData.bankAccountBalance(account: account, snapshot: snapshot)
+            }
+        let spending = snapshot.transactions.filter { $0.deletedAt == nil && $0.type == .spending }.reduce(0) { $0 + $1.netAmountPence }
+        let income = snapshot.paychecks.filter { $0.deletedAt == nil }.reduce(0) { $0 + ($1.actualAmountPence ?? $1.calculatedAmountPence) }
+            + snapshot.oneOffIncomes.filter { $0.deletedAt == nil }.reduce(0) { $0 + $1.amountPence }
+        return (cardOwed, pots, banks, spending, income)
+    }
+
+    private static func eventTitle(name: String, action: PlannerAuditAction) -> String {
+        switch action {
+        case .baseline: name
+        case .created: "\(name) added"
+        case .edited: "\(name) edited"
+        case .deleted: "\(name) deleted"
+        case .reverted: "\(name) restored"
+        case .automatic: "\(name) recalculated"
+        }
+    }
+
+    private static func normalizedDate(_ value: String) -> String {
+        let prefix = String(value.prefix(10))
+        return FinanceEngine.isIsoDate(prefix) ? prefix : FinanceEngine.toIsoDate(Date())
+    }
+
+    private static func normalizedTimestamp(_ value: String) -> String {
+        if value.count > 10 { return value }
+        return "\(normalizedDate(value))T12:00:00Z"
     }
 }
 

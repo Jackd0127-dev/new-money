@@ -1368,7 +1368,8 @@ struct ActivityView: View {
                     sortDate: transaction.date,
                     detailRows: detailRows,
                     recordRows: activityRecordRows(createdAt: transaction.createdAt, updatedAt: transaction.updatedAt),
-                    source: .transaction(transaction.id)
+                    source: .transaction(transaction.id),
+                    auditAction: latestAuditAction(snapshot: snapshot, kind: .transaction, id: transaction.id)
                 )
             }
 
@@ -1408,7 +1409,8 @@ struct ActivityView: View {
                     sortDate: activityDate,
                     detailRows: detailRows,
                     recordRows: activityRecordRows(createdAt: paycheck.createdAt, updatedAt: paycheck.updatedAt),
-                    source: .paycheck(paycheck.id)
+                    source: .paycheck(paycheck.id),
+                    auditAction: latestAuditAction(snapshot: snapshot, kind: .paycheck, id: paycheck.id)
                 )
             }
 
@@ -1439,7 +1441,8 @@ struct ActivityView: View {
                     sortDate: income.date,
                     detailRows: detailRows,
                     recordRows: activityRecordRows(createdAt: income.createdAt, updatedAt: income.updatedAt),
-                    source: .oneOffIncome(income.id)
+                    source: .oneOffIncome(income.id),
+                    auditAction: latestAuditAction(snapshot: snapshot, kind: .oneOffIncome, id: income.id)
                 )
             }
 
@@ -1473,7 +1476,8 @@ struct ActivityView: View {
                 sortDate: period.startDate,
                 detailRows: detailRows,
                 recordRows: activityRecordRows(createdAt: period.createdAt, updatedAt: period.updatedAt),
-                source: .payPeriod(period.id)
+                source: .payPeriod(period.id),
+                auditAction: latestAuditAction(snapshot: snapshot, kind: .payPeriod, id: period.id)
             )
         }
     }
@@ -1508,6 +1512,12 @@ struct ActivityView: View {
         value
             .replacingOccurrences(of: "_", with: " ")
             .capitalized
+    }
+
+    private static func latestAuditAction(snapshot: PlannerSnapshot, kind: PlannerAuditRecordKind, id: String) -> PlannerAuditAction? {
+        snapshot.auditEvents.reversed().first { event in
+            event.action != .baseline && event.changes.contains { $0.recordKind == kind && $0.recordId == id }
+        }?.action
     }
 
 }
@@ -2408,6 +2418,7 @@ private struct ActivityEntry: Identifiable {
     var detailRows: [ActivityDetailRow]
     var recordRows: [ActivityDetailRow]
     var source: ActivityEntrySource
+    var auditAction: PlannerAuditAction? = nil
 }
 
 private struct ActivityDetailRow: Identifiable {
@@ -2430,9 +2441,14 @@ private struct ActivityEntryRow: View {
                 .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.primaryText)
+                HStack(spacing: 7) {
+                    Text(entry.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.primaryText)
+                    if let auditAction = entry.auditAction {
+                        HistoryAuditStatusPill(action: auditAction)
+                    }
+                }
                 Text(entry.detail)
                     .font(.caption)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
@@ -2508,6 +2524,10 @@ private struct ActivityEntryDetailView: View {
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(AppTheme.Colors.cardEyebrow)
                                 .textCase(.uppercase)
+
+                            if let auditAction = entry.auditAction {
+                                HistoryAuditStatusPill(action: auditAction)
+                            }
                         }
 
                         Text(entry.title)

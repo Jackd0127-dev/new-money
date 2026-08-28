@@ -8889,6 +8889,102 @@ final class FinanceEngineTests: XCTestCase {
         window.isHidden = true
     }
 
+    func testAuditBaselineUsesTheRecordsRealEffectiveDate() {
+        let card = makeCreditCard(
+            id: "audit-card",
+            name: "Barclays",
+            limitPence: 100_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-13",
+            dueDay: 19
+        )
+        let transaction = makeTransaction(
+            id: "audit-payment",
+            cardId: card.id,
+            amountPence: 3_747,
+            date: "2026-08-24",
+            note: "MMA Gear"
+        )
+        let events = PlannerAuditEngine.baselineEvents(
+            for: makeSnapshot(transactions: [transaction], creditCards: [card])
+        )
+
+        let paymentEvent = events.first { $0.changes.first?.recordId == transaction.id }
+        XCTAssertEqual(paymentEvent?.effectiveDate, "2026-08-24")
+        XCTAssertEqual(paymentEvent?.action, .baseline)
+        XCTAssertEqual(paymentEvent?.amountPence, 3_747)
+    }
+
+    func testAuditEventCapturesCanonicalEditAndAffectedCardTotal() {
+        let card = makeCreditCard(
+            id: "audit-card",
+            name: "Barclays",
+            limitPence: 100_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-13",
+            dueDay: 19
+        )
+        let original = makeTransaction(id: "audit-payment", cardId: card.id, amountPence: 3_500, date: "2026-08-24", note: "MMA Gear")
+        var edited = original
+        edited.amountPence = 3_747
+        edited.updatedAt = "2026-08-24T18:42:00.000Z"
+        let before = makeSnapshot(transactions: [original], creditCards: [card])
+        let after = makeSnapshot(transactions: [edited], creditCards: [card])
+
+        let event = PlannerAuditEngine.event(before: before, after: after, origin: .user)
+
+        XCTAssertEqual(event?.action, .edited)
+        XCTAssertEqual(event?.changes.first?.recordId, original.id)
+        XCTAssertEqual(event?.effects.first(where: { $0.label == "Card owed" })?.deltaPence, 247)
+        XCTAssertNotNil(event?.changes.first?.beforeJSON)
+        XCTAssertNotNil(event?.changes.first?.afterJSON)
+    }
+
+    func testLegacySnapshotWithoutAuditEventsDecodesAsEmptyHistory() throws {
+        let data = try JSONEncoder().encode(DefaultData.basicDataSnapshot)
+        var dictionary = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        dictionary.removeValue(forKey: "auditEvents")
+        let legacyData = try JSONSerialization.data(withJSONObject: dictionary)
+
+        let decoded = try JSONDecoder().decode(PlannerSnapshot.self, from: legacyData)
+
+        XCTAssertTrue(decoded.auditEvents.isEmpty)
+    }
+
+    @MainActor
+    func testStoreRecordsAndReversesAnEditedCardPayment() async {
+        let card = makeCreditCard(
+            id: "audit-card",
+            name: "Barclays",
+            limitPence: 100_000,
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-13",
+            dueDay: 19
+        )
+        let original = makeTransaction(id: "audit-payment", cardId: card.id, amountPence: 3_500, date: "2026-08-24", note: "MMA Gear")
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: makeSnapshot(transactions: [original], creditCards: [card])))
+        await store.load()
+
+        store.updateTransaction(
+            id: original.id,
+            potId: nil,
+            creditCardId: card.id,
+            paymentMethod: .creditCard,
+            amountPence: 3_747,
+            date: original.date,
+            note: original.note
+        )
+
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == original.id })?.amountPence, 3_747)
+        XCTAssertEqual(store.auditAction(for: .transaction, id: original.id), .edited)
+        XCTAssertTrue(store.reverseLatestEdit(for: .transaction, id: original.id))
+        XCTAssertEqual(store.snapshot.transactions.first(where: { $0.id == original.id })?.amountPence, 3_500)
+        XCTAssertEqual(store.auditAction(for: .transaction, id: original.id), .reverted)
+    }
+
     private func makeSnapshot(
         settings: Settings = DefaultData.defaultSettings,
         bankAccounts: [BankAccount] = [],

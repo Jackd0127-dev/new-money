@@ -426,7 +426,10 @@ struct FundingChecklistBreakdownToggle: View {
             Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AppTheme.Colors.secondaryText)
-                .frame(width: 30, height: 30)
+                .frame(
+                    width: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget,
+                    height: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget
+                )
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

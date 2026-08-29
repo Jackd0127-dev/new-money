@@ -694,6 +694,94 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(checklistItem.status, .needsFunding)
         XCTAssertNil(checklistItem.paidDate)
         XCTAssertEqual(checklistItem.amountPence, 2212)
+        XCTAssertEqual(checklistItem.destinationKind, .pot)
+        XCTAssertEqual(checklistItem.destinationId, zablePot.id)
+        XCTAssertEqual(checklistItem.destinationName, zablePot.name)
+    }
+
+    func testFundingChecklistGroupsPaymentsByStableDestinationAndTotalsThem() throws {
+        let jajaItems = [
+            makeFundingPresentationItem(
+                id: "jaja-streaming",
+                name: "Streaming",
+                destinationId: "pot-jaja",
+                destinationName: "Jaja",
+                amountPence: 599,
+                dueDate: "2026-08-12",
+                action: .recurringBill(paymentId: "bill-streaming", dueDate: "2026-08-12", payPeriodId: "period-august")
+            ),
+            makeFundingPresentationItem(
+                id: "jaja-cloud",
+                name: "Cloud storage",
+                destinationId: "pot-jaja",
+                destinationName: "Jaja",
+                amountPence: 129,
+                dueDate: "2026-08-02",
+                action: .recurringBill(paymentId: "bill-cloud", dueDate: "2026-08-02", payPeriodId: "period-august")
+            ),
+            makeFundingPresentationItem(
+                id: "jaja-coffee",
+                name: "Coffee",
+                destinationId: "pot-jaja",
+                destinationName: "Jaja",
+                amountPence: 235,
+                dueDate: "2026-08-08",
+                action: .cardSpend(transactionId: "spend-coffee", payPeriodId: "period-august")
+            )
+        ]
+        let holidayItem = makeFundingPresentationItem(
+            id: "holiday-hotel",
+            name: "Hotel",
+            destinationId: "pot-holiday",
+            destinationName: "Holiday",
+            amountPence: 10_000,
+            dueDate: "2026-08-20",
+            action: .debt(debtId: "debt-hotel", dueDate: "2026-08-20", payPeriodId: "period-august")
+        )
+
+        let groups = PlannerDerivedData.fundingChecklistDestinationGroups(
+            items: [holidayItem] + jajaItems
+        )
+        let jaja = try XCTUnwrap(groups.first { $0.destinationId == "pot-jaja" })
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(jaja.destinationName, "Jaja")
+        XCTAssertEqual(jaja.totalAmountPence, 963)
+        XCTAssertEqual(jaja.items.map(\.name), ["Cloud storage", "Coffee", "Streaming"])
+        XCTAssertEqual(jaja.items.map(\.action), [
+            .recurringBill(paymentId: "bill-cloud", dueDate: "2026-08-02", payPeriodId: "period-august"),
+            .cardSpend(transactionId: "spend-coffee", payPeriodId: "period-august"),
+            .recurringBill(paymentId: "bill-streaming", dueDate: "2026-08-12", payPeriodId: "period-august")
+        ])
+        XCTAssertTrue(jaja.items[0].supportsCycleAdjustment)
+        XCTAssertFalse(jaja.items[1].supportsCycleAdjustment)
+    }
+
+    func testFundingChecklistDoesNotMergeDifferentPotsWithTheSameName() {
+        let first = makeFundingPresentationItem(
+            id: "first",
+            name: "First payment",
+            destinationId: "pot-one",
+            destinationName: "Everyday",
+            amountPence: 100,
+            dueDate: "2026-08-01",
+            action: .cardSpend(transactionId: "spend-one", payPeriodId: "period-august")
+        )
+        let second = makeFundingPresentationItem(
+            id: "second",
+            name: "Second payment",
+            destinationId: "pot-two",
+            destinationName: "Everyday",
+            amountPence: 200,
+            dueDate: "2026-08-02",
+            action: .cardSpend(transactionId: "spend-two", payPeriodId: "period-august")
+        )
+
+        let groups = PlannerDerivedData.fundingChecklistDestinationGroups(items: [first, second])
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(Set(groups.map(\.destinationId)), ["pot-one", "pot-two"])
+        XCTAssertEqual(groups.map(\.totalAmountPence).sorted(), [100, 200])
     }
 
     func testCardChargesAreGroupedInTheIncomePeriodContainingTheirDirectDebitDate() {
@@ -7649,6 +7737,41 @@ final class FinanceEngineTests: XCTestCase {
         settings.appDateMode = .manual
         settings.manualTodayIso = today
         return settings
+    }
+
+    private func makeFundingPresentationItem(
+        id: String,
+        name: String,
+        destinationId: String,
+        destinationName: String,
+        amountPence: Int,
+        dueDate: String,
+        action: FundingChecklistAction
+    ) -> FundingChecklistPresentationItem {
+        FundingChecklistPresentationItem(
+            id: id,
+            name: name,
+            destinationKind: .pot,
+            destinationId: destinationId,
+            destinationName: destinationName,
+            title: "Add \(MoneyParser.formatPence(amountPence)) to \(destinationName)",
+            detail: "\(name) · due \(dueDate)",
+            amountPence: amountPence,
+            dueDate: dueDate,
+            breakdown: [
+                FundingChecklistBreakdownItem(
+                    id: "breakdown-\(id)",
+                    title: name,
+                    detail: "Due \(dueDate)",
+                    amountPence: amountPence
+                )
+            ],
+            isCompleted: false,
+            isExcluded: false,
+            status: .needsFunding,
+            paidDate: nil,
+            action: action
+        )
     }
 
     private func statementSummary(

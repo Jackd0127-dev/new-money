@@ -159,6 +159,10 @@ enum FundingChecklistStatus: Equatable, Sendable {
     case excluded
 }
 
+enum FundingChecklistDestinationKind: String, Equatable, Sendable {
+    case pot
+}
+
 enum FundingChecklistAction: Equatable, Sendable {
     case recurringBill(paymentId: String, dueDate: String, payPeriodId: String)
     case cardBill(paymentId: String, dueDate: String, payPeriodId: String)
@@ -171,6 +175,9 @@ enum FundingChecklistAction: Equatable, Sendable {
 struct FundingChecklistPresentationItem: Identifiable, Equatable, Sendable {
     var id: String
     var name: String
+    var destinationKind: FundingChecklistDestinationKind
+    var destinationId: String
+    var destinationName: String
     var title: String
     var detail: String
     var amountPence: Int
@@ -181,6 +188,25 @@ struct FundingChecklistPresentationItem: Identifiable, Equatable, Sendable {
     var status: FundingChecklistStatus
     var paidDate: String?
     var action: FundingChecklistAction
+
+    var supportsCycleAdjustment: Bool {
+        if case .recurringBill = action {
+            return true
+        }
+        return false
+    }
+}
+
+struct FundingChecklistDestinationGroup: Identifiable, Equatable, Sendable {
+    var id: String
+    var destinationKind: FundingChecklistDestinationKind
+    var destinationId: String
+    var destinationName: String
+    var items: [FundingChecklistPresentationItem]
+
+    var totalAmountPence: Int {
+        items.reduce(0) { $0 + max(0, $1.amountPence) }
+    }
 }
 
 struct FundingChecklistBreakdownItem: Identifiable, Equatable, Sendable {
@@ -1725,6 +1751,9 @@ enum PlannerDerivedData {
             return FundingChecklistPresentationItem(
                 id: "recurring-\($0.id)",
                 name: $0.paymentName,
+                destinationKind: .pot,
+                destinationId: $0.potId,
+                destinationName: $0.potName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: detail,
                 amountPence: $0.amountPence,
@@ -1764,6 +1793,9 @@ enum PlannerDerivedData {
             return FundingChecklistPresentationItem(
                 id: "card-spend-\($0.id)",
                 name: $0.transactionName,
+                destinationKind: .pot,
+                destinationId: $0.potId,
+                destinationName: $0.potName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.transactionName) spend · \($0.cardName) · due \(shortDate($0.dueDate))",
                 amountPence: $0.amountPence,
@@ -1797,6 +1829,9 @@ enum PlannerDerivedData {
             return FundingChecklistPresentationItem(
                 id: "card-opening-\($0.id)",
                 name: "\($0.cardName) opening balance",
+                destinationKind: .pot,
+                destinationId: $0.potId,
+                destinationName: $0.potName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.cardName) opening balance · due \(shortDate($0.directDebitDate))",
                 amountPence: $0.amountPence,
@@ -1841,6 +1876,9 @@ enum PlannerDerivedData {
             return FundingChecklistPresentationItem(
                 id: "card-payment-\($0.id)",
                 name: "\($0.cardName) card payment",
+                destinationKind: .pot,
+                destinationId: $0.potId,
+                destinationName: $0.potName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.cardName) card payment · due \(shortDate($0.directDebitDate))",
                 amountPence: $0.amountPence,
@@ -1867,6 +1905,9 @@ enum PlannerDerivedData {
             return FundingChecklistPresentationItem(
                 id: "debt-\($0.id)",
                 name: $0.debtName,
+                destinationKind: .pot,
+                destinationId: $0.potId,
+                destinationName: $0.potName,
                 title: "Add \(MoneyParser.formatPence($0.amountPence)) to \($0.potName)",
                 detail: "\($0.debtName) debt · \($0.lenderName) · due \(shortDate($0.dueDate))",
                 amountPence: $0.amountPence,
@@ -1889,6 +1930,33 @@ enum PlannerDerivedData {
 
         return (recurringItems + cardSpendItems + openingItems + allocationBackedOpeningItems + cardPaymentItems + debtItems)
             .sorted(by: sortFundingChecklistPresentationItems)
+    }
+
+    static func fundingChecklistDestinationGroups(
+        items: [FundingChecklistPresentationItem]
+    ) -> [FundingChecklistDestinationGroup] {
+        let groupedItems = Dictionary(grouping: items) {
+            "\($0.destinationKind.rawValue)-\($0.destinationId)"
+        }
+
+        return groupedItems.compactMap { id, destinationItems in
+            guard let first = destinationItems.first else { return nil }
+            return FundingChecklistDestinationGroup(
+                id: id,
+                destinationKind: first.destinationKind,
+                destinationId: first.destinationId,
+                destinationName: first.destinationName,
+                items: destinationItems.sorted(by: sortFundingChecklistPresentationItems)
+            )
+        }
+        .sorted {
+            let lhsDueDate = $0.items.first?.dueDate ?? ""
+            let rhsDueDate = $1.items.first?.dueDate ?? ""
+            if lhsDueDate != rhsDueDate { return lhsDueDate < rhsDueDate }
+            let nameOrder = $0.destinationName.localizedCaseInsensitiveCompare($1.destinationName)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return $0.id < $1.id
+        }
     }
 
     static func debtFundingChecklistItems(snapshot: PlannerSnapshot, payPeriod: PayPeriod?) -> [DebtFundingChecklistItem] {
@@ -4351,6 +4419,9 @@ private extension PlannerDerivedData {
                 return FundingChecklistPresentationItem(
                     id: checklistId,
                     name: "\(card.name) opening balance",
+                    destinationKind: .pot,
+                    destinationId: pot.id,
+                    destinationName: pot.name,
                     title: "Add \(MoneyParser.formatPence(allocation.amountPence)) to \(pot.name)",
                     detail: "\(card.name) opening balance · due \(shortDate(directDebitDate))",
                     amountPence: allocation.amountPence,

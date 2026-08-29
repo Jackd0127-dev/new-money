@@ -179,6 +179,40 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(AppTabNavigationStackPolicy.keepsTabRootScrollReset)
     }
 
+    func testFundingChecklistDestinationRowsUseAccessibleDisclosureAndActionTargets() {
+        XCTAssertTrue(BillsLayoutPolicy.fundingChecklistGroupsByDestination)
+        XCTAssertTrue(BillsLayoutPolicy.fundingChecklistCycleActionIsConditional)
+        XCTAssertGreaterThanOrEqual(BillsLayoutPolicy.fundingChecklistDestinationHeaderMinimumHeight, 44)
+        XCTAssertGreaterThanOrEqual(BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget, 44)
+    }
+
+    @MainActor
+    func testBillsFundingChecklistRendersAtAccessibilityTextSize() async {
+        var snapshot = DefaultData.complexStressSnapshot
+        snapshot.settings.appDateMode = .manual
+        snapshot.settings.manualTodayIso = "2026-07-01"
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: snapshot))
+        await store.load()
+
+        let view = NavigationStack {
+            BillsView(store: store, navigationMode: .inline, toolbarMode: .none)
+        }
+        .environment(\.dynamicTypeSize, .accessibility3)
+        let host = UIHostingController(rootView: view)
+        host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        host.view.backgroundColor = UIColor.systemBackground
+        host.view.layoutIfNeeded()
+
+        let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        XCTAssertEqual(image.size, CGSize(width: 390, height: 844))
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "bills-funding-groups-accessibility-type"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testTabsUseFixedToolbarTitles() {
         XCTAssertTrue(AppTab.allCases.allSatisfy { AppNavigationTitleDisplayPolicy.style(for: $0) == .inline })
     }
@@ -581,7 +615,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistAlwaysVisible)
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistUsesExistingDerivedItems)
         XCTAssertEqual(BillsLayoutPolicy.fundingChecklistProjectedPeriodCount, 2)
-        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistPresentation, "independentDropdowns")
+        XCTAssertEqual(BillsLayoutPolicy.fundingChecklistPresentation, "destinationGroupedDropdowns")
         XCTAssertTrue(BillsLayoutPolicy.fundingChecklistCurrentDefaultsExpanded)
         XCTAssertFalse(BillsLayoutPolicy.fundingChecklistNextDefaultsExpanded)
         XCTAssertEqual(BillsLayoutPolicy.yourBillsPresentation, "collapsibleDropdown")

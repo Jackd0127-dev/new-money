@@ -932,7 +932,11 @@ enum BillsLayoutPolicy {
     static let fundingChecklistAlwaysVisible = true
     static let fundingChecklistUsesExistingDerivedItems = true
     static let fundingChecklistProjectedPeriodCount = 2
-    static let fundingChecklistPresentation = "independentDropdowns"
+    static let fundingChecklistPresentation = "destinationGroupedDropdowns"
+    static let fundingChecklistGroupsByDestination = true
+    static let fundingChecklistDestinationHeaderMinimumHeight: CGFloat = 44
+    static let fundingChecklistActionMinimumTapTarget: CGFloat = 44
+    static let fundingChecklistCycleActionIsConditional = true
     static let fundingChecklistCurrentDefaultsExpanded = true
     static let fundingChecklistNextDefaultsExpanded = false
     static let yourBillsPresentation = "collapsibleDropdown"
@@ -1787,16 +1791,17 @@ private struct BillsFundingChecklistPeriodCard: View {
                 .foregroundStyle(AppTheme.Colors.secondaryText)
                 .textCase(.uppercase)
 
-            ForEach(items) { item in
-                BillsFundingChecklistRow(item: item, isReadOnly: isReadOnly) {
-                    action(item)
-                } excludeAction: {
-                    excludeAction(item)
-                } adjustAction: {
-                    adjustAction(item)
-                }
+            let destinationGroups = PlannerDerivedData.fundingChecklistDestinationGroups(items: items)
+            ForEach(destinationGroups) { destinationGroup in
+                BillsFundingChecklistDestinationGroup(
+                    group: destinationGroup,
+                    isReadOnly: isReadOnly,
+                    action: action,
+                    excludeAction: excludeAction,
+                    adjustAction: adjustAction
+                )
 
-                if item.id != items.last?.id {
+                if destinationGroup.id != destinationGroups.last?.id {
                     AppDivider()
                 }
             }
@@ -1837,9 +1842,85 @@ private struct BillsFundingChecklistPeriodCard: View {
     }
 }
 
+private struct BillsFundingChecklistDestinationGroup: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var group: FundingChecklistDestinationGroup
+    var isReadOnly: Bool
+    var action: (FundingChecklistPresentationItem) -> Void
+    var excludeAction: (FundingChecklistPresentationItem) -> Void
+    var adjustAction: (FundingChecklistPresentationItem) -> Void
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Add \(MoneyParser.formatPence(group.totalAmountPence)) to \(group.destinationName)")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.primaryText)
+                            .multilineTextAlignment(.leading)
+
+                        Text(paymentCountText)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.sm)
+
+                    Image(systemName: ExpandableSectionLayoutPolicy.symbol(isExpanded: isExpanded))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .frame(width: BillsLayoutPolicy.fundingChecklistDestinationHeaderMinimumHeight,
+                               height: BillsLayoutPolicy.fundingChecklistDestinationHeaderMinimumHeight)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: BillsLayoutPolicy.fundingChecklistDestinationHeaderMinimumHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add \(MoneyParser.formatPence(group.totalAmountPence)) to \(group.destinationName)")
+            .accessibilityValue("\(paymentCountText), \(isExpanded ? "expanded" : "collapsed")")
+            .accessibilityHint(isExpanded ? "Hides the contributing payments" : "Shows every contributing payment")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                    ForEach(group.items) { item in
+                        BillsFundingChecklistRow(
+                            item: item,
+                            isReadOnly: isReadOnly,
+                            showsDestinationTitle: false
+                        ) {
+                            action(item)
+                        } excludeAction: {
+                            excludeAction(item)
+                        } adjustAction: {
+                            adjustAction(item)
+                        }
+
+                        if item.id != group.items.last?.id {
+                            AppDivider()
+                        }
+                    }
+                }
+                .padding(.leading, AppTheme.Spacing.sm)
+                .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : AppTheme.Animation.quick, value: isExpanded)
+    }
+
+    private var paymentCountText: String {
+        "\(group.items.count) payment\(group.items.count == 1 ? "" : "s")"
+    }
+}
+
 private struct BillsFundingChecklistRow: View {
     var item: FundingChecklistPresentationItem
     var isReadOnly: Bool
+    var showsDestinationTitle = true
     var action: () -> Void
     var excludeAction: () -> Void
     var adjustAction: () -> Void
@@ -1853,19 +1934,20 @@ private struct BillsFundingChecklistRow: View {
                         Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(iconColor)
-                            .frame(width: 32, height: 32)
+                            .frame(
+                                width: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget,
+                                height: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget
+                            )
 
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(item.title)
+                            Text(rowTitle)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(titleColor)
                                 .strikethrough(item.isExcluded, color: AppTheme.Colors.secondaryText)
-                                .lineLimit(2)
 
                             Text(detailText)
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.Colors.secondaryText)
-                                .lineLimit(2)
                         }
 
                         Spacer(minLength: AppTheme.Spacing.sm)
@@ -1882,7 +1964,10 @@ private struct BillsFundingChecklistRow: View {
                             Image(systemName: "calendar.badge.exclamationmark")
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(AppTheme.Colors.primaryOrange)
-                                .frame(width: 30, height: 30)
+                                .frame(
+                                    width: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget,
+                                    height: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget
+                                )
                                 .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
@@ -1893,7 +1978,10 @@ private struct BillsFundingChecklistRow: View {
                         Image(systemName: item.isExcluded ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(item.isExcluded ? AppTheme.Colors.warning : AppTheme.Colors.secondaryText)
-                            .frame(width: 30, height: 30)
+                            .frame(
+                                width: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget,
+                                height: BillsLayoutPolicy.fundingChecklistActionMinimumTapTarget
+                            )
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -1922,10 +2010,13 @@ private struct BillsFundingChecklistRow: View {
     }
 
     private var canAdjustOccurrence: Bool {
-        if case .recurringBill = item.action {
-            return true
-        }
-        return false
+        item.supportsCycleAdjustment
+    }
+
+    private var rowTitle: String {
+        showsDestinationTitle
+            ? item.title
+            : "\(item.name) · \(MoneyParser.formatPence(item.amountPence))"
     }
 
     private var titleColor: Color {

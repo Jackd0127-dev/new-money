@@ -1421,7 +1421,7 @@ enum PlannerDerivedData {
         }
 
         let openingBalancePence = max(0, card.openingBalancePence ?? 0)
-        let openingStatementPence = max(0, card.openingStatementBalancePence ?? openingBalancePence)
+        let openingStatementPence = statementedOpeningBalancePence(card: card)
         let sourceAmountPence = openingStatementPence > 0
             ? openingStatementPence
             : (card.openingStatementBalancePence == 0 ? openingBalancePence : 0)
@@ -1447,7 +1447,7 @@ enum PlannerDerivedData {
             }
             .compactMap { card -> CreditCardOpeningBalanceFundingChecklistItem? in
                 let openingBalancePence = max(0, card.openingBalancePence ?? 0)
-                let openingStatementPence = max(0, card.openingStatementBalancePence ?? openingBalancePence)
+                let openingStatementPence = statementedOpeningBalancePence(card: card)
                 let today = FinanceEngine.getAppTodayIso(settings: snapshot.settings)
                 guard let statementDate = card.statementDate,
                       FinanceEngine.isIsoDate(statementDate)
@@ -5482,7 +5482,13 @@ private extension PlannerDerivedData {
     }
 
     static func statementedOpeningBalancePence(card: CreditCard) -> Int {
-        max(0, card.openingStatementBalancePence ?? card.openingBalancePence ?? 0)
+        let openingBalancePence = max(0, card.openingBalancePence ?? 0)
+        let statedOpeningPence = max(0, card.openingStatementBalancePence ?? openingBalancePence)
+
+        // An existing statement is part of, not additional to, the balance that
+        // was owed when the card was added. Keep stale edited/imported statement
+        // values from reviving debt that is no longer in the live opening balance.
+        return min(statedOpeningPence, openingBalancePence)
     }
 
     static func unstatementedOpeningBalancePence(card: CreditCard) -> Int {

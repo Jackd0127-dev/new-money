@@ -1121,6 +1121,26 @@ struct PlannerAuditEvent: Codable, Equatable, Identifiable, Sendable {
     var restoredFromEventId: String? = nil
 }
 
+enum PlannerAuditRefundTransition: Equatable, Sendable {
+    case applied
+    case increased
+    case decreased
+    case removed
+}
+
+struct PlannerAuditRefundActivity: Equatable, Sendable {
+    var recordKind: PlannerAuditRecordKind
+    var recordId: String
+    var recordName: String
+    var previousAmountPence: Int
+    var currentAmountPence: Int
+    var transition: PlannerAuditRefundTransition
+
+    var displayAmountPence: Int {
+        currentAmountPence > 0 ? currentAmountPence : previousAmountPence
+    }
+}
+
 struct PlannerSnapshot: Codable, Equatable, Sendable {
     var settings: Settings
     var pots: [Pot]
@@ -1429,6 +1449,70 @@ enum PlannerAuditEngine {
         return try? JSONDecoder().decode(type, from: data)
     }
 
+    /// Refund activity is derived from the immutable before/after audit payloads.
+    /// The underlying finance records remain the source of truth, so no audit
+    /// schema migration is required.
+    static func refundActivity(
+        for event: PlannerAuditEvent,
+        snapshot: PlannerSnapshot
+    ) -> PlannerAuditRefundActivity? {
+        let candidates = event.changes.compactMap { change -> PlannerAuditRefundActivity? in
+            guard change.afterJSON != nil,
+                  let amounts = refundAmounts(for: change, snapshot: snapshot),
+                  amounts.previous != amounts.current
+            else { return nil }
+
+            let transition: PlannerAuditRefundTransition
+            if amounts.previous == 0 {
+                transition = .applied
+            } else if amounts.current == 0 {
+                transition = .removed
+            } else if amounts.current > amounts.previous {
+                transition = .increased
+            } else {
+                transition = .decreased
+            }
+
+            return PlannerAuditRefundActivity(
+                recordKind: change.recordKind,
+                recordId: change.recordId,
+                recordName: change.recordName,
+                previousAmountPence: amounts.previous,
+                currentAmountPence: amounts.current,
+                transition: transition
+            )
+        }
+
+        return candidates.max { lhs, rhs in
+            abs(lhs.currentAmountPence - lhs.previousAmountPence)
+                < abs(rhs.currentAmountPence - rhs.previousAmountPence)
+        }
+    }
+
+    /// Produces a stable source identity for subtle History colouring. Linked
+    /// records deliberately collapse to their canonical bill/card/debt source.
+    static func relationshipKey(
+        for event: PlannerAuditEvent,
+        snapshot: PlannerSnapshot
+    ) -> String {
+        for change in event.changes {
+            if let key = relationshipKey(for: change, snapshot: snapshot) {
+                return key
+            }
+        }
+        guard let primary = event.changes.first else { return "event:\(event.id)" }
+        return "\(primary.recordKind.rawValue):\(primary.recordId)"
+    }
+
+    static func stableRelationshipHash(_ value: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 1_099_511_628_211
+        }
+        return hash
+    }
+
     static func displayName(for kind: PlannerAuditRecordKind) -> String {
         switch kind {
         case .bankAccount: "Bank account"
@@ -1462,6 +1546,153 @@ enum PlannerAuditEngine {
 
     private static func descriptor(name: String, date: String, amountPence: Int?) -> Descriptor {
         Descriptor(name: name, date: normalizedDate(date), amountPence: amountPence)
+    }
+
+    private static func refundAmounts(
+        for change: PlannerAuditChange,
+        snapshot: PlannerSnapshot
+    ) -> (previous: Int, current: Int)? {
+        switch change.recordKind {
+        case .transaction:
+            let previous = change.beforeJSON.flatMap { decode(Transaction.self, json: $0) }?.effectiveRefundedAmountPence ?? 0
+            let current = change.afterJSON.flatMap { decode(Transaction.self, json: $0) }?.effectiveRefundedAmountPence ?? 0
+            return (previous, current)
+        case .creditCardRepayment:
+            let previous = change.beforeJSON.flatMap { decode(CreditCardRepayment.self, json: $0) }?.effectiveRefundedAmountPence ?? 0
+            let current = change.afterJSON.flatMap { decode(CreditCardRepayment.self, json: $0) }?.effectiveRefundedAmountPence ?? 0
+            return (previous, current)
+        case .debtPayment:
+            let previous = change.beforeJSON.flatMap { decode(DebtPayment.self, json: $0) }?.effectiveRefundedAmountPence ?? 0
+            let current = change.afterJSON.flatMap { decode(DebtPayment.self, json: $0) }?.effectiveRefundedAmountPence ?? 0
+            return (previous, current)
+        case .recurringOccurrence:
+            let previous = change.beforeJSON.flatMap { decode(RecurringPaymentOccurrenceOverride.self, json: $0) }
+            let current = change.afterJSON.flatMap { decode(RecurringPaymentOccurrenceOverride.self, json: $0) }
+            let paymentId = current?.paymentId ?? previous?.paymentId
+            let normalAmountPence = snapshot.recurringPayments.first { $0.id == paymentId }?.amountPence ?? 0
+            let previousAmount = previous.map {
+                $0.effectiveRefundedAmountPence(originalAmountPence: $0.amountPenceOverride ?? normalAmountPence)
+            } ?? 0
+            let currentAmount = current.map {
+                $0.effectiveRefundedAmountPence(originalAmountPence: $0.amountPenceOverride ?? normalAmountPence)
+            } ?? 0
+            return (previousAmount, currentAmount)
+        default:
+            return nil
+        }
+    }
+
+    private static func relationshipKey(
+        for change: PlannerAuditChange,
+        snapshot: PlannerSnapshot
+    ) -> String? {
+        switch change.recordKind {
+        case .transaction:
+            guard let value = auditValue(
+                Transaction.self,
+                change: change,
+                current: snapshot.transactions.first { $0.id == change.recordId }
+            ) else { return nil }
+            if let paymentId = value.recurringPaymentId { return "bill:\(paymentId)" }
+            if let cardId = value.creditCardId { return "card:\(cardId)" }
+            if let potId = value.potId { return "pot:\(potId)" }
+            if let bankId = value.bankAccountId { return "bank:\(bankId)" }
+            return "transaction:\(value.id)"
+        case .recurringPayment:
+            return "bill:\(change.recordId)"
+        case .recurringOccurrence:
+            let value = auditValue(
+                RecurringPaymentOccurrenceOverride.self,
+                change: change,
+                current: snapshot.recurringPaymentOccurrenceOverrides.first { $0.id == change.recordId }
+            )
+            return value.map { "bill:\($0.paymentId)" }
+        case .potAllocation:
+            guard let value = auditValue(
+                PotAllocation.self,
+                change: change,
+                current: snapshot.potAllocations.first { $0.id == change.recordId }
+            ) else { return nil }
+            if let paymentId = value.recurringPaymentId { return "bill:\(paymentId)" }
+            if let debtId = value.debtId { return "debt:\(debtId)" }
+            if let cardId = value.creditCardId { return "card:\(cardId)" }
+            if let transactionId = value.transactionId,
+               let transaction = snapshot.transactions.first(where: { $0.id == transactionId }) {
+                if let paymentId = transaction.recurringPaymentId { return "bill:\(paymentId)" }
+                if let cardId = transaction.creditCardId { return "card:\(cardId)" }
+            }
+            return "pot:\(value.potId)"
+        case .pot:
+            return "pot:\(change.recordId)"
+        case .bankAccount:
+            return "bank:\(change.recordId)"
+        case .debt:
+            return "debt:\(change.recordId)"
+        case .debtPayment:
+            let value = auditValue(
+                DebtPayment.self,
+                change: change,
+                current: snapshot.debtPayments.first { $0.id == change.recordId }
+            )
+            return value.map { "debt:\($0.debtId)" }
+        case .debtReserve:
+            let value = auditValue(
+                DebtReserve.self,
+                change: change,
+                current: snapshot.debtReserves.first { $0.id == change.recordId }
+            )
+            return value.map { "debt:\($0.debtId)" }
+        case .debtSchedule:
+            let value = auditValue(
+                DebtPaymentScheduleItem.self,
+                change: change,
+                current: snapshot.debtPaymentScheduleItems.first { $0.id == change.recordId }
+            )
+            return value.map { "debt:\($0.debtId)" }
+        case .creditCard:
+            return "card:\(change.recordId)"
+        case .creditCardRepayment:
+            let value = auditValue(
+                CreditCardRepayment.self,
+                change: change,
+                current: snapshot.creditCardRepayments.first { $0.id == change.recordId }
+            )
+            return value.map { "card:\($0.creditCardId)" }
+        case .creditCardPot:
+            let value = auditValue(
+                CreditCardPot.self,
+                change: change,
+                current: snapshot.creditCardPots.first { $0.id == change.recordId }
+            )
+            return value.map { "card:\($0.creditCardId)" }
+        case .creditCardCycle:
+            let value = auditValue(
+                CreditCardCycleOverride.self,
+                change: change,
+                current: snapshot.creditCardCycleOverrides.first { $0.id == change.recordId }
+            )
+            return value.map { "card:\($0.creditCardId)" }
+        case .customPayment:
+            let value = auditValue(
+                CustomPayment.self,
+                change: change,
+                current: snapshot.customPayments.first { $0.id == change.recordId }
+            )
+            if let cardId = value?.creditCardId { return "card:\(cardId)" }
+            return "customPayment:\(change.recordId)"
+        default:
+            return nil
+        }
+    }
+
+    private static func auditValue<T: Decodable>(
+        _ type: T.Type,
+        change: PlannerAuditChange,
+        current: T?
+    ) -> T? {
+        if let json = change.afterJSON, let value = decode(type, json: json) { return value }
+        if let json = change.beforeJSON, let value = decode(type, json: json) { return value }
+        return current
     }
 
     private static func appendBaseline<T: Codable & Equatable & Identifiable>(

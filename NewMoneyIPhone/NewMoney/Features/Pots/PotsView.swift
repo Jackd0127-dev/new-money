@@ -1677,7 +1677,7 @@ private struct PotDetailView: View {
     }
 }
 
-private struct PotEditView: View {
+struct PotEditView: View {
     @ObservedObject var store: PlannerStore
     var pot: Pot
     @State private var name: String

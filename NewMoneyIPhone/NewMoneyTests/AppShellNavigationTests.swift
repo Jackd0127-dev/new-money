@@ -313,8 +313,34 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     @MainActor
-    private func attachRenderedView<Content: View>(_ view: Content, name: String) {
-        let frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+    func testHistoryFiltersRenderAtNarrowAndAccessibilitySizes() async {
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.basicDataSnapshot))
+        await store.load()
+
+        attachRenderedView(
+            NavigationStack {
+                HistoryView(store: store)
+            },
+            name: "history-five-filters-narrow",
+            width: 320
+        )
+        attachRenderedView(
+            NavigationStack {
+                HistoryView(store: store)
+            }
+            .environment(\.dynamicTypeSize, .accessibility3),
+            name: "history-five-filters-accessibility",
+            width: 390
+        )
+    }
+
+    @MainActor
+    private func attachRenderedView<Content: View>(
+        _ view: Content,
+        name: String,
+        width: CGFloat = 390
+    ) {
+        let frame = CGRect(x: 0, y: 0, width: width, height: 844)
         let host = UIHostingController(rootView: view)
         let window = UIWindow(frame: frame)
         window.rootViewController = host
@@ -722,6 +748,10 @@ final class AppShellNavigationTests: XCTestCase {
     func testProfileHistoryScreenHasNoPlaceholderToolbar() {
         XCTAssertEqual(HistoryLayoutPolicy.toolbarMode, "none")
         XCTAssertFalse(HistoryLayoutPolicy.showsPlaceholderOptions)
+        XCTAssertEqual(HistoryLayoutPolicy.filterLabels, ["All", "Out", "Cards", "Refunds", "System"])
+        XCTAssertTrue(HistoryLayoutPolicy.usesStableSourceTint)
+        XCTAssertEqual(HistoryLayoutPolicy.sourceTintPlacement, "iconAndLeadingKeyline")
+        XCTAssertEqual(HistoryLayoutPolicy.detailEditTitle, "Edit")
     }
 
     func testActivityRecentRowsUseCleanDotMarkersAndReadableDates() {

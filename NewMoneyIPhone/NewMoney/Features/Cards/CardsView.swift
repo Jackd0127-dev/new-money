@@ -1106,7 +1106,7 @@ struct CreditCardBalanceHistoryData: Equatable {
             entries.append(
                 CreditCardBalanceHistoryEntry(
                     id: "statement-adjustment-\(statement.id)",
-                    title: "Bank statement adjustment",
+                    title: "Unitemised statement amount",
                     date: statement.statementDate,
                     amountPence: statement.reconciliationAdjustmentPence,
                     kind: .reconciliationAdjustment,
@@ -1215,7 +1215,7 @@ struct CreditCardBalanceHistoryData: Equatable {
         return .card(cardId)
     }
 
-    private static func transactionEditTarget(
+    static func transactionEditTarget(
         for transaction: Transaction,
         snapshot: PlannerSnapshot
     ) -> CreditCardBalanceHistoryEditTarget {
@@ -2248,7 +2248,7 @@ private struct CreditCardStatementDetailEditorView: View {
     }
 }
 
-private struct CreditCardBalanceHistoryEditorSheet: View {
+struct CreditCardBalanceHistoryEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var target: CreditCardBalanceHistoryEditTarget
@@ -2798,6 +2798,7 @@ private struct CardRepaymentDetailView: View {
         .premiumScreenBackground()
         .navigationTitle("Card payment")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTopDividerHidden()
     }
 
     private var refundIsValid: Bool {

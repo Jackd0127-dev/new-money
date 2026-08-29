@@ -53,9 +53,14 @@ struct StatementDetailView: View {
                     CreditMetricGrid(items: breakdownMetrics)
 
                     if statement.amountSource == .confirmedBankAmount {
-                        Text("The bank total is kept authoritative. The adjustment reconciles it with the real transactions currently itemised in New Money.")
-                            .font(.footnote)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Confirmed statement total − tracked statement transactions = unitemised statement amount.")
+                            Text("\(MoneyParser.formatPence(statement.statementAmountPence)) − \(MoneyParser.formatPence(statement.calculatedAmountPence)) = \(signedMoney(statement.reconciliationAdjustmentPence))")
+                                .fontWeight(.semibold)
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
@@ -223,7 +228,7 @@ struct StatementDetailView: View {
         if statement.amountSource == .confirmedBankAmount {
             items.append(
                 .init(
-                    label: "Bank statement adjustment",
+                    label: "Unitemised statement amount",
                     value: signedMoney(statement.reconciliationAdjustmentPence),
                     valueColor: statement.reconciliationAdjustmentPence == 0 ? AppTheme.Colors.secondaryText : AppTheme.Colors.warning
                 )

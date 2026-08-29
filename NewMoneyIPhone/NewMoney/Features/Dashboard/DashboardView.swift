@@ -3435,7 +3435,7 @@ private struct RecordDebtPaymentSheetView: View {
     }
 }
 
-private struct DebtDetailScreenView: View {
+struct DebtDetailScreenView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var debt: Debt

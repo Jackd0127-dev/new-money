@@ -4665,7 +4665,13 @@ final class FinanceEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(summary.statementAmountPence, 7_917)
+        XCTAssertEqual(summary.calculatedAmountPence, 0)
         XCTAssertEqual(summary.reconciliationAdjustmentPence, 7_917)
+        XCTAssertEqual(
+            summary.reconciliationAdjustmentPence,
+            summary.statementAmountPence - summary.calculatedAmountPence
+        )
+        XCTAssertEqual(summary.statementAmountPence - (card.openingBalancePence ?? 0), 899)
         XCTAssertEqual(owed.actualOwedPence, 23_448)
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: snapshot), 23_448)
 
@@ -4683,6 +4689,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(statement.balancePence, 7_917)
         XCTAssertTrue(statement.entries.contains {
             $0.kind == .reconciliationAdjustment &&
+                $0.title == "Unitemised statement amount" &&
                 $0.editTarget == .statement(cardId: card.id, scheduledStatementDate: "2026-08-13")
         })
         XCTAssertEqual(statement.title, "13 August processed")
@@ -8942,6 +8949,315 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertNotNil(event?.changes.first?.afterJSON)
     }
 
+    func testAuditRefundActivityClassifiesEveryTransactionTransition() throws {
+        let card = makeCreditCard(
+            id: "refund-card",
+            name: "Refund card",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-13",
+            dueDay: 19
+        )
+        let original = makeTransaction(
+            id: "refund-transaction",
+            cardId: card.id,
+            amountPence: 2_000,
+            date: "2026-08-24",
+            note: "MMA Gear"
+        )
+
+        func activity(from before: Transaction, to after: Transaction) throws -> PlannerAuditRefundActivity {
+            let event = try XCTUnwrap(PlannerAuditEngine.event(
+                before: makeSnapshot(transactions: [before], creditCards: [card]),
+                after: makeSnapshot(transactions: [after], creditCards: [card]),
+                origin: .user
+            ))
+            return try XCTUnwrap(PlannerAuditEngine.refundActivity(
+                for: event,
+                snapshot: makeSnapshot(transactions: [after], creditCards: [card])
+            ))
+        }
+
+        var applied = original
+        applied.refundedAt = "2026-08-25T10:00:00.000Z"
+        applied.refundedAmountPence = 500
+        XCTAssertEqual(try activity(from: original, to: applied).transition, .applied)
+
+        var increased = applied
+        increased.refundedAmountPence = 1_500
+        XCTAssertEqual(try activity(from: applied, to: increased).transition, .increased)
+
+        var decreased = increased
+        decreased.refundedAmountPence = 250
+        XCTAssertEqual(try activity(from: increased, to: decreased).transition, .decreased)
+
+        var removed = decreased
+        removed.refundedAt = nil
+        removed.refundedAmountPence = nil
+        let removedActivity = try activity(from: decreased, to: removed)
+        XCTAssertEqual(removedActivity.transition, .removed)
+        XCTAssertEqual(removedActivity.displayAmountPence, 250)
+
+        var ordinaryEdit = original
+        ordinaryEdit.note = "Updated name"
+        let ordinaryEvent = try XCTUnwrap(PlannerAuditEngine.event(
+            before: makeSnapshot(transactions: [original], creditCards: [card]),
+            after: makeSnapshot(transactions: [ordinaryEdit], creditCards: [card]),
+            origin: .user
+        ))
+        XCTAssertNil(PlannerAuditEngine.refundActivity(
+            for: ordinaryEvent,
+            snapshot: makeSnapshot(transactions: [ordinaryEdit], creditCards: [card])
+        ))
+    }
+
+    func testAuditRefundActivityIncludesEveryRefundableSourceAndStableRelationship() throws {
+        let card = makeCreditCard(
+            id: "history-card",
+            name: "Barclays",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-13",
+            dueDay: 19
+        )
+        var transaction = makeTransaction(
+            id: "history-transaction",
+            cardId: card.id,
+            amountPence: 2_000,
+            date: "2026-08-24",
+            note: "MMA Gear"
+        )
+        transaction.refundedAt = "2026-08-25T10:00:00.000Z"
+        transaction.refundedAmountPence = 500
+
+        let repayment = CreditCardRepayment(
+            id: "history-repayment",
+            creditCardId: card.id,
+            amountPence: 1_000,
+            date: "2026-08-20",
+            note: "Statement payment",
+            refundedAt: "2026-08-25T10:00:00.000Z",
+            refundedAmountPence: 1_000,
+            createdAt: "2026-08-20T10:00:00.000Z",
+            updatedAt: "2026-08-25T10:00:00.000Z",
+            deletedAt: nil
+        )
+        let debt = makeDebt(id: "history-debt", name: "Loan", currentBalancePence: 5_000, dueDate: "2026-09-01")
+        var debtPayment = DebtPlannerEngine.applyPayment(
+            debt: debt,
+            scheduleItem: nil,
+            amountPence: 2_000,
+            date: "2026-08-21",
+            sourcePotId: nil,
+            paymentType: .manualPayNow,
+            note: "Loan payment"
+        ).payment
+        debtPayment.refundedAt = "2026-08-25T10:00:00.000Z"
+        debtPayment.refundedAmountPence = 750
+
+        let bill = makeRecurringPayment(
+            id: "history-bill",
+            name: "MMA",
+            amountPence: 5_000,
+            dueDay: 24,
+            potId: nil,
+            creditCardId: card.id
+        )
+        let occurrence = RecurringPaymentOccurrenceOverride(
+            id: "history-occurrence",
+            paymentId: bill.id,
+            scheduledDueDate: "2026-08-24",
+            state: .normal,
+            actualDueDate: nil,
+            amountPenceOverride: nil,
+            refundedAmountPence: 900,
+            reversedGeneratedTransactionIds: [],
+            createdAt: "2026-08-24T10:00:00.000Z",
+            updatedAt: "2026-08-25T10:00:00.000Z",
+            deletedAt: nil
+        )
+        var generatedBillTransaction = makeTransaction(
+            id: "card-recurring-\(bill.id)-2026-08-24",
+            cardId: card.id,
+            amountPence: bill.amountPence,
+            date: "2026-08-24",
+            note: bill.name
+        )
+        generatedBillTransaction.recurringPaymentId = bill.id
+        let snapshot = makeSnapshot(
+            recurringPayments: [bill],
+            recurringPaymentOccurrenceOverrides: [occurrence],
+            transactions: [transaction, generatedBillTransaction],
+            debts: [debt],
+            debtPayments: [debtPayment],
+            creditCards: [card],
+            creditCardRepayments: [repayment]
+        )
+        let events = PlannerAuditEngine.baselineEvents(for: snapshot)
+
+        let expected: [(PlannerAuditRecordKind, String, Int)] = [
+            (.transaction, transaction.id, 500),
+            (.creditCardRepayment, repayment.id, 1_000),
+            (.debtPayment, debtPayment.id, 750),
+            (.recurringOccurrence, occurrence.id, 900)
+        ]
+        for (kind, id, amountPence) in expected {
+            let event = try XCTUnwrap(events.first {
+                $0.changes.contains { $0.recordKind == kind && $0.recordId == id }
+            })
+            let activity = try XCTUnwrap(PlannerAuditEngine.refundActivity(for: event, snapshot: snapshot))
+            XCTAssertEqual(activity.transition, .applied)
+            XCTAssertEqual(activity.currentAmountPence, amountPence)
+        }
+
+        let transactionEvent = try XCTUnwrap(events.first { $0.changes.contains { $0.recordId == transaction.id } })
+        let repaymentEvent = try XCTUnwrap(events.first { $0.changes.contains { $0.recordId == repayment.id } })
+        XCTAssertEqual(PlannerAuditEngine.relationshipKey(for: transactionEvent, snapshot: snapshot), "card:\(card.id)")
+        XCTAssertEqual(PlannerAuditEngine.relationshipKey(for: repaymentEvent, snapshot: snapshot), "card:\(card.id)")
+
+        let billEvent = try XCTUnwrap(events.first { $0.changes.contains { $0.recordId == bill.id } })
+        let occurrenceEvent = try XCTUnwrap(events.first { $0.changes.contains { $0.recordId == occurrence.id } })
+        let generatedEvent = try XCTUnwrap(events.first { $0.changes.contains { $0.recordId == generatedBillTransaction.id } })
+        XCTAssertEqual(PlannerAuditEngine.relationshipKey(for: billEvent, snapshot: snapshot), "bill:\(bill.id)")
+        XCTAssertEqual(PlannerAuditEngine.relationshipKey(for: occurrenceEvent, snapshot: snapshot), "bill:\(bill.id)")
+        XCTAssertEqual(PlannerAuditEngine.relationshipKey(for: generatedEvent, snapshot: snapshot), "bill:\(bill.id)")
+        XCTAssertEqual(
+            PlannerAuditEngine.stableRelationshipHash("bill:\(bill.id)"),
+            PlannerAuditEngine.stableRelationshipHash("bill:\(bill.id)")
+        )
+    }
+
+    func testHistoryEditTargetsResolveCurrentCanonicalRecords() throws {
+        let card = makeCreditCard(
+            id: "edit-card",
+            name: "Aqua",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-02",
+            dueDay: 20
+        )
+        let bill = makeRecurringPayment(
+            id: "edit-bill",
+            name: "MMA",
+            amountPence: 5_000,
+            dueDay: 24,
+            potId: nil,
+            creditCardId: card.id
+        )
+        var generated = makeTransaction(
+            id: "card-recurring-\(bill.id)-2026-08-24",
+            cardId: card.id,
+            amountPence: bill.amountPence,
+            date: "2026-08-24",
+            note: bill.name
+        )
+        generated.recurringPaymentId = bill.id
+        let standalone = makeTransaction(
+            id: "edit-transaction",
+            cardId: card.id,
+            amountPence: 2_848,
+            date: "2026-08-24",
+            note: "MMA Gear"
+        )
+        let occurrence = RecurringPaymentOccurrenceOverride(
+            id: "edit-occurrence",
+            paymentId: bill.id,
+            scheduledDueDate: "2026-08-24",
+            state: .normal,
+            actualDueDate: nil,
+            amountPenceOverride: nil,
+            reversedGeneratedTransactionIds: [],
+            createdAt: "2026-08-24T10:00:00.000Z",
+            updatedAt: "2026-08-24T10:00:00.000Z",
+            deletedAt: nil
+        )
+        let repayment = CreditCardRepayment(
+            id: "edit-repayment",
+            creditCardId: card.id,
+            amountPence: 5_000,
+            date: "2026-08-20",
+            note: "Automatic Aqua statement payment from Aqua pot",
+            createdAt: "2026-08-20T10:00:00.000Z",
+            updatedAt: "2026-08-20T10:00:00.000Z",
+            deletedAt: nil
+        )
+        let cycle = CreditCardCycleOverride(
+            id: "edit-statement",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-08-02",
+            statementState: .confirmed,
+            actualStatementDate: nil,
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 6_958,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-02T10:00:00.000Z",
+            updatedAt: "2026-08-02T10:00:00.000Z",
+            deletedAt: nil
+        )
+        let debt = makeDebt(id: "edit-debt", name: "Loan", currentBalancePence: 10_000, dueDate: "2026-09-01")
+        let debtPayment = DebtPlannerEngine.applyPayment(
+            debt: debt,
+            scheduleItem: nil,
+            amountPence: 1_000,
+            date: "2026-08-21",
+            sourcePotId: nil,
+            paymentType: .manualPayNow
+        ).payment
+        let pot = makePot(id: "edit-pot", name: "Bills", balancePence: 5_000, targetPence: 10_000)
+        let bank = makeBankAccount(id: "edit-bank")
+        let payPeriod = makePayPeriod(
+            id: "system-pay-period",
+            startDate: "2026-08-01",
+            endDate: "2026-08-31",
+            payday: "2026-08-01",
+            incomePence: 100_000
+        )
+        let snapshot = makeSnapshot(
+            bankAccounts: [bank],
+            pots: [pot],
+            recurringPayments: [bill],
+            recurringPaymentOccurrenceOverrides: [occurrence],
+            payPeriods: [payPeriod],
+            transactions: [standalone, generated],
+            debts: [debt],
+            debtPayments: [debtPayment],
+            creditCards: [card],
+            creditCardRepayments: [repayment],
+            creditCardCycleOverrides: [cycle]
+        )
+        let events = PlannerAuditEngine.baselineEvents(for: snapshot)
+
+        func target(kind: PlannerAuditRecordKind, id: String) throws -> HistoryAuditEditTarget? {
+            let event = try XCTUnwrap(events.first {
+                $0.changes.contains { $0.recordKind == kind && $0.recordId == id }
+            })
+            return HistoryAuditEditTarget.make(event: event, snapshot: snapshot)
+        }
+
+        XCTAssertEqual(try target(kind: .transaction, id: standalone.id), .card(.transaction(standalone.id)))
+        XCTAssertEqual(
+            try target(kind: .transaction, id: generated.id),
+            .card(.recurring(paymentId: bill.id, scheduledDueDate: "2026-08-24"))
+        )
+        XCTAssertEqual(
+            try target(kind: .recurringOccurrence, id: occurrence.id),
+            .card(.recurring(paymentId: bill.id, scheduledDueDate: occurrence.scheduledDueDate))
+        )
+        XCTAssertEqual(try target(kind: .recurringPayment, id: bill.id), .recurringBill(bill.id))
+        XCTAssertEqual(try target(kind: .creditCardRepayment, id: repayment.id), .card(.repayment(repayment.id)))
+        XCTAssertEqual(
+            try target(kind: .creditCardCycle, id: cycle.id),
+            .card(.statement(cardId: card.id, scheduledStatementDate: cycle.scheduledStatementDate))
+        )
+        XCTAssertEqual(try target(kind: .creditCard, id: card.id), .card(.card(card.id)))
+        XCTAssertEqual(try target(kind: .debtPayment, id: debtPayment.id), .debtPayment(debtPayment.id))
+        XCTAssertEqual(try target(kind: .debt, id: debt.id), .debt(debt.id))
+        XCTAssertEqual(try target(kind: .pot, id: pot.id), .pot(pot.id))
+        XCTAssertEqual(try target(kind: .bankAccount, id: bank.id), .bankAccount(bank.id))
+        XCTAssertNil(try target(kind: .payPeriod, id: payPeriod.id))
+    }
+
     func testLegacySnapshotWithoutAuditEventsDecodesAsEmptyHistory() throws {
         let data = try JSONEncoder().encode(DefaultData.basicDataSnapshot)
         var dictionary = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -8990,6 +9306,7 @@ final class FinanceEngineTests: XCTestCase {
         bankAccounts: [BankAccount] = [],
         pots: [Pot] = [],
         recurringPayments: [RecurringPayment] = [],
+        recurringPaymentOccurrenceOverrides: [RecurringPaymentOccurrenceOverride] = [],
         payPeriods: [PayPeriod] = [],
         potAllocations: [PotAllocation] = [],
         transactions: [Transaction] = [],
@@ -9007,6 +9324,7 @@ final class FinanceEngineTests: XCTestCase {
             settings: settings,
             pots: pots,
             recurringPayments: recurringPayments,
+            recurringPaymentOccurrenceOverrides: recurringPaymentOccurrenceOverrides,
             payPeriods: payPeriods,
             paychecks: [],
             potAllocations: potAllocations,

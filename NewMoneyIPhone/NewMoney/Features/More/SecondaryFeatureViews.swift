@@ -3651,15 +3651,83 @@ enum HistoryLayoutPolicy {
     static let baselineLabel = "Baseline"
     static let editedLabel = "Edited"
     static let revertedLabel = "Reverted"
+    static let filterLabels = ["All", "Out", "Cards", "Refunds", "System"]
+    static let usesStableSourceTint = true
+    static let sourceTintPlacement = "iconAndLeadingKeyline"
+    static let detailEditTitle = "Edit"
 }
 
 private enum HistoryAuditFilter: String, CaseIterable, Identifiable {
     case all = "All"
-    case moneyOut = "Money out"
+    case moneyOut = "Out"
     case cards = "Cards"
+    case refunds = "Refunds"
     case system = "System"
 
     var id: String { rawValue }
+
+    var accessibilityLabel: String {
+        self == .moneyOut ? "Money out" : rawValue
+    }
+}
+
+private struct HistoryAuditFilterBar: View {
+    @Binding var selection: HistoryAuditFilter
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(HistoryAuditFilter.allCases) { option in
+                Button {
+                    selection = option
+                } label: {
+                    Text(option.rawValue)
+                        .font(.caption.weight(selection == option ? .bold : .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                        .frame(maxWidth: .infinity, minHeight: 38)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .background {
+                    if selection == option {
+                        Capsule(style: .continuous)
+                            .fill(AppTheme.Colors.selectedFill)
+                    }
+                }
+                .accessibilityLabel(option.accessibilityLabel)
+                .accessibilityAddTraits(selection == option ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(AppTheme.Colors.surface, in: Capsule(style: .continuous))
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(AppTheme.Colors.border.opacity(0.72), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("History filter")
+        .accessibilityIdentifier("history-filter")
+        // Keep the five navigation labels readable as one control. VoiceOver
+        // still exposes each full label and every button retains a 44pt target.
+        .dynamicTypeSize(.xSmall ... .large)
+    }
+}
+
+private struct HistoryAuditPresentedEvent: Identifiable {
+    var event: PlannerAuditEvent
+    var relationshipKey: String
+    var refundActivity: PlannerAuditRefundActivity?
+
+    var id: String { event.id }
+
+    static func make(event: PlannerAuditEvent, snapshot: PlannerSnapshot) -> HistoryAuditPresentedEvent {
+        HistoryAuditPresentedEvent(
+            event: event,
+            relationshipKey: PlannerAuditEngine.relationshipKey(for: event, snapshot: snapshot),
+            refundActivity: PlannerAuditEngine.refundActivity(for: event, snapshot: snapshot)
+        )
+    }
 }
 
 struct HistoryView: View {
@@ -3678,19 +3746,14 @@ struct HistoryView: View {
                 TextField("Search payments, statements, bills...", text: $searchText)
                     .textFieldStyle(AppTextFieldStyle())
 
-                Picker("History filter", selection: $filter) {
-                    ForEach(HistoryAuditFilter.allCases) { option in
-                        Text(option.rawValue).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
+                HistoryAuditFilterBar(selection: $filter)
             }
 
             if filteredEvents.isEmpty {
                 AppCard {
                     EmptyStateView(
                         title: "No matching history",
-                        message: "Inputs, payments, statements, edits, and calculated changes appear here.",
+                        message: emptyStateMessage,
                         systemImage: "clock.arrow.circlepath"
                     )
                 }
@@ -3700,7 +3763,7 @@ struct HistoryView: View {
                     AppCard {
                         ForEach(Array(month.events.enumerated()), id: \.element.id) { index, event in
                             NavigationLink {
-                                HistoryAuditEventDetailView(store: store, eventId: event.id)
+                                HistoryAuditEventDetailView(store: store, eventId: event.event.id)
                             } label: {
                                 HistoryAuditEventRow(event: event)
                             }
@@ -3716,63 +3779,84 @@ struct HistoryView: View {
         }
     }
 
-    private var filteredEvents: [PlannerAuditEvent] {
+    private var filteredEvents: [HistoryAuditPresentedEvent] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let snapshot = store.snapshot
         return store.snapshot.auditEvents
-            .filter { event in
-                switch filter {
+            .map { HistoryAuditPresentedEvent.make(event: $0, snapshot: snapshot) }
+            .filter { item in
+                let event = item.event
+                return switch filter {
                 case .all:
                     true
                 case .moneyOut:
                     event.changes.contains { [.transaction, .recurringPayment, .debtPayment, .potAllocation].contains($0.recordKind) }
                 case .cards:
                     event.changes.contains { [.creditCard, .creditCardCycle, .creditCardRepayment, .creditCardPot].contains($0.recordKind) }
+                case .refunds:
+                    item.refundActivity != nil
                 case .system:
                     event.origin == .system || event.action == .automatic
                 }
             }
-            .filter { event in
+            .filter { item in
                 guard !query.isEmpty else { return true }
+                let event = item.event
                 return event.title.localizedStandardContains(query)
                     || event.subtitle.localizedStandardContains(query)
                     || event.changes.contains { $0.recordName.localizedStandardContains(query) }
+                    || refundSummary(item.refundActivity).localizedStandardContains(query)
             }
-            .sorted { $0.occurredAt > $1.occurredAt }
+            .sorted { $0.event.occurredAt > $1.event.occurredAt }
     }
 
-    private var groupedMonths: [(key: String, events: [PlannerAuditEvent])] {
+    private var groupedMonths: [(key: String, events: [HistoryAuditPresentedEvent])] {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM yyyy"
-        return Dictionary(grouping: filteredEvents) { event in
-            formatter.string(from: FinanceEngine.parseDate(event.effectiveDate))
+        return Dictionary(grouping: filteredEvents) { item in
+            formatter.string(from: FinanceEngine.parseDate(item.event.effectiveDate))
         }
-        .map { (key: $0.key, events: $0.value.sorted { $0.occurredAt > $1.occurredAt }) }
+        .map { (key: $0.key, events: $0.value.sorted { $0.event.occurredAt > $1.event.occurredAt }) }
         .sorted { lhs, rhs in
-            (lhs.events.first?.effectiveDate ?? "") > (rhs.events.first?.effectiveDate ?? "")
+            (lhs.events.first?.event.effectiveDate ?? "") > (rhs.events.first?.event.effectiveDate ?? "")
         }
+    }
+
+    private var emptyStateMessage: String {
+        filter == .refunds
+            ? "Refunds and later refund changes appear here."
+            : "Inputs, payments, statements, edits, and calculated changes appear here."
     }
 }
 
 private struct HistoryAuditEventRow: View {
-    var event: PlannerAuditEvent
+    var event: HistoryAuditPresentedEvent
+    @ScaledMetric(relativeTo: .caption) private var iconSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .caption) private var keylineHeight: CGFloat = 34
 
     var body: some View {
         HStack(spacing: AppTheme.Spacing.md) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(tint.color.opacity(0.72))
+                .frame(width: 2, height: keylineHeight)
+                .accessibilityHidden(true)
+
             Image(systemName: symbol)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(color)
-                .frame(width: 30, height: 30)
-                .background(color.opacity(0.12), in: Circle())
+                .foregroundStyle(tint.color.opacity(tint.foregroundOpacity))
+                .frame(width: iconSize, height: iconSize)
+                .background(tint.color.opacity(tint.backgroundOpacity), in: Circle())
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
-                    Text(event.title)
+                    Text(event.event.title)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.primaryText)
                         .lineLimit(1)
-                    HistoryAuditStatusPill(action: event.action)
+                    HistoryAuditStatusPill(action: event.event.action)
                 }
-                Text("\(historyFullDate(event.effectiveDate)) · \(event.subtitle)")
+                Text("\(historyFullDate(event.event.effectiveDate)) · \(rowSubtitle)")
                     .font(.caption)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
                     .lineLimit(1)
@@ -3781,10 +3865,10 @@ private struct HistoryAuditEventRow: View {
             Spacer(minLength: AppTheme.Spacing.sm)
 
             VStack(alignment: .trailing, spacing: 4) {
-                if let amountPence = event.amountPence {
+                if let amountPence = displayAmountPence {
                     Text(MoneyParser.formatPence(amountPence))
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(amountPence < 0 ? AppTheme.Colors.success : AppTheme.Colors.primaryText)
+                        .foregroundStyle(amountColor)
                 }
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.black))
@@ -3792,10 +3876,11 @@ private struct HistoryAuditEventRow: View {
             }
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private var symbol: String {
-        switch event.action {
+        switch event.event.action {
         case .baseline: "clock"
         case .created: "plus"
         case .edited: "pencil"
@@ -3805,13 +3890,48 @@ private struct HistoryAuditEventRow: View {
         }
     }
 
-    private var color: Color {
-        switch event.action {
-        case .reverted: AppTheme.Colors.success
-        case .deleted: AppTheme.Colors.danger
-        case .baseline: AppTheme.Colors.secondaryText
-        case .created, .edited, .automatic: AppTheme.Colors.primaryOrange
+    private var tint: HistoryAuditTint {
+        HistoryAuditTint.make(relationshipKey: event.relationshipKey)
+    }
+
+    private var rowSubtitle: String {
+        let summary = refundSummary(event.refundActivity)
+        return summary.isEmpty ? event.event.subtitle : summary
+    }
+
+    private var displayAmountPence: Int? {
+        event.refundActivity?.displayAmountPence ?? event.event.amountPence
+    }
+
+    private var amountColor: Color {
+        if let activity = event.refundActivity {
+            return activity.transition == .removed ? AppTheme.Colors.secondaryText : AppTheme.Colors.success
         }
+        return (event.event.amountPence ?? 0) < 0 ? AppTheme.Colors.success : AppTheme.Colors.primaryText
+    }
+}
+
+private struct HistoryAuditTint {
+    var color: Color
+    var foregroundOpacity: Double
+    var backgroundOpacity: Double
+
+    static func make(relationshipKey: String) -> HistoryAuditTint {
+        let colors = AppTheme.selectableColorHexes()
+        guard !colors.isEmpty else {
+            return HistoryAuditTint(color: AppTheme.Colors.primaryOrange, foregroundOpacity: 0.9, backgroundOpacity: 0.12)
+        }
+
+        let hash = PlannerAuditEngine.stableRelationshipHash(relationshipKey)
+        let colorIndex = Int(hash % UInt64(colors.count))
+        let shadeIndex = Int((hash / UInt64(colors.count)) % 3)
+        let foregroundOpacities = [0.72, 0.86, 1.0]
+        let backgroundOpacities = [0.09, 0.12, 0.16]
+        return HistoryAuditTint(
+            color: Color(hex: colors[colorIndex]),
+            foregroundOpacity: foregroundOpacities[shadeIndex],
+            backgroundOpacity: backgroundOpacities[shadeIndex]
+        )
     }
 }
 
@@ -3822,6 +3942,8 @@ struct HistoryAuditStatusPill: View {
         if let label {
             Text(label)
                 .font(.system(size: 9, weight: .black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
                 .foregroundStyle(color)
                 .textCase(.uppercase)
                 .padding(.horizontal, 7)
@@ -3853,9 +3975,14 @@ struct HistoryAuditStatusPill: View {
 private struct HistoryAuditEventDetailView: View {
     @ObservedObject var store: PlannerStore
     var eventId: String
+    @State private var presentedEditor: HistoryAuditEditTarget?
 
     private var event: PlannerAuditEvent? {
         store.snapshot.auditEvents.first { $0.id == eventId }
+    }
+
+    private var editTarget: HistoryAuditEditTarget? {
+        event.flatMap { HistoryAuditEditTarget.make(event: $0, snapshot: store.snapshot) }
     }
 
     var body: some View {
@@ -3946,6 +4073,192 @@ private struct HistoryAuditEventDetailView: View {
                 }
             }
         }
+        .toolbar {
+            if let editTarget {
+                ToolbarItem(id: "history-record-edit", placement: .topBarTrailing) {
+                    Button(HistoryLayoutPolicy.detailEditTitle) {
+                        presentedEditor = editTarget
+                    }
+                    .accessibilityHint("Edits the current source record while preserving this revision")
+                    .accessibilityIdentifier("history-record-edit")
+                }
+            }
+        }
+        .sheet(item: $presentedEditor) { target in
+            HistoryAuditEditorSheet(store: store, target: target)
+        }
+    }
+}
+
+enum HistoryAuditEditTarget: Equatable, Identifiable {
+    case card(CreditCardBalanceHistoryEditTarget)
+    case recurringBill(String)
+    case debtPayment(String)
+    case debt(String)
+    case pot(String)
+    case bankAccount(String)
+
+    var id: String {
+        switch self {
+        case .card(let target): "card-history-\(target.id)"
+        case .recurringBill(let id): "bill-\(id)"
+        case .debtPayment(let id): "debt-payment-\(id)"
+        case .debt(let id): "debt-\(id)"
+        case .pot(let id): "pot-\(id)"
+        case .bankAccount(let id): "bank-account-\(id)"
+        }
+    }
+
+    static func make(event: PlannerAuditEvent, snapshot: PlannerSnapshot) -> HistoryAuditEditTarget? {
+        for change in event.changes {
+            switch change.recordKind {
+            case .transaction:
+                guard let transaction = snapshot.transactions.first(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                let target = CreditCardBalanceHistoryData.transactionEditTarget(
+                    for: transaction,
+                    snapshot: snapshot
+                )
+                if case .recurring(let paymentId, _) = target,
+                   !snapshot.recurringPayments.contains(where: { $0.id == paymentId && $0.deletedAt == nil }) {
+                    continue
+                }
+                return .card(target)
+            case .recurringPayment:
+                guard snapshot.recurringPayments.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .recurringBill(change.recordId)
+            case .recurringOccurrence:
+                guard let occurrence = snapshot.recurringPaymentOccurrenceOverrides.first(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }), snapshot.recurringPayments.contains(where: {
+                    $0.id == occurrence.paymentId && $0.deletedAt == nil
+                }) else { continue }
+                return .card(.recurring(
+                    paymentId: occurrence.paymentId,
+                    scheduledDueDate: occurrence.scheduledDueDate
+                ))
+            case .creditCardRepayment:
+                guard snapshot.creditCardRepayments.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .card(.repayment(change.recordId))
+            case .creditCardCycle:
+                guard let cycle = snapshot.creditCardCycleOverrides.first(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }), snapshot.creditCards.contains(where: {
+                    $0.id == cycle.creditCardId && !$0.archived && $0.deletedAt == nil
+                }) else { continue }
+                return .card(.statement(
+                    cardId: cycle.creditCardId,
+                    scheduledStatementDate: cycle.scheduledStatementDate
+                ))
+            case .creditCard:
+                guard snapshot.creditCards.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .card(.card(change.recordId))
+            case .debtPayment:
+                guard snapshot.debtPayments.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .debtPayment(change.recordId)
+            case .debt:
+                guard snapshot.debts.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .debt(change.recordId)
+            case .pot:
+                guard snapshot.pots.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .pot(change.recordId)
+            case .bankAccount:
+                guard snapshot.bankAccounts.contains(where: {
+                    $0.id == change.recordId && $0.deletedAt == nil
+                }) else { continue }
+                return .bankAccount(change.recordId)
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+}
+
+private struct HistoryAuditEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var target: HistoryAuditEditTarget
+
+    @ViewBuilder
+    var body: some View {
+        switch target {
+        case .card(let target):
+            CreditCardBalanceHistoryEditorSheet(store: store, target: target)
+        case .recurringBill(let id):
+            if let payment = store.snapshot.recurringPayments.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                NavigationStack {
+                    EditBillView(store: store, payment: payment)
+                        .toolbar { closeToolbarItem }
+                }
+            } else {
+                missingRecord
+            }
+        case .debtPayment(let id):
+            if let payment = store.snapshot.debtPayments.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                DebtPaymentEditSheetView(store: store, payment: payment)
+            } else {
+                missingRecord
+            }
+        case .debt(let id):
+            if let debt = store.snapshot.debts.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                NavigationStack {
+                    DebtDetailScreenView(store: store, debt: debt)
+                        .toolbar { closeToolbarItem }
+                }
+            } else {
+                missingRecord
+            }
+        case .pot(let id):
+            if let pot = store.snapshot.pots.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                NavigationStack {
+                    PotEditView(store: store, pot: pot)
+                        .toolbar { closeToolbarItem }
+                }
+            } else {
+                missingRecord
+            }
+        case .bankAccount(let id):
+            if let account = store.snapshot.bankAccounts.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                NavigationStack {
+                    BankAccountFormView(store: store, account: account)
+                }
+            } else {
+                missingRecord
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var closeToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Close") { dismiss() }
+        }
+    }
+
+    private var missingRecord: some View {
+        NavigationStack {
+            ContentUnavailableView(
+                "Record unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text("This source record is no longer available to edit.")
+            )
+            .premiumScreenBackground()
+            .toolbar { closeToolbarItem }
+        }
     }
 }
 
@@ -4003,6 +4316,20 @@ private struct AuditRecordSummary {
 
 private func signedMoney(_ pence: Int) -> String {
     pence > 0 ? "+\(MoneyParser.formatPence(pence))" : MoneyParser.formatPence(pence)
+}
+
+private func refundSummary(_ activity: PlannerAuditRefundActivity?) -> String {
+    guard let activity else { return "" }
+    switch activity.transition {
+    case .applied:
+        return "Refunded \(MoneyParser.formatPence(activity.currentAmountPence))"
+    case .increased:
+        return "Refund increased to \(MoneyParser.formatPence(activity.currentAmountPence))"
+    case .decreased:
+        return "Refund reduced to \(MoneyParser.formatPence(activity.currentAmountPence))"
+    case .removed:
+        return "Refund removed"
+    }
 }
 
 private func historyFullDate(_ value: String) -> String {

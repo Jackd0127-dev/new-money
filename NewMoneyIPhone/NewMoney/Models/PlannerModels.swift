@@ -1724,8 +1724,11 @@ enum PlannerAuditEngine {
         to changes: inout [PlannerAuditChange],
         describe: (T) -> Descriptor
     ) where T.ID == String {
-        let oldById = Dictionary(uniqueKeysWithValues: oldValues.map { ($0.id, $0) })
-        let newById = Dictionary(uniqueKeysWithValues: newValues.map { ($0.id, $0) })
+        // Imported and repaired snapshots can temporarily contain duplicate legacy IDs.
+        // Audit capture must stay non-fatal while the canonical store mutation keeps the
+        // last record, matching the snapshot's visible ordering semantics.
+        let oldById = Dictionary(oldValues.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        let newById = Dictionary(newValues.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         for id in Set(oldById.keys).union(newById.keys).sorted() {
             let oldValue = oldById[id]
             let newValue = newById[id]

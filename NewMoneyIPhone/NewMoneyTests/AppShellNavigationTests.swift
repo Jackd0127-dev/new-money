@@ -466,10 +466,20 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertFalse(CreditRoute.allCases.map(\.title).contains("Statements"))
     }
 
+    func testEditableCreditRowsAndAssistantMeetInteractionPolicy() {
+        XCTAssertEqual(FloatingAssistantPolicy.symbol, "person.fill")
+        XCTAssertGreaterThanOrEqual(FloatingAssistantPolicy.minimumTapTarget, 44)
+        XCTAssertGreaterThanOrEqual(CreditLayoutPolicy.scheduleHeaderMinimumTapTarget, 44)
+        XCTAssertGreaterThanOrEqual(CreditLayoutPolicy.ledgerRowMinimumTapTarget, 44)
+        XCTAssertTrue(CreditLayoutPolicy.previousStatementsStartCollapsed)
+        XCTAssertTrue(CardsLayoutPolicy.linkedRowsUseFlatPresentation)
+        XCTAssertGreaterThanOrEqual(CardsLayoutPolicy.linkedRowMinimumTapTarget, 44)
+    }
+
     func testCreditSecondaryScreenToolbarActionsMatchRequestedButtons() {
         XCTAssertEqual(CardsLayoutPolicy.toolbarActionId, "add")
         XCTAssertEqual(CardsLayoutPolicy.detailToolbarActionId, "card-detail-add-payment")
-        XCTAssertEqual(CardsLayoutPolicy.detailToolbarTitle, "Payment")
+        XCTAssertEqual(CardsLayoutPolicy.detailToolbarTitle, "Pay")
         XCTAssertEqual(CardsLayoutPolicy.detailToolbarStyle, "textButton")
         XCTAssertEqual(CardsLayoutPolicy.repaymentFlowPlacement, "cardDetailToolbar")
         XCTAssertEqual(CardsLayoutPolicy.balanceHistoryToolbarActionId, "card-detail-balance-history")
@@ -1112,12 +1122,12 @@ final class AppThemePresetTests: XCTestCase {
             (.mintCream, "#0F6B2B", "#FEF6EA", "#07130A"),
             (.mintCreamDark, "#5FC98A", "#0C120F", "#F7F4EC"),
             (.goldObsidian, "#E6B450", "#0B0E14", "#BFBDB6"),
-            (.warmLight, "#CC7D5E", "#F9F9F7", "#2D2D2B"),
+            (.warmLight, "#8A412B", "#F9F9F7", "#2D2D2B"),
             (.sagePaper, "#3D755D", "#F5F3ED", "#2F312D"),
             (.navyEmerald, "#1A237E", "#FFFFFF", "#263238"),
             (.darkBlueMintGold, "#0D47A1", "#F5F5F5", "#263238"),
             (.charcoalTeal, "#212121", "#FAFAFA", "#424242"),
-            (.slateCoral, "#607D8B", "#FFFFFF", "#333333"),
+            (.slateCoral, "#455A64", "#FFFFFF", "#333333"),
             (.midnightEmerald, "#003366", "#E8E8E8", "#263238")
         ]
 
@@ -1161,7 +1171,7 @@ final class AppThemePresetTests: XCTestCase {
         }
 
         defaults.set(AppThemePreset.sagePaper.rawValue, forKey: AppTheme.selectedPresetStorageKey)
-        XCTAssertEqual(Array(AppTheme.selectableColorHexes(includeWhite: true).prefix(3)), ["#3D755D", "#5C9479", "#2D5E49"])
+        XCTAssertEqual(Array(AppTheme.selectableColorHexes(includeWhite: true).prefix(3)), ["#3D755D", "#2D5E49", "#765000"])
         XCTAssertTrue(AppTheme.selectableColorHexes(includeWhite: true).contains("#FFFFFF"))
 
         defaults.set(AppThemePreset.mintCream.rawValue, forKey: AppTheme.selectedPresetStorageKey)
@@ -1176,6 +1186,55 @@ final class AppThemePresetTests: XCTestCase {
 
         collection.selectedThemePresetId = AppThemePreset.classic.rawValue
         XCTAssertTrue(collection.hasMeaningfulPlannerData)
+    }
+
+    func testEveryNormalTextTokenMeetsWCAGAAOnSharedThemeSurfaces() {
+        for preset in AppThemePreset.allCases {
+            let palette = preset.palette
+            let backgrounds = [palette.backgroundHex, palette.surfaceHex, palette.cardBackgroundHex]
+            let normalTextColors = [
+                palette.textHex,
+                palette.secondaryTextHex,
+                palette.tertiaryTextHex,
+                palette.accentHex,
+                palette.accentHighlightHex,
+                palette.accentMutedHex,
+                palette.successHex,
+                palette.warningHex,
+                palette.dangerHex
+            ]
+
+            for foreground in normalTextColors {
+                for background in backgrounds {
+                    XCTAssertGreaterThanOrEqual(
+                        contrastRatio(foreground, background),
+                        4.5,
+                        "\(preset.rawValue): \(foreground) on \(background)"
+                    )
+                }
+            }
+        }
+    }
+
+    private func contrastRatio(_ firstHex: String, _ secondHex: String) -> Double {
+        let first = relativeLuminance(firstHex)
+        let second = relativeLuminance(secondHex)
+        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
+    }
+
+    private func relativeLuminance(_ hex: String) -> Double {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard cleaned.count == 6, let value = UInt64(cleaned, radix: 16) else { return 0 }
+        let components = [
+            Double((value & 0xFF0000) >> 16) / 255,
+            Double((value & 0x00FF00) >> 8) / 255,
+            Double(value & 0x0000FF) / 255
+        ].map { component in
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * components[0] + 0.7152 * components[1] + 0.0722 * components[2]
     }
 }
 

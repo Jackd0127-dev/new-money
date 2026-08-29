@@ -12,13 +12,12 @@ struct AppCard<Content: View>: View {
         }
         .padding(AppTheme.Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.Gradients.card)
+        .background(AppTheme.Colors.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(glow ? AppTheme.Colors.selectedStroke : AppTheme.Colors.border, lineWidth: 1)
+                .stroke(AppTheme.Colors.border, lineWidth: 1)
         )
-        .shadow(color: glow ? AppTheme.Colors.accentGlow : AppTheme.Colors.shadow, radius: glow ? 18 : 10, y: glow ? 8 : 4)
     }
 }
 
@@ -33,13 +32,12 @@ struct CompactMenuCard<Content: View>: View {
         .padding(.horizontal, AppTheme.Spacing.md)
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.Gradients.card)
+        .background(AppTheme.Colors.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
                 .stroke(AppTheme.Colors.border, lineWidth: 1)
         )
-        .shadow(color: AppTheme.Colors.shadow.opacity(0.75), radius: 8, y: 4)
     }
 }
 
@@ -120,13 +118,12 @@ struct SettingsPanel<Content: View>: View {
         }
         .padding(AppTheme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.Gradients.card)
+        .background(AppTheme.Colors.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.lg, style: .continuous)
                 .stroke(isDestructive ? AppTheme.Colors.danger.opacity(0.25) : AppTheme.Colors.border, lineWidth: 1)
         )
-        .shadow(color: AppTheme.Colors.shadow.opacity(0.75), radius: 8, y: 4)
     }
 }
 
@@ -152,9 +149,8 @@ struct PrimaryButton: View {
             .foregroundStyle(AppTheme.Colors.controlText)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 52)
-            .background(isDisabled ? AnyShapeStyle(AppTheme.Colors.darkDisabled) : AnyShapeStyle(AppTheme.Gradients.primary))
+            .background(isDisabled ? AnyShapeStyle(AppTheme.Colors.darkDisabled) : AnyShapeStyle(AppTheme.Colors.accent))
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
-            .shadow(color: isDisabled ? .clear : AppTheme.Colors.glowOrange, radius: 16, y: 8)
         }
         .buttonStyle(ScaleButtonStyle())
         .disabled(isDisabled || isLoading)
@@ -474,21 +470,13 @@ struct SelectionField<MenuContent: View>: View {
             .padding(.horizontal, AppTheme.Spacing.md)
             .frame(minHeight: 58)
             .background(
-                LinearGradient(
-                    colors: [
-                        AppTheme.Colors.elevatedSurface,
-                        hasValue ? AppTheme.Colors.accentSoft.opacity(0.44) : AppTheme.Colors.cardBackground
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
+                hasValue ? AppTheme.Colors.elevatedSurface : AppTheme.Colors.cardBackground,
                 in: RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous)
                     .stroke(hasValue ? AppTheme.Colors.selectedStroke.opacity(0.7) : AppTheme.Colors.border, lineWidth: 1)
             )
-            .shadow(color: AppTheme.Colors.shadow.opacity(0.8), radius: 10, y: 5)
             .opacity(isDisabled ? 0.55 : 1)
             .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md, style: .continuous))
         }
@@ -551,10 +539,7 @@ private struct PremiumScreenBackground: View {
     @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
 
     var body: some View {
-        ZStack {
-            AppTheme.Colors.appBackground
-            AppTheme.Gradients.screenBackground
-        }
+        AppTheme.Colors.appBackground
         .id("screen-background-\(selectedThemeRawValue)")
         .ignoresSafeArea()
     }

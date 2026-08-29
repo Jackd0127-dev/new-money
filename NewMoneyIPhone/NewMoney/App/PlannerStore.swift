@@ -2091,6 +2091,35 @@ final class PlannerStore: ObservableObject {
         persist()
     }
 
+    func updateCustomPayment(
+        id: String,
+        name: String,
+        amountPence: Int,
+        dueDate: String,
+        creditCardId: String?,
+        status: CustomPaymentStatus
+    ) {
+        guard amountPence > 0,
+              FinanceEngine.isIsoDate(dueDate),
+              let index = snapshot.customPayments.firstIndex(where: { $0.id == id && $0.deletedAt == nil })
+        else { return }
+        snapshot.customPayments[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        snapshot.customPayments[index].amountPence = amountPence
+        snapshot.customPayments[index].dueDate = dueDate
+        snapshot.customPayments[index].creditCardId = creditCardId
+        snapshot.customPayments[index].status = status
+        snapshot.customPayments[index].updatedAt = DateUtilities.nowIsoString()
+        persist()
+    }
+
+    func deleteCustomPayment(id: String) {
+        guard let index = snapshot.customPayments.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else { return }
+        let now = DateUtilities.nowIsoString()
+        snapshot.customPayments[index].deletedAt = now
+        snapshot.customPayments[index].updatedAt = now
+        persist()
+    }
+
     func addCreditCardPot(cardId: String, name: String, amountPence: Int, source: CreditCardPotSource) {
         let now = DateUtilities.nowIsoString()
         snapshot.creditCardPots.insert(
@@ -2112,6 +2141,34 @@ final class PlannerStore: ObservableObject {
             ),
             at: 0
         )
+        persist()
+    }
+
+    func updateCreditCardPot(
+        id: String,
+        name: String,
+        amountPence: Int,
+        source: CreditCardPotSource,
+        status: CreditCardPotStatus,
+        note: String
+    ) {
+        guard amountPence > 0,
+              let index = snapshot.creditCardPots.firstIndex(where: { $0.id == id && $0.deletedAt == nil })
+        else { return }
+        snapshot.creditCardPots[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        snapshot.creditCardPots[index].amountPence = abs(amountPence)
+        snapshot.creditCardPots[index].source = source
+        snapshot.creditCardPots[index].status = status
+        snapshot.creditCardPots[index].note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        snapshot.creditCardPots[index].updatedAt = DateUtilities.nowIsoString()
+        persist()
+    }
+
+    func deleteCreditCardPot(id: String) {
+        guard let index = snapshot.creditCardPots.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else { return }
+        let now = DateUtilities.nowIsoString()
+        snapshot.creditCardPots[index].deletedAt = now
+        snapshot.creditCardPots[index].updatedAt = now
         persist()
     }
 

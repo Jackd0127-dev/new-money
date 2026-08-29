@@ -207,6 +207,11 @@ enum AppNavigationTitlePolicy {
     }
 }
 
+enum FloatingAssistantPolicy {
+    static let symbol = "person.fill"
+    static let minimumTapTarget: CGFloat = 56
+}
+
 enum AppNavigationTitleDisplayStyle: Equatable {
     case large
     case inline
@@ -485,10 +490,13 @@ struct AppView: View {
             Button {
                 isAssistantPresented = true
             } label: {
-                Image(systemName: "sparkles")
+                Image(systemName: FloatingAssistantPolicy.symbol)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.controlText)
-                    .frame(width: 56, height: 56)
+                    .frame(
+                        width: FloatingAssistantPolicy.minimumTapTarget,
+                        height: FloatingAssistantPolicy.minimumTapTarget
+                    )
                     .background(AppTheme.Gradients.primary)
                     .clipShape(Circle())
                     .shadow(color: AppTheme.Colors.glowOrange, radius: 20, y: 8)
@@ -741,10 +749,7 @@ private struct PremiumRootBackground: View {
     @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
 
     var body: some View {
-        ZStack {
-            AppTheme.Colors.appBackground
-            AppTheme.Gradients.screenBackground
-        }
+        AppTheme.Colors.appBackground
         .id("root-background-\(selectedThemeRawValue)")
         .ignoresSafeArea()
     }

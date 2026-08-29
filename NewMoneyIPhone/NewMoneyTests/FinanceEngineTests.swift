@@ -1050,7 +1050,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertTrue(item.breakdown.allSatisfy { !$0.detail.isEmpty })
     }
 
-    func testCardSpendFundingDoesNotReuseReserveAlreadyAppliedToOpeningBalance() {
+    func testStatementDayCardSpendIsReservedForFollowingCycleInsteadOfOpeningBalance() {
         let settings = makeManualSettings(today: "2026-07-31")
         let period = makePayPeriod(
             id: "period-july-august",
@@ -1120,15 +1120,12 @@ final class FinanceEngineTests: XCTestCase {
             return false
         }
 
-        XCTAssertEqual(
-            Dictionary(uniqueKeysWithValues: cardSpends.map { ($0.name, $0.amountPence) }),
-            ["Amazon prime student": 449, "Amazon shop": 7767]
-        )
+        XCTAssertTrue(cardSpends.isEmpty)
         XCTAssertFalse(items.contains {
             if case .cardPayment = $0.action { return true }
             return false
         })
-        XCTAssertEqual(cardSpends.reduce(0) { $0 + $1.amountPence }, 8216)
+        XCTAssertEqual(cardSpends.reduce(0) { $0 + $1.amountPence }, 0)
     }
 
     func testAwaitingCardStatementDoesNotPullLaterChargesIntoAnEarlierFundingPeriod() {
@@ -2806,9 +2803,9 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(fullAppPence(julyTwentySeventh, in: daily, "CC4 Reserve"), 41000)
 
         let julyTwentyEighth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-28"))
-        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Target"), 37700)
-        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Balance"), 37700)
-        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "CC5 Balance"), 37700)
+        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Target"), 42200)
+        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "Pot5 Balance"), 42200)
+        XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "CC5 Balance"), 42200)
         XCTAssertEqual(fullAppPence(julyTwentyEighth, in: daily, "CC5 Reserve"), 37700)
     }
 
@@ -2827,10 +2824,10 @@ final class FinanceEngineTests: XCTestCase {
             in: ddPayments,
             matching: ["date": "2027-08-02", "card_id": "CC1", "statement_date": "2027-07-05"]
         ))
-        XCTAssertEqual(fullAppPence(cc1AugustDd, in: ddPayments, "amount_paid"), 19850)
+        XCTAssertEqual(fullAppPence(cc1AugustDd, in: ddPayments, "amount_paid"), 13900)
         XCTAssertEqual(
             fullAppText(cc1AugustDd, in: ddPayments, "source_breakdown"),
-            "£198.50 from Pot1"
+            "£139 from Pot1"
         )
     }
 
@@ -3235,10 +3232,10 @@ final class FinanceEngineTests: XCTestCase {
         store.updateSettings(january10Settings)
 
         let zableStatement = try statementSummary(in: store.snapshot, cardId: "card-cc3", statementDate: "2027-01-10", asOfDate: "2027-01-10")
-        XCTAssertEqual(zableStatement.statementAmountPence, 55000)
+        XCTAssertEqual(zableStatement.statementAmountPence, 33000)
         XCTAssertEqual(zableStatement.transactions.first { $0.name == "Zable opening balance" }?.amountPence, 33000)
-        XCTAssertEqual(zableStatement.transactions.first { $0.name == "Groceries Big Shop A" }?.amountPence, 15000)
-        XCTAssertEqual(zableStatement.transactions.first { $0.name == "Fuel Fill A" }?.amountPence, 7000)
+        XCTAssertNil(zableStatement.transactions.first { $0.name == "Groceries Big Shop A" })
+        XCTAssertNil(zableStatement.transactions.first { $0.name == "Fuel Fill A" })
 
         var january18Settings = store.snapshot.settings
         january18Settings.manualTodayIso = "2027-01-18"
@@ -3249,7 +3246,7 @@ final class FinanceEngineTests: XCTestCase {
             $0.statementDate == "2027-01-10" &&
             ($0.directDebitDate ?? $0.date) == "2027-01-18"
         })
-        XCTAssertEqual(zableRepayment.amountPence, 55000)
+        XCTAssertEqual(zableRepayment.amountPence, 33000)
         XCTAssertEqual(zableRepayment.date, "2027-01-18")
 
         let zable = try XCTUnwrap(store.snapshot.creditCards.first { $0.id == "card-cc3" })
@@ -3259,14 +3256,14 @@ final class FinanceEngineTests: XCTestCase {
             payPeriod: januaryPeriod,
             asOfDate: "2027-01-18"
         )
-        XCTAssertEqual(PlannerDerivedData.cardBalance(card: zable, snapshot: store.snapshot), 0)
-        XCTAssertEqual(zableAvailability.actualAvailablePence, 85000)
-        XCTAssertEqual(zableAvailability.forecastAvailablePence, 63000)
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: zable, snapshot: store.snapshot), 22000)
+        XCTAssertEqual(zableAvailability.actualAvailablePence, 63000)
+        XCTAssertEqual(zableAvailability.forecastAvailablePence, 41000)
 
         let cardBalanceTotal = store.snapshot.creditCards.reduce(0) {
             $0 + PlannerDerivedData.cardBalance(card: $1, snapshot: store.snapshot)
         }
-        XCTAssertEqual(cardBalanceTotal, 85500)
+        XCTAssertEqual(cardBalanceTotal, 107500)
 
         let januarySpending = store.snapshot.transactions.filter {
             $0.deletedAt == nil &&
@@ -3278,8 +3275,8 @@ final class FinanceEngineTests: XCTestCase {
 
         let foodFuelPot = try XCTUnwrap(store.snapshot.pots.first { $0.id == "pot-pot3" })
         let foodFuelProgress = PlannerDerivedData.potProgress(pot: foodFuelPot, snapshot: store.snapshot, today: "2027-01-18")
-        XCTAssertEqual(foodFuelPot.balancePence, 22000)
-        XCTAssertEqual(foodFuelProgress.targetPence, 22000)
+        XCTAssertEqual(foodFuelPot.balancePence, 44000)
+        XCTAssertEqual(foodFuelProgress.targetPence, 44000)
         XCTAssertEqual(foodFuelProgress.shortfallPence, 0)
 
         let remainingFoodFuelItems = PlannerDerivedData.recurringBillFundingChecklistItems(
@@ -8099,14 +8096,14 @@ final class FinanceEngineTests: XCTestCase {
             id: "transaction-aqua-tracked",
             cardId: aqua.id,
             amountPence: 8_216,
-            date: "2026-08-03",
+            date: "2026-08-02",
             note: "Tracked Aqua spending"
         )
         let jajaTransaction = makeTransaction(
             id: "transaction-jaja-tracked",
             cardId: jaja.id,
             amountPence: 129,
-            date: "2026-08-07",
+            date: "2026-08-06",
             note: "Tracked Jaja spending"
         )
         let aquaOverride = CreditCardCycleOverride(
@@ -8290,7 +8287,7 @@ final class FinanceEngineTests: XCTestCase {
             id: "transaction-aqua-visual",
             cardId: aqua.id,
             amountPence: 8_216,
-            date: "2026-08-03",
+            date: "2026-08-02",
             note: "Tracked Aqua spending"
         )
         let jajaTransaction = makeTransaction(
@@ -8351,54 +8348,76 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(PlannerDerivedData.cardBalance(card: aqua, snapshot: snapshot), 156_893)
         XCTAssertEqual(aquaSummary.calculatedAmountPence, 8_216)
         XCTAssertEqual(aquaSummary.statementAmountPence, 69_588)
-        let dueItems = summaries
-            .filter { $0.unpaidAmountPence > 0 }
-            .map {
-                CreditDueItem(
-                    id: $0.id,
-                    title: "\($0.cardName) direct debit",
-                    date: $0.directDebitDate,
-                    amountPence: $0.unpaidAmountPence,
-                    isOverdue: $0.directDebitDate < "2026-08-08"
+        let aquaNextStatementDate = try XCTUnwrap(
+            PlannerDerivedData.creditCardNextStatementDate(
+                card: aqua,
+                snapshot: snapshot,
+                asOfDate: "2026-08-08"
+            )
+        )
+        let originalTheme = UserDefaults.standard.string(forKey: AppTheme.selectedPresetStorageKey)
+        defer {
+            if let originalTheme {
+                UserDefaults.standard.set(originalTheme, forKey: AppTheme.selectedPresetStorageKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: AppTheme.selectedPresetStorageKey)
+            }
+        }
+
+        for preset in AppThemePreset.allCases {
+            UserDefaults.standard.set(preset.rawValue, forKey: AppTheme.selectedPresetStorageKey)
+            for configuration in [
+                (name: "normal", size: DynamicTypeSize.large),
+                (name: "accessibility", size: DynamicTypeSize.accessibility3)
+            ] {
+                let suffix = "\(preset.rawValue)-\(configuration.name)"
+                attachCreditRender(
+                    CardDetailView(store: store, card: aqua),
+                    name: "credit-card-\(suffix)",
+                    dynamicTypeSize: configuration.size,
+                    colorScheme: preset.palette.preferredColorScheme
+                )
+                attachCreditRender(
+                    NavigationStack {
+                        CreditScheduleDetailView(store: store, schedule: .directDebits)
+                    },
+                    name: "credit-direct-debits-\(suffix)",
+                    dynamicTypeSize: configuration.size,
+                    colorScheme: preset.palette.preferredColorScheme
+                )
+                attachCreditRender(
+                    NavigationStack {
+                        CreditScheduleDetailView(store: store, schedule: .statements)
+                    },
+                    name: "credit-statements-\(suffix)",
+                    dynamicTypeSize: configuration.size,
+                    colorScheme: preset.palette.preferredColorScheme
+                )
+                attachCreditRender(
+                    NavigationStack {
+                        CreditStatementLedgerDetailView(
+                            store: store,
+                            identity: .init(cardId: aqua.id, scheduledStatementDate: aquaNextStatementDate),
+                            mode: .currentStatement
+                        )
+                    },
+                    name: "credit-current-statement-\(suffix)",
+                    dynamicTypeSize: configuration.size,
+                    colorScheme: preset.palette.preferredColorScheme
+                )
+                attachCreditRender(
+                    NavigationStack {
+                        CreditStatementLedgerDetailView(
+                            store: store,
+                            identity: .init(cardId: aqua.id, scheduledStatementDate: aquaSummary.scheduledStatementDate),
+                            mode: .previousStatement
+                        )
+                    },
+                    name: "credit-previous-statement-\(suffix)",
+                    dynamicTypeSize: configuration.size,
+                    colorScheme: preset.palette.preferredColorScheme
                 )
             }
-            .sorted { $0.date < $1.date }
-
-        for configuration in [
-            (name: "normal", size: DynamicTypeSize.large),
-            (name: "accessibility", size: DynamicTypeSize.accessibility3)
-        ] {
-            attachCreditRender(
-                CardDetailView(store: store, card: aqua),
-                name: "credit-card-aqua-\(configuration.name)",
-                dynamicTypeSize: configuration.size
-            )
-            attachCreditRender(
-                CardDetailView(store: store, card: jaja),
-                name: "credit-card-jaja-\(configuration.name)",
-                dynamicTypeSize: configuration.size
-            )
-            attachCreditRender(
-                NavigationStack {
-                    CreditScheduleDetailView(schedule: .directDebits(dueItems))
-                },
-                name: "credit-direct-debits-\(configuration.name)",
-                dynamicTypeSize: configuration.size
-            )
-            attachCreditRender(
-                NavigationStack {
-                    StatementsView(store: store, navigationMode: .inline, toolbarMode: .none)
-                },
-                name: "credit-statements-\(configuration.name)",
-                dynamicTypeSize: configuration.size
-            )
-            attachCreditRender(
-                NavigationStack {
-                    StatementDetailView(statement: aquaSummary)
-                },
-                name: "credit-statement-aqua-\(configuration.name)",
-                dynamicTypeSize: configuration.size
-            )
         }
     }
 
@@ -8557,7 +8576,7 @@ final class FinanceEngineTests: XCTestCase {
             id: "transaction-aqua-tracked",
             cardId: card.id,
             amountPence: 5_000,
-            date: "2026-08-03",
+            date: "2026-08-02",
             note: "Tracked Aqua spending"
         )
         let cycleOverride = CreditCardCycleOverride(
@@ -8871,11 +8890,12 @@ final class FinanceEngineTests: XCTestCase {
     private func attachCreditRender<Content: View>(
         _ content: Content,
         name: String,
-        dynamicTypeSize: DynamicTypeSize
+        dynamicTypeSize: DynamicTypeSize,
+        colorScheme: ColorScheme
     ) {
         let rootView = content
             .environment(\.dynamicTypeSize, dynamicTypeSize)
-            .environment(\.colorScheme, .light)
+            .environment(\.colorScheme, colorScheme)
         let host = UIHostingController(rootView: rootView)
         let frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         let window = UIWindow(frame: frame)
@@ -9301,6 +9321,148 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(store.auditAction(for: .transaction, id: original.id), .reverted)
     }
 
+    @MainActor
+    func testEditableOneOffCardPaymentUpdatesAndSoftDeletesByStableIdentity() throws {
+        let payment = CustomPayment(
+            id: "custom-aqua",
+            name: "Original payment",
+            amountPence: 2_500,
+            dueDate: "2026-09-01",
+            creditCardId: "card-aqua",
+            status: .unpaid,
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(customPayments: [payment])
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+        store.useSnapshotForSimulation(snapshot)
+
+        store.updateCustomPayment(
+            id: payment.id,
+            name: "Updated payment",
+            amountPence: 3_750,
+            dueDate: "2026-09-03",
+            creditCardId: payment.creditCardId,
+            status: .paid
+        )
+
+        let updated = try XCTUnwrap(store.snapshot.customPayments.first { $0.id == payment.id })
+        XCTAssertEqual(updated.name, "Updated payment")
+        XCTAssertEqual(updated.amountPence, 3_750)
+        XCTAssertEqual(updated.dueDate, "2026-09-03")
+        XCTAssertEqual(updated.status, .paid)
+
+        store.deleteCustomPayment(id: payment.id)
+        XCTAssertNotNil(store.snapshot.customPayments.first { $0.id == payment.id }?.deletedAt)
+    }
+
+    @MainActor
+    func testEditableCreditCardCoverPotRefreshesAmountAndSoftDeletes() throws {
+        let cover = CreditCardPot(
+            id: "cover-aqua",
+            creditCardId: "card-aqua",
+            payPeriodId: nil,
+            payday: nil,
+            periodStartDate: "2026-08-01",
+            periodEndDate: "2026-08-31",
+            name: "Aqua cover",
+            amountPence: 5_000,
+            source: .paycheck,
+            status: .active,
+            note: "",
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(creditCardPots: [cover])
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+        store.useSnapshotForSimulation(snapshot)
+
+        store.updateCreditCardPot(
+            id: cover.id,
+            name: "Aqua reserve",
+            amountPence: 7_500,
+            source: .external,
+            status: .active,
+            note: "Adjusted"
+        )
+
+        let updated = try XCTUnwrap(store.snapshot.creditCardPots.first { $0.id == cover.id })
+        XCTAssertEqual(updated.name, "Aqua reserve")
+        XCTAssertEqual(updated.amountPence, 7_500)
+        XCTAssertEqual(updated.source, .external)
+        XCTAssertEqual(updated.note, "Adjusted")
+
+        store.deleteCreditCardPot(id: cover.id)
+        XCTAssertNotNil(store.snapshot.creditCardPots.first { $0.id == cover.id }?.deletedAt)
+    }
+
+    func testCreditScheduleModelsUseStableCardAndScheduledStatementIdentity() {
+        let directDebit = CreditDueItem(
+            id: "statement-card-aqua-2026-09-03",
+            title: "Aqua direct debit",
+            date: "2026-09-20",
+            amountPence: 69_588,
+            isOverdue: false,
+            cardId: "card-aqua",
+            scheduledStatementDate: "2026-09-03"
+        )
+        let current = CreditNextStatementItem(
+            cardId: "card-aqua",
+            scheduledStatementDate: "2026-10-03",
+            cardName: "Aqua",
+            statementDate: "2026-10-03",
+            amountPence: 7_699,
+            movementCount: 3
+        )
+
+        XCTAssertEqual(directDebit.cardId, "card-aqua")
+        XCTAssertEqual(directDebit.scheduledStatementDate, "2026-09-03")
+        XCTAssertEqual(current.id, "card-aqua-2026-10-03")
+        XCTAssertEqual(current.amountPence, 7_699)
+        XCTAssertEqual(current.movementCount, 3)
+    }
+
+    func testStatementReconciliationBalancesTrackedAdjustmentsPaymentsAndOutstanding() throws {
+        let card = makeCreditCard(
+            id: "card-reconcile",
+            name: "Aqua",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-03",
+            dueDay: 20
+        )
+        let transaction = makeTransaction(
+            id: "reconcile-spend",
+            cardId: card.id,
+            amountPence: 8_216,
+            date: "2026-08-02",
+            note: "Tracked"
+        )
+        let override = CreditCardCycleOverride(
+            id: "reconcile-cycle",
+            creditCardId: card.id,
+            scheduledStatementDate: "2026-08-03",
+            statementState: .confirmed,
+            actualStatementDate: "2026-08-03",
+            directDebitState: .normal,
+            actualDirectDebitDate: nil,
+            amountPenceOverride: 69_588,
+            reversedAutomaticRepaymentIds: [],
+            createdAt: "2026-08-03T00:00:00.000Z",
+            updatedAt: "2026-08-03T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let snapshot = makeSnapshot(transactions: [transaction], creditCards: [card], creditCardCycleOverrides: [override])
+        let statement = try XCTUnwrap(
+            PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: "2026-08-08").first
+        )
+
+        XCTAssertEqual(statement.calculatedAmountPence + statement.reconciliationAdjustmentPence, statement.statementAmountPence)
+        XCTAssertEqual(statement.statementAmountPence - statement.paidAmountPence, statement.unpaidAmountPence)
+    }
+
     private func makeSnapshot(
         settings: Settings = DefaultData.defaultSettings,
         bankAccounts: [BankAccount] = [],
@@ -9316,6 +9478,7 @@ final class FinanceEngineTests: XCTestCase {
         creditCards: [CreditCard] = [],
         customPayments: [CustomPayment] = [],
         creditCardRepayments: [CreditCardRepayment] = [],
+        creditCardPots: [CreditCardPot] = [],
         creditCardCycleOverrides: [CreditCardCycleOverride] = [],
         oneOffIncomes: [OneOffIncome] = [],
         fundingChecklistExclusions: [FundingChecklistExclusion] = []
@@ -9337,7 +9500,7 @@ final class FinanceEngineTests: XCTestCase {
             creditCards: creditCards,
             customPayments: customPayments,
             creditCardRepayments: creditCardRepayments,
-            creditCardPots: [],
+            creditCardPots: creditCardPots,
             creditCardCycleOverrides: creditCardCycleOverrides,
             dailyBriefs: [],
             oneOffIncomes: oneOffIncomes,
@@ -9780,10 +9943,8 @@ private enum FinalDebtFullAppSimJanApr2028Simulation {
         )
         #else
         guard FileManager.default.fileExists(atPath: actualJsonURL.path) else {
-            throw NSError(
-                domain: "FinalDebtFullAppSimJanApr2028Simulation",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Missing generated simulation artifact at \(actualJsonURL.path). Run tools/final_debt_full_app_sim_jan_apr_2028_export.mjs before the iOS simulator test."]
+            throw XCTSkip(
+                "The external workbook exporter is not included in this checkout; run it on macOS before validating its generated artifact."
             )
         }
         #endif

@@ -133,6 +133,9 @@ struct CreditLayoutPolicy {
     static let dueSoonHeadersShowSubtitles = false
     static let creditMetricsUseAlignedGrid = true
     static let creditMetricsStackAtAccessibilitySizes = true
+    static let scheduleHeaderMinimumTapTarget: CGFloat = 44
+    static let ledgerRowMinimumTapTarget: CGFloat = 54
+    static let previousStatementsStartCollapsed = true
     static let directDebitFutureStatus = "Due"
     static let statementDetailShowsBankReconciliation = true
 }
@@ -3394,7 +3397,9 @@ struct CreditView: View {
                     title: "\($0.cardName) direct debit",
                     date: $0.directDebitDate,
                     amountPence: $0.unpaidAmountPence,
-                    isOverdue: $0.status == .overdue
+                    isOverdue: $0.status == .overdue,
+                    cardId: $0.cardId,
+                    scheduledStatementDate: $0.scheduledStatementDate
                 )
             }
         let nextStatementItems = activeCards.compactMap { card -> CreditNextStatementItem? in
@@ -3406,10 +3411,14 @@ struct CreditView: View {
                 return nil
             }
 
+            let history = CreditCardBalanceHistoryData.make(card: card, snapshot: snapshot, asOfDate: context.todayIso)
             return CreditNextStatementItem(
-                id: card.id,
+                cardId: card.id,
+                scheduledStatementDate: statementDate,
                 cardName: card.name,
-                statementDate: statementDate
+                statementDate: statementDate,
+                amountPence: history.currentSection.balancePence,
+                movementCount: history.currentSection.entries.count
             )
         }
         .sorted { lhs, rhs in
@@ -3428,7 +3437,9 @@ struct CreditView: View {
                     title: debtsById[item.debtId]?.name ?? "Debt payment",
                     date: item.dueDate,
                     amountPence: item.plannedAmountPence,
-                    isOverdue: item.dueDate < context.todayIso
+                    isOverdue: item.dueDate < context.todayIso,
+                    cardId: nil,
+                    scheduledStatementDate: nil
                 )
             }
 
@@ -3465,7 +3476,7 @@ struct CreditView: View {
             SectionTitle("Due soon")
 
             NavigationLink {
-                CreditScheduleDetailView(schedule: .directDebits(directDebits))
+                CreditScheduleDetailView(store: store, schedule: .directDebits)
             } label: {
                 CreditDirectDebitsCard(
                     items: directDebits,
@@ -3477,7 +3488,7 @@ struct CreditView: View {
             .accessibilityLabel("Open all direct debits")
 
             NavigationLink {
-                CreditScheduleDetailView(schedule: .nextStatements(nextStatements))
+                CreditScheduleDetailView(store: store, schedule: .statements)
             } label: {
                 CreditNextStatementsCard(
                     items: nextStatements,
@@ -3686,21 +3697,30 @@ struct CreditDueItem: Identifiable {
     var date: String
     var amountPence: Int
     var isOverdue: Bool
+    var cardId: String?
+    var scheduledStatementDate: String?
 }
 
 struct CreditNextStatementItem: Identifiable {
-    var id: String
+    var cardId: String
+    var scheduledStatementDate: String
     var cardName: String
     var statementDate: String
+    var amountPence: Int
+    var movementCount: Int
+
+    var id: String { "\(cardId)-\(scheduledStatementDate)" }
 }
 
-enum CreditScheduleDetail {
-    case directDebits([CreditDueItem])
-    case nextStatements([CreditNextStatementItem])
+enum CreditScheduleDetail: Equatable {
+    case directDebits
+    case statements
 }
 
 struct CreditScheduleDetailView: View {
+    @ObservedObject var store: PlannerStore
     var schedule: CreditScheduleDetail
+    @State private var showsPreviousStatements = !CreditLayoutPolicy.previousStatementsStartCollapsed
 
     var body: some View {
         ScreenScaffold(
@@ -3711,30 +3731,155 @@ struct CreditScheduleDetailView: View {
             titleDisplayMode: .inline
         ) {
             switch schedule {
-            case .directDebits(let items):
-                CreditDirectDebitsCard(items: items)
-            case .nextStatements(let items):
-                CreditNextStatementsCard(items: items)
+            case .directDebits:
+                CreditDirectDebitsCard(items: directDebitItems) { item in
+                    CreditStatementLedgerDetailView(
+                        store: store,
+                        identity: item.statementIdentity ?? .init(cardId: "", scheduledStatementDate: ""),
+                        mode: .directDebit
+                    )
+                }
+            case .statements:
+                CreditNextStatementsCard(items: currentStatementItems) { item in
+                    CreditStatementLedgerDetailView(
+                        store: store,
+                        identity: .init(cardId: item.cardId, scheduledStatementDate: item.scheduledStatementDate),
+                        mode: .currentStatement
+                    )
+                }
+
+                DisclosureGroup(isExpanded: $showsPreviousStatements) {
+                    VStack(spacing: 0) {
+                        if previousStatements.isEmpty {
+                            Text("No previous statements yet")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.Colors.secondaryText)
+                                .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                        } else {
+                            ForEach(Array(previousStatements.enumerated()), id: \.element.id) { index, statement in
+                                NavigationLink {
+                                    CreditStatementLedgerDetailView(
+                                        store: store,
+                                        identity: .init(cardId: statement.cardId, scheduledStatementDate: statement.scheduledStatementDate),
+                                        mode: .previousStatement
+                                    )
+                                } label: {
+                                    CreditStatementScheduleRow(
+                                        title: statement.cardName,
+                                        subtitle: "\(shortDate(statement.statementDate)) · \(statementStatusLabel(statement.status))",
+                                        amountPence: statement.statementAmountPence
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Opens the locked statement and every editable movement")
+                                if index < previousStatements.count - 1 { AppDivider() }
+                            }
+                        }
+                    }
+                    .padding(.top, AppTheme.Spacing.sm)
+                } label: {
+                    CreditScheduleHeader(title: "Previous statements", showsDisclosure: true, isExpanded: showsPreviousStatements)
+                }
+                .tint(AppTheme.Colors.primaryOrange)
+                .accessibilityIdentifier("previous-statements-disclosure")
             }
         }
     }
 
+    private var directDebitItems: [CreditDueItem] {
+        PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: store.todayIso)
+            .filter { $0.status != .paid }
+            .sorted { $0.directDebitDate < $1.directDebitDate }
+            .map {
+                CreditDueItem(
+                    id: "statement-\($0.id)",
+                    title: "\($0.cardName) direct debit",
+                    date: $0.directDebitDate,
+                    amountPence: $0.unpaidAmountPence,
+                    isOverdue: $0.status == .overdue,
+                    cardId: $0.cardId,
+                    scheduledStatementDate: $0.scheduledStatementDate
+                )
+            }
+    }
+
+    private var currentStatementItems: [CreditNextStatementItem] {
+        store.snapshot.creditCards
+            .filter { !$0.archived && $0.deletedAt == nil }
+            .compactMap { card in
+                guard let date = PlannerDerivedData.creditCardNextStatementDate(card: card, snapshot: store.snapshot, asOfDate: store.todayIso) else { return nil }
+                let current = CreditCardBalanceHistoryData.make(card: card, snapshot: store.snapshot, asOfDate: store.todayIso).currentSection
+                return CreditNextStatementItem(
+                    cardId: card.id,
+                    scheduledStatementDate: date,
+                    cardName: card.name,
+                    statementDate: date,
+                    amountPence: current.balancePence,
+                    movementCount: current.entries.count
+                )
+            }
+            .sorted { $0.statementDate < $1.statementDate }
+    }
+
+    private var previousStatements: [CreditCardStatementSummary] {
+        PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: store.todayIso)
+            .filter { $0.statementDate <= store.todayIso }
+            .sorted { $0.statementDate > $1.statementDate }
+    }
+
     private var title: String {
         switch schedule {
-        case .directDebits:
-            "Direct debits"
-        case .nextStatements:
-            "Next statements"
+        case .directDebits: "Direct debits"
+        case .statements: "Statements"
         }
     }
 
     private var subtitle: String {
         switch schedule {
-        case .directDebits:
-            "Every open card payment, ordered by collection date."
-        case .nextStatements:
-            "Every active card, ordered by its next statement date."
+        case .directDebits: "Every open collection and the movements that make up its total."
+        case .statements: "Open cycles and locked previous statements."
         }
+    }
+}
+
+struct CreditStatementIdentity: Hashable, Identifiable {
+    var cardId: String
+    var scheduledStatementDate: String
+    var id: String { "\(cardId)-\(scheduledStatementDate)" }
+}
+
+private extension CreditDueItem {
+    var statementIdentity: CreditStatementIdentity? {
+        guard let cardId, let scheduledStatementDate else { return nil }
+        return CreditStatementIdentity(cardId: cardId, scheduledStatementDate: scheduledStatementDate)
+    }
+}
+
+private struct CreditScheduleHeader: View {
+    var title: String
+    var showsDisclosure = false
+    var isExpanded = false
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Spacer(minLength: AppTheme.Spacing.sm)
+            if showsDisclosure {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: CreditLayoutPolicy.scheduleHeaderMinimumTapTarget,
+            alignment: .leading
+        )
+        .contentShape(Rectangle())
     }
 }
 
@@ -3742,16 +3887,23 @@ private struct CreditDirectDebitsCard: View {
     var items: [CreditDueItem]
     var previewLimit: Int?
     var showsDisclosure: Bool
+    var destination: ((CreditDueItem) -> CreditStatementLedgerDetailView)?
 
-    init(items: [CreditDueItem], previewLimit: Int? = nil, showsDisclosure: Bool = false) {
+    init(
+        items: [CreditDueItem],
+        previewLimit: Int? = nil,
+        showsDisclosure: Bool = false,
+        destination: ((CreditDueItem) -> CreditStatementLedgerDetailView)? = nil
+    ) {
         self.items = items
         self.previewLimit = previewLimit
         self.showsDisclosure = showsDisclosure
+        self.destination = destination
     }
 
     var body: some View {
         AppCard {
-            scheduleHeader(title: "Direct debits")
+            CreditScheduleHeader(title: "Direct debits", showsDisclosure: showsDisclosure)
 
             if items.isEmpty {
                 EmptyStateView(
@@ -3761,7 +3913,13 @@ private struct CreditDirectDebitsCard: View {
                 )
             } else {
                 ForEach(visibleItems) { item in
-                    CreditDirectDebitRow(item: item)
+                    if let destination {
+                        NavigationLink { destination(item) } label: { CreditDirectDebitRow(item: item, showsDisclosure: true) }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens the collection reconciliation and editable movements")
+                    } else {
+                        CreditDirectDebitRow(item: item, showsDisclosure: false)
+                    }
 
                     if item.id != visibleItems.last?.id {
                         AppDivider()
@@ -3769,24 +3927,6 @@ private struct CreditDirectDebitsCard: View {
                 }
 
                 remainingItemsLabel
-            }
-        }
-    }
-
-    private func scheduleHeader(title: String) -> some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(AppTheme.Colors.primaryText)
-
-            Spacer(minLength: AppTheme.Spacing.sm)
-
-            if showsDisclosure {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.Colors.tertiaryText)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityHidden(true)
             }
         }
     }
@@ -3809,22 +3949,15 @@ private struct CreditDirectDebitsCard: View {
 
 private struct CreditDirectDebitRow: View {
     var item: CreditDueItem
+    var showsDisclosure: Bool
 
     var body: some View {
-        CreditMetricGrid(
-            items: [
-                .init(
-                    id: item.id,
-                    label: item.title,
-                    detail: MoneyParser.formatPence(item.amountPence),
-                    value: item.isOverdue ? "Overdue" : CreditLayoutPolicy.directDebitFutureStatus,
-                    valueDetail: shortDate(item.date),
-                    labelColor: AppTheme.Colors.primaryText,
-                    valueColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.tertiaryText,
-                    detailColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText,
-                    valueDetailColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.warning
-                )
-            ]
+        CreditStatementScheduleRow(
+            title: item.title,
+            subtitle: "\(item.isOverdue ? "Overdue" : CreditLayoutPolicy.directDebitFutureStatus) · \(shortDate(item.date))",
+            amountPence: item.amountPence,
+            statusColor: item.isOverdue ? AppTheme.Colors.danger : AppTheme.Colors.secondaryText,
+            showsDisclosure: showsDisclosure
         )
     }
 }
@@ -3833,30 +3966,23 @@ private struct CreditNextStatementsCard: View {
     var items: [CreditNextStatementItem]
     var previewLimit: Int?
     var showsDisclosure: Bool
+    var destination: ((CreditNextStatementItem) -> CreditStatementLedgerDetailView)?
 
-    init(items: [CreditNextStatementItem], previewLimit: Int? = nil, showsDisclosure: Bool = false) {
+    init(
+        items: [CreditNextStatementItem],
+        previewLimit: Int? = nil,
+        showsDisclosure: Bool = false,
+        destination: ((CreditNextStatementItem) -> CreditStatementLedgerDetailView)? = nil
+    ) {
         self.items = items
         self.previewLimit = previewLimit
         self.showsDisclosure = showsDisclosure
+        self.destination = destination
     }
 
     var body: some View {
         AppCard {
-            HStack(spacing: AppTheme.Spacing.sm) {
-                Text("Next statements")
-                    .font(.headline)
-                    .foregroundStyle(AppTheme.Colors.primaryText)
-
-                Spacer(minLength: AppTheme.Spacing.sm)
-
-                if showsDisclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityHidden(true)
-                }
-            }
+            CreditScheduleHeader(title: "Next statements", showsDisclosure: showsDisclosure)
 
             if items.isEmpty {
                 EmptyStateView(
@@ -3866,19 +3992,24 @@ private struct CreditNextStatementsCard: View {
                 )
             } else {
                 ForEach(visibleItems) { item in
-                    CreditMetricGrid(
-                        items: [
-                            .init(
-                                id: item.id,
-                                label: item.cardName,
-                                value: "Statement",
-                                valueDetail: shortDate(item.statementDate),
-                                labelColor: AppTheme.Colors.primaryText,
-                                valueColor: AppTheme.Colors.tertiaryText,
-                                valueDetailColor: AppTheme.Colors.warning
+                    if let destination {
+                        NavigationLink { destination(item) } label: {
+                            CreditStatementScheduleRow(
+                                title: item.cardName,
+                                subtitle: "Closes \(shortDate(item.statementDate)) · \(item.movementCount) movements",
+                                amountPence: item.amountPence,
+                                showsDisclosure: true
                             )
-                        ]
-                    )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens every movement contributing to the current statement")
+                    } else {
+                        CreditStatementScheduleRow(
+                            title: item.cardName,
+                            subtitle: "Closes \(shortDate(item.statementDate)) · \(item.movementCount) movements",
+                            amountPence: item.amountPence
+                        )
+                    }
 
                     if item.id != visibleItems.last?.id {
                         AppDivider()
@@ -3903,6 +4034,193 @@ private struct CreditNextStatementsCard: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(AppTheme.Colors.primaryOrange)
         }
+    }
+}
+
+private struct CreditStatementScheduleRow: View {
+    var title: String
+    var subtitle: String
+    var amountPence: Int
+    var statusColor: Color = AppTheme.Colors.secondaryText
+    var showsDisclosure = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.Colors.primaryText)
+                Text(subtitle).font(.caption).foregroundStyle(statusColor).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: AppTheme.Spacing.sm)
+            Text(MoneyParser.formatPence(amountPence))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: CreditLayoutPolicy.ledgerRowMinimumTapTarget,
+            alignment: .leading
+        )
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+enum CreditStatementLedgerMode: Equatable {
+    case directDebit
+    case currentStatement
+    case previousStatement
+}
+
+struct CreditStatementLedgerDetailView: View {
+    @ObservedObject var store: PlannerStore
+    var identity: CreditStatementIdentity
+    var mode: CreditStatementLedgerMode
+    @State private var editTarget: CreditCardBalanceHistoryEditTarget?
+    @State private var isCycleAdjustmentPresented = false
+
+    var body: some View {
+        ScreenScaffold(
+            title: title,
+            subtitle: subtitle,
+            navigationMode: .inline,
+            toolbarMode: .none,
+            titleDisplayMode: .inline
+        ) {
+            if let card, let section {
+                AppCard {
+                    CreditMetricGrid(items: summaryMetrics)
+                    Button {
+                        isCycleAdjustmentPresented = true
+                    } label: {
+                        Label("Adjust cycle date or status", systemImage: "calendar.badge.clock")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.Colors.primaryOrange)
+                }
+
+                if let statementSummary {
+                    SectionTitle("Reconciliation")
+                    AppCard {
+                        MetricRow(label: "Tracked movements", value: MoneyParser.formatPence(statementSummary.calculatedAmountPence))
+                        AppDivider()
+                        MetricRow(
+                            label: statementSummary.reconciliationAdjustmentPence >= 0 ? "Unitemised adjustment" : "Refunds and adjustments",
+                            value: MoneyParser.formatPence(abs(statementSummary.reconciliationAdjustmentPence)),
+                            valueColor: statementSummary.reconciliationAdjustmentPence < 0 ? AppTheme.Colors.success : AppTheme.Colors.warning
+                        )
+                        AppDivider()
+                        MetricRow(label: "Paid", value: MoneyParser.formatPence(statementSummary.paidAmountPence), valueColor: AppTheme.Colors.success)
+                        AppDivider()
+                        MetricRow(label: "Outstanding", value: MoneyParser.formatPence(statementSummary.unpaidAmountPence), valueColor: statementSummary.unpaidAmountPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success)
+                    }
+                }
+
+                SectionTitle(mode == .currentStatement ? "Contributing movements" : "Statement movements")
+                AppCard {
+                    if section.entries.isEmpty {
+                        EmptyStateView(title: "No movements yet", message: "Movements appear here as they are recorded.", systemImage: "list.bullet.rectangle")
+                    } else {
+                        ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
+                            if let target = entry.editTarget {
+                                Button { editTarget = target } label: {
+                                    CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: true, auditAction: nil)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Opens this movement to edit, refund, or delete")
+                            } else {
+                                CreditCardBalanceHistoryEntryRow(entry: entry, showsEditIndicator: false, auditAction: nil)
+                            }
+                            if index < section.entries.count - 1 { AppDivider() }
+                        }
+                    }
+                }
+            } else {
+                AppCard {
+                    EmptyStateView(title: "Statement unavailable", message: "The card or statement was deleted.", systemImage: "exclamationmark.triangle")
+                }
+            }
+        }
+        .sheet(item: $editTarget) { CreditCardBalanceHistoryEditorSheet(store: store, target: $0) }
+        .sheet(isPresented: $isCycleAdjustmentPresented) {
+            if let card {
+                CreditCardCycleAdjustmentSheet(
+                    store: store,
+                    card: card,
+                    scheduledStatementDate: identity.scheduledStatementDate
+                )
+            }
+        }
+        .accessibilityIdentifier("credit-statement-ledger-\(identity.id)")
+    }
+
+    private var card: CreditCard? {
+        store.snapshot.creditCards.first { $0.id == identity.cardId && $0.deletedAt == nil }
+    }
+
+    private var history: CreditCardBalanceHistoryData? {
+        card.map { CreditCardBalanceHistoryData.make(card: $0, snapshot: store.snapshot, asOfDate: store.todayIso) }
+    }
+
+    private var section: CreditCardBalanceHistorySection? {
+        switch mode {
+        case .currentStatement:
+            history?.currentSection
+        case .directDebit, .previousStatement:
+            history?.statementSections.first { statementSection in
+                statementSection.id == "statement-\(identity.id)" ||
+                    statementSection.statementDate == statementSummary?.statementDate
+            }
+        }
+    }
+
+    private var statementSummary: CreditCardStatementSummary? {
+        PlannerDerivedData.creditCardStatementSummaries(snapshot: store.snapshot, asOfDate: store.todayIso)
+            .first { $0.cardId == identity.cardId && $0.scheduledStatementDate == identity.scheduledStatementDate }
+    }
+
+    private var title: String {
+        switch mode {
+        case .directDebit: "Direct debit"
+        case .currentStatement: "Current statement"
+        case .previousStatement: "Previous statement"
+        }
+    }
+
+    private var subtitle: String {
+        guard let card else { return "" }
+        return "\(card.name) · \(shortDate(identity.scheduledStatementDate))"
+    }
+
+    private var summaryMetrics: [CreditMetricGrid.Item] {
+        guard let section else { return [] }
+        var result = [CreditMetricGrid.Item(label: mode == .currentStatement ? "Total so far" : "Locked total", value: MoneyParser.formatPence(section.balancePence), valueColor: AppTheme.Colors.primaryOrange)]
+        if let statementSummary {
+            result.append(.init(label: "Payment status", value: statementStatusLabel(statementSummary.status)))
+            result.append(.init(label: "Collection date", value: shortDate(statementSummary.directDebitDate)))
+        } else {
+            result.append(.init(label: "Statement date", value: shortDate(identity.scheduledStatementDate)))
+        }
+        result.append(.init(label: "Movements", value: "\(section.entries.count)"))
+        return result
+    }
+}
+
+private func statementStatusLabel(_ status: CreditCardStatementStatus) -> String {
+    switch status {
+    case .upcoming: "Upcoming"
+    case .paid: "Paid"
+    case .overdue: "Overdue"
+    case .awaitingConfirmation: "Awaiting confirmation"
     }
 }
 

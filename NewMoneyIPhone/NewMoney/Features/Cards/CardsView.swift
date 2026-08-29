@@ -37,6 +37,8 @@ struct CardsLayoutPolicy {
     static let currentStatementDueTitle = "Current statement due"
     static let forecastStatementDueTitle = "Forecast statement due"
     static let detailUsesSafeAreaAwareTopSpacing = true
+    static let linkedRowsUseFlatPresentation = true
+    static let linkedRowMinimumTapTarget: CGFloat = 54
     static let sections: [CardsSection] = [
         .summary,
         .activeCards
@@ -1271,6 +1273,26 @@ private enum CardDetailTab {
     case balanceHistory
 }
 
+enum CardLinkedRowDestination: Equatable, Identifiable {
+    case recurring(paymentId: String, scheduledDueDate: String)
+    case customPayment(String)
+    case pot(String)
+    case coverPot(String)
+    case transaction(String)
+    case repayment(String)
+
+    var id: String {
+        switch self {
+        case .recurring(let paymentId, let scheduledDueDate): "recurring-\(paymentId)-\(scheduledDueDate)"
+        case .customPayment(let id): "custom-\(id)"
+        case .pot(let id): "pot-\(id)"
+        case .coverPot(let id): "cover-pot-\(id)"
+        case .transaction(let id): "transaction-\(id)"
+        case .repayment(let id): "repayment-\(id)"
+        }
+    }
+}
+
 struct CardDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1283,6 +1305,7 @@ struct CardDetailView: View {
     @State private var isCardEditPresented = false
     @State private var isDeleteConfirmationPresented = false
     @State private var balanceHistoryEditTarget: CreditCardBalanceHistoryEditTarget?
+    @State private var linkedRowDestination: CardLinkedRowDestination?
     @State private var selectedStatementSection: CreditCardBalanceHistorySection?
 
     private var currentCard: CreditCard {
@@ -1352,6 +1375,9 @@ struct CardDetailView: View {
             }
             .sheet(item: $balanceHistoryEditTarget) { target in
                 CreditCardBalanceHistoryEditorSheet(store: store, target: target)
+            }
+            .sheet(item: $linkedRowDestination) { destination in
+                CardLinkedRecordEditorSheet(store: store, destination: destination)
             }
             .sheet(item: $selectedStatementSection) { section in
                 CreditCardStatementDetailEditorView(
@@ -1479,8 +1505,15 @@ struct CardDetailView: View {
                     EmptyStateView(title: "Nothing linked", message: "Bills, one-off payments, and pots linked to this card will appear here.", systemImage: "link")
                 }
             } else {
-                ForEach(linkedRows) { row in
-                    CardPaymentAllocationRowCard(row: row)
+                VStack(spacing: 0) {
+                    ForEach(Array(linkedRows.enumerated()), id: \.element.id) { index, row in
+                        Button { linkedRowDestination = row.destination } label: {
+                            CardPaymentAllocationRowCard(row: row)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens this linked record for editing")
+                        if index < linkedRows.count - 1 { AppDivider() }
+                    }
                 }
             }
         }
@@ -1493,9 +1526,14 @@ struct CardDetailView: View {
                     EmptyStateView(title: "No card history", message: "Charges, payments, cover pots, and card spending will appear here.", systemImage: "clock.arrow.circlepath")
                 }
             } else {
-                VStack(spacing: AppTheme.Spacing.md) {
-                    ForEach(historyRows) { row in
-                        CardPaymentAllocationRowCard(row: row)
+                VStack(spacing: 0) {
+                    ForEach(Array(historyRows.enumerated()), id: \.element.id) { index, row in
+                        Button { linkedRowDestination = row.destination } label: {
+                            CardPaymentAllocationRowCard(row: row)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens this card history record for editing")
+                        if index < historyRows.count - 1 { AppDivider() }
                     }
                 }
                 .padding(.top, AppTheme.Spacing.sm)
@@ -1518,7 +1556,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.warning,
                     context: "Bill",
                     symbol: "calendar.badge.clock",
-                    sortDate: recurringSortDate(payment)
+                    sortDate: recurringSortDate(payment),
+                    destination: .recurring(paymentId: payment.id, scheduledDueDate: payment.dueDate ?? store.todayIso)
                 )
             }
 
@@ -1533,7 +1572,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.primaryOrange,
                     context: "One-off",
                     symbol: "calendar.badge.plus",
-                    sortDate: payment.dueDate
+                    sortDate: payment.dueDate,
+                    destination: .customPayment(payment.id)
                 )
             }
 
@@ -1548,7 +1588,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.primaryOrange,
                     context: "Pot",
                     symbol: "wallet.pass",
-                    sortDate: String(pot.updatedAt.prefix(10))
+                    sortDate: String(pot.updatedAt.prefix(10)),
+                    destination: .pot(pot.id)
                 )
             }
 
@@ -1563,7 +1604,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.success,
                     context: "Cover pot",
                     symbol: "wallet.pass",
-                    sortDate: creditCardPotDate(pot)
+                    sortDate: creditCardPotDate(pot),
+                    destination: .coverPot(pot.id)
                 )
             }
 
@@ -1582,7 +1624,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.warning,
                     context: "Bill",
                     symbol: "calendar.badge.clock",
-                    sortDate: recurringSortDate(payment)
+                    sortDate: recurringSortDate(payment),
+                    destination: .recurring(paymentId: payment.id, scheduledDueDate: payment.dueDate ?? store.todayIso)
                 )
             }
 
@@ -1597,7 +1640,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.primaryOrange,
                     context: "One-off",
                     symbol: "calendar.badge.plus",
-                    sortDate: payment.dueDate
+                    sortDate: payment.dueDate,
+                    destination: .customPayment(payment.id)
                 )
             }
 
@@ -1612,7 +1656,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.orangeHighlight,
                     context: "Spending",
                     symbol: "receipt",
-                    sortDate: transaction.date
+                    sortDate: transaction.date,
+                    destination: .transaction(transaction.id)
                 )
             }
 
@@ -1636,7 +1681,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.success,
                     context: "Refund",
                     symbol: "arrow.uturn.backward.circle.fill",
-                    sortDate: refundDate
+                    sortDate: refundDate,
+                    destination: .transaction(transaction.id)
                 )
             }
 
@@ -1651,7 +1697,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.success,
                     context: "Payment",
                     symbol: "arrow.down.circle",
-                    sortDate: repayment.date
+                    sortDate: repayment.date,
+                    destination: .repayment(repayment.id)
                 )
             }
 
@@ -1666,7 +1713,8 @@ struct CardDetailView: View {
                     amountColor: AppTheme.Colors.success,
                     context: "Cover pot",
                     symbol: "wallet.pass",
-                    sortDate: creditCardPotDate(pot)
+                    sortDate: creditCardPotDate(pot),
+                    destination: .coverPot(pot.id)
                 )
             }
 
@@ -2024,7 +2072,7 @@ private struct CreditCardBalanceHistorySectionView: View {
     }
 }
 
-private struct CreditCardBalanceHistoryEntryRow: View {
+struct CreditCardBalanceHistoryEntryRow: View {
     var entry: CreditCardBalanceHistoryEntry
     var showsEditIndicator: Bool
     var auditAction: PlannerAuditAction?
@@ -2515,19 +2563,25 @@ private enum CreditCardCycleDateChoice: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct CreditCardCycleAdjustmentSheet: View {
+struct CreditCardCycleAdjustmentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: PlannerStore
     var card: CreditCard
+    var scheduledStatementDate: String?
     @State private var statementChoice: CreditCardCycleDateChoice
     @State private var directDebitChoice: CreditCardCycleDateChoice
     @State private var statementDate: Date
     @State private var directDebitDate: Date
 
-    init(store: PlannerStore, card: CreditCard) {
+    init(store: PlannerStore, card: CreditCard, scheduledStatementDate: String? = nil) {
         self.store = store
         self.card = card
-        let cycle = PlannerDerivedData.creditCardCycleAdjustmentSummary(card: card, snapshot: store.snapshot, asOfDate: store.todayIso)
+        self.scheduledStatementDate = scheduledStatementDate
+        let cycle = Self.resolveCycle(
+            store: store,
+            card: card,
+            scheduledStatementDate: scheduledStatementDate
+        )
         let override = cycle.flatMap { summary in
             store.snapshot.creditCardCycleOverrides.first {
                 $0.deletedAt == nil && $0.creditCardId == card.id && $0.scheduledStatementDate == summary.scheduledStatementDate
@@ -2540,7 +2594,39 @@ private struct CreditCardCycleAdjustmentSheet: View {
     }
 
     private var cycle: CreditCardCycleAdjustmentSummary? {
-        PlannerDerivedData.creditCardCycleAdjustmentSummary(card: card, snapshot: store.snapshot, asOfDate: store.todayIso)
+        Self.resolveCycle(store: store, card: card, scheduledStatementDate: scheduledStatementDate)
+    }
+
+    private static func resolveCycle(
+        store: PlannerStore,
+        card: CreditCard,
+        scheduledStatementDate: String?
+    ) -> CreditCardCycleAdjustmentSummary? {
+        if let scheduledStatementDate,
+           let statement = PlannerDerivedData.creditCardStatementSummaries(
+               snapshot: store.snapshot,
+               asOfDate: store.todayIso
+           ).first(where: {
+               $0.cardId == card.id && $0.scheduledStatementDate == scheduledStatementDate
+           }) {
+            let cycleOverride = store.snapshot.creditCardCycleOverrides.first {
+                $0.deletedAt == nil &&
+                    $0.creditCardId == card.id &&
+                    $0.scheduledStatementDate == scheduledStatementDate
+            }
+            return CreditCardCycleAdjustmentSummary(
+                scheduledStatementDate: scheduledStatementDate,
+                statementDate: statement.statementDate,
+                directDebitDate: statement.directDebitDate,
+                isStatementHeld: cycleOverride?.statementState == .awaitingConfirmation,
+                isDirectDebitHeld: cycleOverride?.directDebitState == .awaitingPayment
+            )
+        }
+        return PlannerDerivedData.creditCardCycleAdjustmentSummary(
+            card: card,
+            snapshot: store.snapshot,
+            asOfDate: store.todayIso
+        )
     }
 
     var body: some View {
@@ -2820,32 +2906,247 @@ private func cardRepaymentSubtitle(_ repayment: CreditCardRepayment) -> String {
     return "\(repayment.date) · \(status)"
 }
 
+private struct CardLinkedRecordEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var destination: CardLinkedRowDestination
+
+    @ViewBuilder
+    var body: some View {
+        switch destination {
+        case .recurring(let paymentId, let scheduledDueDate):
+            CreditCardRecurringOccurrenceEditorView(
+                store: store,
+                paymentId: paymentId,
+                scheduledDueDate: scheduledDueDate
+            )
+        case .customPayment(let id):
+            if let payment = store.snapshot.customPayments.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                CreditCardCustomPaymentEditorView(store: store, payment: payment)
+            } else {
+                unavailable
+            }
+        case .pot(let id):
+            if let pot = store.snapshot.pots.first(where: { $0.id == id && !$0.archived }) {
+                NavigationStack {
+                    PotEditView(store: store, pot: pot)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                        }
+                }
+            } else {
+                unavailable
+            }
+        case .coverPot(let id):
+            if let pot = store.snapshot.creditCardPots.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                CreditCardCoverPotEditorView(store: store, pot: pot)
+            } else {
+                unavailable
+            }
+        case .transaction(let id):
+            CreditCardBalanceHistoryEditorSheet(store: store, target: .transaction(id))
+        case .repayment(let id):
+            CreditCardBalanceHistoryEditorSheet(store: store, target: .repayment(id))
+        }
+    }
+
+    private var unavailable: some View {
+        NavigationStack {
+            ContentUnavailableView(
+                "Record unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text("This linked record was deleted or is no longer available.")
+            )
+            .premiumScreenBackground()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            }
+        }
+    }
+}
+
+private struct CreditCardCustomPaymentEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var payment: CustomPayment
+    @State private var name: String
+    @State private var amount: String
+    @State private var dueDate: Date
+    @State private var status: CustomPaymentStatus
+    @State private var isDeleteConfirmationPresented = false
+
+    init(store: PlannerStore, payment: CustomPayment) {
+        self.store = store
+        self.payment = payment
+        _name = State(initialValue: payment.name)
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: payment.amountPence))
+        _dueDate = State(initialValue: FinanceEngine.parseDate(payment.dueDate))
+        _status = State(initialValue: payment.status)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("One-off payment") {
+                    TextField("Name", text: $name)
+                    MoneyField(title: "Amount", text: $amount)
+                    DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+                    Picker("Status", selection: $status) {
+                        Text("Unpaid").tag(CustomPaymentStatus.unpaid)
+                        Text("Paid").tag(CustomPaymentStatus.paid)
+                        Text("Archived").tag(CustomPaymentStatus.archived)
+                    }
+                }
+                Section {
+                    Button("Delete payment", role: .destructive) { isDeleteConfirmationPresented = true }
+                }
+            }
+            .navigationTitle("Edit payment")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.updateCustomPayment(
+                            id: payment.id,
+                            name: name,
+                            amountPence: MoneyParser.parsePoundsToPence(amount),
+                            dueDate: FinanceEngine.toIsoDate(dueDate),
+                            creditCardId: payment.creditCardId,
+                            status: status
+                        )
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || MoneyParser.parsePoundsToPence(amount) <= 0)
+                }
+            }
+            .confirmationDialog("Delete this payment?", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+                Button("Delete payment", role: .destructive) {
+                    store.deleteCustomPayment(id: payment.id)
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+}
+
+private struct CreditCardCoverPotEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    var pot: CreditCardPot
+    @State private var name: String
+    @State private var amount: String
+    @State private var source: CreditCardPotSource
+    @State private var status: CreditCardPotStatus
+    @State private var note: String
+    @State private var isDeleteConfirmationPresented = false
+
+    init(store: PlannerStore, pot: CreditCardPot) {
+        self.store = store
+        self.pot = pot
+        _name = State(initialValue: pot.name)
+        _amount = State(initialValue: RefundAmountEditor.inputValue(for: pot.amountPence))
+        _source = State(initialValue: pot.source)
+        _status = State(initialValue: pot.status)
+        _note = State(initialValue: pot.note)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Credit card cover") {
+                    TextField("Name", text: $name)
+                    MoneyField(title: "Amount", text: $amount)
+                    Picker("Source", selection: $source) {
+                        Text("Paycheck").tag(CreditCardPotSource.paycheck)
+                        Text("External").tag(CreditCardPotSource.external)
+                    }
+                    Picker("Status", selection: $status) {
+                        Text("Active").tag(CreditCardPotStatus.active)
+                        Text("Applied").tag(CreditCardPotStatus.applied)
+                        Text("Cancelled").tag(CreditCardPotStatus.cancelled)
+                    }
+                    TextField("Note", text: $note, axis: .vertical)
+                }
+                Section {
+                    Button("Delete cover pot", role: .destructive) { isDeleteConfirmationPresented = true }
+                }
+            }
+            .navigationTitle("Edit cover pot")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTopDividerHidden()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.updateCreditCardPot(
+                            id: pot.id,
+                            name: name,
+                            amountPence: MoneyParser.parsePoundsToPence(amount),
+                            source: source,
+                            status: status,
+                            note: note
+                        )
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || MoneyParser.parsePoundsToPence(amount) <= 0)
+                }
+            }
+            .confirmationDialog("Delete this cover pot?", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+                Button("Delete cover pot", role: .destructive) {
+                    store.deleteCreditCardPot(id: pot.id)
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+}
+
 private struct CardPaymentAllocationRowCard: View {
     var row: CardPaymentAllocationRow
 
     var body: some View {
-        AppCard {
-            HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(row.title)
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                        .lineLimit(1)
-                    Text(row.detail)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.secondaryText)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: AppTheme.Spacing.md)
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(row.amount)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(row.amountColor)
-                        .multilineTextAlignment(.trailing)
-                    Pill(text: row.context, systemImage: row.symbol, color: row.amountColor)
-                }
+        HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
+            Image(systemName: row.symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(row.amountColor)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text("\(row.context) · \(row.detail)")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Text(row.amount)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(row.amountColor)
+                .multilineTextAlignment(.trailing)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+                .frame(width: 18)
+                .accessibilityHidden(true)
         }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: CardsLayoutPolicy.linkedRowMinimumTapTarget,
+            alignment: .leading
+        )
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(row.title), \(row.context), \(row.amount), \(row.detail)")
     }
 }
 
@@ -2858,6 +3159,7 @@ private struct CardPaymentAllocationRow: Identifiable {
     var context: String
     var symbol: String
     var sortDate: String
+    var destination: CardLinkedRowDestination
 }
 
 private func cardAvailabilityLabel(_ availablePence: Int) -> String {

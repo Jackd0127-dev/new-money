@@ -5198,7 +5198,7 @@ private extension PlannerDerivedData {
             }
 
         let custom = snapshot.customPayments
-            .filter { $0.status == .unpaid && $0.dueDate >= rangeStart && $0.dueDate <= rangeEnd }
+            .filter { $0.deletedAt == nil && $0.status == .unpaid && $0.dueDate >= rangeStart && $0.dueDate <= rangeEnd }
             .map {
                 CreditCardAllocationItem(
                     creditCardId: $0.creditCardId,
@@ -5210,6 +5210,7 @@ private extension PlannerDerivedData {
 
         let transactions = snapshot.transactions
             .filter {
+                $0.deletedAt == nil &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.date >= rangeStart &&
@@ -5225,7 +5226,7 @@ private extension PlannerDerivedData {
             }
 
         let repayments = snapshot.creditCardRepayments
-            .filter { $0.date >= rangeStart && $0.date <= rangeEnd }
+            .filter { $0.deletedAt == nil && $0.date >= rangeStart && $0.date <= rangeEnd }
             .map {
                 CreditCardAllocationItem(
                     creditCardId: $0.creditCardId,
@@ -5363,6 +5364,7 @@ private extension PlannerDerivedData {
 
         let actualRecurringKeys = Set(snapshot.transactions
             .filter {
+                $0.deletedAt == nil &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id &&
@@ -5397,6 +5399,7 @@ private extension PlannerDerivedData {
 
         let customLines = snapshot.customPayments
             .filter {
+                $0.deletedAt == nil &&
                 $0.status != .archived &&
                 $0.creditCardId == card.id &&
                 $0.dueDate >= cycleStart &&
@@ -5453,7 +5456,10 @@ private extension PlannerDerivedData {
         statementDate: String,
         asOfDate: String
     ) -> [CreditCardStatementLine] {
+        // Sync retains deleted records. Only live charges and refunds can form debt,
+        // matching the balance and statement-history calculations.
         let cardTransactions = transactions.filter {
+                $0.deletedAt == nil &&
                 $0.type == .spending &&
                 $0.paymentMethod == .creditCard &&
                 $0.creditCardId == card.id

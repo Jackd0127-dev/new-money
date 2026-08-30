@@ -6173,6 +6173,122 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(julyStatement?.actualDuePence, 7500)
     }
 
+    func testDeletedDuplicateCardChargesDoNotBecomeStatementOrFundingDebt() throws {
+        let period = makePayPeriod(
+            id: "period-card", startDate: "2026-08-10", endDate: "2026-09-09",
+            payday: "2026-08-10", incomePence: 200_000
+        )
+        let card = makeCreditCard(
+            id: "card-main", name: "Card", limitPence: 100_000,
+            openingBalancePence: 0, openingStatementBalancePence: 0,
+            statementDate: "2026-09-01", dueDay: 5,
+            createdAt: "2026-08-09T19:20:00.000Z"
+        )
+        let pot = makePot(id: "pot-card", name: "Card", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+        let bill = makeRecurringPayment(
+            id: "bill-subscription", name: "Subscription", amountPence: 20_000,
+            dueDay: 21, potId: pot.id, creditCardId: card.id,
+            createdAt: "2026-08-09T19:20:00.000Z"
+        )
+        var charge = makeTransaction(id: "recurring-charge", cardId: card.id, amountPence: 20_000, date: "2026-08-21", note: "Subscription")
+        charge.recurringPaymentId = bill.id
+        let groceries = makeTransaction(id: "groceries", cardId: card.id, amountPence: 8_623, date: "2026-08-22", note: "Groceries")
+        // Re-recording an occurrence can retain multiple tombstones with the same ID.
+        let deletedDuplicates = (0..<4).map { index in
+            var deleted = charge
+            deleted.deletedAt = "2026-08-24T08:51:1\(index).000Z"
+            return deleted
+        }
+        let snapshot = makeSnapshot(
+            settings: makeManualSettings(today: "2026-08-30"), pots: [pot],
+            recurringPayments: [bill], payPeriods: [period],
+            transactions: deletedDuplicates + [charge, groceries], creditCards: [card]
+        )
+        // Exercise persisted state, not just an in-memory clean fixture.
+        let restored = try JSONDecoder().decode(PlannerSnapshot.self, from: JSONEncoder().encode(snapshot))
+        XCTAssertEqual(restored.transactions.count, 6)
+
+        for asOfDate in ["2026-08-30", "2026-09-01"] {
+            let payment = try XCTUnwrap(PlannerDerivedData.creditCardStatementPayments(
+                card: card, snapshot: restored, startDate: asOfDate,
+                endDate: "2026-09-05", asOfDate: asOfDate
+            ).first)
+            XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: restored), 28_623)
+            XCTAssertEqual(payment.actualDuePence, 28_623)
+            XCTAssertEqual(payment.forecastDuePence, 28_623)
+            let group = try XCTUnwrap(PlannerDerivedData.fundingChecklistDestinationGroups(
+                items: PlannerDerivedData.fundingChecklistPresentationItems(
+                    snapshot: restored, payPeriod: period, asOfDate: asOfDate, groupByFundingDueDate: true
+                )
+            ).first { $0.destinationId == pot.id })
+            XCTAssertEqual(group.totalAmountPence, 28_623)
+            XCTAssertEqual(group.items.count, 2)
+            XCTAssertFalse(group.items.contains { if case .cardPayment = $0.action { return true }; return false })
+        }
+        let statement = try XCTUnwrap(PlannerDerivedData.creditCardStatementSummaries(snapshot: restored, asOfDate: "2026-09-01").first)
+        XCTAssertEqual(statement.statementAmountPence, 28_623)
+        XCTAssertEqual(statement.transactions.count, 2)
+    }
+
+    func testDeletedCardActivityDoesNotAffectStatementOrAvailabilityForecasts() throws {
+        let card = makeCreditCard(
+            id: "card-main", name: "Card", limitPence: 100_000,
+            openingBalancePence: 0, openingStatementBalancePence: 0,
+            statementDate: "2026-09-01", dueDay: 5, createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let period = makePayPeriod(id: "period", startDate: "2026-08-01", endDate: "2026-09-09", payday: "2026-08-01", incomePence: 200_000)
+        let live = makeTransaction(id: "live", cardId: card.id, amountPence: 10_000, date: "2026-08-10", note: "Live")
+        var deleted = makeTransaction(id: "deleted", cardId: card.id, amountPence: 20_000, date: "2026-08-25", note: "Deleted")
+        deleted.deletedAt = "2026-08-19T00:00:00.000Z"
+        var deletedRefund = makeTransaction(id: "deleted-refund", cardId: card.id, amountPence: 5_000, date: "2026-07-10", note: "Deleted refund")
+        deletedRefund.deletedAt = deleted.deletedAt
+        deletedRefund.refundedAt = "2026-08-15T00:00:00.000Z"
+        deletedRefund.refundedAmountPence = 5_000
+        let deletedCustom = CustomPayment(
+            id: "deleted-custom", name: "Deleted custom", amountPence: 30_000, dueDate: "2026-08-26",
+            creditCardId: card.id, status: .unpaid, createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: deleted.deletedAt!, deletedAt: deleted.deletedAt
+        )
+        let deletedRepayment = CreditCardRepayment(
+            id: "deleted-repayment", creditCardId: card.id, amountPence: 4_000, date: "2026-09-05", note: "Deleted",
+            statementDate: "2026-09-01", directDebitDate: "2026-09-05", source: .manual,
+            potId: nil, potContributionPence: 0, paycheckContributionPence: 4_000,
+            createdAt: "2026-08-01T00:00:00.000Z", updatedAt: deleted.deletedAt!, deletedAt: deleted.deletedAt
+        )
+        let snapshot = makeSnapshot(
+            settings: makeManualSettings(today: "2026-08-20"), payPeriods: [period],
+            transactions: [live, deleted, deletedRefund], creditCards: [card],
+            customPayments: [deletedCustom], creditCardRepayments: [deletedRepayment]
+        )
+        for asOfDate in ["2026-08-20", "2026-08-30"] {
+            let payment = try XCTUnwrap(PlannerDerivedData.creditCardStatementPayments(
+                card: card, snapshot: snapshot, startDate: asOfDate, endDate: "2026-09-05", asOfDate: asOfDate
+            ).first)
+            XCTAssertEqual(payment.actualDuePence, 10_000)
+            XCTAssertEqual(payment.forecastDuePence, 10_000)
+            let availability = PlannerDerivedData.creditCardAvailabilitySummary(card: card, snapshot: snapshot, payPeriod: period, asOfDate: asOfDate)
+            XCTAssertEqual(availability.actualAvailablePence, 90_000)
+            XCTAssertEqual(availability.forecastAvailablePence, 90_000)
+        }
+    }
+
+    func testDeletedCardChargeDoesNotSuppressReplacementRecurringForecast() throws {
+        let card = makeCreditCard(
+            id: "card-main", name: "Card", openingBalancePence: 0, openingStatementBalancePence: 0,
+            statementDate: "2026-09-01", dueDay: 5, createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let bill = makeRecurringPayment(id: "bill", name: "Subscription", amountPence: 20_000, dueDay: 21, potId: nil, creditCardId: card.id)
+        var deleted = makeTransaction(id: "deleted", cardId: card.id, amountPence: 20_000, date: "2026-08-21", note: "Subscription")
+        deleted.recurringPaymentId = bill.id
+        deleted.deletedAt = "2026-08-19T00:00:00.000Z"
+        let snapshot = makeSnapshot(recurringPayments: [bill], transactions: [deleted], creditCards: [card])
+        let payment = try XCTUnwrap(PlannerDerivedData.creditCardStatementPayments(
+            card: card, snapshot: snapshot, startDate: "2026-08-20", endDate: "2026-09-05", asOfDate: "2026-08-20"
+        ).first)
+        XCTAssertEqual(payment.actualDuePence, 0)
+        XCTAssertEqual(payment.forecastDuePence, 20_000)
+    }
+
     func testForecastStatementDoesNotReviveOpeningStatementAboveLiveOpeningBalance() throws {
         let card = makeCreditCard(
             id: "card-capital-two",

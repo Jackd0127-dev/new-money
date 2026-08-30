@@ -6297,6 +6297,119 @@ final class FinanceEngineTests: XCTestCase {
         })
     }
 
+    func testMigrationReanchorsLegacyPaidOpeningStatementBeforeFundingChecklistCalculation() throws {
+        let period = makePayPeriod(
+            id: "period-capital-two",
+            startDate: "2026-08-10",
+            endDate: "2026-09-09",
+            payday: "2026-08-10",
+            incomePence: 200_000
+        )
+        let card = makeCreditCard(
+            id: "card-capital-two",
+            name: "Capital two",
+            limitPence: 100_000,
+            openingBalancePence: 80_000,
+            openingStatementBalancePence: 80_000,
+            statementDate: "2026-09-01",
+            dueDay: 5,
+            createdAt: "2026-08-10T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-capital-two",
+            name: "Capital two",
+            balancePence: 0,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        let chatGPT = makeRecurringPayment(
+            id: "bill-chatgpt",
+            name: "ChatGPT",
+            amountPence: 20_000,
+            dueDay: 21,
+            potId: pot.id,
+            creditCardId: card.id,
+            createdAt: "2026-08-10T00:00:00.000Z"
+        )
+        var chatGPTCharge = makeTransaction(
+            id: "capital-two-chatgpt",
+            cardId: card.id,
+            amountPence: 20_000,
+            date: "2026-08-21",
+            note: "ChatGPT"
+        )
+        chatGPTCharge.recurringPaymentId = chatGPT.id
+        let tescoCharge = makeTransaction(
+            id: "capital-two-tesco",
+            cardId: card.id,
+            amountPence: 8_623,
+            date: "2026-08-22",
+            note: "Tesco"
+        )
+        let openingStatementRepayment = CreditCardRepayment(
+            id: "capital-two-opening-statement-payment",
+            creditCardId: card.id,
+            amountPence: 80_000,
+            date: "2026-08-05",
+            note: "Capital two direct debit",
+            statementDate: nil,
+            directDebitDate: "2026-08-05",
+            source: .manual,
+            potId: nil,
+            potContributionPence: 0,
+            paycheckContributionPence: 80_000,
+            createdAt: "2026-08-05T00:00:00.000Z",
+            updatedAt: "2026-08-05T00:00:00.000Z",
+            deletedAt: nil
+        )
+        let legacySnapshot = makeSnapshot(
+            settings: makeManualSettings(today: "2026-08-30"),
+            pots: [pot],
+            recurringPayments: [chatGPT],
+            payPeriods: [period],
+            transactions: [chatGPTCharge, tescoCharge],
+            creditCards: [card],
+            creditCardRepayments: [openingStatementRepayment]
+        )
+
+        let migrated = DefaultData.migratedSnapshot(legacySnapshot).snapshot
+        let migratedCard = try XCTUnwrap(migrated.creditCards.first)
+        let statementPayments = PlannerDerivedData.creditCardStatementPayments(
+            card: migratedCard,
+            snapshot: migrated,
+            startDate: period.startDate,
+            endDate: period.endDate,
+            asOfDate: "2026-08-30"
+        )
+        let group = try XCTUnwrap(
+            PlannerDerivedData.fundingChecklistDestinationGroups(
+                items: PlannerDerivedData.fundingChecklistPresentationItems(
+                    snapshot: migrated,
+                    payPeriod: period,
+                    asOfDate: "2026-08-30",
+                    groupByFundingDueDate: true
+                )
+            ).first { $0.destinationId == pot.id }
+        )
+
+        XCTAssertEqual(migratedCard.statementDate, "2026-08-01")
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: migratedCard, snapshot: migrated), 28_623)
+        XCTAssertEqual(migrated.creditCardRepayments.first?.statementDate, "2026-08-01")
+        XCTAssertEqual(migrated.creditCardRepayments.first?.directDebitDate, "2026-08-05")
+        XCTAssertEqual(statementPayments.map(\.forecastDuePence), [28_623])
+        XCTAssertEqual(group.totalAmountPence, 28_623)
+        XCTAssertEqual(group.items.count, 2)
+        XCTAssertFalse(group.items.contains { item in
+            if case .cardPayment = item.action { return true }
+            return false
+        })
+
+        let rerun = DefaultData.migratedSnapshot(migrated)
+        XCTAssertFalse(rerun.didChange)
+        XCTAssertEqual(rerun.snapshot, migrated)
+        XCTAssertEqual(migrated.settings.creditCardOpeningStatementCycleMigrationVersion, 1)
+    }
+
     @MainActor
     func testCreatedCreditCardStatementSummariesIncludeTransactionsAndStatuses() async throws {
         let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.basicDataSnapshot))

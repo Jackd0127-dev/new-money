@@ -1184,10 +1184,55 @@ enum DefaultData {
         }
 
         normalizeMonthlyPayPeriods(in: &migrated)
+        normalizeLegacyCreditCardOpeningStatementCycles(in: &migrated)
         repairUnsettledRecurringCardBillReserves(in: &migrated)
         repairKnownAutomaticCardBillFunding(in: &migrated)
 
         return (migrated, migrated != snapshot)
+    }
+
+    /// Early card records could save an entered opening statement on the next
+    /// statement date. When a matching repayment proves that opening statement
+    /// was already paid, attach both records to the issued cycle so the balance
+    /// cannot reappear as a future card-payment checklist item.
+    private static func normalizeLegacyCreditCardOpeningStatementCycles(in snapshot: inout PlannerSnapshot) {
+        guard (snapshot.settings.creditCardOpeningStatementCycleMigrationVersion ?? 0) < 1 else { return }
+
+        let today = FinanceEngine.getAppTodayIso(settings: snapshot.settings)
+        for cardIndex in snapshot.creditCards.indices {
+            let card = snapshot.creditCards[cardIndex]
+            guard !card.archived,
+                  card.deletedAt == nil,
+                  let openingStatementPence = card.openingStatementBalancePence,
+                  openingStatementPence > 0,
+                  let storedStatementDate = card.statementDate,
+                  storedStatementDate > today,
+                  openingStatementPence > PlannerDerivedData.cardBalance(card: card, snapshot: snapshot),
+                  let repaymentIndex = snapshot.creditCardRepayments.firstIndex(where: {
+                      $0.deletedAt == nil &&
+                      !$0.isRefunded &&
+                      $0.creditCardId == card.id &&
+                      $0.netAmountPence == openingStatementPence &&
+                      $0.date <= today &&
+                      ($0.statementDate == nil || $0.statementDate == storedStatementDate)
+                  })
+            else { continue }
+
+            let issuedStatementDate = PlannerDerivedData.addIsoMonthsClamped(
+                date: storedStatementDate,
+                months: -1
+            )
+            snapshot.creditCards[cardIndex].statementDate = issuedStatementDate
+            snapshot.creditCardRepayments[repaymentIndex].statementDate = issuedStatementDate
+            if let dueDay = card.dueDay {
+                snapshot.creditCardRepayments[repaymentIndex].directDebitDate = PlannerDerivedData.creditCardDirectDebitDate(
+                    statementDate: issuedStatementDate,
+                    dueDay: dueDay
+                )
+            }
+        }
+
+        snapshot.settings.creditCardOpeningStatementCycleMigrationVersion = 1
     }
 
     private static func normalizeMonthlyPayPeriods(in snapshot: inout PlannerSnapshot) {

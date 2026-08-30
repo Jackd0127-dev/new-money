@@ -335,6 +335,8 @@ struct Settings: Codable, Equatable, Identifiable, Sendable {
     var cardRecurringPotReserveMigrationVersion: Int? = nil
     /// Tracks the targeted removal of a known automatic card-bill funding error.
     var cardRecurringAutoFundingRepairVersion: Int? = nil
+    /// Tracks normalization of paid opening statements saved against the following cycle.
+    var creditCardOpeningStatementCycleMigrationVersion: Int? = nil
     /// Controls whether reserved pot balances are part of the displayed Money left total.
     /// Optional so snapshots saved before this setting existed continue to decode.
     var includePotsInMoneyLeft: Bool? = true

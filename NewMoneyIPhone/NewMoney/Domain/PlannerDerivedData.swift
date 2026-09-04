@@ -5198,8 +5198,7 @@ private extension PlannerDerivedData {
             }
         }
 
-        if statementDate == card.statementDate,
-           cardCreatedDateCanFeedFirstStatement(card: card, statementDate: statementDate),
+        if statementDate == unstatementedOpeningBalanceStatementDate(card: card),
            statementDate <= asOfDate {
             let unstatementedOpeningPence = unstatementedOpeningBalancePence(card: card)
             if unstatementedOpeningPence > 0 {
@@ -5480,13 +5479,26 @@ private extension PlannerDerivedData {
 
         if let previousStatementDate {
             cycleStart = previousStatementDate
-            actualLines = creditCardSpendingStatementLines(
+            var cycleLines = creditCardSpendingStatementLines(
                 card: card,
                 transactions: snapshot.transactions,
                 cycleStart: cycleStart,
                 statementDate: statementDate,
                 asOfDate: asOfDate
             )
+            if statementDate == unstatementedOpeningBalanceStatementDate(card: card) {
+                let unstatementedOpeningPence = unstatementedOpeningBalancePence(card: card)
+                if unstatementedOpeningPence > 0 {
+                    cycleLines.append(
+                        CreditCardStatementLine(
+                            amountPence: unstatementedOpeningPence,
+                            date: statementDate,
+                            source: .spending
+                        )
+                    )
+                }
+            }
+            actualLines = cycleLines
         } else {
             cycleStart = card.createdAt.prefixDate ?? statementDate
             var firstCycleLines = creditCardSpendingStatementLines(
@@ -5497,7 +5509,7 @@ private extension PlannerDerivedData {
                 asOfDate: asOfDate
             )
             let openingStatementPence = statementedOpeningBalancePence(card: card)
-            let unstatementedOpeningPence = cardCreatedDateCanFeedFirstStatement(card: card, statementDate: statementDate)
+            let unstatementedOpeningPence = statementDate == unstatementedOpeningBalanceStatementDate(card: card)
                 ? unstatementedOpeningBalancePence(card: card)
                 : 0
 
@@ -5663,8 +5675,18 @@ private extension PlannerDerivedData {
         max(0, (card.openingBalancePence ?? 0) - statementedOpeningBalancePence(card: card))
     }
 
-    static func cardCreatedDateCanFeedFirstStatement(card: CreditCard, statementDate: String) -> Bool {
-        (card.createdAt.prefixDate ?? statementDate) <= statementDate
+    /// The part of an imported opening balance that was not already on the
+    /// entered statement belongs to the first cycle that closes after import.
+    /// If the card predates its anchor, preserve the original anchor cycle.
+    static func unstatementedOpeningBalanceStatementDate(card: CreditCard) -> String? {
+        guard let anchorDate = card.statementDate,
+              FinanceEngine.isIsoDate(anchorDate)
+        else { return nil }
+
+        let createdDate = card.createdAt.prefixDate ?? anchorDate
+        guard FinanceEngine.isIsoDate(createdDate) else { return anchorDate }
+        if createdDate <= anchorDate { return anchorDate }
+        return creditCardStatementDate(for: card, chargeDate: createdDate)
     }
 
     static func creditCardDirectDebitDateCore(statementDate: String, dueDay: Int) -> String {

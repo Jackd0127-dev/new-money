@@ -602,6 +602,95 @@ extension FinanceEngineTests {
         XCTAssertEqual(statement.directDebitDate, "2026-09-05")
     }
 
+    func testUnstatementedOpeningBalanceRollsIntoFirstStatementAfterCardImport() throws {
+        let card = makeCreditCard(
+            id: "card-aqua",
+            name: "Aqua",
+            limitPence: 130_000,
+            openingBalancePence: 107_091,
+            openingStatementBalancePence: 69_588,
+            statementDate: "2026-08-02",
+            dueDay: 20,
+            createdAt: "2026-08-29T09:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-aqua",
+            name: "Aqua",
+            balancePence: 19_982,
+            targetPence: nil,
+            linkedCreditCardId: card.id
+        )
+        var statementPurchases = makeTransaction(
+            id: "aqua-statement-purchases",
+            cardId: card.id,
+            amountPence: 21_213,
+            date: "2026-08-28",
+            note: "Recorded statement purchases"
+        )
+        statementPurchases.refundedAt = "2026-08-29T10:00:00.000Z"
+        statementPurchases.refundedAmountPence = 1_231
+        let costa = makeTransaction(
+            id: "aqua-costa",
+            cardId: card.id,
+            amountPence: 415,
+            date: "2026-09-03",
+            note: "Costa"
+        )
+        let augustPayment = CreditCardRepayment(
+            id: "aqua-august-payment",
+            creditCardId: card.id,
+            amountPence: 69_588,
+            date: "2026-08-20",
+            note: "Automatic Aqua statement payment",
+            statementDate: "2026-08-02",
+            directDebitDate: "2026-08-20",
+            source: .linkedPotStatement,
+            potId: pot.id,
+            potContributionPence: 69_588,
+            paycheckContributionPence: 0,
+            createdAt: "2026-08-20T00:00:00.000Z",
+            updatedAt: "2026-08-20T00:00:00.000Z",
+            deletedAt: nil
+        )
+        var settings = makeManualSettings(today: "2026-09-03")
+        settings.lastProcessedDateIso = "2026-09-03"
+        let snapshot = makeSnapshot(
+            settings: settings,
+            pots: [pot],
+            transactions: [statementPurchases, costa],
+            creditCards: [card],
+            creditCardRepayments: [augustPayment]
+        )
+
+        let statements = PlannerDerivedData.creditCardStatementSummaries(
+            snapshot: snapshot,
+            asOfDate: "2026-09-03"
+        )
+        let september = try XCTUnwrap(statements.first { $0.statementDate == "2026-09-02" })
+        let august = try XCTUnwrap(statements.first { $0.statementDate == "2026-08-02" })
+        let history = CreditCardBalanceHistoryData.make(
+            card: card,
+            snapshot: snapshot,
+            asOfDate: "2026-09-03"
+        )
+        let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-09-03")
+
+        XCTAssertEqual(august.statementAmountPence, 69_588)
+        XCTAssertEqual(august.unpaidAmountPence, 0)
+        XCTAssertEqual(september.statementAmountPence, 57_485)
+        XCTAssertEqual(september.transactions.reduce(0) { $0 + $1.amountPence }, 57_485)
+        XCTAssertTrue(september.transactions.contains {
+            $0.id == "opening-unstatemented-card-aqua-2026-09-02" && $0.amountPence == 37_503
+        })
+        XCTAssertEqual(PlannerDerivedData.cardBalance(card: card, snapshot: snapshot), 57_900)
+        XCTAssertEqual(history.currentBalancePence, 57_900)
+        XCTAssertEqual(history.currentSection.balancePence, 415)
+        XCTAssertEqual(history.currentSection.entries.map(\.title), ["Costa"])
+        XCTAssertEqual(progress.targetPence, 57_485)
+        XCTAssertEqual(progress.coveredPence, 19_982)
+        XCTAssertEqual(progress.shortfallPence, 37_503)
+    }
+
     @MainActor
     func testRecurringCardBillsNormalizeToCardsLinkedPotWhenSaved() async {
         let settings = makeManualSettings(today: "2026-07-01")

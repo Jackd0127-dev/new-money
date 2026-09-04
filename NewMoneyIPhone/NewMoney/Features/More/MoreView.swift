@@ -80,6 +80,10 @@ struct CreditLayoutPolicy {
     static let creditMetricsUseAlignedGrid = true
     static let creditMetricsStackAtAccessibilitySizes = true
     static let scheduleHeaderMinimumTapTarget: CGFloat = 44
+    static let directDebitsDisclosureId = "credit-direct-debits-disclosure"
+    static let directDebitsContentId = "credit-direct-debits-content"
+    static let nextStatementsDisclosureId = "credit-next-statements-disclosure"
+    static let nextStatementsContentId = "credit-next-statements-content"
     static let scheduleContentTopAdjustment: CGFloat = -12
     static let dueSoonTopAdjustment: CGFloat = -10
     static let ledgerRowMinimumTapTarget: CGFloat = 54
@@ -2772,8 +2776,7 @@ struct CreditView: View {
                 items: directDebits,
                 previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
                 showsDisclosure: true,
-                isExpanded: directDebitsExpanded,
-                toggleExpansion: { directDebitsExpanded.toggle() },
+                isExpanded: $directDebitsExpanded,
                 moreDestination: { AnyView(CreditScheduleDetailView(store: store, schedule: .directDebits)) }
             )
 
@@ -2781,8 +2784,7 @@ struct CreditView: View {
                 items: nextStatements,
                 previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
                 showsDisclosure: true,
-                isExpanded: nextStatementsExpanded,
-                toggleExpansion: { nextStatementsExpanded.toggle() },
+                isExpanded: $nextStatementsExpanded,
                 moreDestination: { AnyView(CreditScheduleDetailView(store: store, schedule: .statements)) }
             )
         }
@@ -3177,8 +3179,7 @@ private struct CreditDirectDebitsCard: View {
     var items: [CreditDueItem]
     var previewLimit: Int?
     var showsDisclosure: Bool
-    var isExpanded: Bool
-    var toggleExpansion: (() -> Void)?
+    var isExpanded: Binding<Bool>?
     var moreDestination: (() -> AnyView)?
     var destination: ((CreditDueItem) -> CreditStatementLedgerDetailView)?
 
@@ -3186,8 +3187,7 @@ private struct CreditDirectDebitsCard: View {
         items: [CreditDueItem],
         previewLimit: Int? = nil,
         showsDisclosure: Bool = false,
-        isExpanded: Bool = true,
-        toggleExpansion: (() -> Void)? = nil,
+        isExpanded: Binding<Bool>? = nil,
         moreDestination: (() -> AnyView)? = nil,
         destination: ((CreditDueItem) -> CreditStatementLedgerDetailView)? = nil
     ) {
@@ -3195,7 +3195,6 @@ private struct CreditDirectDebitsCard: View {
         self.previewLimit = previewLimit
         self.showsDisclosure = showsDisclosure
         self.isExpanded = isExpanded
-        self.toggleExpansion = toggleExpansion
         self.moreDestination = moreDestination
         self.destination = destination
     }
@@ -3203,22 +3202,23 @@ private struct CreditDirectDebitsCard: View {
     var body: some View {
         AppCard {
             Button {
-                toggleExpansion?()
+                isExpanded?.wrappedValue.toggle()
             } label: {
-                CreditScheduleHeader(title: "Direct debits", showsDisclosure: showsDisclosure, isExpanded: isExpanded)
+                CreditScheduleHeader(title: "Direct debits", showsDisclosure: showsDisclosure, isExpanded: expanded)
             }
             .buttonStyle(.plain)
-            .disabled(toggleExpansion == nil)
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .disabled(isExpanded == nil)
+            .accessibilityIdentifier(CreditLayoutPolicy.directDebitsDisclosureId)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
 
-            if isExpanded && items.isEmpty {
+            if expanded && items.isEmpty {
                 EmptyStateView(
                     title: "No direct debits due",
                     message: "Open card statement payments will appear here.",
                     systemImage: "checkmark.circle"
                 )
                     .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
-            } else if isExpanded {
+            } else if expanded {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 ForEach(visibleItems) { item in
                     if let destination {
@@ -3237,8 +3237,13 @@ private struct CreditDirectDebitsCard: View {
                 remainingItemsLabel
                 }
                 .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
+                .accessibilityIdentifier(CreditLayoutPolicy.directDebitsContentId)
             }
         }
+    }
+
+    private var expanded: Bool {
+        isExpanded?.wrappedValue ?? true
     }
 
     private var visibleItems: [CreditDueItem] {
@@ -3285,8 +3290,7 @@ private struct CreditNextStatementsCard: View {
     var items: [CreditNextStatementItem]
     var previewLimit: Int?
     var showsDisclosure: Bool
-    var isExpanded: Bool
-    var toggleExpansion: (() -> Void)?
+    var isExpanded: Binding<Bool>?
     var moreDestination: (() -> AnyView)?
     var destination: ((CreditNextStatementItem) -> CreditStatementLedgerDetailView)?
 
@@ -3294,8 +3298,7 @@ private struct CreditNextStatementsCard: View {
         items: [CreditNextStatementItem],
         previewLimit: Int? = nil,
         showsDisclosure: Bool = false,
-        isExpanded: Bool = true,
-        toggleExpansion: (() -> Void)? = nil,
+        isExpanded: Binding<Bool>? = nil,
         moreDestination: (() -> AnyView)? = nil,
         destination: ((CreditNextStatementItem) -> CreditStatementLedgerDetailView)? = nil
     ) {
@@ -3303,7 +3306,6 @@ private struct CreditNextStatementsCard: View {
         self.previewLimit = previewLimit
         self.showsDisclosure = showsDisclosure
         self.isExpanded = isExpanded
-        self.toggleExpansion = toggleExpansion
         self.moreDestination = moreDestination
         self.destination = destination
     }
@@ -3311,22 +3313,23 @@ private struct CreditNextStatementsCard: View {
     var body: some View {
         AppCard {
             Button {
-                toggleExpansion?()
+                isExpanded?.wrappedValue.toggle()
             } label: {
-                CreditScheduleHeader(title: "Next statements", showsDisclosure: showsDisclosure, isExpanded: isExpanded)
+                CreditScheduleHeader(title: "Next statements", showsDisclosure: showsDisclosure, isExpanded: expanded)
             }
             .buttonStyle(.plain)
-            .disabled(toggleExpansion == nil)
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .disabled(isExpanded == nil)
+            .accessibilityIdentifier(CreditLayoutPolicy.nextStatementsDisclosureId)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
 
-            if isExpanded && items.isEmpty {
+            if expanded && items.isEmpty {
                 EmptyStateView(
                     title: "No statements scheduled",
                     message: "Next statement dates will appear after they are set on your cards.",
                     systemImage: "doc.text"
                 )
                     .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
-            } else if isExpanded {
+            } else if expanded {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 ForEach(visibleItems) { item in
                     if let destination {
@@ -3356,8 +3359,13 @@ private struct CreditNextStatementsCard: View {
                 remainingItemsLabel
                 }
                 .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
+                .accessibilityIdentifier(CreditLayoutPolicy.nextStatementsContentId)
             }
         }
+    }
+
+    private var expanded: Bool {
+        isExpanded?.wrappedValue ?? true
     }
 
     private var visibleItems: [CreditNextStatementItem] {

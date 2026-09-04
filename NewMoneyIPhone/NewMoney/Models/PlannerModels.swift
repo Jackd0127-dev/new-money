@@ -123,6 +123,24 @@ enum TransactionType: String, Codable, Sendable, CaseIterable {
     case adjustment
 }
 
+enum PotBankTransferDirection: String, Sendable, CaseIterable, Identifiable {
+    case bankToPot
+    case potToBank
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .bankToPot: "Bank to pot"
+        case .potToBank: "Pot to bank"
+        }
+    }
+
+    var reversed: Self {
+        self == .bankToPot ? .potToBank : .bankToPot
+    }
+}
+
 enum PotAllocationSource: String, Codable, Sendable {
     case manual
     case recurring
@@ -602,6 +620,15 @@ struct Transaction: Codable, Equatable, Identifiable, Sendable {
     var hasRefund: Bool { effectiveRefundedAmountPence > 0 }
     var isPartiallyRefunded: Bool { hasRefund && netAmountPence > 0 }
     var isRefunded: Bool { hasRefund && netAmountPence == 0 }
+
+    var potBankTransferDirection: PotBankTransferDirection? {
+        guard type == .transfer, potId != nil, bankAccountId != nil else { return nil }
+        switch paymentMethod {
+        case .bankAccount: return PotBankTransferDirection.bankToPot
+        case .pot: return PotBankTransferDirection.potToBank
+        case .income, .creditCard, nil: return nil
+        }
+    }
 }
 
 struct Debt: Codable, Equatable, Identifiable, Sendable {

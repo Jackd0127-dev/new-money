@@ -134,6 +134,8 @@ struct CreditLayoutPolicy {
     static let creditMetricsUseAlignedGrid = true
     static let creditMetricsStackAtAccessibilitySizes = true
     static let scheduleHeaderMinimumTapTarget: CGFloat = 44
+    static let scheduleContentTopAdjustment: CGFloat = -12
+    static let dueSoonTopAdjustment: CGFloat = -10
     static let ledgerRowMinimumTapTarget: CGFloat = 54
     static let previousStatementsStartCollapsed = true
     static let directDebitFutureStatus = "Due"
@@ -1259,7 +1261,9 @@ struct ActivityView: View {
             }
             .filter { entry in
                 guard !query.isEmpty else { return true }
-                return entry.title.localizedStandardContains(query) || entry.detail.localizedStandardContains(query)
+                return entry.title.localizedStandardContains(query) ||
+                    entry.detail.localizedStandardContains(query) ||
+                    (entry.sourceBadge?.label.localizedStandardContains(query) ?? false)
             }
     }
 
@@ -1311,6 +1315,9 @@ struct ActivityView: View {
         }
         let cardsById = snapshot.creditCards.reduce(into: [String: CreditCard]()) { result, card in
             result[card.id] = card
+        }
+        let banksById = snapshot.bankAccounts.reduce(into: [String: BankAccount]()) { result, account in
+            result[account.id] = account
         }
         let recurringById = snapshot.recurringPayments.reduce(into: [String: RecurringPayment]()) { result, payment in
             result[payment.id] = payment
@@ -1364,7 +1371,7 @@ struct ActivityView: View {
                     id: transaction.id,
                     kind: .spending,
                     title: transaction.note.isEmpty ? "Spending" : transaction.note,
-                    detail: "\(date) · \(transaction.paymentMethod?.displayName ?? "Manual")",
+                    detail: date,
                     amount: amount,
                     typeLabel: "Spending",
                     color: AppTheme.Colors.orangeHighlight,
@@ -1372,7 +1379,50 @@ struct ActivityView: View {
                     detailRows: detailRows,
                     recordRows: activityRecordRows(createdAt: transaction.createdAt, updatedAt: transaction.updatedAt),
                     source: .transaction(transaction.id),
-                    auditAction: latestAuditAction(snapshot: snapshot, kind: .transaction, id: transaction.id)
+                    auditAction: latestAuditAction(snapshot: snapshot, kind: .transaction, id: transaction.id),
+                    sourceBadge: activitySourceBadge(
+                        transaction: transaction,
+                        potsById: potsById,
+                        cardsById: cardsById,
+                        banksById: banksById
+                    )
+                )
+            }
+
+        let transfers = snapshot.transactions
+            .filter { $0.deletedAt == nil && $0.potBankTransferDirection != nil }
+            .compactMap { transaction -> ActivityEntry? in
+                guard let direction = transaction.potBankTransferDirection,
+                      let potId = transaction.potId,
+                      let bankId = transaction.bankAccountId
+                else { return nil }
+                let pot = potsById[potId]
+                let bank = banksById[bankId]
+                let fromName = direction == .bankToPot ? (bank?.name ?? "Bank") : (pot?.name ?? "Pot")
+                let toName = direction == .bankToPot ? (pot?.name ?? "Pot") : (bank?.name ?? "Bank")
+                let date = activityDisplayDate(transaction.date)
+                return ActivityEntry(
+                    id: transaction.id,
+                    kind: .all,
+                    title: transaction.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Transfer to \(toName)" : transaction.note,
+                    detail: date,
+                    amount: MoneyParser.formatPence(transaction.netAmountPence),
+                    typeLabel: "Transfer",
+                    color: AppTheme.Colors.primaryOrange,
+                    sortDate: transaction.date,
+                    detailRows: [
+                        ActivityDetailRow(label: "Amount", value: MoneyParser.formatPence(transaction.netAmountPence)),
+                        ActivityDetailRow(label: "From", value: fromName),
+                        ActivityDetailRow(label: "To", value: toName),
+                        ActivityDetailRow(label: "Date", value: date)
+                    ],
+                    recordRows: activityRecordRows(createdAt: transaction.createdAt, updatedAt: transaction.updatedAt),
+                    source: .transfer(transaction.id),
+                    auditAction: latestAuditAction(snapshot: snapshot, kind: .transaction, id: transaction.id),
+                    sourceBadge: ActivitySourceBadge(
+                        label: fromName,
+                        color: direction == .bankToPot ? Color(hex: bank?.color ?? "") : Color(hex: pot?.color ?? "")
+                    )
                 )
             }
 
@@ -1449,7 +1499,28 @@ struct ActivityView: View {
                 )
             }
 
-        return (spending + income + oneOffIncome + payPeriodSummaryEntries(snapshot: snapshot)).sorted { $0.sortDate > $1.sortDate }
+        return (spending + transfers + income + oneOffIncome + payPeriodSummaryEntries(snapshot: snapshot)).sorted { $0.sortDate > $1.sortDate }
+    }
+
+    private static func activitySourceBadge(
+        transaction: Transaction,
+        potsById: [String: Pot],
+        cardsById: [String: CreditCard],
+        banksById: [String: BankAccount]
+    ) -> ActivitySourceBadge {
+        switch transaction.paymentMethod {
+        case .creditCard:
+            let card = transaction.creditCardId.flatMap { cardsById[$0] }
+            return ActivitySourceBadge(label: card?.name ?? "Credit card", color: Color(hex: card?.color ?? ""))
+        case .bankAccount:
+            let bank = transaction.bankAccountId.flatMap { banksById[$0] }
+            return ActivitySourceBadge(label: bank?.name ?? "Bank", color: Color(hex: bank?.color ?? ""))
+        case .pot:
+            let pot = transaction.potId.flatMap { potsById[$0] }
+            return ActivitySourceBadge(label: pot?.name ?? "Pot", color: Color(hex: pot?.color ?? ""))
+        case .income, nil:
+            return ActivitySourceBadge(label: "Money left", color: AppTheme.Colors.success)
+        }
     }
 
     private static func payPeriodSummaryEntries(snapshot: PlannerSnapshot) -> [ActivityEntry] {
@@ -2404,9 +2475,15 @@ private enum ActivityFilter: String, CaseIterable, Identifiable {
 
 private enum ActivityEntrySource: Equatable {
     case transaction(String)
+    case transfer(String)
     case paycheck(String)
     case oneOffIncome(String)
     case payPeriod(String)
+}
+
+private struct ActivitySourceBadge {
+    var label: String
+    var color: Color
 }
 
 private struct ActivityEntry: Identifiable {
@@ -2422,6 +2499,7 @@ private struct ActivityEntry: Identifiable {
     var recordRows: [ActivityDetailRow]
     var source: ActivityEntrySource
     var auditAction: PlannerAuditAction? = nil
+    var sourceBadge: ActivitySourceBadge? = nil
 }
 
 private struct ActivityDetailRow: Identifiable {
@@ -2451,6 +2529,9 @@ private struct ActivityEntryRow: View {
                     if let auditAction = entry.auditAction {
                         HistoryAuditStatusPill(action: auditAction)
                     }
+                    if let sourceBadge = entry.sourceBadge {
+                        ActivitySourcePill(source: sourceBadge)
+                    }
                 }
                 Text(entry.detail)
                     .font(.caption)
@@ -2470,6 +2551,23 @@ private struct ActivityEntryRow: View {
         }
         .contentShape(Rectangle())
         .accessibilityLabel("Open details for \(entry.title)")
+    }
+}
+
+private struct ActivitySourcePill: View {
+    var source: ActivitySourceBadge
+
+    var body: some View {
+        Text(source.label.uppercased())
+            .font(.system(size: 9, weight: .black, design: .rounded))
+            .foregroundStyle(source.color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(source.color.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(source.color.opacity(0.2), lineWidth: 1))
+            .accessibilityLabel("Paid from \(source.label)")
     }
 }
 
@@ -2531,6 +2629,9 @@ private struct ActivityEntryDetailView: View {
                             if let auditAction = entry.auditAction {
                                 HistoryAuditStatusPill(action: auditAction)
                             }
+                            if let sourceBadge = entry.sourceBadge {
+                                ActivitySourcePill(source: sourceBadge)
+                            }
                         }
 
                         Text(entry.title)
@@ -2566,6 +2667,9 @@ private struct ActivityEntryDetailView: View {
     }
 
     private var heroSource: String {
+        if let sourceBadge = currentEntry.sourceBadge {
+            return sourceBadge.label
+        }
         guard detailParts.count > 1 else { return currentEntry.typeLabel }
         return detailParts.dropFirst().joined(separator: " · ")
     }
@@ -2601,6 +2705,12 @@ private struct ActivityEntryDetailView: View {
         case .transaction(let id):
             if let transaction = store.snapshot.transactions.first(where: { $0.id == id && $0.deletedAt == nil }) {
                 SpendingTransactionDetailView(store: store, transaction: transaction)
+            } else {
+                missingRecordView
+            }
+        case .transfer(let id):
+            if let transaction = store.snapshot.transactions.first(where: { $0.id == id && $0.deletedAt == nil }) {
+                PotBankTransferView(store: store, transfer: transaction)
             } else {
                 missingRecordView
             }
@@ -2650,6 +2760,8 @@ private struct ActivityEntryDetailView: View {
         switch entry.source {
         case .transaction:
             "Are you sure? This payment will be permanently removed and all linked balances will be updated."
+        case .transfer:
+            "Are you sure? This transfer will be removed and both balances will be restored."
         case .paycheck:
             "Are you sure? This paycheck, its pay period, and linked allocations will be permanently removed."
         case .oneOffIncome:
@@ -2663,6 +2775,8 @@ private struct ActivityEntryDetailView: View {
         switch entry.source {
         case .transaction(let id):
             store.permanentlyDeleteActivityTransaction(id: id)
+        case .transfer(let id):
+            _ = store.deletePotBankTransfer(id: id)
         case .paycheck(let id):
             store.deletePaycheck(id: id)
         case .oneOffIncome(let id):
@@ -3311,6 +3425,8 @@ struct CreditView: View {
     var presentationCache: PlannerTabPresentationCache?
     var presentationContext: PlannerTabPresentationContext?
     @State private var selectedCard: CreditCard?
+    @State private var directDebitsExpanded = true
+    @State private var nextStatementsExpanded = true
 
     var body: some View {
         let displayData = creditDisplayData
@@ -3475,30 +3591,25 @@ struct CreditView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Due soon")
 
-            NavigationLink {
-                CreditScheduleDetailView(store: store, schedule: .directDebits)
-            } label: {
-                CreditDirectDebitsCard(
-                    items: directDebits,
-                    previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
-                    showsDisclosure: true
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open all direct debits")
+            CreditDirectDebitsCard(
+                items: directDebits,
+                previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
+                showsDisclosure: true,
+                isExpanded: directDebitsExpanded,
+                toggleExpansion: { directDebitsExpanded.toggle() },
+                moreDestination: { AnyView(CreditScheduleDetailView(store: store, schedule: .directDebits)) }
+            )
 
-            NavigationLink {
-                CreditScheduleDetailView(store: store, schedule: .statements)
-            } label: {
-                CreditNextStatementsCard(
-                    items: nextStatements,
-                    previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
-                    showsDisclosure: true
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open all next statements")
+            CreditNextStatementsCard(
+                items: nextStatements,
+                previewLimit: CreditLayoutPolicy.dueSoonPreviewItemLimit,
+                showsDisclosure: true,
+                isExpanded: nextStatementsExpanded,
+                toggleExpansion: { nextStatementsExpanded.toggle() },
+                moreDestination: { AnyView(CreditScheduleDetailView(store: store, schedule: .statements)) }
+            )
         }
+        .padding(.top, CreditLayoutPolicy.dueSoonTopAdjustment)
     }
 
     @ViewBuilder
@@ -3732,21 +3843,21 @@ struct CreditScheduleDetailView: View {
         ) {
             switch schedule {
             case .directDebits:
-                CreditDirectDebitsCard(items: directDebitItems) { item in
+                CreditDirectDebitsCard(items: directDebitItems, destination: { item in
                     CreditStatementLedgerDetailView(
                         store: store,
                         identity: item.statementIdentity ?? .init(cardId: "", scheduledStatementDate: ""),
                         mode: .directDebit
                     )
-                }
+                })
             case .statements:
-                CreditNextStatementsCard(items: currentStatementItems) { item in
+                CreditNextStatementsCard(items: currentStatementItems, destination: { item in
                     CreditStatementLedgerDetailView(
                         store: store,
                         identity: .init(cardId: item.cardId, scheduledStatementDate: item.scheduledStatementDate),
                         mode: .currentStatement
                     )
-                }
+                })
 
                 DisclosureGroup(isExpanded: $showsPreviousStatements) {
                     VStack(spacing: 0) {
@@ -3871,6 +3982,8 @@ private struct CreditScheduleHeader: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.tertiaryText)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .frame(width: CreditLayoutPolicy.scheduleHeaderMinimumTapTarget,
+                           height: CreditLayoutPolicy.scheduleHeaderMinimumTapTarget)
                     .accessibilityHidden(true)
             }
         }
@@ -3887,31 +4000,49 @@ private struct CreditDirectDebitsCard: View {
     var items: [CreditDueItem]
     var previewLimit: Int?
     var showsDisclosure: Bool
+    var isExpanded: Bool
+    var toggleExpansion: (() -> Void)?
+    var moreDestination: (() -> AnyView)?
     var destination: ((CreditDueItem) -> CreditStatementLedgerDetailView)?
 
     init(
         items: [CreditDueItem],
         previewLimit: Int? = nil,
         showsDisclosure: Bool = false,
+        isExpanded: Bool = true,
+        toggleExpansion: (() -> Void)? = nil,
+        moreDestination: (() -> AnyView)? = nil,
         destination: ((CreditDueItem) -> CreditStatementLedgerDetailView)? = nil
     ) {
         self.items = items
         self.previewLimit = previewLimit
         self.showsDisclosure = showsDisclosure
+        self.isExpanded = isExpanded
+        self.toggleExpansion = toggleExpansion
+        self.moreDestination = moreDestination
         self.destination = destination
     }
 
     var body: some View {
         AppCard {
-            CreditScheduleHeader(title: "Direct debits", showsDisclosure: showsDisclosure)
+            Button {
+                toggleExpansion?()
+            } label: {
+                CreditScheduleHeader(title: "Direct debits", showsDisclosure: showsDisclosure, isExpanded: isExpanded)
+            }
+            .buttonStyle(.plain)
+            .disabled(toggleExpansion == nil)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
 
-            if items.isEmpty {
+            if isExpanded && items.isEmpty {
                 EmptyStateView(
                     title: "No direct debits due",
                     message: "Open card statement payments will appear here.",
                     systemImage: "checkmark.circle"
                 )
-            } else {
+                    .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
+            } else if isExpanded {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 ForEach(visibleItems) { item in
                     if let destination {
                         NavigationLink { destination(item) } label: { CreditDirectDebitRow(item: item, showsDisclosure: true) }
@@ -3927,6 +4058,8 @@ private struct CreditDirectDebitsCard: View {
                 }
 
                 remainingItemsLabel
+                }
+                .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
             }
         }
     }
@@ -3940,9 +4073,18 @@ private struct CreditDirectDebitsCard: View {
     private var remainingItemsLabel: some View {
         let remainingCount = items.count - visibleItems.count
         if remainingCount > 0 {
-            Text("View \(remainingCount) more")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.primaryOrange)
+            if let moreDestination {
+                NavigationLink { moreDestination() } label: {
+                    Text("View \(remainingCount) more")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("View \(remainingCount) more")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+            }
         }
     }
 }
@@ -3966,31 +4108,49 @@ private struct CreditNextStatementsCard: View {
     var items: [CreditNextStatementItem]
     var previewLimit: Int?
     var showsDisclosure: Bool
+    var isExpanded: Bool
+    var toggleExpansion: (() -> Void)?
+    var moreDestination: (() -> AnyView)?
     var destination: ((CreditNextStatementItem) -> CreditStatementLedgerDetailView)?
 
     init(
         items: [CreditNextStatementItem],
         previewLimit: Int? = nil,
         showsDisclosure: Bool = false,
+        isExpanded: Bool = true,
+        toggleExpansion: (() -> Void)? = nil,
+        moreDestination: (() -> AnyView)? = nil,
         destination: ((CreditNextStatementItem) -> CreditStatementLedgerDetailView)? = nil
     ) {
         self.items = items
         self.previewLimit = previewLimit
         self.showsDisclosure = showsDisclosure
+        self.isExpanded = isExpanded
+        self.toggleExpansion = toggleExpansion
+        self.moreDestination = moreDestination
         self.destination = destination
     }
 
     var body: some View {
         AppCard {
-            CreditScheduleHeader(title: "Next statements", showsDisclosure: showsDisclosure)
+            Button {
+                toggleExpansion?()
+            } label: {
+                CreditScheduleHeader(title: "Next statements", showsDisclosure: showsDisclosure, isExpanded: isExpanded)
+            }
+            .buttonStyle(.plain)
+            .disabled(toggleExpansion == nil)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
 
-            if items.isEmpty {
+            if isExpanded && items.isEmpty {
                 EmptyStateView(
                     title: "No statements scheduled",
                     message: "Next statement dates will appear after they are set on your cards.",
                     systemImage: "doc.text"
                 )
-            } else {
+                    .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
+            } else if isExpanded {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 ForEach(visibleItems) { item in
                     if let destination {
                         NavigationLink { destination(item) } label: {
@@ -4017,6 +4177,8 @@ private struct CreditNextStatementsCard: View {
                 }
 
                 remainingItemsLabel
+                }
+                .padding(.top, CreditLayoutPolicy.scheduleContentTopAdjustment)
             }
         }
     }
@@ -4030,9 +4192,18 @@ private struct CreditNextStatementsCard: View {
     private var remainingItemsLabel: some View {
         let remainingCount = items.count - visibleItems.count
         if remainingCount > 0 {
-            Text("View \(remainingCount) more")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.Colors.primaryOrange)
+            if let moreDestination {
+                NavigationLink { moreDestination() } label: {
+                    Text("View \(remainingCount) more")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.primaryOrange)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("View \(remainingCount) more")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+            }
         }
     }
 }

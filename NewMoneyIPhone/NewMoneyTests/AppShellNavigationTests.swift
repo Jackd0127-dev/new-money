@@ -369,6 +369,19 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testPotsRenderNextStatementTargetsWithoutChecklistStatusMixing() async {
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.complexStressSnapshot))
+        await store.load()
+
+        attachRenderedView(
+            NavigationStack {
+                PotsView(store: store, navigationMode: .inline, toolbarMode: .none)
+            },
+            name: "pots-next-statement-targets"
+        )
+    }
+
+    @MainActor
     private func attachRenderedView<Content: View>(
         _ view: Content,
         name: String,

@@ -858,15 +858,20 @@ final class PlannerStore: ObservableObject {
         note: String
     ) {
         let now = DateUtilities.nowIsoString()
+        let resolvedBankAccountId = resolvedBankAccountId(
+            requestedId: bankAccountId,
+            paymentMethod: paymentMethod
+        )
+        let resolvedPaymentMethod: PaymentMethod = resolvedBankAccountId == nil ? paymentMethod : .bankAccount
         let transaction = Transaction(
             id: DateUtilities.newId(prefix: "transaction"),
-            potId: paymentMethod == .pot ? potId?.nilIfBlank : nil,
+            potId: resolvedPaymentMethod == .pot ? potId?.nilIfBlank : nil,
             payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id,
             amountPence: abs(amountPence),
             type: type,
-            paymentMethod: paymentMethod,
-            creditCardId: paymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil,
-            bankAccountId: paymentMethod == .bankAccount ? normalizedActiveBankAccountId(bankAccountId) : nil,
+            paymentMethod: resolvedPaymentMethod,
+            creditCardId: resolvedPaymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil,
+            bankAccountId: resolvedBankAccountId,
             recurringPaymentId: nil,
             date: date,
             note: note,
@@ -876,7 +881,7 @@ final class PlannerStore: ObservableObject {
         )
         snapshot.transactions.insert(transaction, at: 0)
 
-        if let potId, paymentMethod == .pot, let index = snapshot.pots.firstIndex(where: { $0.id == potId }) {
+        if let potId, resolvedPaymentMethod == .pot, let index = snapshot.pots.firstIndex(where: { $0.id == potId }) {
             snapshot.pots[index] = FinanceEngine.applyTransactionToPot(snapshot.pots[index], amountPence: abs(amountPence), type: type)
         }
 
@@ -894,11 +899,15 @@ final class PlannerStore: ObservableObject {
         note: String
     ) {
         let amount = abs(amountPence)
-        let cleanPotId = paymentMethod == .pot ? potId?.nilIfBlank : nil
-        let cleanCardId = paymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil
-        let cleanBankAccountId = paymentMethod == .bankAccount ? normalizedActiveBankAccountId(bankAccountId) : nil
+        let cleanBankAccountId = resolvedBankAccountId(
+            requestedId: bankAccountId,
+            paymentMethod: paymentMethod
+        )
+        let resolvedPaymentMethod: PaymentMethod = cleanBankAccountId == nil ? paymentMethod : .bankAccount
+        let cleanPotId = resolvedPaymentMethod == .pot ? potId?.nilIfBlank : nil
+        let cleanCardId = resolvedPaymentMethod == .creditCard ? creditCardId?.nilIfBlank : nil
         let hasValidFundingSource: Bool
-        switch paymentMethod {
+        switch resolvedPaymentMethod {
         case .income:
             hasValidFundingSource = true
         case .bankAccount:
@@ -927,7 +936,7 @@ final class PlannerStore: ObservableObject {
         updated.potId = cleanPotId
         updated.payPeriodId = PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id
         updated.amountPence = amount
-        updated.paymentMethod = paymentMethod
+        updated.paymentMethod = resolvedPaymentMethod
         updated.creditCardId = cleanCardId
         updated.bankAccountId = cleanBankAccountId
         updated.date = date
@@ -938,6 +947,130 @@ final class PlannerStore: ObservableObject {
         applyPotBalanceForTransaction(updated)
         restoreCardSpendFundingAllocations(transactionId: updated.id, payPeriodIds: fundedCardSpendPayPeriodIds)
         persist()
+    }
+
+    @discardableResult
+    func transferMoney(
+        bankAccountId: String,
+        potId: String,
+        amountPence: Int,
+        direction: PotBankTransferDirection,
+        date: String,
+        note: String
+    ) -> Bool {
+        let amount = abs(amountPence)
+        guard amount > 0,
+              let cleanBankId = normalizedActiveBankAccountId(bankAccountId),
+              let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived })
+        else { return false }
+
+        guard transferSourceHasFunds(
+            direction: direction,
+            amountPence: amount,
+            bankAccountId: cleanBankId,
+            potBalancePence: snapshot.pots[potIndex].balancePence,
+            snapshot: snapshot
+        ) else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        let transaction = Transaction(
+            id: DateUtilities.newId(prefix: "transfer"),
+            potId: potId,
+            payPeriodId: PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id ?? selectedPayPeriod?.id,
+            amountPence: amount,
+            type: .transfer,
+            paymentMethod: direction == .bankToPot ? .bankAccount : .pot,
+            creditCardId: nil,
+            bankAccountId: cleanBankId,
+            recurringPaymentId: nil,
+            date: date,
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: nil
+        )
+
+        snapshot.transactions.insert(transaction, at: 0)
+        applyTransferToPot(direction: direction, amountPence: amount, potIndex: potIndex, now: now)
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func updatePotBankTransfer(
+        id: String,
+        bankAccountId: String,
+        potId: String,
+        amountPence: Int,
+        direction: PotBankTransferDirection,
+        date: String,
+        note: String
+    ) -> Bool {
+        let amount = abs(amountPence)
+        guard amount > 0,
+              let transactionIndex = snapshot.transactions.firstIndex(where: { $0.id == id && $0.deletedAt == nil }),
+              let oldDirection = snapshot.transactions[transactionIndex].potBankTransferDirection,
+              let oldPotId = snapshot.transactions[transactionIndex].potId,
+              let oldPotIndex = snapshot.pots.firstIndex(where: { $0.id == oldPotId }),
+              let cleanBankId = normalizedActiveBankAccountId(bankAccountId),
+              let newPotIndex = snapshot.pots.firstIndex(where: { $0.id == potId && !$0.archived })
+        else { return false }
+
+        let oldAmount = snapshot.transactions[transactionIndex].netAmountPence
+        guard oldDirection != .bankToPot || snapshot.pots[oldPotIndex].balancePence >= oldAmount else {
+            return false
+        }
+
+        var candidate = snapshot
+        candidate.transactions.remove(at: transactionIndex)
+        candidate.pots[oldPotIndex].balancePence += oldDirection == .bankToPot ? -oldAmount : oldAmount
+
+        guard transferSourceHasFunds(
+            direction: direction,
+            amountPence: amount,
+            bankAccountId: cleanBankId,
+            potBalancePence: candidate.pots[newPotIndex].balancePence,
+            snapshot: candidate
+        ) else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        snapshot.pots[oldPotIndex].balancePence += oldDirection == .bankToPot ? -oldAmount : oldAmount
+        snapshot.pots[oldPotIndex].updatedAt = now
+
+        var updated = snapshot.transactions[transactionIndex]
+        updated.potId = potId
+        updated.payPeriodId = PlannerDerivedData.findPayPeriod(payPeriods: snapshot.payPeriods, date: date)?.id
+        updated.amountPence = amount
+        updated.paymentMethod = direction == .bankToPot ? .bankAccount : .pot
+        updated.bankAccountId = cleanBankId
+        updated.date = date
+        updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.updatedAt = now
+        snapshot.transactions[transactionIndex] = updated
+
+        applyTransferToPot(direction: direction, amountPence: amount, potIndex: newPotIndex, now: now)
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deletePotBankTransfer(id: String) -> Bool {
+        guard let transactionIndex = snapshot.transactions.firstIndex(where: { $0.id == id && $0.deletedAt == nil }),
+              let direction = snapshot.transactions[transactionIndex].potBankTransferDirection,
+              let potId = snapshot.transactions[transactionIndex].potId,
+              let potIndex = snapshot.pots.firstIndex(where: { $0.id == potId })
+        else { return false }
+
+        let now = DateUtilities.nowIsoString()
+        let amount = snapshot.transactions[transactionIndex].netAmountPence
+        guard direction != .bankToPot || snapshot.pots[potIndex].balancePence >= amount else {
+            return false
+        }
+        snapshot.pots[potIndex].balancePence += direction == .bankToPot ? -amount : amount
+        snapshot.pots[potIndex].updatedAt = now
+        snapshot.transactions.remove(at: transactionIndex)
+        persist()
+        return true
     }
 
     func deleteTransaction(id: String) {
@@ -1533,6 +1666,51 @@ final class PlannerStore: ObservableObject {
               })
         else { return nil }
         return cleanId
+    }
+
+    /// "Money left" is a convenience source, not a second cash balance. Once a
+    /// bank account exists, record that spend against the primary account so the
+    /// bank balance and Money Left breakdown describe the same movement.
+    private func resolvedBankAccountId(
+        requestedId: String?,
+        paymentMethod: PaymentMethod
+    ) -> String? {
+        if paymentMethod == .bankAccount {
+            return normalizedActiveBankAccountId(requestedId)
+        }
+        guard paymentMethod == .income else { return nil }
+        return snapshot.bankAccounts.first(where: {
+            $0.isPrimary && !$0.archived && $0.deletedAt == nil
+        })?.id ?? snapshot.bankAccounts.first(where: {
+            !$0.archived && $0.deletedAt == nil
+        })?.id
+    }
+
+    private func transferSourceHasFunds(
+        direction: PotBankTransferDirection,
+        amountPence: Int,
+        bankAccountId: String,
+        potBalancePence: Int,
+        snapshot: PlannerSnapshot
+    ) -> Bool {
+        switch direction {
+        case .bankToPot:
+            guard let account = snapshot.bankAccounts.first(where: { $0.id == bankAccountId }) else { return false }
+            return PlannerDerivedData.bankAccountBalance(account: account, snapshot: snapshot) >= amountPence
+        case .potToBank:
+            return potBalancePence >= amountPence
+        }
+    }
+
+    private func applyTransferToPot(
+        direction: PotBankTransferDirection,
+        amountPence: Int,
+        potIndex: Int,
+        now: String
+    ) {
+        snapshot.pots[potIndex].balancePence += direction == .bankToPot ? amountPence : -amountPence
+        snapshot.pots[potIndex].balancePence = max(0, snapshot.pots[potIndex].balancePence)
+        snapshot.pots[potIndex].updatedAt = now
     }
 
     private func fundingBankAccountId(for potId: String) -> String? {

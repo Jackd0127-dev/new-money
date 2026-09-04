@@ -6,6 +6,7 @@ struct BankAccountDetailView: View {
     var account: BankAccount
     @State private var isEditPresented = false
     @State private var isDeleteConfirmationPresented = false
+    @State private var isTransferPresented = false
 
     var body: some View {
         ScreenScaffold(
@@ -15,6 +16,9 @@ struct BankAccountDetailView: View {
             toolbarMode: .none
         ) {
             balanceCard
+            SecondaryButton(title: "Transfer money", systemImage: "arrow.left.arrow.right") {
+                isTransferPresented = true
+            }
             linksCard
             activitySection
             deleteButton
@@ -29,6 +33,11 @@ struct BankAccountDetailView: View {
         .sheet(isPresented: $isEditPresented) {
             NavigationStack {
                 BankAccountFormView(store: store, account: currentAccount)
+            }
+        }
+        .sheet(isPresented: $isTransferPresented) {
+            NavigationStack {
+                PotBankTransferView(store: store, bankAccountId: currentAccount.id)
             }
         }
         .alert("Remove bank account?", isPresented: $isDeleteConfirmationPresented) {
@@ -202,11 +211,21 @@ struct BankAccountDetailView: View {
                   !transaction.isRefunded,
                   transaction.bankAccountId == account.id
             else { return nil }
+            let isTransfer = transaction.potBankTransferDirection != nil
+            let potName = transaction.potId.flatMap { id in store.snapshot.pots.first(where: { $0.id == id })?.name }
+            let amountPence: Int
+            switch transaction.potBankTransferDirection {
+            case .bankToPot: amountPence = -transaction.netAmountPence
+            case .potToBank: amountPence = transaction.netAmountPence
+            case nil: amountPence = -transaction.netAmountPence
+            }
             return Movement(
                 id: "transaction-\(transaction.id)",
-                title: transaction.note.isEmpty ? "Bank payment" : transaction.note,
+                title: transaction.note.isEmpty
+                    ? (isTransfer ? "Transfer \(transaction.potBankTransferDirection == .bankToPot ? "to" : "from") \(potName ?? "pot")" : "Bank payment")
+                    : transaction.note,
                 date: transaction.date,
-                amountPence: -transaction.netAmountPence
+                amountPence: amountPence
             )
         }
 

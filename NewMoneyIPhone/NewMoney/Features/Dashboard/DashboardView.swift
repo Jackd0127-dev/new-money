@@ -1228,7 +1228,7 @@ private struct DashboardSpendingSnapshotCard: View {
                 }
 
                 MetricRow(label: "Spent this period", value: MoneyParser.formatPence(summary.manualSpendingPence), valueColor: summary.manualSpendingPence > 0 ? AppTheme.Colors.orangeHighlight : AppTheme.Colors.primaryText)
-                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                MetricRow(label: "Current Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                 MetricRow(label: "Projected end", value: MoneyParser.formatPence(summary.projectedMoneyLeftPence), valueColor: summary.projectedMoneyLeftPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryText)
             }
         }
@@ -2169,7 +2169,7 @@ struct IncomeBreakdownView: View {
         ) {
             AppCard(glow: true) {
                 MetricRow(label: "Current plan", value: MoneyParser.formatPence(store.selectedPayPeriod.map { PlannerDerivedData.effectivePayPeriodIncomePence(snapshot: snapshot, payPeriod: $0) } ?? 0), valueColor: AppTheme.Colors.success)
-                MetricRow(label: "Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
+                MetricRow(label: "Current Money left", value: MoneyParser.formatPence(currentTotalMoneyPence), valueColor: currentTotalMoneyPence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.primaryOrange)
                 MetricRow(label: "Projected costs", value: MoneyParser.formatPence(costSummary.projectedCostsPence), valueColor: AppTheme.Colors.warning)
                 if costSummary.unfundedChecklistPence > 0 {
                     MetricRow(label: "Unfunded checklist", value: MoneyParser.formatPence(costSummary.unfundedChecklistPence), valueColor: AppTheme.Colors.secondaryText)

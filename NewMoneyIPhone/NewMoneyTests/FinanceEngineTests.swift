@@ -460,8 +460,11 @@ final class FinanceEngineTests: XCTestCase {
         let currentAccount = try XCTUnwrap(store.activeBankAccounts.first)
         XCTAssertEqual(
             PlannerDerivedData.bankAccountBalance(account: currentAccount, snapshot: store.snapshot),
-            272_500
+            267_500
         )
+        let moneyLeftSpend = try XCTUnwrap(store.snapshot.transactions.first { $0.note == "Cash spend" })
+        XCTAssertEqual(moneyLeftSpend.paymentMethod, .bankAccount)
+        XCTAssertEqual(moneyLeftSpend.bankAccountId, account.id)
         XCTAssertEqual(store.activePots.first?.balancePence, 25_000)
         XCTAssertEqual(
             PlannerDerivedData.currentTotalMoneyPence(
@@ -498,6 +501,162 @@ final class FinanceEngineTests: XCTestCase {
             ),
             317_500
         )
+    }
+
+    @MainActor
+    func testBankPotTransfersAreAtomicReversibleAndDoNotChangeIncludedMoneyLeft() async throws {
+        var settings = makeManualSettings(today: "2026-06-10")
+        settings.includePotsInMoneyLeft = true
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        let pot = makePot(id: "pot-main", name: "Savings", balancePence: 20_000, targetPence: nil)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            bankAccounts: [account],
+            pots: [pot]
+        )))
+        await store.load()
+
+        XCTAssertTrue(store.transferMoney(
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 30_000,
+            direction: .bankToPot,
+            date: "2026-06-10",
+            note: "Save"
+        ))
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 70_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 50_000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 120_000)
+
+        var excludesPots = store.snapshot.settings
+        excludesPots.includePotsInMoneyLeft = false
+        store.updateSettings(excludesPots)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 70_000)
+
+        let transfer = try XCTUnwrap(store.snapshot.transactions.first { $0.type == .transfer })
+        XCTAssertEqual(transfer.potBankTransferDirection, .bankToPot)
+        XCTAssertTrue(store.updatePotBankTransfer(
+            id: transfer.id,
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 10_000,
+            direction: .potToBank,
+            date: "2026-06-11",
+            note: "Return"
+        ))
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 110_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 110_000)
+
+        var includesPots = store.snapshot.settings
+        includesPots.includePotsInMoneyLeft = true
+        store.updateSettings(includesPots)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 120_000)
+
+        XCTAssertTrue(store.deletePotBankTransfer(id: transfer.id))
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 100_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 20_000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 120_000)
+    }
+
+    func testLegacyMoneyLeftSpendMigratesToThePrimaryBankExactlyOnce() throws {
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        var legacySpend = makeTransaction(
+            id: "legacy-money-left-spend",
+            cardId: "unused",
+            amountPence: 1_275,
+            date: "2026-06-10",
+            note: "Tax"
+        )
+        legacySpend.paymentMethod = .income
+        legacySpend.creditCardId = nil
+        legacySpend.bankAccountId = nil
+        let original = makeSnapshot(bankAccounts: [account], transactions: [legacySpend])
+
+        let migrated = DefaultData.migratedSnapshot(original)
+        let transaction = try XCTUnwrap(migrated.snapshot.transactions.first)
+        XCTAssertTrue(migrated.didChange)
+        XCTAssertEqual(transaction.paymentMethod, .bankAccount)
+        XCTAssertEqual(transaction.bankAccountId, account.id)
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: migrated.snapshot),
+            98_725
+        )
+
+        let rerun = DefaultData.migratedSnapshot(migrated.snapshot)
+        XCTAssertFalse(rerun.didChange)
+        XCTAssertEqual(rerun.snapshot, migrated.snapshot)
+    }
+
+    @MainActor
+    func testBankPotTransferRejectsAmountsAboveTheSourceBalance() async {
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 10_000)
+        let pot = makePot(id: "pot-main", name: "Savings", balancePence: 2_000, targetPence: nil)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            bankAccounts: [account],
+            pots: [pot]
+        )))
+        await store.load()
+
+        XCTAssertFalse(store.transferMoney(
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 10_001,
+            direction: .bankToPot,
+            date: "2026-06-10",
+            note: ""
+        ))
+        XCTAssertFalse(store.transferMoney(
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 2_001,
+            direction: .potToBank,
+            date: "2026-06-10",
+            note: ""
+        ))
+        XCTAssertTrue(store.snapshot.transactions.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 2_000)
+    }
+
+    func testFundingDestinationGroupReportsPartialAndFullyAddedProgress() {
+        func item(id: String, isCompleted: Bool) -> FundingChecklistPresentationItem {
+            FundingChecklistPresentationItem(
+                id: id,
+                name: "Bill \(id)",
+                destinationKind: .pot,
+                destinationId: "pot-bills",
+                destinationName: "Bills",
+                title: "Fund bill",
+                detail: "",
+                amountPence: 1_000,
+                dueDate: "2026-06-20",
+                breakdown: [],
+                isCompleted: isCompleted,
+                isExcluded: false,
+                status: isCompleted ? .activeReserved : .needsFunding,
+                paidDate: nil,
+                action: .recurringBill(paymentId: id, dueDate: "2026-06-20", payPeriodId: "period-june")
+            )
+        }
+
+        var group = FundingChecklistDestinationGroup(
+            id: "pot-bills",
+            destinationKind: .pot,
+            destinationId: "pot-bills",
+            destinationName: "Bills",
+            items: (1...7).map { item(id: "\($0)", isCompleted: $0 <= 4) }
+        )
+
+        XCTAssertEqual(group.completedItemCount, 4)
+        XCTAssertEqual(group.fundingStatusLabel, "4/7")
+        XCTAssertFalse(group.isFullyAdded)
+
+        group.items = group.items.map { existing in
+            item(id: existing.id, isCompleted: true)
+        }
+        XCTAssertEqual(group.fundingStatusLabel, "Added")
+        XCTAssertTrue(group.isFullyAdded)
+        XCTAssertTrue(group.items.allSatisfy { $0.status == .activeReserved })
     }
 
     @MainActor
@@ -2854,7 +3013,7 @@ final class FinanceEngineTests: XCTestCase {
 
         let julyFirst = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-01"))
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Income Remaining"), 124500)
-        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Target"), 420000)
+        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Target"), 218500)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Balance"), 420000)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Card Balance"), 193000)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Card Reserve"), 38500)
@@ -2866,20 +3025,20 @@ final class FinanceEngineTests: XCTestCase {
 
         let julySecond = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-02"))
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Income Remaining"), 118100)
-        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Target"), 26000)
+        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Target"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Balance"), 26000)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "CC1 Balance"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "CC1 Reserve"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Total Card Reserve"), 44900)
 
         let julyFifth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-05"))
-        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Target"), 27850)
+        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Target"), 13900)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Balance"), 27850)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "CC1 Balance"), 19850)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "CC1 Reserve"), 19850)
 
         let julyFifteenth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-15"))
-        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Target"), 41700)
+        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Target"), 24000)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Balance"), 41700)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "CC2 Balance"), 37000)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "CC2 Reserve"), 37000)
@@ -2923,8 +3082,8 @@ final class FinanceEngineTests: XCTestCase {
         let snapshot = DefaultData.groupedComplexJanMar2027Snapshot
         let expectations: [(periodId: String, today: String, recurringCount: Int, openingCount: Int, baseChecklistTotal: Int, projectedTotal: Int, moneyLeft: Int)] = [
             ("pay-period-grouped-january-2027", "2027-01-01", 24, 5, 411600, 411600, 38400),
-            ("pay-period-grouped-february-2027", "2027-02-01", 24, 0, 285100, 383300, 66700),
-            ("pay-period-grouped-march-2027", "2027-03-01", 24, 0, 269000, 367200, 82800),
+            ("pay-period-grouped-february-2027", "2027-02-01", 24, 0, 285100, 318100, 131900),
+            ("pay-period-grouped-march-2027", "2027-03-01", 24, 0, 269000, 269000, 181000),
         ]
 
         for expectation in expectations {
@@ -3364,7 +3523,7 @@ final class FinanceEngineTests: XCTestCase {
         let foodFuelPot = try XCTUnwrap(store.snapshot.pots.first { $0.id == "pot-pot3" })
         let foodFuelProgress = PlannerDerivedData.potProgress(pot: foodFuelPot, snapshot: store.snapshot, today: "2027-01-18")
         XCTAssertEqual(foodFuelPot.balancePence, 44000)
-        XCTAssertEqual(foodFuelProgress.targetPence, 44000)
+        XCTAssertEqual(foodFuelProgress.targetPence, 22000)
         XCTAssertEqual(foodFuelProgress.shortfallPence, 0)
 
         let remainingFoodFuelItems = PlannerDerivedData.recurringBillFundingChecklistItems(
@@ -3801,16 +3960,16 @@ final class FinanceEngineTests: XCTestCase {
             ($0.name, PlannerDerivedData.potProgress(pot: $0, snapshot: store.snapshot, today: "2026-09-01"))
         })
         let potsByName = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.name, $0) })
-        XCTAssertEqual(potProgressByName["Subscriptions"]?.targetPence, 61500)
+        XCTAssertEqual(potProgressByName["Subscriptions"]?.targetPence, 43000)
         XCTAssertEqual(potsByName["Subscriptions"]?.balancePence, 61500)
-        XCTAssertEqual(potProgressByName["Car & Insurance"]?.targetPence, 51400)
+        XCTAssertEqual(potProgressByName["Car & Insurance"]?.targetPence, 16000)
         XCTAssertEqual(potsByName["Car & Insurance"]?.balancePence, 51400)
-        XCTAssertEqual(potProgressByName["Food & Fuel"]?.targetPence, 64000)
+        XCTAssertEqual(potProgressByName["Food & Fuel"]?.targetPence, 21000)
         XCTAssertEqual(potsByName["Food & Fuel"]?.balancePence, 64000)
         XCTAssertEqual(potProgressByName["Emergency"]?.targetPence, 6000)
         XCTAssertEqual(potsByName["Emergency"]?.balancePence, 6000)
         XCTAssertEqual(potProgressByName["Emergency"]?.shortfallPence, 0)
-        XCTAssertEqual(potProgressByName["Annual & Work"]?.targetPence, 27000)
+        XCTAssertEqual(potProgressByName["Annual & Work"]?.targetPence, 9000)
         XCTAssertEqual(potsByName["Annual & Work"]?.balancePence, 27000)
 
         var september8Settings = store.snapshot.settings
@@ -4239,7 +4398,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 23300)
         XCTAssertEqual(potsById["pot-cc3"]?.balancePence, 40000)
         let pot1Progress = PlannerDerivedData.potProgress(pot: try XCTUnwrap(potsById["pot-cc1"]), snapshot: store.snapshot, today: "2026-08-02")
-        XCTAssertEqual(pot1Progress.targetPence, 19000)
+        XCTAssertEqual(pot1Progress.targetPence, 14000)
         XCTAssertEqual(pot1Progress.coveredPence, 19000)
         XCTAssertEqual(pot1Progress.shortfallPence, 0)
         XCTAssertEqual(pot1Progress.percent, 100)
@@ -4346,7 +4505,7 @@ final class FinanceEngineTests: XCTestCase {
         var pot1Progress = PlannerDerivedData.potProgress(pot: pot1, snapshot: store.snapshot, today: "2026-07-01")
         let pot3Progress = PlannerDerivedData.potProgress(pot: pot3, snapshot: store.snapshot, today: "2026-07-01")
 
-        XCTAssertEqual(pot1Progress.targetPence, 62500)
+        XCTAssertEqual(pot1Progress.targetPence, 50000)
         XCTAssertEqual(pot1Progress.nextObligation?.amountPence, 50000)
         XCTAssertEqual(pot1Progress.nextObligation?.dueIso, "2026-07-02")
         XCTAssertEqual(pot1Progress.nextObligation?.label, "CC1 opening balance")
@@ -4354,7 +4513,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(pot1Progress.laterObligation?.dueIso, "2026-07-15")
         XCTAssertEqual(pot1Progress.laterObligation?.label, "Skincare")
 
-        XCTAssertEqual(pot3Progress.targetPence, 20000)
+        XCTAssertEqual(pot3Progress.targetPence, 0)
         XCTAssertEqual(pot3Progress.nextObligation?.amountPence, 20000)
         XCTAssertEqual(pot3Progress.nextObligation?.dueIso, "2026-07-25")
         XCTAssertEqual(pot3Progress.nextObligation?.label, "Spending money")
@@ -4380,7 +4539,7 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(july2Pot1Progress.nextObligation?.label, "Skincare")
     }
 
-    func testLinkedCreditCardPotProgressShowsUpcomingStatementPaymentsSeparatelyFromFundingTarget() {
+    func testLinkedCreditCardPotTargetsOnlyTheNextRealStatementPayment() {
         let settings = makeManualSettings(today: "2026-08-01")
         let julyPeriod = makePayPeriod(id: "period-july", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 100000)
         let augustPeriod = makePayPeriod(id: "period-august", startDate: "2026-08-01", endDate: "2026-08-31", payday: "2026-08-01", incomePence: 100000)
@@ -4406,23 +4565,69 @@ final class FinanceEngineTests: XCTestCase {
             recurringPaymentId: "rec-insurance",
             recurringDueDate: "2026-07-01"
         )
+        let futureRecurringCharge = makeRecurringPayment(
+            id: "future-card-bill",
+            name: "Later card bill",
+            amountPence: 42_503,
+            dueDay: 20,
+            potId: pot.id,
+            creditCardId: card.id
+        )
+        let futureRecurringAllocation = makePotAllocation(
+            id: "alloc-future-card-bill",
+            payPeriodId: augustPeriod.id,
+            potId: pot.id,
+            amountPence: 42_503,
+            source: .recurringBillFunding,
+            recurringPaymentId: futureRecurringCharge.id,
+            recurringDueDate: "2026-08-20"
+        )
         let snapshot = makeSnapshot(
             settings: settings,
             pots: [pot],
+            recurringPayments: [futureRecurringCharge],
             payPeriods: [julyPeriod, augustPeriod],
-            potAllocations: [insuranceAllocation],
+            potAllocations: [insuranceAllocation, futureRecurringAllocation],
             transactions: [insurance, manualSpend],
             creditCards: [card]
         )
 
         let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-08-01")
 
-        XCTAssertEqual(progress.targetPence, 13300)
+        XCTAssertEqual(progress.targetPence, 10000)
         XCTAssertEqual(progress.coveredPence, 3300)
-        XCTAssertEqual(progress.shortfallPence, 10000)
+        XCTAssertEqual(progress.shortfallPence, 6700)
+        XCTAssertEqual(progress.percent, 33)
+        XCTAssertFalse(progress.usesForecastTarget)
         XCTAssertEqual(progress.linkedCardPayments.map(\.dueIso), ["2026-08-10", "2026-09-10"])
         XCTAssertEqual(progress.linkedCardPayments.map(\.amountPence), [10000, 3300])
         XCTAssertEqual(progress.linkedCardPayments.map(\.statementIso), ["2026-07-15", "2026-08-15"])
+    }
+
+    func testLinkedCreditCardPotWithoutPostedPaymentDoesNotFallBackToManualTarget() {
+        let card = makeCreditCard(
+            id: "card-no-statement",
+            name: "No statement",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-15",
+            dueDay: 10,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-no-statement",
+            name: "No statement",
+            balancePence: 0,
+            targetPence: 25_000,
+            linkedCreditCardId: card.id
+        )
+        let snapshot = makeSnapshot(pots: [pot], creditCards: [card])
+
+        let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-08-01")
+
+        XCTAssertEqual(progress.targetPence, 0)
+        XCTAssertEqual(progress.shortfallPence, 0)
+        XCTAssertTrue(progress.linkedCardPayments.isEmpty)
     }
 
     func testCreditCardAvailabilityPreservesNegativeOverLimitAmounts() {
@@ -5224,14 +5429,14 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(progress.shortfallPence, 15000)
     }
 
-    func testPotProgressFallsBackToManualTargetAndShowsRealOverTargetPercent() {
+    func testPotProgressFallsBackToManualTargetAndCapsReachedProgressAtOneHundredPercent() {
         let pot = makePot(id: "pot-holiday", name: "Holiday", balancePence: 15000, targetPence: 10000)
         let snapshot = makeSnapshot(pots: [pot])
 
         let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-06-01")
 
         XCTAssertEqual(progress.targetPence, 10000)
-        XCTAssertEqual(progress.percent, 150)
+        XCTAssertEqual(progress.percent, 100)
         XCTAssertEqual(progress.sourceLabels, [])
     }
 
@@ -7255,8 +7460,8 @@ final class FinanceEngineTests: XCTestCase {
         XCTAssertEqual(beforeDueAvailability.actualAvailablePence, 80000)
         XCTAssertEqual(beforeDueAvailability.forecastAvailablePence, 70000)
         let beforeDueProgress = PlannerDerivedData.potProgress(pot: pot, snapshot: beforeSnapshot, today: "2026-06-01")
-        XCTAssertEqual(beforeDueProgress.targetPence, 10000)
-        XCTAssertEqual(beforeDueProgress.shortfallPence, 10000)
+        XCTAssertEqual(beforeDueProgress.targetPence, 0)
+        XCTAssertEqual(beforeDueProgress.shortfallPence, 0)
 
         let fundingStore = PlannerStore(repository: TestPlannerRepository(snapshot: beforeSnapshot))
         await fundingStore.load()

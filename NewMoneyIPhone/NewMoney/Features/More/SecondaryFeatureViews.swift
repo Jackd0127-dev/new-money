@@ -1,5 +1,177 @@
 import SwiftUI
 
+struct PotBankTransferView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: PlannerStore
+    private let transferId: String?
+    @State private var direction: PotBankTransferDirection
+    @State private var bankAccountId: String
+    @State private var potId: String
+    @State private var amount: String
+    @State private var date: Date
+    @State private var note: String
+    @State private var errorMessage: String?
+
+    init(
+        store: PlannerStore,
+        transfer: Transaction? = nil,
+        bankAccountId: String? = nil,
+        potId: String? = nil
+    ) {
+        self.store = store
+        transferId = transfer?.id
+        _direction = State(initialValue: transfer?.potBankTransferDirection ?? .bankToPot)
+        _bankAccountId = State(initialValue: transfer?.bankAccountId ?? bankAccountId ?? "")
+        _potId = State(initialValue: transfer?.potId ?? potId ?? "")
+        _amount = State(initialValue: transfer.map { String(format: "%.2f", Double($0.amountPence) / 100) } ?? "")
+        _date = State(initialValue: transfer.map { FinanceEngine.parseDate($0.date) } ?? Date())
+        _note = State(initialValue: transfer?.note ?? "")
+    }
+
+    var body: some View {
+        ScreenScaffold(
+            title: transferId == nil ? "Transfer money" : "Edit transfer",
+            subtitle: "Move cash without counting it as income or spending.",
+            navigationMode: .inline,
+            toolbarMode: .none
+        ) {
+            AppCard(glow: true) {
+                transferRoute
+                MoneyField(title: "Amount", text: $amount)
+                DatePicker("Date", selection: $date, displayedComponents: .date)
+                    .tint(AppTheme.Colors.primaryOrange)
+                TextField("Note (optional)", text: $note)
+                    .textFieldStyle(AppTextFieldStyle())
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.danger)
+                }
+
+                PrimaryButton(
+                    title: transferId == nil ? "Transfer money" : "Save transfer",
+                    systemImage: "arrow.left.arrow.right",
+                    isDisabled: isSaveDisabled
+                ) {
+                    save()
+                }
+            }
+        }
+        .navigationTitle(transferId == nil ? "Transfer money" : "Edit transfer")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") { dismiss() }
+            }
+        }
+        .onAppear {
+            if bankAccountId.isEmpty {
+                bankAccountId = store.primaryBankAccount?.id ?? store.activeBankAccounts.first?.id ?? ""
+            }
+            if potId.isEmpty {
+                potId = store.activePots.first?.id ?? ""
+            }
+        }
+    }
+
+    private var transferRoute: some View {
+        VStack(spacing: AppTheme.Spacing.sm) {
+            if direction == .bankToPot {
+                bankSelection(title: "From bank")
+            } else {
+                potSelection(title: "From pot")
+            }
+
+            Button {
+                direction = direction.reversed
+                errorMessage = nil
+            } label: {
+                Label("Swap direction", systemImage: "arrow.up.arrow.down.circle.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.Colors.primaryOrange)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+
+            if direction == .bankToPot {
+                potSelection(title: "To pot")
+            } else {
+                bankSelection(title: "To bank")
+            }
+        }
+    }
+
+    private func bankSelection(title: String) -> some View {
+        SelectionField(
+            title: title,
+            value: selectedBankName,
+            placeholder: "Choose bank",
+            systemImage: "building.columns"
+        ) {
+            ForEach(store.activeBankAccounts) { account in
+                Button(account.name) { bankAccountId = account.id }
+            }
+        }
+    }
+
+    private func potSelection(title: String) -> some View {
+        SelectionField(
+            title: title,
+            value: selectedPotName,
+            placeholder: "Choose pot",
+            systemImage: "wallet.pass"
+        ) {
+            ForEach(store.activePots) { pot in
+                Button(pot.name) { potId = pot.id }
+            }
+        }
+    }
+
+    private var selectedBankName: String {
+        store.activeBankAccounts.first(where: { $0.id == bankAccountId })?.name ?? ""
+    }
+
+    private var selectedPotName: String {
+        store.activePots.first(where: { $0.id == potId })?.name ?? ""
+    }
+
+    private var isSaveDisabled: Bool {
+        MoneyParser.parsePoundsToPence(amount) <= 0 || bankAccountId.isEmpty || potId.isEmpty
+    }
+
+    private func save() {
+        let amountPence = MoneyParser.parsePoundsToPence(amount)
+        let succeeded: Bool
+        if let transferId {
+            succeeded = store.updatePotBankTransfer(
+                id: transferId,
+                bankAccountId: bankAccountId,
+                potId: potId,
+                amountPence: amountPence,
+                direction: direction,
+                date: date.isoDateString,
+                note: note
+            )
+        } else {
+            succeeded = store.transferMoney(
+                bankAccountId: bankAccountId,
+                potId: potId,
+                amountPence: amountPence,
+                direction: direction,
+                date: date.isoDateString,
+                note: note
+            )
+        }
+
+        if succeeded {
+            dismiss()
+        } else {
+            errorMessage = "There is not enough money in the selected source."
+        }
+    }
+}
+
 enum SpendingFormLayoutPolicy {
     static let accountPickerStyle = "selectionFieldBox"
     static let paymentMethods: [PaymentMethod] = [.income, .bankAccount, .pot, .creditCard]
@@ -1862,7 +2034,7 @@ private struct BillsFundingChecklistDestinationGroup: View {
             } label: {
                 HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Add \(MoneyParser.formatPence(group.totalAmountPence)) to \(group.destinationName)")
+                        Text(destinationTitle)
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(AppTheme.Colors.primaryText)
                             .multilineTextAlignment(.leading)
@@ -1873,6 +2045,18 @@ private struct BillsFundingChecklistDestinationGroup: View {
                     }
 
                     Spacer(minLength: AppTheme.Spacing.sm)
+
+                    if let statusLabel = group.fundingStatusLabel {
+                        Text(statusLabel)
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(group.isFullyAdded ? AppTheme.Colors.success : AppTheme.Colors.primaryOrange)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(
+                                (group.isFullyAdded ? AppTheme.Colors.success : AppTheme.Colors.primaryOrange).opacity(0.12),
+                                in: Capsule()
+                            )
+                    }
 
                     Image(systemName: ExpandableSectionLayoutPolicy.symbol(isExpanded: isExpanded))
                         .font(.caption.weight(.bold))
@@ -1885,8 +2069,8 @@ private struct BillsFundingChecklistDestinationGroup: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Add \(MoneyParser.formatPence(group.totalAmountPence)) to \(group.destinationName)")
-            .accessibilityValue("\(paymentCountText), \(isExpanded ? "expanded" : "collapsed")")
+            .accessibilityLabel(destinationTitle)
+            .accessibilityValue("\(group.fundingStatusLabel ?? "Not added"), \(paymentCountText), \(isExpanded ? "expanded" : "collapsed")")
             .accessibilityHint(isExpanded ? "Hides the contributing payments" : "Shows every contributing payment")
 
             if isExpanded {
@@ -1914,6 +2098,13 @@ private struct BillsFundingChecklistDestinationGroup: View {
             }
         }
         .animation(reduceMotion ? .easeOut(duration: 0.12) : AppTheme.Animation.quick, value: isExpanded)
+    }
+
+    private var destinationTitle: String {
+        if group.isFullyAdded {
+            return "\(MoneyParser.formatPence(group.totalAmountPence)) added to \(group.destinationName)"
+        }
+        return "Add \(MoneyParser.formatPence(group.totalAmountPence)) to \(group.destinationName)"
     }
 
     private var paymentCountText: String {

@@ -143,8 +143,11 @@ extension FinanceEngineTests {
         let currentAccount = try XCTUnwrap(store.activeBankAccounts.first)
         XCTAssertEqual(
             PlannerDerivedData.bankAccountBalance(account: currentAccount, snapshot: store.snapshot),
-            272_500
+            267_500
         )
+        let moneyLeftSpend = try XCTUnwrap(store.snapshot.transactions.first { $0.note == "Cash spend" })
+        XCTAssertEqual(moneyLeftSpend.paymentMethod, .bankAccount)
+        XCTAssertEqual(moneyLeftSpend.bankAccountId, account.id)
         XCTAssertEqual(store.activePots.first?.balancePence, 25_000)
         XCTAssertEqual(
             PlannerDerivedData.currentTotalMoneyPence(
@@ -181,6 +184,121 @@ extension FinanceEngineTests {
             ),
             317_500
         )
+    }
+
+    @MainActor
+    func testBankPotTransfersAreAtomicReversibleAndDoNotChangeIncludedMoneyLeft() async throws {
+        var settings = makeManualSettings(today: "2026-06-10")
+        settings.includePotsInMoneyLeft = true
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        let pot = makePot(id: "pot-main", name: "Savings", balancePence: 20_000, targetPence: nil)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            settings: settings,
+            bankAccounts: [account],
+            pots: [pot]
+        )))
+        await store.load()
+
+        XCTAssertTrue(store.transferMoney(
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 30_000,
+            direction: .bankToPot,
+            date: "2026-06-10",
+            note: "Save"
+        ))
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 70_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 50_000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 120_000)
+
+        var excludesPots = store.snapshot.settings
+        excludesPots.includePotsInMoneyLeft = false
+        store.updateSettings(excludesPots)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 70_000)
+
+        let transfer = try XCTUnwrap(store.snapshot.transactions.first { $0.type == .transfer })
+        XCTAssertEqual(transfer.potBankTransferDirection, .bankToPot)
+        XCTAssertTrue(store.updatePotBankTransfer(
+            id: transfer.id,
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 10_000,
+            direction: .potToBank,
+            date: "2026-06-11",
+            note: "Return"
+        ))
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 110_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 10_000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 110_000)
+
+        var includesPots = store.snapshot.settings
+        includesPots.includePotsInMoneyLeft = true
+        store.updateSettings(includesPots)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 120_000)
+
+        XCTAssertTrue(store.deletePotBankTransfer(id: transfer.id))
+        XCTAssertEqual(PlannerDerivedData.bankAccountBalance(account: account, snapshot: store.snapshot), 100_000)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 20_000)
+        XCTAssertEqual(PlannerDerivedData.currentTotalMoneyPence(snapshot: store.snapshot, payPeriod: nil), 120_000)
+    }
+
+    func testLegacyMoneyLeftSpendMigratesToThePrimaryBankExactlyOnce() throws {
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 100_000)
+        var legacySpend = makeTransaction(
+            id: "legacy-money-left-spend",
+            cardId: "unused",
+            amountPence: 1_275,
+            date: "2026-06-10",
+            note: "Tax"
+        )
+        legacySpend.paymentMethod = .income
+        legacySpend.creditCardId = nil
+        legacySpend.bankAccountId = nil
+        let original = makeSnapshot(bankAccounts: [account], transactions: [legacySpend])
+
+        let migrated = DefaultData.migratedSnapshot(original)
+        let transaction = try XCTUnwrap(migrated.snapshot.transactions.first)
+        XCTAssertTrue(migrated.didChange)
+        XCTAssertEqual(transaction.paymentMethod, .bankAccount)
+        XCTAssertEqual(transaction.bankAccountId, account.id)
+        XCTAssertEqual(
+            PlannerDerivedData.bankAccountBalance(account: account, snapshot: migrated.snapshot),
+            98_725
+        )
+
+        let rerun = DefaultData.migratedSnapshot(migrated.snapshot)
+        XCTAssertFalse(rerun.didChange)
+        XCTAssertEqual(rerun.snapshot, migrated.snapshot)
+    }
+
+    @MainActor
+    func testBankPotTransferRejectsAmountsAboveTheSourceBalance() async {
+        let account = makeBankAccount(id: "bank-main", openingBalancePence: 10_000)
+        let pot = makePot(id: "pot-main", name: "Savings", balancePence: 2_000, targetPence: nil)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(
+            bankAccounts: [account],
+            pots: [pot]
+        )))
+        await store.load()
+
+        XCTAssertFalse(store.transferMoney(
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 10_001,
+            direction: .bankToPot,
+            date: "2026-06-10",
+            note: ""
+        ))
+        XCTAssertFalse(store.transferMoney(
+            bankAccountId: account.id,
+            potId: pot.id,
+            amountPence: 2_001,
+            direction: .potToBank,
+            date: "2026-06-10",
+            note: ""
+        ))
+        XCTAssertTrue(store.snapshot.transactions.isEmpty)
+        XCTAssertEqual(store.snapshot.pots.first?.balancePence, 2_000)
     }
 
     @MainActor

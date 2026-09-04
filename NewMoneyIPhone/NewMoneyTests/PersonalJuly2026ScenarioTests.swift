@@ -113,7 +113,7 @@ final class PersonalJuly2026ScenarioTests: XCTestCase {
         let amountsByCard = Dictionary(uniqueKeysWithValues: items.map { ($0.cardName, $0.amountPence) })
 
         XCTAssertEqual(amountsByCard["Aqua"], 699)
-        XCTAssertEqual(amountsByCard["Capital One"], 12_158)
+        XCTAssertNil(amountsByCard["Capital One"])
         XCTAssertEqual(amountsByCard["Barclays"], 13_859)
 
         let aqua = try XCTUnwrap(items.first { $0.cardId == PersonalJuly2026Fixture.aquaCardId })

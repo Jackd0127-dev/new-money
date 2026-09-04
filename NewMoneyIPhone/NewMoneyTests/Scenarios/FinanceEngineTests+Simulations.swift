@@ -113,7 +113,7 @@ extension FinanceEngineTests {
 
         let julyFirst = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-01"))
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Income Remaining"), 124500)
-        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Target"), 420000)
+        XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Target"), 218500)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Pot Balance"), 420000)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Card Balance"), 193000)
         XCTAssertEqual(fullAppPence(julyFirst, in: daily, "Total Card Reserve"), 38500)
@@ -125,20 +125,20 @@ extension FinanceEngineTests {
 
         let julySecond = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-02"))
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Income Remaining"), 118100)
-        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Target"), 26000)
+        XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Target"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Pot1 Balance"), 26000)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "CC1 Balance"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "CC1 Reserve"), 13900)
         XCTAssertEqual(fullAppPence(julySecond, in: daily, "Total Card Reserve"), 44900)
 
         let julyFifth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-05"))
-        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Target"), 27850)
+        XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Target"), 13900)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "Pot1 Balance"), 27850)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "CC1 Balance"), 19850)
         XCTAssertEqual(fullAppPence(julyFifth, in: daily, "CC1 Reserve"), 19850)
 
         let julyFifteenth = try! XCTUnwrap(fullAppRow(in: daily, where: "Date", equals: "2027-07-15"))
-        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Target"), 41700)
+        XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Target"), 24000)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "Pot2 Balance"), 41700)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "CC2 Balance"), 37000)
         XCTAssertEqual(fullAppPence(julyFifteenth, in: daily, "CC2 Reserve"), 37000)
@@ -182,8 +182,8 @@ extension FinanceEngineTests {
         let snapshot = DefaultData.groupedComplexJanMar2027Snapshot
         let expectations: [(periodId: String, today: String, recurringCount: Int, openingCount: Int, baseChecklistTotal: Int, projectedTotal: Int, moneyLeft: Int)] = [
             ("pay-period-grouped-january-2027", "2027-01-01", 24, 5, 411600, 411600, 38400),
-            ("pay-period-grouped-february-2027", "2027-02-01", 24, 0, 285100, 383300, 66700),
-            ("pay-period-grouped-march-2027", "2027-03-01", 24, 0, 269000, 367200, 82800),
+            ("pay-period-grouped-february-2027", "2027-02-01", 24, 0, 285100, 318100, 131900),
+            ("pay-period-grouped-march-2027", "2027-03-01", 24, 0, 269000, 269000, 181000),
         ]
 
         for expectation in expectations {
@@ -623,7 +623,7 @@ extension FinanceEngineTests {
         let foodFuelPot = try XCTUnwrap(store.snapshot.pots.first { $0.id == "pot-pot3" })
         let foodFuelProgress = PlannerDerivedData.potProgress(pot: foodFuelPot, snapshot: store.snapshot, today: "2027-01-18")
         XCTAssertEqual(foodFuelPot.balancePence, 44000)
-        XCTAssertEqual(foodFuelProgress.targetPence, 44000)
+        XCTAssertEqual(foodFuelProgress.targetPence, 22000)
         XCTAssertEqual(foodFuelProgress.shortfallPence, 0)
 
         let remainingFoodFuelItems = PlannerDerivedData.recurringBillFundingChecklistItems(
@@ -922,16 +922,16 @@ extension FinanceEngineTests {
             ($0.name, PlannerDerivedData.potProgress(pot: $0, snapshot: store.snapshot, today: "2026-09-01"))
         })
         let potsByName = Dictionary(uniqueKeysWithValues: store.snapshot.pots.map { ($0.name, $0) })
-        XCTAssertEqual(potProgressByName["Subscriptions"]?.targetPence, 61500)
+        XCTAssertEqual(potProgressByName["Subscriptions"]?.targetPence, 43000)
         XCTAssertEqual(potsByName["Subscriptions"]?.balancePence, 61500)
-        XCTAssertEqual(potProgressByName["Car & Insurance"]?.targetPence, 51400)
+        XCTAssertEqual(potProgressByName["Car & Insurance"]?.targetPence, 16000)
         XCTAssertEqual(potsByName["Car & Insurance"]?.balancePence, 51400)
-        XCTAssertEqual(potProgressByName["Food & Fuel"]?.targetPence, 64000)
+        XCTAssertEqual(potProgressByName["Food & Fuel"]?.targetPence, 21000)
         XCTAssertEqual(potsByName["Food & Fuel"]?.balancePence, 64000)
         XCTAssertEqual(potProgressByName["Emergency"]?.targetPence, 6000)
         XCTAssertEqual(potsByName["Emergency"]?.balancePence, 6000)
         XCTAssertEqual(potProgressByName["Emergency"]?.shortfallPence, 0)
-        XCTAssertEqual(potProgressByName["Annual & Work"]?.targetPence, 27000)
+        XCTAssertEqual(potProgressByName["Annual & Work"]?.targetPence, 9000)
         XCTAssertEqual(potsByName["Annual & Work"]?.balancePence, 27000)
 
         var september8Settings = store.snapshot.settings
@@ -1360,7 +1360,7 @@ extension FinanceEngineTests {
         XCTAssertEqual(potsById["pot-cc2"]?.balancePence, 23300)
         XCTAssertEqual(potsById["pot-cc3"]?.balancePence, 40000)
         let pot1Progress = PlannerDerivedData.potProgress(pot: try XCTUnwrap(potsById["pot-cc1"]), snapshot: store.snapshot, today: "2026-08-02")
-        XCTAssertEqual(pot1Progress.targetPence, 19000)
+        XCTAssertEqual(pot1Progress.targetPence, 14000)
         XCTAssertEqual(pot1Progress.coveredPence, 19000)
         XCTAssertEqual(pot1Progress.shortfallPence, 0)
         XCTAssertEqual(pot1Progress.percent, 100)
@@ -1427,7 +1427,7 @@ extension FinanceEngineTests {
         var pot1Progress = PlannerDerivedData.potProgress(pot: pot1, snapshot: store.snapshot, today: "2026-07-01")
         let pot3Progress = PlannerDerivedData.potProgress(pot: pot3, snapshot: store.snapshot, today: "2026-07-01")
 
-        XCTAssertEqual(pot1Progress.targetPence, 62500)
+        XCTAssertEqual(pot1Progress.targetPence, 50000)
         XCTAssertEqual(pot1Progress.nextObligation?.amountPence, 50000)
         XCTAssertEqual(pot1Progress.nextObligation?.dueIso, "2026-07-02")
         XCTAssertEqual(pot1Progress.nextObligation?.label, "CC1 opening balance")
@@ -1435,7 +1435,7 @@ extension FinanceEngineTests {
         XCTAssertEqual(pot1Progress.laterObligation?.dueIso, "2026-07-15")
         XCTAssertEqual(pot1Progress.laterObligation?.label, "Skincare")
 
-        XCTAssertEqual(pot3Progress.targetPence, 20000)
+        XCTAssertEqual(pot3Progress.targetPence, 0)
         XCTAssertEqual(pot3Progress.nextObligation?.amountPence, 20000)
         XCTAssertEqual(pot3Progress.nextObligation?.dueIso, "2026-07-25")
         XCTAssertEqual(pot3Progress.nextObligation?.label, "Spending money")

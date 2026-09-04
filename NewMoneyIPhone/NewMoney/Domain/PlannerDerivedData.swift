@@ -208,6 +208,19 @@ struct FundingChecklistDestinationGroup: Identifiable, Equatable, Sendable {
     var totalAmountPence: Int {
         items.reduce(0) { $0 + max(0, $1.amountPence) }
     }
+
+    var completedItemCount: Int {
+        items.count(where: \.isCompleted)
+    }
+
+    var isFullyAdded: Bool {
+        !items.isEmpty && completedItemCount == items.count
+    }
+
+    var fundingStatusLabel: String? {
+        guard completedItemCount > 0 else { return nil }
+        return isFullyAdded ? "Added" : "\(completedItemCount)/\(items.count)"
+    }
 }
 
 struct FundingChecklistBreakdownItem: Identifiable, Equatable, Sendable {
@@ -1040,7 +1053,16 @@ enum PlannerDerivedData {
                 return total + transaction.netAmountPence
             case .allocation:
                 return total + transaction.netAmountPence
-            case .transfer, .adjustment:
+            case .transfer:
+                switch transaction.potBankTransferDirection {
+                case .bankToPot:
+                    return total + transaction.netAmountPence
+                case .potToBank:
+                    return total - transaction.netAmountPence
+                case nil:
+                    return total
+                }
+            case .adjustment:
                 return total
             }
         }
@@ -1064,8 +1086,9 @@ enum PlannerDerivedData {
         var sourceLabels: [String] = []
         var linkedTargetPence = 0
         var dueIso: String?
-        var usesForecastTarget = false
+        let usesForecastTarget = false
         let payPeriod = currentOrLatestPayPeriod(snapshot.payPeriods, today: today)
+        let linkedCardPayments = linkedCreditCardPayments(pot: pot, snapshot: snapshot, today: today)
 
         let directRecurringBillItems = directRecurringBillTargetItems(
             snapshot: snapshot,
@@ -1075,7 +1098,10 @@ enum PlannerDerivedData {
         )
         let recurringTargetPence = directRecurringBillItems.reduce(0) { $0 + max(0, $1.amountPence) }
 
-        if recurringTargetPence > 0 {
+        // A linked card's next real statement already contains its posted card
+        // bills. Future recurring charges belong in the Bills forecast and must
+        // not be stacked on top of the pot's current collection target.
+        if recurringTargetPence > 0 && pot.linkedCreditCardId == nil {
             linkedTargetPence += recurringTargetPence
             sourceLabels.append("Recurring")
             dueIso = minIsoDate(dueIso, directRecurringBillItems.map(\.dueDate).sorted().first)
@@ -1083,35 +1109,16 @@ enum PlannerDerivedData {
 
         if let cardId = pot.linkedCreditCardId {
             if let card = snapshot.creditCards.first(where: { $0.id == cardId && !$0.archived }) {
-                let summary = creditCardOwedSummary(
-                    card: card,
-                    snapshot: snapshot,
-                    payPeriod: payPeriod,
-                    asOfDate: today
-                )
-                let cardUsesForecastTarget = summary.forecastOwedPence > summary.actualOwedPence
-                let rawCardTargetPence = cardUsesForecastTarget ? summary.forecastOwedPence : summary.actualOwedPence
-                let otherPotCardBillTargetPence = selectedCardRecurringBillTargetPence(
-                    snapshot: snapshot,
-                    payPeriod: payPeriod,
-                    today: today,
-                    cardId: cardId,
-                    excludingPotId: pot.id
-                )
-                let cardTargetPence = max(0, rawCardTargetPence - otherPotCardBillTargetPence)
-                let activeReserveTargetPence = activeLinkedCreditCardReserveTargetPence(
-                    potId: pot.id,
-                    cardId: cardId,
-                    snapshot: snapshot,
-                    asOfDate: today
-                )
-                let linkedCardTargetPence = max(cardTargetPence, activeReserveTargetPence)
+                let nextPayment = linkedCardPayments.first
+                // A linked pot funds the next real collection. Later forecast
+                // cycles remain visible in the schedule, but cannot inflate the
+                // current pot target or prevent it reaching 100%.
+                let linkedCardTargetPence = nextPayment?.amountPence ?? 0
 
                 if linkedCardTargetPence > 0 {
                     linkedTargetPence += linkedCardTargetPence
-                    usesForecastTarget = usesForecastTarget || cardUsesForecastTarget
                     sourceLabels.append("\(card.name) card")
-                    dueIso = minIsoDate(dueIso, creditCardDueIso(card: card, today: today))
+                    dueIso = minIsoDate(dueIso, nextPayment?.dueIso ?? creditCardDueIso(card: card, today: today))
                 }
             } else {
                 sourceLabels.append("missing card \(cardId)")
@@ -1155,12 +1162,18 @@ enum PlannerDerivedData {
         }
 
         let manualTargetPence = max(0, pot.targetPence ?? 0)
-        let targetPence = linkedTargetPence > 0 ? linkedTargetPence : manualTargetPence
+        // Once linked to a card, the pot target is statement-driven. Falling
+        // back to an old manual target would make a card with no posted
+        // statement look as though a collection is already due.
+        let targetPence = pot.linkedCreditCardId == nil
+            ? (linkedTargetPence > 0 ? linkedTargetPence : manualTargetPence)
+            : linkedTargetPence
         let coveredPence = max(0, pot.balancePence)
         let shortfallPence = max(0, targetPence - coveredPence)
-        let percent = targetPence > 0 ? Int((Double(coveredPence) / Double(targetPence) * 100).rounded()) : 0
+        let percent = targetPence > 0
+            ? min(100, Int((Double(coveredPence) / Double(targetPence) * 100).rounded()))
+            : 0
         let obligations = potDueObligations(pot: pot, snapshot: snapshot, today: today)
-        let linkedCardPayments = linkedCreditCardPayments(pot: pot, snapshot: snapshot, today: today)
 
         return PotProgress(
             targetPence: targetPence,
@@ -1610,7 +1623,13 @@ enum PlannerDerivedData {
                     ? periodStatementPayments.reduce(0) {
                         $0 + max(max(0, $1.actualDuePence), max(0, $1.forecastDuePence))
                     }
-                    : progress.targetPence
+                    : cardPaymentOperationalFundingTargetPence(
+                        pot: pot,
+                        card: card,
+                        snapshot: snapshot,
+                        payPeriod: payPeriod,
+                        asOfDate: asOfDate
+                    )
                 let balanceBeforeThisFundingPence = max(0, pot.balancePence - matchingFundingPence)
                 let pendingRecurringPence = recurringBillFundingChecklistItems(
                     snapshot: snapshot,
@@ -1735,6 +1754,47 @@ enum PlannerDerivedData {
                     isCompleted: matchingFundingPence >= amountPence
                 )
             }
+    }
+
+    /// Checklist funding must continue reserving the complete operational card
+    /// obligation for its pay period. This is intentionally separate from the
+    /// pot card's progress target, which presents only the next real collection.
+    private static func cardPaymentOperationalFundingTargetPence(
+        pot: Pot,
+        card: CreditCard,
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod,
+        asOfDate: String
+    ) -> Int {
+        let recurringTargetPence = directRecurringBillTargetItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            today: asOfDate,
+            potId: pot.id
+        ).reduce(0) { $0 + max(0, $1.amountPence) }
+        let summary = creditCardOwedSummary(
+            card: card,
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: asOfDate
+        )
+        let rawCardTargetPence = max(summary.actualOwedPence, summary.forecastOwedPence)
+        let otherPotCardBillTargetPence = selectedCardRecurringBillTargetPence(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            today: asOfDate,
+            cardId: card.id,
+            excludingPotId: pot.id
+        )
+        let cardTargetPence = max(0, rawCardTargetPence - otherPotCardBillTargetPence)
+        let reserveTargetPence = activeLinkedCreditCardReserveTargetPence(
+            potId: pot.id,
+            cardId: card.id,
+            snapshot: snapshot,
+            asOfDate: asOfDate
+        )
+        let linkedTargetPence = recurringTargetPence + max(cardTargetPence, reserveTargetPence)
+        return linkedTargetPence > 0 ? linkedTargetPence : max(0, pot.targetPence ?? 0)
     }
 
     static func cardPaymentFundingChecklistId(cardId: String, potId: String, directDebitDate: String) -> String {
@@ -4704,8 +4764,6 @@ private extension PlannerDerivedData {
             }
 
         return mergeLinkedCardPaymentRows(statementRows + heldRows + openingRows)
-        .prefix(2)
-        .map { $0 }
     }
 
     private static func mergeLinkedCardPaymentRows(_ rows: [LinkedCardPaymentDue]) -> [LinkedCardPaymentDue] {

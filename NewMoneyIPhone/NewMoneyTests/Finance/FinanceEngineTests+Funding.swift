@@ -252,6 +252,47 @@ extension FinanceEngineTests {
         XCTAssertEqual(groups.map(\.totalAmountPence).sorted(), [100, 200])
     }
 
+    func testFundingDestinationGroupReportsPartialAndFullyAddedProgress() {
+        func item(id: String, isCompleted: Bool) -> FundingChecklistPresentationItem {
+            FundingChecklistPresentationItem(
+                id: id,
+                name: "Bill \(id)",
+                destinationKind: .pot,
+                destinationId: "pot-bills",
+                destinationName: "Bills",
+                title: "Fund bill",
+                detail: "",
+                amountPence: 1_000,
+                dueDate: "2026-06-20",
+                breakdown: [],
+                isCompleted: isCompleted,
+                isExcluded: false,
+                status: isCompleted ? .activeReserved : .needsFunding,
+                paidDate: nil,
+                action: .recurringBill(paymentId: id, dueDate: "2026-06-20", payPeriodId: "period-june")
+            )
+        }
+
+        var group = FundingChecklistDestinationGroup(
+            id: "pot-bills",
+            destinationKind: .pot,
+            destinationId: "pot-bills",
+            destinationName: "Bills",
+            items: (1...7).map { item(id: "\($0)", isCompleted: $0 <= 4) }
+        )
+
+        XCTAssertEqual(group.completedItemCount, 4)
+        XCTAssertEqual(group.fundingStatusLabel, "4/7")
+        XCTAssertFalse(group.isFullyAdded)
+
+        group.items = group.items.map { existing in
+            item(id: existing.id, isCompleted: true)
+        }
+        XCTAssertEqual(group.fundingStatusLabel, "Added")
+        XCTAssertTrue(group.isFullyAdded)
+        XCTAssertTrue(group.items.allSatisfy { $0.status == .activeReserved })
+    }
+
     func testCashDueGroupingRecognizesLegacyCardFundingAndExclusion() {
         let settings = makeManualSettings(today: "2026-07-21")
         let july = makePayPeriod(
@@ -545,7 +586,7 @@ extension FinanceEngineTests {
         XCTAssertEqual(periods.map(\.monthlyAnchorDay), [31, 31, 31, 31])
     }
 
-    func testLinkedCreditCardPotProgressShowsUpcomingStatementPaymentsSeparatelyFromFundingTarget() {
+    func testLinkedCreditCardPotTargetsOnlyTheNextRealStatementPayment() {
         let settings = makeManualSettings(today: "2026-08-01")
         let julyPeriod = makePayPeriod(id: "period-july", startDate: "2026-07-01", endDate: "2026-07-31", payday: "2026-07-01", incomePence: 100000)
         let augustPeriod = makePayPeriod(id: "period-august", startDate: "2026-08-01", endDate: "2026-08-31", payday: "2026-08-01", incomePence: 100000)
@@ -571,23 +612,69 @@ extension FinanceEngineTests {
             recurringPaymentId: "rec-insurance",
             recurringDueDate: "2026-07-01"
         )
+        let futureRecurringCharge = makeRecurringPayment(
+            id: "future-card-bill",
+            name: "Later card bill",
+            amountPence: 42_503,
+            dueDay: 20,
+            potId: pot.id,
+            creditCardId: card.id
+        )
+        let futureRecurringAllocation = makePotAllocation(
+            id: "alloc-future-card-bill",
+            payPeriodId: augustPeriod.id,
+            potId: pot.id,
+            amountPence: 42_503,
+            source: .recurringBillFunding,
+            recurringPaymentId: futureRecurringCharge.id,
+            recurringDueDate: "2026-08-20"
+        )
         let snapshot = makeSnapshot(
             settings: settings,
             pots: [pot],
+            recurringPayments: [futureRecurringCharge],
             payPeriods: [julyPeriod, augustPeriod],
-            potAllocations: [insuranceAllocation],
+            potAllocations: [insuranceAllocation, futureRecurringAllocation],
             transactions: [insurance, manualSpend],
             creditCards: [card]
         )
 
         let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-08-01")
 
-        XCTAssertEqual(progress.targetPence, 13300)
+        XCTAssertEqual(progress.targetPence, 10000)
         XCTAssertEqual(progress.coveredPence, 3300)
-        XCTAssertEqual(progress.shortfallPence, 10000)
+        XCTAssertEqual(progress.shortfallPence, 6700)
+        XCTAssertEqual(progress.percent, 33)
+        XCTAssertFalse(progress.usesForecastTarget)
         XCTAssertEqual(progress.linkedCardPayments.map(\.dueIso), ["2026-08-10", "2026-09-10"])
         XCTAssertEqual(progress.linkedCardPayments.map(\.amountPence), [10000, 3300])
         XCTAssertEqual(progress.linkedCardPayments.map(\.statementIso), ["2026-07-15", "2026-08-15"])
+    }
+
+    func testLinkedCreditCardPotWithoutPostedPaymentDoesNotFallBackToManualTarget() {
+        let card = makeCreditCard(
+            id: "card-no-statement",
+            name: "No statement",
+            openingBalancePence: 0,
+            openingStatementBalancePence: nil,
+            statementDate: "2026-08-15",
+            dueDay: 10,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        let pot = makePot(
+            id: "pot-no-statement",
+            name: "No statement",
+            balancePence: 0,
+            targetPence: 25_000,
+            linkedCreditCardId: card.id
+        )
+        let snapshot = makeSnapshot(pots: [pot], creditCards: [card])
+
+        let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-08-01")
+
+        XCTAssertEqual(progress.targetPence, 0)
+        XCTAssertEqual(progress.shortfallPence, 0)
+        XCTAssertTrue(progress.linkedCardPayments.isEmpty)
     }
 
     @MainActor
@@ -763,14 +850,14 @@ extension FinanceEngineTests {
         XCTAssertEqual(progress.shortfallPence, 15000)
     }
 
-    func testPotProgressFallsBackToManualTargetAndShowsRealOverTargetPercent() {
+    func testPotProgressFallsBackToManualTargetAndCapsReachedProgressAtOneHundredPercent() {
         let pot = makePot(id: "pot-holiday", name: "Holiday", balancePence: 15000, targetPence: 10000)
         let snapshot = makeSnapshot(pots: [pot])
 
         let progress = PlannerDerivedData.potProgress(pot: pot, snapshot: snapshot, today: "2026-06-01")
 
         XCTAssertEqual(progress.targetPence, 10000)
-        XCTAssertEqual(progress.percent, 150)
+        XCTAssertEqual(progress.percent, 100)
         XCTAssertEqual(progress.sourceLabels, [])
     }
 
@@ -1238,8 +1325,8 @@ extension FinanceEngineTests {
         XCTAssertEqual(beforeDueAvailability.actualAvailablePence, 80000)
         XCTAssertEqual(beforeDueAvailability.forecastAvailablePence, 70000)
         let beforeDueProgress = PlannerDerivedData.potProgress(pot: pot, snapshot: beforeSnapshot, today: "2026-06-01")
-        XCTAssertEqual(beforeDueProgress.targetPence, 10000)
-        XCTAssertEqual(beforeDueProgress.shortfallPence, 10000)
+        XCTAssertEqual(beforeDueProgress.targetPence, 0)
+        XCTAssertEqual(beforeDueProgress.shortfallPence, 0)
 
         let fundingStore = PlannerStore(repository: TestPlannerRepository(snapshot: beforeSnapshot))
         await fundingStore.load()

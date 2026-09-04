@@ -231,7 +231,7 @@ final class AuthSyncTests: XCTestCase {
         XCTAssertEqual(decision, .downloadCloud)
         XCTAssertTrue(PlannerCloudSyncPolicy.treatsExistingCloudSnapshotAsAuthoritative)
         XCTAssertFalse(PlannerCloudSyncPolicy.promptsForConflicts)
-        XCTAssertFalse(AuthLaunchPresentationPolicy.promptsForCloudDataChoice)
+        XCTAssertTrue(AuthLaunchPresentationPolicy.promptsForCloudDataChoice)
     }
 
     func testSyncDecisionDownloadsCloudWhenBothSnapshotsHaveDifferentUserData() {
@@ -251,7 +251,7 @@ final class AuthSyncTests: XCTestCase {
         XCTAssertTrue(PlannerCloudSyncPolicy.treatsExistingCloudSnapshotAsAuthoritative)
         XCTAssertFalse(PlannerCloudSyncPolicy.promptsForConflicts)
         XCTAssertFalse(AuthLaunchPresentationPolicy.showsLoadingScreens)
-        XCTAssertFalse(AuthLaunchPresentationPolicy.promptsForCloudDataChoice)
+        XCTAssertTrue(AuthLaunchPresentationPolicy.promptsForCloudDataChoice)
     }
 
     func testCloudPayloadRoundTripsSnapshotAndMarksBackups() throws {
@@ -592,6 +592,7 @@ final class PlannerAccountsTests: XCTestCase {
         XCTAssertNil(resetCollection.activeAccount?.avatarImageDataBase64)
         XCTAssertEqual(resetCollection.activeAccount?.snapshot, DefaultData.emptySnapshot)
         XCTAssertFalse(resetCollection.hasMeaningfulPlannerData)
+        XCTAssertFalse(store.accountCollectionForCloudUpload().hasMeaningfulPlannerData)
         XCTAssertEqual(store.snapshot, DefaultData.emptySnapshot)
         XCTAssertEqual(store.plannerAccounts.map(\.name), ["Personal"])
     }

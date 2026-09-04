@@ -434,7 +434,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AssistantMenuPresentationPolicy.toolbarTitle, "Edit")
         XCTAssertEqual(AssistantMenuPresentationPolicy.presentation, "nativeSwiftUIMenu")
         XCTAssertEqual(AssistantMenuPresentationPolicy.actions, ["Customise assistant", "Rename"])
-        XCTAssertEqual(AssistantMenuPresentationPolicy.customiseAssistantRoute, "instructionsScreen")
+        XCTAssertEqual(AssistantMenuPresentationPolicy.customiseAssistantRoute, "preferencesScreen")
         XCTAssertEqual(AssistantMenuPresentationPolicy.renamePresentation, "textFieldAlert")
         XCTAssertFalse(AssistantMenuPresentationPolicy.instructionsUsesPlaceholderToolbar)
         XCTAssertEqual(AssistantMenuPresentationPolicy.focusedMessageBottomClearance, 132)
@@ -1190,7 +1190,7 @@ final class AppThemePresetTests: XCTestCase {
         XCTAssertEqual(AppThemePreset.classic.palette.cardEyebrowHex, "#D9C3AB")
         XCTAssertEqual(AppThemePreset.warmLight.palette.cardEyebrowHex, "#69665F")
         XCTAssertEqual(AppThemePreset.sagePaper.palette.cardEyebrowHex, "#66695F")
-        XCTAssertEqual(AppThemePreset.navyEmerald.palette.cardEyebrowHex, "#60717A")
+        XCTAssertEqual(AppThemePreset.navyEmerald.palette.cardEyebrowHex, "#52636C")
     }
 
     func testSelectableColorHexesFollowSelectedTheme() {

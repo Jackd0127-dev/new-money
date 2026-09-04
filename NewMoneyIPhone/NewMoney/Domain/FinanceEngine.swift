@@ -21,11 +21,15 @@ enum FinanceEngine {
         hourlyRatePence: Int,
         actualAmountPence: Int?
     ) -> Int {
+        validatedPaycheckAmount(hoursWorked: hoursWorked, hourlyRatePence: hourlyRatePence, actualAmountPence: actualAmountPence) ?? 0
+    }
+
+    static func validatedPaycheckAmount(hoursWorked: Double, hourlyRatePence: Int, actualAmountPence: Int?) -> Int? {
         if let actualAmountPence {
             return actualAmountPence
         }
-
-        return Int((hoursWorked * Double(hourlyRatePence)).rounded())
+        guard hoursWorked.isFinite else { return nil }
+        return Int(exactly: (hoursWorked * Double(hourlyRatePence)).rounded())
     }
 
     static func formatPaydayLabel(_ isoDate: String) -> String {
@@ -97,7 +101,9 @@ enum FinanceEngine {
         frequency: PayFrequency,
         monthlyAnchorDay: Int? = nil
     ) -> NextPayPeriod {
-        let start = parseDate(payday)
+        guard let start = validatedDate(payday) else {
+            return NextPayPeriod(startDate: payday, endDate: payday, nextPayday: payday)
+        }
         let nextPayday: Date
         if frequency == .monthly {
             let preferredDay = monthlyAnchorDay ?? utcCalendar.component(.day, from: start)
@@ -250,8 +256,7 @@ enum FinanceEngine {
     }
 
     static func getDaysInclusive(startDate: String, endDate: String) -> Int {
-        let start = parseDate(startDate)
-        let end = parseDate(endDate)
+        guard let start = validatedDate(startDate), let end = validatedDate(endDate) else { return 1 }
         let days = utcCalendar.dateComponents([.day], from: start, to: end).day ?? 0
         return max(1, days + 1)
     }
@@ -261,7 +266,28 @@ enum FinanceEngine {
     }
 
     static func isIsoDate(_ value: String) -> Bool {
-        value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
+        isoDateParts(value) != nil
+    }
+
+    /// Rejects impossible civil dates rather than normalizing them into another cycle.
+    static func validatedDate(_ value: String) -> Date? {
+        guard let parts = isoDateParts(value) else { return nil }
+        return utcCalendar.date(from: DateComponents(year: parts.year, month: parts.month, day: parts.day))
+    }
+
+    private static func isoDateParts(_ value: String) -> (year: Int, month: Int, day: Int)? {
+        let bytes = Array(value.utf8)
+        guard bytes.count == 10, bytes[4] == 45, bytes[7] == 45,
+              [0, 1, 2, 3, 5, 6, 8, 9].allSatisfy({ (48...57).contains(bytes[$0]) })
+        else { return nil }
+        let year = bytes[0..<4].reduce(0) { $0 * 10 + Int($1 - 48) }
+        let month = Int(bytes[5] - 48) * 10 + Int(bytes[6] - 48)
+        let day = Int(bytes[8] - 48) * 10 + Int(bytes[9] - 48)
+        guard year > 0, (1...12).contains(month) else { return nil }
+        let leapYear = year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))
+        let daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+        guard (1...daysInMonth).contains(day) else { return nil }
+        return (year, month, day)
     }
 
     static func toIsoDate(_ date: Date) -> String {
@@ -269,12 +295,13 @@ enum FinanceEngine {
     }
 
     static func addIsoDays(date: String, days: Int) -> String {
-        toIsoDate(addDays(parseDate(date), days: days))
+        guard let parsed = validatedDate(date) else { return date }
+        return toIsoDate(addDays(parsed, days: days))
     }
 
     static func monthlyDate(onOrAfter isoDate: String, day: Int) -> String {
         let calendar = utcCalendar
-        let date = parseDate(isoDate)
+        guard let date = validatedDate(isoDate) else { return isoDate }
         let components = calendar.dateComponents([.year, .month], from: date)
         var year = components.year ?? 1970
         var month = components.month ?? 1

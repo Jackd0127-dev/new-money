@@ -1,9 +1,15 @@
 import Foundation
 
 protocol PlannerRepository: Sendable {
+    func hasPersistedSnapshot() async -> Bool
     func loadSnapshot() async throws -> PlannerSnapshot
     func saveSnapshot(_ snapshot: PlannerSnapshot) async throws
     func resetSnapshot() async throws
+}
+
+extension PlannerRepository {
+    // Unknown/custom repositories are treated conservatively as existing data.
+    func hasPersistedSnapshot() async -> Bool { true }
 }
 
 struct PlannerAccount: Codable, Equatable, Identifiable, Sendable {
@@ -67,9 +73,14 @@ enum PlannerAccountError: Error, Equatable, LocalizedError {
 }
 
 protocol PlannerAccountRepository: Sendable {
+    func hasPersistedAccountCollection() async -> Bool
     func loadAccountCollection() async throws -> PlannerAccountCollection?
     func saveAccountCollection(_ collection: PlannerAccountCollection) async throws
     func resetAccountCollection() async throws
+}
+
+extension PlannerAccountRepository {
+    func hasPersistedAccountCollection() async -> Bool { true }
 }
 
 enum PlannerLaunchProfile {
@@ -111,7 +122,15 @@ enum PlannerLaunchProfile {
     }
 
     static func isUsingFixture(environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
-        environment[fixtureEnvironmentKey] != nil
+        guard let value = environment[fixtureEnvironmentKey] else { return false }
+        let known = [basicDataFixtureValue, complexStressFixtureValue,
+                     complexStressJanMar2027FixtureValue, groupedComplexJanMar2027FixtureValue,
+                     fullAppLogicTortureJulSep2027FixtureValue, finalDebtFullAppSimJanApr2028FixtureValue,
+                     debtDemoFixtureValue]
+#if DEBUG
+        if value == personalJuly2026FixtureValue { return true }
+#endif
+        return known.contains(value)
     }
 }
 
@@ -152,6 +171,10 @@ actor FilePlannerRepository: PlannerRepository {
             .appendingPathComponent("planner-snapshot-v1.json")
     }
 
+    func hasPersistedSnapshot() async -> Bool {
+        FileManager.default.fileExists(atPath: fileURL.path)
+    }
+
     func loadSnapshot() async throws -> PlannerSnapshot {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return DefaultData.emptySnapshot
@@ -168,6 +191,7 @@ actor FilePlannerRepository: PlannerRepository {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(snapshot)
+        try preserveOriginalPlannerFile(fileURL)
         try data.write(to: fileURL, options: [.atomic])
     }
 
@@ -186,6 +210,8 @@ actor InMemoryPlannerAccountRepository: PlannerAccountRepository {
         self.seedCollection = seedCollection
         self.collection = seedCollection
     }
+
+    func hasPersistedAccountCollection() async -> Bool { collection != nil }
 
     func loadAccountCollection() async throws -> PlannerAccountCollection? {
         collection
@@ -215,6 +241,10 @@ actor FilePlannerAccountRepository: PlannerAccountRepository {
             .appendingPathComponent("planner-accounts-v1.json")
     }
 
+    func hasPersistedAccountCollection() async -> Bool {
+        FileManager.default.fileExists(atPath: fileURL.path)
+    }
+
     func loadAccountCollection() async throws -> PlannerAccountCollection? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return nil
@@ -231,6 +261,7 @@ actor FilePlannerAccountRepository: PlannerAccountRepository {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(collection)
+        try preserveOriginalPlannerFile(fileURL)
         try data.write(to: fileURL, options: [.atomic])
     }
 
@@ -239,4 +270,12 @@ actor FilePlannerAccountRepository: PlannerAccountRepository {
             try FileManager.default.removeItem(at: fileURL)
         }
     }
+}
+
+/// Keeps the first pre-upgrade payload intact before any normalization or migration is saved.
+private func preserveOriginalPlannerFile(_ fileURL: URL) throws {
+    let backup = fileURL.appendingPathExtension("before-overhaul-v1")
+    let manager = FileManager.default
+    guard manager.fileExists(atPath: fileURL.path), !manager.fileExists(atPath: backup.path) else { return }
+    try manager.copyItem(at: fileURL, to: backup)
 }

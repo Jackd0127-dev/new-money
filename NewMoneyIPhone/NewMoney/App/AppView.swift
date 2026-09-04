@@ -355,6 +355,7 @@ private enum AppNavigationDestination: String, Identifiable {
 }
 
 struct AppView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var store: PlannerStore
     @AppStorage(AppTheme.selectedPresetStorageKey) private var selectedThemeRawValue = AppThemePreset.defaultPreset.rawValue
     @State private var selectedTab: AppTab = .home
@@ -409,6 +410,30 @@ struct AppView: View {
         }
         .onAppear {
             configureSystemChromeAppearance()
+            store.refreshForCurrentDate()
+        }
+        .task(id: "\(scenePhase)-\(store.todayIso)-\(store.snapshot.settings.appDateMode)") {
+            guard scenePhase == .active, store.snapshot.settings.appDateMode == .automatic else { return }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())) else { return }
+            do {
+                try await Task.sleep(for: .seconds(max(1, nextDay.timeIntervalSinceNow)))
+                store.refreshForCurrentDate()
+            } catch { /* View disappearance cancels the one-shot day refresh. */ }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                store.refreshForCurrentDate()
+            } else {
+                Task { await store.retrySaving() }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            store.refreshForCurrentDate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            store.refreshForCurrentDate()
         }
         .onChange(of: selectedThemeRawValue) { _, _ in
             configureSystemChromeAppearance()

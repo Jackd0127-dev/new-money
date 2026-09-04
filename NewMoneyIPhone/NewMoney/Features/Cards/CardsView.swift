@@ -1293,6 +1293,22 @@ enum CardLinkedRowDestination: Equatable, Identifiable {
     }
 }
 
+private struct CardDetailPresentationKey: Equatable {
+    var revision: PlannerPresentationRevision
+    var cardId: String
+}
+
+private struct CardDetailPresentation {
+    var availability: CreditCardAvailabilitySummary
+    var balancePence: Int
+    var statementSummaries: [CreditCardStatementSummary]
+    var cycleAdjustment: CreditCardCycleAdjustmentSummary?
+    var nextStatementDate: String?
+    var nextPayment: CreditCardStatementPayment?
+    var heldReservePence: Int
+    var linkedPotCoverPence: Int
+}
+
 struct CardDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1307,18 +1323,47 @@ struct CardDetailView: View {
     @State private var balanceHistoryEditTarget: CreditCardBalanceHistoryEditTarget?
     @State private var linkedRowDestination: CardLinkedRowDestination?
     @State private var selectedStatementSection: CreditCardBalanceHistorySection?
+    @State private var presentationCache = RevisionPresentationCache<CardDetailPresentationKey, CardDetailPresentation>()
+    @State private var ledgerCache = RevisionPresentationCache<CardDetailPresentationKey, CreditCardBalanceHistoryData>()
+    @State private var linkedRowsCache = RevisionPresentationCache<CardDetailPresentationKey, [CardPaymentAllocationRow]>()
+    @State private var historyRowsCache = RevisionPresentationCache<CardDetailPresentationKey, [CardPaymentAllocationRow]>()
 
     private var currentCard: CreditCard {
         store.snapshot.creditCards.first(where: { $0.id == card.id }) ?? card
     }
 
-    private var cardAvailability: CreditCardAvailabilitySummary {
-        PlannerDerivedData.creditCardAvailabilitySummary(
-            card: currentCard,
-            snapshot: store.snapshot,
-            payPeriod: store.selectedPayPeriod,
-            asOfDate: store.todayIso
+    private var presentationKey: CardDetailPresentationKey {
+        CardDetailPresentationKey(
+            revision: PlannerPresentationRevision(
+                accountId: store.activePlannerAccountId,
+                snapshotRevision: store.snapshotRevision,
+                todayIso: store.todayIso,
+                selectedPayPeriodId: store.selectedPayPeriod?.id
+            ),
+            cardId: card.id
         )
+    }
+
+    private var presentation: CardDetailPresentation {
+        presentationCache.value(for: presentationKey) {
+            let card = currentCard
+            let snapshot = store.snapshot
+            let today = store.todayIso
+            return CardDetailPresentation(
+                availability: PlannerDerivedData.creditCardAvailabilitySummary(card: card, snapshot: snapshot, payPeriod: store.selectedPayPeriod, asOfDate: today),
+                balancePence: PlannerDerivedData.cardBalance(card: card, snapshot: snapshot),
+                statementSummaries: PlannerDerivedData.creditCardStatementSummaries(snapshot: snapshot, asOfDate: today).filter { $0.cardId == card.id },
+                cycleAdjustment: PlannerDerivedData.creditCardCycleAdjustmentSummary(card: card, snapshot: snapshot, asOfDate: today),
+                nextStatementDate: PlannerDerivedData.creditCardNextStatementDate(card: card, snapshot: snapshot, asOfDate: today),
+                nextPayment: PlannerDerivedData.creditCardStatementPayments(card: card, snapshot: snapshot, startDate: today, endDate: FinanceEngine.addIsoDays(date: today, days: 90), asOfDate: today).first,
+                heldReservePence: PlannerDerivedData.creditCardHeldCycleReservePence(card: card, snapshot: snapshot, asOfDate: today),
+                linkedPotCoverPence: FinanceEngine.getLinkedCreditCardPotPence(pots: snapshot.pots, creditCardId: card.id)
+            )
+        }
+    }
+
+    private var cardAvailability: CreditCardAvailabilitySummary {
+        presentation.availability
     }
 
     var body: some View {
@@ -1396,7 +1441,7 @@ struct CardDetailView: View {
             } label: {
                 CreditCardRow(
                     card: currentCard,
-                    balancePence: PlannerDerivedData.cardBalance(card: currentCard, snapshot: store.snapshot),
+                    balancePence: presentation.balancePence,
                     availability: cardAvailability,
                     showsTitle: false
                 )
@@ -1425,11 +1470,9 @@ struct CardDetailView: View {
     }
 
     private var balanceHistoryContent: some View {
-        let history = CreditCardBalanceHistoryData.make(
-            card: currentCard,
-            snapshot: store.snapshot,
-            asOfDate: store.todayIso
-        )
+        let history = ledgerCache.value(for: presentationKey) {
+            CreditCardBalanceHistoryData.make(card: currentCard, snapshot: store.snapshot, asOfDate: store.todayIso)
+        }
 
         return VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
             VStack(alignment: .leading, spacing: 6) {
@@ -1480,6 +1523,9 @@ struct CardDetailView: View {
         AppCard {
             SectionTitle("Statement")
             CreditMetricGrid(items: statementMetrics)
+            Text("Available now uses the current balance. Forecast values also include planned card spending.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.Colors.secondaryText)
             if let cycleAdjustmentSummary, cycleAdjustmentSummary.isStatementHeld || cycleAdjustmentSummary.isDirectDebitHeld {
                 Text("This cycle is on hold. New card spending is kept reserved until you confirm the bank dates.")
                     .font(.footnote.weight(.medium))
@@ -1498,21 +1544,22 @@ struct CardDetailView: View {
     }
 
     private var linkedSection: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+        let rows = linkedRows
+        return VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SectionTitle("Linked to this card")
-            if linkedRows.isEmpty {
+            if rows.isEmpty {
                 AppCard {
                     EmptyStateView(title: "Nothing linked", message: "Bills, one-off payments, and pots linked to this card will appear here.", systemImage: "link")
                 }
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(linkedRows.enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         Button { linkedRowDestination = row.destination } label: {
                             CardPaymentAllocationRowCard(row: row)
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens this linked record for editing")
-                        if index < linkedRows.count - 1 { AppDivider() }
+                        if index < rows.count - 1 { AppDivider() }
                     }
                 }
             }
@@ -1520,20 +1567,21 @@ struct CardDetailView: View {
     }
 
     private var historySection: some View {
-        DisclosureGroup(isExpanded: $isHistoryExpanded) {
-            if historyRows.isEmpty {
+        let rows = historyRows
+        return DisclosureGroup(isExpanded: $isHistoryExpanded) {
+            if rows.isEmpty {
                 AppCard {
                     EmptyStateView(title: "No card history", message: "Charges, payments, cover pots, and card spending will appear here.", systemImage: "clock.arrow.circlepath")
                 }
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(historyRows.enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         Button { linkedRowDestination = row.destination } label: {
                             CardPaymentAllocationRowCard(row: row)
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens this card history record for editing")
-                        if index < historyRows.count - 1 { AppDivider() }
+                        if index < rows.count - 1 { AppDivider() }
                     }
                 }
                 .padding(.top, AppTheme.Spacing.sm)
@@ -1545,6 +1593,10 @@ struct CardDetailView: View {
     }
 
     private var linkedRows: [CardPaymentAllocationRow] {
+        linkedRowsCache.value(for: presentationKey, build: makeLinkedRows)
+    }
+
+    private func makeLinkedRows() -> [CardPaymentAllocationRow] {
         let recurring = store.snapshot.recurringPayments
             .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
             .map { payment in
@@ -1613,6 +1665,10 @@ struct CardDetailView: View {
     }
 
     private var historyRows: [CardPaymentAllocationRow] {
+        historyRowsCache.value(for: presentationKey, build: makeHistoryRows)
+    }
+
+    private func makeHistoryRows() -> [CardPaymentAllocationRow] {
         let recurring = store.snapshot.recurringPayments
             .filter { $0.deletedAt == nil && $0.creditCardId == currentCard.id }
             .map { payment in
@@ -1754,19 +1810,11 @@ struct CardDetailView: View {
     }
 
     private var nextStatementDate: String? {
-        PlannerDerivedData.creditCardNextStatementDate(
-            card: currentCard,
-            snapshot: store.snapshot,
-            asOfDate: store.todayIso
-        )
+        presentation.nextStatementDate
     }
 
     private var statementSummaries: [CreditCardStatementSummary] {
-        PlannerDerivedData.creditCardStatementSummaries(
-            snapshot: store.snapshot,
-            asOfDate: store.todayIso
-        )
-        .filter { $0.cardId == currentCard.id }
+        presentation.statementSummaries
     }
 
     private var activeStatementSummary: CreditCardStatementSummary? {
@@ -1794,22 +1842,11 @@ struct CardDetailView: View {
     }
 
     private var cycleAdjustmentSummary: CreditCardCycleAdjustmentSummary? {
-        PlannerDerivedData.creditCardCycleAdjustmentSummary(
-            card: currentCard,
-            snapshot: store.snapshot,
-            asOfDate: store.todayIso
-        )
+        presentation.cycleAdjustment
     }
 
     private var nextStatementPayment: CreditCardStatementPayment? {
-        PlannerDerivedData.creditCardStatementPayments(
-            card: currentCard,
-            snapshot: store.snapshot,
-            startDate: store.todayIso,
-            endDate: FinanceEngine.addIsoDays(date: store.todayIso, days: 90),
-            asOfDate: store.todayIso
-        )
-        .first
+        presentation.nextPayment
     }
 
     private var displayedStatementDuePence: Int {
@@ -1853,7 +1890,7 @@ struct CardDetailView: View {
 
         items.append(
             .init(
-                label: cardAvailability.actualAvailablePence < 0 ? "Over limit" : "Available",
+                label: cardAvailability.actualAvailablePence < 0 ? "Over limit now" : "Available now",
                 value: MoneyParser.formatPence(abs(cardAvailability.actualAvailablePence)),
                 valueColor: cardAvailability.actualAvailablePence < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success
             )
@@ -1880,11 +1917,11 @@ struct CardDetailView: View {
     }
 
     private var heldCycleReservePence: Int {
-        PlannerDerivedData.creditCardHeldCycleReservePence(card: currentCard, snapshot: store.snapshot, asOfDate: store.todayIso)
+        presentation.heldReservePence
     }
 
     private var linkedPotCoverPence: Int {
-        FinanceEngine.getLinkedCreditCardPotPence(pots: store.snapshot.pots, creditCardId: currentCard.id)
+        presentation.linkedPotCoverPence
     }
 
     private func deleteCard() {

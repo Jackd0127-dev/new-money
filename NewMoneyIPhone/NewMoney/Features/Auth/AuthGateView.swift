@@ -6,7 +6,7 @@ import SwiftUI
 
 enum AuthLaunchPresentationPolicy {
     static let showsLoadingScreens = false
-    static let promptsForCloudDataChoice = false
+    static let promptsForCloudDataChoice = true
 }
 
 struct AuthenticatedRootView: View {
@@ -45,7 +45,16 @@ struct AuthenticatedRootView: View {
             case .syncing:
                 AuthSilentLaunchView()
             case .ready:
-                AppView(store: store)
+                if let conflict = session.syncConflict {
+                    SyncRecoveryView(store: store, session: session, conflict: conflict)
+                } else {
+                    AppView(store: store)
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            if store.saveState != .saved || session.syncStatus != .synced {
+                                PlannerSaveStatusView(store: store, session: session)
+                            }
+                        }
+                }
             case .failed(let message):
                 AuthFailureView(session: session, store: store, message: message)
             }

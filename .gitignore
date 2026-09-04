@@ -1,0 +1,15 @@
+# macOS and personal Xcode state
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Local build and verification outputs
+DerivedData/
+build/
+.build/
+__pycache__/
+*.pyc
+*.xcresult
+*.xcarchive
+*.ipa
+/outputs/

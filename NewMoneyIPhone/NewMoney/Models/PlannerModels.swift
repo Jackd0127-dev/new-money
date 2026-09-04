@@ -764,6 +764,40 @@ struct Debt: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+struct DebtPaymentPotContribution: Codable, Equatable, Sendable {
+    var potId: String
+    var amountPence: Int
+}
+
+struct DebtPaymentComponents: Equatable, Sendable {
+    var principalPence: Int
+    var interestPence: Int
+    var feePence: Int
+
+    var totalPence: Int { principalPence + interestPence + feePence }
+
+    /// Round principal proportionally first, then split the remainder between interest
+    /// and fees. Each retained component is monotonic as the net payment grows, unlike
+    /// largest-remainder allocation. Full-width products retain integer precision.
+    func scaled(to totalPence: Int) -> DebtPaymentComponents {
+        let original = self.totalPence
+        let target = min(original, max(0, totalPence))
+        guard original > 0, target > 0 else {
+            return DebtPaymentComponents(principalPence: 0, interestPence: 0, feePence: 0)
+        }
+        func roundedShare(_ component: Int, of amount: Int, over denominator: Int) -> Int {
+            guard denominator > 0 else { return 0 }
+            let division = UInt64(denominator).dividingFullWidth(UInt64(component).multipliedFullWidth(by: UInt64(amount)))
+            let halfway = UInt64(denominator / 2 + denominator % 2)
+            return Int(division.quotient) + (division.remainder >= halfway ? 1 : 0)
+        }
+        let principal = roundedShare(principalPence, of: target, over: original)
+        let remaining = target - principal
+        let interest = roundedShare(interestPence, of: remaining, over: interestPence + feePence)
+        return DebtPaymentComponents(principalPence: principal, interestPence: interest, feePence: remaining - interest)
+    }
+}
+
 struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var debtId: String
@@ -771,6 +805,10 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     var date: String
     var note: String
     var sourcePotId: String?
+    /// Exact cash sources for new split-pot payments. Missing on legacy records.
+    var potContributions: [DebtPaymentPotContribution]? = nil
+    /// Funding created and immediately spent by a manual Pay now payment.
+    var fundingAllocationId: String? = nil
     var paymentType: DebtPaymentType
     var scheduleItemId: String?
     var principalPaidPence: Int
@@ -790,21 +828,21 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     }
 
     var netAmountPence: Int { max(0, amountPence - effectiveRefundedAmountPence) }
-    var effectivePrincipalPaidPence: Int { proportionalNetComponent(principalPaidPence) }
-    var effectiveInterestPaidPence: Int { proportionalNetComponent(interestPaidPence) }
-    var effectiveFeePaidPence: Int { proportionalNetComponent(feePaidPence) }
+    var effectiveComponents: DebtPaymentComponents {
+        // The gross amount remains authoritative for legacy records with incomplete
+        // component metadata. Allocation follows the engine's fee/interest/principal order.
+        let amount = max(0, amountPence)
+        let fee = min(amount, max(0, feePaidPence))
+        let interest = min(amount - fee, max(0, interestPaidPence))
+        return DebtPaymentComponents(principalPence: amount - fee - interest, interestPence: interest, feePence: fee)
+            .scaled(to: netAmountPence)
+    }
+    var effectivePrincipalPaidPence: Int { effectiveComponents.principalPence }
+    var effectiveInterestPaidPence: Int { effectiveComponents.interestPence }
+    var effectiveFeePaidPence: Int { effectiveComponents.feePence }
     var hasRefund: Bool { effectiveRefundedAmountPence > 0 }
     var isPartiallyRefunded: Bool { hasRefund && netAmountPence > 0 }
     var isRefunded: Bool { hasRefund && netAmountPence == 0 }
-
-    private func proportionalNetComponent(_ componentPence: Int) -> Int {
-        guard amountPence > 0, netAmountPence > 0 else { return 0 }
-        if netAmountPence == amountPence { return max(0, componentPence) }
-        return min(
-            max(0, componentPence),
-            Int((Double(max(0, componentPence)) * Double(netAmountPence) / Double(amountPence)).rounded())
-        )
-    }
 
     init(
         id: String,
@@ -816,6 +854,8 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
         updatedAt: String,
         deletedAt: String?,
         sourcePotId: String? = nil,
+        potContributions: [DebtPaymentPotContribution]? = nil,
+        fundingAllocationId: String? = nil,
         paymentType: DebtPaymentType = .manualPayNow,
         scheduleItemId: String? = nil,
         principalPaidPence: Int? = nil,
@@ -825,7 +865,7 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
         refundedAt: String? = nil,
         refundedAmountPence: Int? = nil
     ) {
-        let amount = max(0, abs(amountPence))
+        let amount = amountPence == .min ? 0 : abs(amountPence)
         let interest = max(0, interestPaidPence)
         let fee = max(0, feePaidPence)
         self.id = id
@@ -834,6 +874,8 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
         self.date = date
         self.note = note
         self.sourcePotId = sourcePotId?.nilIfBlank
+        self.potContributions = potContributions
+        self.fundingAllocationId = fundingAllocationId?.nilIfBlank
         self.paymentType = paymentType
         self.scheduleItemId = scheduleItemId?.nilIfBlank
         self.principalPaidPence = max(0, principalPaidPence ?? max(0, amount - interest - fee))
@@ -848,7 +890,7 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, debtId, amountPence, date, note, sourcePotId, paymentType, scheduleItemId, principalPaidPence, interestPaidPence, feePaidPence, recalculationMode, refundedAt, refundedAmountPence, createdAt, updatedAt, deletedAt
+        case id, debtId, amountPence, date, note, sourcePotId, potContributions, fundingAllocationId, paymentType, scheduleItemId, principalPaidPence, interestPaidPence, feePaidPence, recalculationMode, refundedAt, refundedAmountPence, createdAt, updatedAt, deletedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -864,6 +906,8 @@ struct DebtPayment: Codable, Equatable, Identifiable, Sendable {
             updatedAt: try container.decodeIfPresent(String.self, forKey: .updatedAt) ?? DateUtilities.nowIsoString(),
             deletedAt: try container.decodeIfPresent(String.self, forKey: .deletedAt),
             sourcePotId: try container.decodeIfPresent(String.self, forKey: .sourcePotId),
+            potContributions: try container.decodeIfPresent([DebtPaymentPotContribution].self, forKey: .potContributions),
+            fundingAllocationId: try container.decodeIfPresent(String.self, forKey: .fundingAllocationId),
             paymentType: try container.decodeIfPresent(DebtPaymentType.self, forKey: .paymentType) ?? .manualPayNow,
             scheduleItemId: try container.decodeIfPresent(String.self, forKey: .scheduleItemId),
             principalPaidPence: try container.decodeIfPresent(Int.self, forKey: .principalPaidPence),

@@ -83,9 +83,7 @@ enum PersonalJuly2026ScenarioAudit {
             costs.currentMoneyLeftPence == PersonalJuly2026ExpectedResults.baselineMoneyLeftPence ? "Fixture problem resolved: final balances had previously been seeded without completed funding history; projected Money Left remains a distinct metric." : "Production calculation problem or mixed result: completed funding history did not restore Home/current Money Left.", "",
             "## Out-of-scope policy questions", "- Insurance pot target behaviour", "- Barclays statement recurrence", "- Aqua opening-balance overlap", "- Home All Outgoings presentation", "- Jaja due-date production repair", "- UI screenshot coverage", ""]
 
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let output = root.appendingPathComponent("outputs/personal_july_2026", isDirectory: true)
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let output = try TestArtifacts.directory(for: "personal_july_2026")
         let destination = output.appendingPathComponent("PersonalJuly2026ScenarioAudit-\(date).md")
         try lines.joined(separator: "\n").write(to: destination, atomically: true, encoding: .utf8)
         return destination

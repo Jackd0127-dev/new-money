@@ -11,43 +11,34 @@ struct AISettingsView: View {
             toolbarMode: .none
         ) {
             SettingsPanel(
-                title: "Assistant",
-                subtitle: "Choose a provider and tailor its guidance.",
+                title: "On-device assistant",
+                subtitle: "Answers use your saved planner data.",
                 systemImage: "sparkles"
             ) {
-                Picker("Provider", selection: providerBinding) {
-                    ForEach(AIProvider.allCases) { provider in
-                        Text(provider.rawValue.capitalized).tag(provider)
+                Text("No online AI provider is connected. The assistant can explain supported totals, but cannot change your planner.")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+
+                SelectionField(title: "Response style", value: responseStyle.label, systemImage: "text.bubble") {
+                    ForEach(AssistantResponseStyle.allCases) { style in
+                        Button(style.label) {
+                            var settings = store.snapshot.settings
+                            settings.assistantResponseStyle = style
+                            store.updateSettings(settings)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
 
-                TextField("Assistant instructions", text: instructionsBinding, axis: .vertical)
-                    .lineLimit(5...10)
-                    .textFieldStyle(AppTextFieldStyle())
+                Text("Provider preferences and custom instructions remain saved, but are not used by local replies.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
             }
         }
         .navigationTopDividerHidden()
         .accessibilityIdentifier("ai-settings-screen")
     }
 
-    private var providerBinding: Binding<AIProvider> {
-        Binding {
-            store.snapshot.settings.aiProvider
-        } set: { provider in
-            var settings = store.snapshot.settings
-            settings.aiProvider = provider
-            store.updateSettings(settings)
-        }
-    }
-
-    private var instructionsBinding: Binding<String> {
-        Binding {
-            store.snapshot.settings.aiInstructions
-        } set: { instructions in
-            var settings = store.snapshot.settings
-            settings.aiInstructions = instructions
-            store.updateSettings(settings)
-        }
+    private var responseStyle: AssistantResponseStyle {
+        store.snapshot.settings.assistantResponseStyle ?? .straightToThePoint
     }
 }

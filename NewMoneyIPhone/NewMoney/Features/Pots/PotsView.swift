@@ -498,7 +498,7 @@ private struct PotBalanceLineGraph: View {
                     .opacity(revealOpacity)
 
                 if let finalPoint = data.points.last {
-                    PotBalancePulseMarker(color: lineColor)
+                    PotBalanceEndpointMarker(color: lineColor)
                         .position(pointPosition(index: data.points.count - 1, balancePence: finalPoint.balancePence, size: proxy.size, minValue: minValue, maxValue: maxValue))
                         .opacity(drawProgress > 0.92 ? 1 : 0)
                         .opacity(revealOpacity)
@@ -668,17 +668,14 @@ private struct PotBalanceAreaShape: Shape {
     }
 }
 
-private struct PotBalancePulseMarker: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+private struct PotBalanceEndpointMarker: View {
     var color: Color
-    @State private var pulse = false
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(color.opacity(0.16))
-                .frame(width: pulse ? 38 : 22, height: pulse ? 38 : 22)
-                .opacity(pulse ? 0.15 : 0.8)
+                .frame(width: 22, height: 22)
 
             Circle()
                 .fill(color)
@@ -686,19 +683,7 @@ private struct PotBalancePulseMarker: View {
                 .overlay(Circle().stroke(AppTheme.Colors.primaryText.opacity(0.72), lineWidth: 2))
                 .shadow(color: color.opacity(0.72), radius: 10, y: 4)
         }
-        .onAppear {
-            startPulse()
-        }
-    }
-
-    private func startPulse() {
-        guard !reduceMotion else {
-            pulse = false
-            return
-        }
-        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-            pulse = true
-        }
+        .accessibilityHidden(true)
     }
 }
 

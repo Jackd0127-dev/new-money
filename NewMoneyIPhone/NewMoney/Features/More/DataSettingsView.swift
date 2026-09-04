@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DataSettingsView: View {
+    @EnvironmentObject private var authSession: FirebaseAuthSession
     @ObservedObject var store: PlannerStore
     @State private var showResetAlert = false
 
@@ -11,14 +12,16 @@ struct DataSettingsView: View {
             navigationMode: .inline,
             toolbarMode: .none
         ) {
+            PlannerSaveStatusView(store: store, session: authSession)
+
             SettingsPanel(
-                title: "Local planner data",
-                subtitle: "Clear this iPhone without deleting your login.",
+                title: "Planner data",
+                subtitle: "Reset the active planner without deleting your login.",
                 systemImage: "externaldrive.badge.xmark",
                 tint: AppTheme.Colors.danger,
                 isDestructive: true
             ) {
-                Text("Resetting local data clears paychecks, pots, bills, cards, debts, spending, history, date simulation, and saved settings from this iPhone.")
+                Text("Resetting clears paychecks, pots, bills, cards, debts, spending, history, and settings in the active planner. This reset also syncs to its cloud copy.")
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
 
@@ -26,7 +29,7 @@ struct DataSettingsView: View {
                     showResetAlert = true
                 } label: {
                     CompactMenuRow(
-                        title: "Reset local data",
+                        title: "Reset active planner",
                         systemImage: "trash",
                         isDestructive: true,
                         showsDisclosure: false
@@ -36,13 +39,13 @@ struct DataSettingsView: View {
             }
         }
         .navigationTopDividerHidden()
-        .alert("Reset local planner?", isPresented: $showResetAlert) {
+        .alert("Reset active planner?", isPresented: $showResetAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {
                 store.resetLocalData()
             }
         } message: {
-            Text("This clears local iPhone planner inputs and returns the app to its default data.")
+            Text("This clears the active planner on this iPhone and syncs the reset to the cloud. Your login and other planner accounts are kept.")
         }
         .accessibilityIdentifier("data-settings-screen")
     }

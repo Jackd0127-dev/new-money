@@ -11,6 +11,12 @@ enum AssistantLocalResponseBuilder {
 
         if isGreeting(trimmedPrompt) {
             response = "Hi. Ask me about your money left, income, payday, bills, cards, or debts."
+        } else if matches(trimmedPrompt, phrases: ["credit card", "card balance", "cards", "credit"]) {
+            response = cardsResponse(snapshot: snapshot)
+        } else if matches(trimmedPrompt, phrases: ["debt", "loan", "owe", "repayment"]) {
+            response = debtsResponse(snapshot: snapshot)
+        } else if matches(trimmedPrompt, phrases: ["bill", "subscription", "direct debit"]) {
+            response = billsResponse(snapshot: snapshot)
         } else if matches(trimmedPrompt, phrases: ["money left", "spendable", "balance", "how much money", "cash"]) {
             let currentMoney = PlannerDerivedData.currentTotalMoneyPence(
                 snapshot: snapshot,
@@ -19,19 +25,13 @@ enum AssistantLocalResponseBuilder {
             response = "Your current money total is \(MoneyParser.formatPence(currentMoney))."
         } else if matches(trimmedPrompt, phrases: ["income", "payday", "pay check", "paycheck", "paid"]) {
             response = incomeResponse(for: selectedPayPeriod)
-        } else if matches(trimmedPrompt, phrases: ["bill", "subscription", "direct debit"]) {
-            response = billsResponse(snapshot: snapshot)
-        } else if matches(trimmedPrompt, phrases: ["credit card", "card balance", "cards", "credit"]) {
-            response = cardsResponse(snapshot: snapshot)
-        } else if matches(trimmedPrompt, phrases: ["debt", "loan", "owe", "repayment"]) {
-            response = debtsResponse(snapshot: snapshot)
         } else {
             let currentMoney = PlannerDerivedData.currentTotalMoneyPence(
                 snapshot: snapshot,
                 payPeriod: selectedPayPeriod
             )
             let activeBills = snapshot.recurringPayments.count { $0.active && $0.deletedAt == nil }
-            response = "I received your message. From your planner, you currently have \(MoneyParser.formatPence(currentMoney)) total money and \(activeBills) active bill\(activeBills == 1 ? "" : "s"). Ask me about money left, income, payday, bills, cards, or debts for a more specific answer."
+            response = "I can answer only about the saved planner. From your planner, you currently have \(MoneyParser.formatPence(currentMoney)) total money and \(activeBills) active bill\(activeBills == 1 ? "" : "s"). Ask me about money left, income, payday, bills, cards, or debts for a more specific answer."
         }
 
         return applyResponseStyle(response, style: snapshot.settings.assistantResponseStyle ?? .straightToThePoint)
@@ -85,11 +85,11 @@ enum AssistantLocalResponseBuilder {
         case .affirmative:
             "Absolutely. \(response)"
         case .enthusiastic:
-            "Good question — \(response)"
+            "Good question. \(response)"
         case .friendly:
-            "Of course — \(response)"
+            "Of course. \(response)"
         case .flirty:
-            "I've got you — \(response)"
+            "I've got you. \(response)"
         }
     }
 }

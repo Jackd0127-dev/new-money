@@ -369,6 +369,19 @@ final class AppShellNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testPotsRenderNextStatementTargetsWithoutChecklistStatusMixing() async {
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.complexStressSnapshot))
+        await store.load()
+
+        attachRenderedView(
+            NavigationStack {
+                PotsView(store: store, navigationMode: .inline, toolbarMode: .none)
+            },
+            name: "pots-next-statement-targets"
+        )
+    }
+
+    @MainActor
     private func attachRenderedView<Content: View>(
         _ view: Content,
         name: String,
@@ -434,7 +447,7 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertEqual(AssistantMenuPresentationPolicy.toolbarTitle, "Edit")
         XCTAssertEqual(AssistantMenuPresentationPolicy.presentation, "nativeSwiftUIMenu")
         XCTAssertEqual(AssistantMenuPresentationPolicy.actions, ["Customise assistant", "Rename"])
-        XCTAssertEqual(AssistantMenuPresentationPolicy.customiseAssistantRoute, "instructionsScreen")
+        XCTAssertEqual(AssistantMenuPresentationPolicy.customiseAssistantRoute, "preferencesScreen")
         XCTAssertEqual(AssistantMenuPresentationPolicy.renamePresentation, "textFieldAlert")
         XCTAssertFalse(AssistantMenuPresentationPolicy.instructionsUsesPlaceholderToolbar)
         XCTAssertEqual(AssistantMenuPresentationPolicy.focusedMessageBottomClearance, 132)
@@ -505,6 +518,10 @@ final class AppShellNavigationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(FloatingAssistantPolicy.minimumTapTarget, 44)
         XCTAssertGreaterThanOrEqual(CreditLayoutPolicy.scheduleHeaderMinimumTapTarget, 44)
         XCTAssertGreaterThanOrEqual(CreditLayoutPolicy.ledgerRowMinimumTapTarget, 44)
+        XCTAssertEqual(CreditLayoutPolicy.directDebitsDisclosureId, "credit-direct-debits-disclosure")
+        XCTAssertEqual(CreditLayoutPolicy.directDebitsContentId, "credit-direct-debits-content")
+        XCTAssertEqual(CreditLayoutPolicy.nextStatementsDisclosureId, "credit-next-statements-disclosure")
+        XCTAssertEqual(CreditLayoutPolicy.nextStatementsContentId, "credit-next-statements-content")
         XCTAssertTrue(CreditLayoutPolicy.previousStatementsStartCollapsed)
         XCTAssertTrue(CardsLayoutPolicy.linkedRowsUseFlatPresentation)
         XCTAssertGreaterThanOrEqual(CardsLayoutPolicy.linkedRowMinimumTapTarget, 44)
@@ -1190,7 +1207,7 @@ final class AppThemePresetTests: XCTestCase {
         XCTAssertEqual(AppThemePreset.classic.palette.cardEyebrowHex, "#D9C3AB")
         XCTAssertEqual(AppThemePreset.warmLight.palette.cardEyebrowHex, "#69665F")
         XCTAssertEqual(AppThemePreset.sagePaper.palette.cardEyebrowHex, "#66695F")
-        XCTAssertEqual(AppThemePreset.navyEmerald.palette.cardEyebrowHex, "#60717A")
+        XCTAssertEqual(AppThemePreset.navyEmerald.palette.cardEyebrowHex, "#52636C")
     }
 
     func testSelectableColorHexesFollowSelectedTheme() {

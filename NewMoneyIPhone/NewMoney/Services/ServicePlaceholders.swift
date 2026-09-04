@@ -89,6 +89,21 @@ protocol CloudSyncService {
     func pullAccountCollection(for user: AuthUser) async throws -> CloudPlannerAccountCollectionRecord?
     func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws
     func resetAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws
+    func readAuthoritative(for user: AuthUser) async throws -> PlannerCloudRead
+    func compareAndSet(_ pending: PlannerPendingUpload, for user: AuthUser) async throws -> PlannerCloudWriteResult
+}
+
+extension CloudSyncService {
+    // Compatibility for existing test doubles. Production implements an explicit server read.
+    func readAuthoritative(for user: AuthUser) async throws -> PlannerCloudRead {
+        guard let record = try await pullAccountCollection(for: user) else { return .missing }
+        return try PlannerCloudRead.collection(record.collection)
+    }
+
+    func compareAndSet(_ pending: PlannerPendingUpload, for user: AuthUser) async throws -> PlannerCloudWriteResult {
+        // Never degrade a conditional write to the old unconditional upload API.
+        throw PlannerSyncRecoveryError.conditionalWritesUnavailable
+    }
 }
 
 struct PlaceholderCloudSyncService: CloudSyncService {

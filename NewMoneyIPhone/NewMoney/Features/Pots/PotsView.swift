@@ -159,18 +159,15 @@ struct PotsView: View {
                 }
             } else {
                 ForEach(filteredRows) { row in
-                    Button {
-                        selectedPot = row.pot
-                    } label: {
-                        PotRow(
-                            pot: row.pot,
-                            linkedLabel: row.linkedLabel,
-                            progress: row.progress,
-                            pendingFundingContext: row.pendingFundingContext,
-                            today: presentationContext?.todayIso ?? store.todayIso
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    PotRow(
+                        pot: row.pot,
+                        linkedLabel: row.linkedLabel,
+                        progress: row.progress,
+                        pendingFundingContext: row.pendingFundingContext,
+                        selectedPayPeriod: presentationContext?.selectedPayPeriod ?? store.selectedPayPeriod,
+                        today: presentationContext?.todayIso ?? store.todayIso,
+                        onOpen: { selectedPot = row.pot }
+                    )
                 }
             }
         }
@@ -208,23 +205,48 @@ struct PotsView: View {
             today: context.todayIso
         )
 
+        let rows = activePots.map { pot in
+            PotTabPresentationRow(
+                pot: pot,
+                linkedLabel: linkedTargetLabel(for: pot, in: context.snapshot),
+                progress: PlannerDerivedData.potProgress(
+                    pot: pot,
+                    snapshot: context.snapshot,
+                    today: context.todayIso
+                ),
+                pendingFundingContext: pendingFundingContexts[pot.id, default: .none]
+            )
+        }
+        let sortedRows = rows.enumerated().sorted { lhs, rhs in
+            let lhsRank = potPresentationSortRank(lhs.element.progress)
+            let rhsRank = potPresentationSortRank(rhs.element.progress)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+
+            let lhsDue = lhs.element.progress.linkedCardPayments.first?.dueIso
+                ?? lhs.element.progress.dueIso
+                ?? "9999-12-31"
+            let rhsDue = rhs.element.progress.linkedCardPayments.first?.dueIso
+                ?? rhs.element.progress.dueIso
+                ?? "9999-12-31"
+            if lhsDue != rhsDue { return lhsDue < rhsDue }
+
+            let nameOrder = lhs.element.pot.name.localizedCaseInsensitiveCompare(rhs.element.pot.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return lhs.offset < rhs.offset
+        }.map { $0.element }
+
         return PotsTabPresentation(
             activePots: activePots,
             totalSavedPence: activePots.reduce(0) { $0 + $1.balancePence },
-            rows: activePots.map { pot in
-                PotTabPresentationRow(
-                    pot: pot,
-                    linkedLabel: linkedTargetLabel(for: pot, in: context.snapshot),
-                    progress: PlannerDerivedData.potProgress(
-                        pot: pot,
-                        snapshot: context.snapshot,
-                        today: context.todayIso
-                    ),
-                    pendingFundingContext: pendingFundingContexts[pot.id, default: .none]
-                )
-            }
+            rows: sortedRows
         )
     }
+}
+
+private func potPresentationSortRank(_ progress: PotProgress) -> Int {
+    if progress.targetPence > 0 && progress.shortfallPence > 0 { return 0 }
+    if progress.targetPence > 0 { return 1 }
+    return 2
 }
 
 private struct FilterChip: View {
@@ -498,7 +520,7 @@ private struct PotBalanceLineGraph: View {
                     .opacity(revealOpacity)
 
                 if let finalPoint = data.points.last {
-                    PotBalancePulseMarker(color: lineColor)
+                    PotBalanceEndpointMarker(color: lineColor)
                         .position(pointPosition(index: data.points.count - 1, balancePence: finalPoint.balancePence, size: proxy.size, minValue: minValue, maxValue: maxValue))
                         .opacity(drawProgress > 0.92 ? 1 : 0)
                         .opacity(revealOpacity)
@@ -668,17 +690,14 @@ private struct PotBalanceAreaShape: Shape {
     }
 }
 
-private struct PotBalancePulseMarker: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+private struct PotBalanceEndpointMarker: View {
     var color: Color
-    @State private var pulse = false
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(color.opacity(0.16))
-                .frame(width: pulse ? 38 : 22, height: pulse ? 38 : 22)
-                .opacity(pulse ? 0.15 : 0.8)
+                .frame(width: 22, height: 22)
 
             Circle()
                 .fill(color)
@@ -686,19 +705,7 @@ private struct PotBalancePulseMarker: View {
                 .overlay(Circle().stroke(AppTheme.Colors.primaryText.opacity(0.72), lineWidth: 2))
                 .shadow(color: color.opacity(0.72), radius: 10, y: 4)
         }
-        .onAppear {
-            startPulse()
-        }
-    }
-
-    private func startPulse() {
-        guard !reduceMotion else {
-            pulse = false
-            return
-        }
-        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-            pulse = true
-        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -989,42 +996,60 @@ private struct PotRow: View {
     var linkedLabel: String?
     var progress: PotProgress
     var pendingFundingContext: PotPendingFundingContext
+    var selectedPayPeriod: PayPeriod?
     var today: String
+    var onOpen: (() -> Void)?
 
     var body: some View {
         AppCard {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                HStack(spacing: AppTheme.Spacing.md) {
-                    Circle()
-                        .fill(Color(hex: pot.color))
-                        .frame(width: 12, height: 12)
-                        .overlay(
-                            Circle()
-                                .stroke(pot.color.uppercased() == "#FFFFFF" ? AppTheme.Colors.border : .clear, lineWidth: 1)
-                        )
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(pot.name)
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.Colors.primaryText)
-                        Text(rowDetail)
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.secondaryText)
-                            .lineLimit(1)
+                Group {
+                    if let onOpen {
+                        Button(action: onOpen) {
+                            header
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        header
                     }
-                    Spacer()
-                    Text(MoneyParser.formatPence(pot.balancePence))
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(AppTheme.Colors.primaryOrange)
                 }
 
                 PotProgressBlock(
                     progress: progress,
                     pendingFundingContext: pendingFundingContext,
                     balancePence: pot.balancePence,
+                    isLinkedCreditCard: pot.linkedCreditCardId != nil,
+                    selectedPayPeriod: selectedPayPeriod,
                     today: today
                 )
             }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            Circle()
+                .fill(Color(hex: pot.color))
+                .frame(width: 12, height: 12)
+                .overlay(
+                    Circle()
+                        .stroke(pot.color.uppercased() == "#FFFFFF" ? AppTheme.Colors.border : .clear, lineWidth: 1)
+                )
+            VStack(alignment: .leading, spacing: 6) {
+                Text(pot.name)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.Colors.primaryText)
+                Text(rowDetail)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text(MoneyParser.formatPence(pot.balancePence))
+                .font(.headline.weight(.bold))
+                .foregroundStyle(AppTheme.Colors.primaryOrange)
+        }
+        .contentShape(Rectangle())
     }
 
     private var rowDetail: String {
@@ -1039,6 +1064,8 @@ private struct PotProgressBlock: View {
     var progress: PotProgress
     var pendingFundingContext: PotPendingFundingContext
     var balancePence: Int
+    var isLinkedCreditCard: Bool
+    var selectedPayPeriod: PayPeriod?
     var today: String
 
     var body: some View {
@@ -1065,10 +1092,15 @@ private struct PotProgressBlock: View {
                     .foregroundStyle(progress.shortfallPence > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success)
                     .lineLimit(1)
 
-                pendingFundingContextLine
+                if !isLinkedCreditCard {
+                    pendingFundingContextLine
+                }
 
                 if !progress.linkedCardPayments.isEmpty {
-                    LinkedCardPaymentsBlock(payments: progress.linkedCardPayments)
+                    LinkedCardPaymentsBlock(
+                        payments: progress.linkedCardPayments,
+                        selectedPayPeriod: selectedPayPeriod
+                    )
                 } else {
                     if let dueLabel = potDueLabel(progress: progress, today: today) {
                         Text(dueLabel)
@@ -1085,17 +1117,23 @@ private struct PotProgressBlock: View {
                     }
                 }
             } else {
-                HStack {
-                    Text("No target")
+                if isLinkedCreditCard {
+                    Text("No statement target yet")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.Colors.secondaryText)
-                    Spacer()
-                    Text("Balance only")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
-                }
+                } else {
+                    HStack {
+                        Text("No target")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                        Spacer()
+                        Text("Balance only")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.tertiaryText)
+                    }
 
-                pendingFundingContextLine
+                    pendingFundingContextLine
+                }
             }
 
             if !progress.sourceLabels.isEmpty {
@@ -1139,7 +1177,9 @@ private struct PotProgressBlock: View {
     }
 
     private var pendingFundingContextText: String? {
-        guard pendingFundingContext.hasPendingChecklistFunding else { return nil }
+        guard pendingFundingContext.hasPendingChecklistFunding,
+              progress.targetPence == 0 || progress.shortfallPence > 0
+        else { return nil }
 
         if balancePence < 0 {
             return "Temporary until funding is ticked."
@@ -1159,29 +1199,71 @@ private struct PotProgressBlock: View {
 
 private struct LinkedCardPaymentsBlock: View {
     var payments: [LinkedCardPaymentDue]
+    var selectedPayPeriod: PayPeriod?
+    @State private var showsLaterPayments = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let cardName = payments.first?.cardName {
-                Text("Upcoming \(cardName) payments")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.secondaryText)
+            if let targetPayment = payments.first {
+                HStack(spacing: 6) {
+                    Text("Target payment")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
+                    if let timingLabel = paymentTimingLabel(targetPayment.dueIso, payPeriod: selectedPayPeriod) {
+                        Text(timingLabel)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.Colors.secondaryText)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(AppTheme.Colors.elevatedSurface)
+                            .clipShape(Capsule())
+                    }
+                }
+
+                paymentRow(targetPayment)
             }
 
-            ForEach(Array(payments.enumerated()), id: \.offset) { _, payment in
-                HStack(spacing: 6) {
-                    Text(shortDayMonth(payment.dueIso))
+            if payments.count > 1 {
+                DisclosureGroup(isExpanded: $showsLaterPayments) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(payments.dropFirst().enumerated()), id: \.offset) { _, payment in
+                            paymentRow(payment)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("Later payments · \(payments.count - 1)")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.primaryText)
-                    Text("- \(MoneyParser.formatPence(payment.amountPence)) due")
-                        .font(.caption2)
-                        .foregroundStyle(AppTheme.Colors.tertiaryText)
-                    Spacer(minLength: 0)
+                        .foregroundStyle(AppTheme.Colors.secondaryText)
                 }
-                .lineLimit(1)
+                .tint(AppTheme.Colors.secondaryText)
             }
         }
     }
+
+    private func paymentRow(_ payment: LinkedCardPaymentDue) -> some View {
+        HStack(spacing: 6) {
+            Text(shortDayMonth(payment.dueIso))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.primaryText)
+            Text("- \(MoneyParser.formatPence(payment.amountPence)) due")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.Colors.tertiaryText)
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+    }
+}
+
+private func paymentTimingLabel(_ dueIso: String, payPeriod: PayPeriod?) -> String? {
+    guard let payPeriod else { return nil }
+    if dueIso > payPeriod.endDate {
+        return "Next period"
+    }
+    if dueIso < payPeriod.startDate {
+        return "Earlier period"
+    }
+    return nil
 }
 
 struct PotFormView: View {
@@ -1355,6 +1437,8 @@ struct PotHistorySheetView: View {
             _ = store.deleteManualPotAllocation(id: id)
         case .transaction(let id):
             store.deletePotHistoryTransaction(id: id)
+        case .transfer(let id):
+            _ = store.deletePotBankTransfer(id: id)
         }
     }
 
@@ -1382,17 +1466,22 @@ struct PotHistorySheetView: View {
             }
 
         let transactionRows = store.snapshot.transactions
-            .filter { $0.deletedAt == nil && $0.type == .allocation && $0.potId != nil }
+            .filter {
+                $0.deletedAt == nil && $0.potId != nil &&
+                ($0.type == .allocation || $0.potBankTransferDirection == .bankToPot)
+            }
             .compactMap { transaction -> PotHistoryRow? in
                 guard let potId = transaction.potId, let pot = pot(for: potId) else { return nil }
                 return PotHistoryRow(
                     id: transaction.id,
                     potName: pot.name,
                     date: transaction.date,
-                    detail: transaction.note.potTrimmed.isEmpty ? "Pot top-up" : transaction.note,
+                    detail: transaction.note.potTrimmed.isEmpty
+                        ? (transaction.type == .transfer ? "Transfer from bank" : "Pot top-up")
+                        : transaction.note,
                     amountPence: transaction.amountPence,
                     kind: .topUp,
-                    source: .transaction(transaction.id)
+                    source: transaction.type == .transfer ? .transfer(transaction.id) : .transaction(transaction.id)
                 )
             }
 
@@ -1401,17 +1490,22 @@ struct PotHistorySheetView: View {
 
     private var paymentRows: [PotHistoryRow] {
         store.snapshot.transactions
-            .filter { $0.deletedAt == nil && $0.type == .spending && $0.potId != nil }
+            .filter {
+                $0.deletedAt == nil && $0.potId != nil &&
+                ($0.type == .spending || $0.potBankTransferDirection == .potToBank)
+            }
             .compactMap { transaction -> PotHistoryRow? in
                 guard let potId = transaction.potId, let pot = pot(for: potId) else { return nil }
                 return PotHistoryRow(
                     id: transaction.id,
                     potName: pot.name,
                     date: transaction.date,
-                    detail: transaction.note.potTrimmed.isEmpty ? "Recorded payment" : transaction.note,
+                    detail: transaction.note.potTrimmed.isEmpty
+                        ? (transaction.type == .transfer ? "Transfer to bank" : "Recorded payment")
+                        : transaction.note,
                     amountPence: transaction.netAmountPence,
                     kind: .payment,
-                    source: .transaction(transaction.id)
+                    source: transaction.type == .transfer ? .transfer(transaction.id) : .transaction(transaction.id)
                 )
             }
             .sorted(by: sortRows)
@@ -1528,12 +1622,13 @@ private enum PotHistoryKind {
 private enum PotHistoryRowSource {
     case allocation(id: String, canDelete: Bool)
     case transaction(String)
+    case transfer(String)
 
     var isDeletable: Bool {
         switch self {
         case .allocation(_, let canDelete):
             canDelete
-        case .transaction:
+        case .transaction, .transfer:
             true
         }
     }
@@ -1607,6 +1702,7 @@ private struct PotDetailView: View {
     @State private var allocation = ""
     @State private var isEditingSetup = false
     @State private var isDeleteConfirmationPresented = false
+    @State private var isTransferPresented = false
 
     var body: some View {
         NavigationStack {
@@ -1621,7 +1717,9 @@ private struct PotDetailView: View {
                             payPeriod: store.selectedPayPeriod,
                             today: store.todayIso
                         )[latestPot.id, default: .none],
-                        today: store.todayIso
+                        selectedPayPeriod: store.selectedPayPeriod,
+                        today: store.todayIso,
+                        onOpen: nil
                     )
                     AppCard {
                         SectionTitle("Move money")
@@ -1632,6 +1730,9 @@ private struct PotDetailView: View {
                             if store.addPotAllocation(potId: pot.id, amountPence: amountPence) {
                                 allocation = ""
                             }
+                        }
+                        SecondaryButton(title: "Transfer with bank", systemImage: "arrow.left.arrow.right") {
+                            isTransferPresented = true
                         }
                     }
                     SecondaryButton(title: "Delete pot", systemImage: "trash", role: .destructive) {
@@ -1668,6 +1769,11 @@ private struct PotDetailView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Pots with existing history are hidden instead so old records stay intact.")
+            }
+            .sheet(isPresented: $isTransferPresented) {
+                NavigationStack {
+                    PotBankTransferView(store: store, potId: latestPot.id)
+                }
             }
         }
     }

@@ -32,15 +32,27 @@ final class FirebaseAuthSession: ObservableObject {
     @Published private(set) var phoneAuthDebugMessage: String?
 
     private let authService: AuthService
-    private let cloudSyncService: CloudSyncService
-    private var lastUploadedSignature: String?
+    @Published private(set) var syncStatus: PlannerSyncStatus = .savedLocally
+    @Published private(set) var syncConflict: PlannerSyncConflict?
+
+    private let syncCoordinator: PlannerSyncCoordinator
+    private let isFixtureSession: Bool
+    private var syncGeneration = 0
+    private var syncUserID: String?
+    private var syncTask: Task<Void, Never>?
+    private var syncRequested = false
+    private var syncActionID: UUID?
+    private var isSyncActionActive: Bool { syncActionID != nil }
 
     init(
         authService: AuthService = FirebaseAuthService(),
-        cloudSyncService: CloudSyncService = FirebaseCloudSyncService()
+        cloudSyncService: CloudSyncService = FirebaseCloudSyncService(),
+        syncRecoveryRepository: PlannerSyncRecoveryRepository = FilePlannerSyncRecoveryRepository(),
+        isFixtureSession: Bool = PlannerLaunchProfile.isUsingFixture()
     ) {
         self.authService = authService
-        self.cloudSyncService = cloudSyncService
+        self.syncCoordinator = PlannerSyncCoordinator(service: cloudSyncService, recovery: syncRecoveryRepository)
+        self.isFixtureSession = isFixtureSession
     }
 
     func start(store: PlannerStore) async {
@@ -126,26 +138,32 @@ final class FirebaseAuthSession: ObservableObject {
     }
 
     func uploadLatestPlannerData(from store: PlannerStore) async {
-        guard case let .ready(user) = state else { return }
-        let collection = store.accountCollectionForCloudUpload()
-        guard let signature = try? PlannerCloudPayload.signature(for: collection),
-              signature != lastUploadedSignature else { return }
+        guard !isFixtureSession, case let .ready(user) = state else { return }
+        syncRequested = true
+        guard !isSyncActionActive else { return }
+        activateSyncIfNeeded(for: user)
+        await drainSync(store: store, user: user)
+    }
 
-        do {
-            cloudStatus = "Uploading"
-            try await cloudSyncService.pushAccountCollection(collection, for: user)
-            lastUploadedSignature = signature
-            cloudStatus = "Synced"
-        } catch {
-            cloudStatus = "Sync failed"
-            errorMessage = userFacingMessage(for: error)
-        }
+    func retryPlannerSync(store: PlannerStore) async {
+        await uploadLatestPlannerData(from: store)
+    }
+
+    func chooseLocalSyncConflict(store: PlannerStore) async {
+        await resolveSyncConflict(useLocal: true, store: store)
+    }
+
+    func chooseCloudSyncConflict(store: PlannerStore) async {
+        await resolveSyncConflict(useLocal: false, store: store)
     }
 
     func signOut() async {
         await performWorkingAction {
+            let actionID = beginSyncAction()
+            defer { finishSyncAction(actionID) }
+            _ = await suspendSync()
             try await authService.signOut()
-            lastUploadedSignature = nil
+            syncConflict = nil
             cloudStatus = "Signed out"
             state = .signedOut
         }
@@ -153,9 +171,12 @@ final class FirebaseAuthSession: ObservableObject {
 
     func deleteAccount() async {
         await performWorkingAction {
+            let actionID = beginSyncAction()
+            defer { finishSyncAction(actionID) }
+            _ = await suspendSync()
             let idToken = try await authService.idToken(forceRefresh: true)
             try await authService.deleteAccount(idToken: idToken)
-            lastUploadedSignature = nil
+            syncConflict = nil
             cloudStatus = "Account deleted"
             state = .signedOut
         }
@@ -163,15 +184,28 @@ final class FirebaseAuthSession: ObservableObject {
 
     func resetPlannerData(store: PlannerStore) async {
         await performWorkingAction {
+            guard !isFixtureSession else { throw PlannerSyncRecoveryError.fixtureCloudSyncDisabled }
             guard case let .ready(user) = state else {
                 throw FirebaseNativeServiceError.missingCurrentUser
             }
 
+            let actionID = beginSyncAction()
+            defer { finishSyncAction(actionID) }
             cloudStatus = "Resetting data"
+            let suspension = await suspendSync()
+            guard suspension == syncGeneration else { return }
+            activateSyncIfNeeded(for: user)
+            let token = syncGeneration
             let resetCollection = PlannerAccountCollection.singleAccount(snapshot: DefaultData.emptySnapshot)
-            try await cloudSyncService.resetAccountCollection(resetCollection, for: user)
-            let savedCollection = try await store.resetAllPlannerDataKeepingSignedInAccount(to: resetCollection)
-            lastUploadedSignature = try? PlannerCloudPayload.signature(for: savedCollection)
+            let cloud = try await syncCoordinator.reset(to: resetCollection, user: user)
+            guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+            _ = try await store.resetAllPlannerDataKeepingSignedInAccount(to: resetCollection)
+            guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+            try await syncCoordinator.acknowledgeDownload(originalCollection: resetCollection, cloud: cloud, user: user)
+            guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+            syncConflict = nil
+            syncRequested = false
+            setSyncStatus(.synced)
             cloudStatus = "Data reset"
             state = .ready(user)
         }
@@ -204,48 +238,194 @@ final class FirebaseAuthSession: ObservableObject {
             return
         }
 
-        state = .syncing(user, "Resolving cloud sync")
+        let actionID = beginSyncAction()
+        defer { finishSyncAction(actionID) }
         cloudStatus = "Checking cloud"
+        let suspension = await suspendSync()
+        guard suspension == syncGeneration else { return }
+        activateSyncIfNeeded(for: user)
+        let token = syncGeneration
+        state = .syncing(user, "Resolving cloud sync")
         await store.load()
-
+        guard token == syncGeneration else { return }
+        guard store.loadError == nil else {
+            state = .failed(store.loadError ?? "Unable to load local planner data.")
+            return
+        }
+        if isFixtureSession {
+            // Fixtures never adopt, consume or update real cloud/recovery state, even for an already signed-in user.
+            syncConflict = nil
+            syncRequested = false
+            setSyncStatus(.fixture)
+            state = .ready(user)
+            return
+        }
         do {
-            let cloud = try await cloudSyncService.pullAccountCollection(for: user)
-            let local = store.accountCollectionForCloudUpload()
-            let decision = PlannerCloudSyncResolver.decision(local: local, cloud: cloud)
-
-            switch decision {
-            case .uploadLocal:
-                cloudStatus = "Uploading iPhone data"
-                try await cloudSyncService.pushAccountCollection(local, for: user)
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: local)
-                cloudStatus = "Synced"
-                state = .ready(user)
-            case .downloadCloud:
-                guard let cloud else {
-                    cloudStatus = "Synced"
-                    state = .ready(user)
+            try await syncCoordinator.initializeLocalState(local: store.accountCollectionForCloudUpload(),
+                hadPersistedLocalData: store.hadPersistedPlannerDataBeforeLoad, user: user)
+        } catch {
+            guard token == syncGeneration else { return }
+            state = .failed(error.localizedDescription)
+            return
+        }
+        guard token == syncGeneration else { return }
+        syncRequested = true
+        await drainSync(store: store, user: user)
+        guard token == syncGeneration else { return }
+        // Offline editing is safe only after ownership is established. A preserved conflict has its own review gate.
+        if syncConflict == nil {
+            do {
+                guard try await syncCoordinator.hasVerifiedLocalOwner(user: user) else {
+                    state = .failed(PlannerSyncRecoveryError.unverifiedLocalOwner.localizedDescription)
                     return
                 }
-                cloudStatus = "Downloading cloud data"
-                let savedCollection = try await store.replaceAccountCollection(cloud.collection)
-                let cloudSignature = try PlannerCloudPayload.signature(for: cloud.collection)
-                let savedSignature = try PlannerCloudPayload.signature(for: savedCollection)
-                if savedSignature != cloudSignature {
-                    cloudStatus = "Uploading repaired data"
-                    try await cloudSyncService.pushAccountCollection(savedCollection, for: user)
-                }
-                lastUploadedSignature = savedSignature
-                cloudStatus = "Synced"
-                state = .ready(user)
-            case .alreadySynced, .keepEmptyLocal:
-                lastUploadedSignature = try? PlannerCloudPayload.signature(for: local)
-                cloudStatus = "Synced"
-                state = .ready(user)
+            } catch {
+                guard token == syncGeneration else { return }
+                state = .failed(error.localizedDescription)
+                return
             }
-        } catch {
-            cloudStatus = "Sync failed"
-            state = .failed(userFacingMessage(for: error))
         }
+        guard token == syncGeneration else { return }
+        state = .ready(user)
+    }
+
+    private func activateSyncIfNeeded(for user: AuthUser) {
+        guard syncUserID != user.uid else { return }
+        if syncConflict?.ownerUID != user.uid { syncConflict = nil }
+        syncGeneration &+= 1
+        syncUserID = user.uid
+        syncCoordinator.activate(userID: user.uid)
+    }
+
+    private func beginSyncAction() -> UUID {
+        let actionID = UUID()
+        syncActionID = actionID
+        return actionID
+    }
+
+    private func finishSyncAction(_ actionID: UUID) {
+        if syncActionID == actionID { syncActionID = nil }
+    }
+
+    /// Only the newest suspension may clear the task slot or authorize subsequent activation.
+    private func suspendSync() async -> Int {
+        syncGeneration &+= 1
+        let token = syncGeneration
+        let previousTask = syncTask
+        syncUserID = nil
+        syncRequested = false
+        await syncCoordinator.suspendAndWait()
+        await previousTask?.value
+        if token == syncGeneration { syncTask = nil }
+        return token
+    }
+
+    private func setSyncStatus(_ status: PlannerSyncStatus) {
+        syncStatus = status
+        cloudStatus = status.title
+    }
+
+    private func drainSync(store: PlannerStore, user: AuthUser) async {
+        guard !isFixtureSession else {
+            syncRequested = false
+            return
+        }
+        if let task = syncTask {
+            await task.value
+            return
+        }
+        let token = syncGeneration
+        let task = Task { @MainActor in
+            while self.syncRequested, token == self.syncGeneration {
+                self.syncRequested = false
+                self.setSyncStatus(.syncing)
+                do {
+                    try await store.saveCurrentSnapshot()
+                    guard token == self.syncGeneration else { return }
+                    let local = store.accountCollectionForCloudUpload()
+                    let result = try await self.syncCoordinator.synchronize(local: local,
+                        hadPersistedLocalData: store.hadPersistedPlannerDataBeforeLoad, user: user)
+                    guard token == self.syncGeneration else { return }
+                    try await self.applySyncResult(result, requestedLocal: local, store: store, user: user, generation: token)
+                } catch PlannerSyncRecoveryError.changedDuringDownload {
+                    guard token == self.syncGeneration else { return }
+                    self.syncRequested = true
+                    self.setSyncStatus(.savedLocally)
+                } catch {
+                    guard token == self.syncGeneration else { return }
+                    self.setSyncStatus(.failed(error.localizedDescription))
+                    self.errorMessage = error.localizedDescription
+                    self.syncRequested = false
+                }
+            }
+        }
+        syncTask = task
+        await task.value
+        if token == syncGeneration { syncTask = nil }
+    }
+
+    private func applySyncResult(_ result: PlannerSyncResult, requestedLocal: PlannerAccountCollection,
+                                 store: PlannerStore, user: AuthUser, generation token: Int) async throws {
+        guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+        switch result {
+        case let .acknowledged(fingerprint):
+            syncConflict = nil
+            if try PlannerCloudFingerprint.collection(store.accountCollectionForCloudUpload()) == fingerprint {
+                setSyncStatus(.synced)
+            } else {
+                setSyncStatus(.savedLocally)
+                syncRequested = true
+            }
+        case let .replaceLocal(collection, cloud):
+            guard try PlannerCloudFingerprint.collection(store.accountCollectionForCloudUpload()) == PlannerCloudFingerprint.collection(requestedLocal) else {
+                throw PlannerSyncRecoveryError.changedDuringDownload
+            }
+            _ = try await store.replaceAccountCollection(collection)
+            guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+            try await syncCoordinator.acknowledgeDownload(originalCollection: collection, cloud: cloud, user: user)
+            guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+            syncConflict = nil
+            if try PlannerCloudFingerprint.collection(store.accountCollectionForCloudUpload()) == PlannerCloudFingerprint.collection(collection) {
+                setSyncStatus(.synced)
+            } else {
+                setSyncStatus(.savedLocally)
+                syncRequested = true
+            }
+        case let .conflict(conflict):
+            syncConflict = conflict
+            syncRequested = false
+            setSyncStatus(.conflict)
+        }
+    }
+
+    private func resolveSyncConflict(useLocal: Bool, store: PlannerStore) async {
+        guard !isFixtureSession, case let .ready(user) = state, let conflict = syncConflict, !isSyncActionActive else { return }
+        let actionID = beginSyncAction()
+        defer { finishSyncAction(actionID) }
+        setSyncStatus(.syncing)
+        let suspension = await suspendSync()
+        guard suspension == syncGeneration else { return }
+        activateSyncIfNeeded(for: user)
+        let token = syncGeneration
+        do {
+            try await store.saveCurrentSnapshot()
+            guard token == syncGeneration else { throw PlannerSyncRecoveryError.staleSession }
+            let local = store.accountCollectionForCloudUpload()
+            let result: PlannerSyncResult
+            if useLocal {
+                result = try await syncCoordinator.chooseLocal(conflictID: conflict.id, currentLocal: local, user: user)
+            } else {
+                result = try await syncCoordinator.chooseCloud(conflictID: conflict.id, currentLocal: local, user: user)
+            }
+            try await applySyncResult(result, requestedLocal: local, store: store, user: user, generation: token)
+        } catch {
+            if token == syncGeneration {
+                setSyncStatus(.failed(error.localizedDescription))
+                errorMessage = error.localizedDescription
+            }
+        }
+        finishSyncAction(actionID)
+        if syncRequested, token == syncGeneration { await drainSync(store: store, user: user) }
     }
 
     private func performWorkingAction(_ action: () async throws -> Void) async {

@@ -1184,11 +1184,31 @@ enum DefaultData {
         }
 
         normalizeMonthlyPayPeriods(in: &migrated)
+        normalizeLegacyMoneyLeftSpending(in: &migrated)
         normalizeLegacyCreditCardOpeningStatementCycles(in: &migrated)
         repairUnsettledRecurringCardBillReserves(in: &migrated)
         repairKnownAutomaticCardBillFunding(in: &migrated)
 
         return (migrated, migrated != snapshot)
+    }
+
+    /// Older "Money left" spends were left unlinked even when the user's cash
+    /// lived in a bank account. Link them once so the same spend is not shown as
+    /// stale bank cash plus a separate negative unlinked-income balance.
+    private static func normalizeLegacyMoneyLeftSpending(in snapshot: inout PlannerSnapshot) {
+        let activeAccounts = snapshot.bankAccounts.filter { !$0.archived && $0.deletedAt == nil }
+        guard let accountId = activeAccounts.first(where: \.isPrimary)?.id ?? activeAccounts.first?.id else {
+            return
+        }
+
+        for index in snapshot.transactions.indices where
+            snapshot.transactions[index].deletedAt == nil &&
+            snapshot.transactions[index].type == .spending &&
+            snapshot.transactions[index].paymentMethod == .income &&
+            snapshot.transactions[index].bankAccountId == nil {
+            snapshot.transactions[index].paymentMethod = .bankAccount
+            snapshot.transactions[index].bankAccountId = accountId
+        }
     }
 
     /// Early card records could save an entered opening statement on the next

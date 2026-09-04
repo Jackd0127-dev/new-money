@@ -80,7 +80,17 @@ enum PlannerCloudPayload: Sendable {
     }
 
     static func decodeAccountCollectionRecord(from dictionary: [String: Any]) throws -> CloudPlannerAccountCollectionRecord? {
-        if let accountCollectionData = dictionary["accountCollection"] as? [String: Any] {
+        let fallbackTimestamp = dictionary["updatedAtIso"] as? String ?? "1970-01-01T00:00:00.000Z"
+        if var accountCollectionData = dictionary["accountCollection"] as? [String: Any] {
+            if let accounts = accountCollectionData["accounts"] as? [[String: Any]] {
+                accountCollectionData["accounts"] = accounts.map { account in
+                    var normalized = account
+                    if let snapshot = account["snapshot"] as? [String: Any] {
+                        normalized["snapshot"] = stableLegacyTimestamps(snapshot, fallback: account["createdAt"] as? String ?? fallbackTimestamp)
+                    }
+                    return normalized
+                }
+            }
             return try CloudPlannerAccountCollectionRecord(
                 collection: decodeAccountCollection(from: accountCollectionData),
                 updatedAtIso: dictionary["updatedAtIso"] as? String
@@ -88,14 +98,34 @@ enum PlannerCloudPayload: Sendable {
         }
 
         if let snapshotData = dictionary["snapshot"] as? [String: Any] {
-            let snapshot = try decodeSnapshot(from: snapshotData)
+            let snapshot = try decodeSnapshot(from: stableLegacyTimestamps(snapshotData, fallback: fallbackTimestamp))
+            let raw = try JSONSerialization.data(withJSONObject: snapshotData, options: [.sortedKeys, .withoutEscapingSlashes])
+            let accountID = "legacy-planner-" + PlannerCloudFingerprint.data(raw)
+            let timestamp = dictionary["updatedAtIso"] as? String ?? "1970-01-01T00:00:00.000Z"
+            let account = PlannerAccount(id: accountID, name: "Personal", color: "#F97316", snapshot: snapshot,
+                createdAt: timestamp, updatedAt: timestamp)
             return CloudPlannerAccountCollectionRecord(
-                collection: PlannerAccountCollection.singleAccount(snapshot: snapshot),
+                collection: PlannerAccountCollection(activeAccountId: accountID, accounts: [account], updatedAt: timestamp),
                 updatedAtIso: dictionary["updatedAtIso"] as? String
             )
         }
 
         return nil
+    }
+
+    /// Older debt payloads omitted timestamps. Wall-clock defaults would change sync identity on every read.
+    private static func stableLegacyTimestamps(_ snapshot: [String: Any], fallback: String) -> [String: Any] {
+        var normalized = snapshot
+        for key in ["debts", "debtPayments"] {
+            guard let records = snapshot[key] as? [[String: Any]] else { continue }
+            normalized[key] = records.map { record in
+                var value = record
+                if value["createdAt"] == nil || value["createdAt"] is NSNull { value["createdAt"] = fallback }
+                if value["updatedAt"] == nil || value["updatedAt"] is NSNull { value["updatedAt"] = value["createdAt"] }
+                return value
+            }
+        }
+        return normalized
     }
 
     static func snapshotDictionary(_ snapshot: PlannerSnapshot) throws -> [String: Any] {

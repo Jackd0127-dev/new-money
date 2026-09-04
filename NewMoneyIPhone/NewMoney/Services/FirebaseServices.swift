@@ -191,28 +191,96 @@ struct FirebaseCloudSyncService: CloudSyncService {
     }
 
     func pullAccountCollection(for user: AuthUser) async throws -> CloudPlannerAccountCollectionRecord? {
-        let document = try await snapshotDocument(for: user).getDocument()
-        guard document.exists,
-              let data = document.data() else {
-            return nil
-        }
-
-        return try PlannerCloudPayload.decodeAccountCollectionRecord(from: data)
+        let read = try await readAuthoritative(for: user)
+        guard let collection = read.collection else { return nil }
+        return CloudPlannerAccountCollectionRecord(collection: collection, updatedAtIso: read.updatedAtIso)
     }
 
     func pushAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
-        let updatedAtIso = DateUtilities.nowIsoString()
-        var currentData = try PlannerCloudPayload.currentAccounts(collection: collection, updatedAtIso: updatedAtIso).firestoreData()
-        currentData["updatedAt"] = FieldValue.serverTimestamp()
+        // Kept only for source compatibility. Every production write must carry its observed baseline.
+        throw PlannerSyncRecoveryError.conditionalWritesUnavailable
+    }
 
-        var backupData = try PlannerCloudPayload.backupAccounts(collection: collection, updatedAtIso: updatedAtIso).firestoreData()
-        backupData["updatedAt"] = FieldValue.serverTimestamp()
+    func readAuthoritative(for user: AuthUser) async throws -> PlannerCloudRead {
+        let document = try await snapshotDocument(for: user).getDocument(source: .server)
+        guard !document.metadata.isFromCache, !document.metadata.hasPendingWrites else {
+            throw PlannerSyncRecoveryError.invalidPayload
+        }
+        return try Self.plannerRead(document)
+    }
 
-        let batch = firestore.batch()
-        let snapshotDocument = snapshotDocument(for: user)
-        batch.setData(currentData, forDocument: snapshotDocument, merge: true)
-        batch.setData(backupData, forDocument: snapshotDocument.collection("backups").document())
-        try await batch.commit()
+    func compareAndSet(_ pending: PlannerPendingUpload, for user: AuthUser) async throws -> PlannerCloudWriteResult {
+        let document = snapshotDocument(for: user)
+        let context = PlannerFirestoreWriteContext(document: document,
+            backup: document.collection("backups").document("sync-" + PlannerCloudFingerprint.data(Data(pending.operationID.utf8))),
+            pending: pending, updatedAtIso: DateUtilities.nowIsoString())
+
+        // Keep the SDK handle on its actor; only immutable context and typed results cross callback queues.
+        let result: PlannerFirestoreTransactionResult = try await withCheckedThrowingContinuation { continuation in
+            firestore.runTransaction({ @Sendable transaction, errorPointer -> Any? in
+                do {
+                    let snapshot = try transaction.getDocument(context.document)
+                    let current = try Self.plannerRead(snapshot)
+                    if let collection = current.collection,
+                       try PlannerCloudFingerprint.collection(collection) == PlannerCloudFingerprint.collection(context.pending.collection) {
+                        return ["kind": "unchanged", "record": try JSONEncoder().encode(current)]
+                    }
+                    guard current.revision == context.pending.expectedRevision else {
+                        return ["kind": "conflict", "record": try JSONEncoder().encode(current)]
+                    }
+
+                    var fields = snapshot.data() ?? [:]
+                    let newCollection = try PlannerCloudPayload.accountCollectionDictionary(context.pending.collection)
+                    if let oldRaw = fields["accountCollection"], let oldCollection = current.collection {
+                        let oldKnown = try PlannerCloudPayload.accountCollectionDictionary(oldCollection)
+                        fields["accountCollection"] = PlannerCloudDocumentCodec.preservingUnknownFields(
+                            raw: oldRaw, before: oldKnown, after: newCollection)
+                    } else {
+                        fields["accountCollection"] = newCollection
+                    }
+                    fields["version"] = 2
+                    fields["schema"] = "plannerAccountCollection"
+                    fields["updatedAtIso"] = context.updatedAtIso
+                    let expectedPayloadHash = try PlannerCloudDocumentCodec.read(fields: fields).revision.payloadSHA256
+                    fields["updatedAt"] = FieldValue.serverTimestamp()
+                    var backup = fields
+                    backup["backupVersion"] = 2
+                    transaction.setData(fields, forDocument: context.document)
+                    transaction.setData(backup, forDocument: context.backup)
+                    return ["kind": "written", "payloadSHA256": expectedPayloadHash ?? ""]
+                } catch let error as NSError {
+                    errorPointer?.pointee = error
+                    return nil
+                }
+            }, completion: { @Sendable result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                do {
+                    continuation.resume(returning: try PlannerFirestoreTransactionResult.decode(result))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            })
+        }
+
+        switch result {
+        case let .committed(read): return .committed(read)
+        case let .conflict(read): return .conflict(read)
+        case let .written(expectedHash):
+            let verified = try await readAuthoritative(for: user)
+            return verified.revision.payloadSHA256 == expectedHash ? .committed(verified) : .conflict(verified)
+        }
+    }
+
+    nonisolated private static func plannerRead(_ document: DocumentSnapshot) throws -> PlannerCloudRead {
+        guard document.exists else { return .missing }
+        guard let fields = document.data() else { throw PlannerSyncRecoveryError.invalidPayload }
+        let timestamp = (fields["updatedAt"] as? Timestamp).map {
+            PlannerServerTimestamp(seconds: $0.seconds, nanoseconds: $0.nanoseconds)
+        }
+        return try PlannerCloudDocumentCodec.read(fields: fields, updatedAt: timestamp)
     }
 
     func resetAccountCollection(_ collection: PlannerAccountCollection, for user: AuthUser) async throws {
@@ -253,6 +321,38 @@ struct FirebaseCloudSyncService: CloudSyncService {
             try await batch.commit()
             remainingReferences.removeFirst(chunk.count)
         }
+    }
+}
+
+/// Firebase references are immutable handles; each retry constructs its own mutable dictionaries.
+private struct PlannerFirestoreWriteContext: @unchecked Sendable {
+    let document: DocumentReference
+    let backup: DocumentReference
+    let pending: PlannerPendingUpload
+    let updatedAtIso: String
+}
+
+private enum PlannerFirestoreTransactionResult: Sendable {
+    case committed(PlannerCloudRead)
+    case conflict(PlannerCloudRead)
+    case written(String)
+
+    static func decode(_ value: Any?) throws -> Self {
+        guard let result = value as? [String: Any], let kind = result["kind"] as? String else {
+            throw PlannerSyncRecoveryError.invalidPayload
+        }
+        if let data = result["record"] as? Data {
+            let read = try JSONDecoder().decode(PlannerCloudRead.self, from: data)
+            switch kind {
+            case "conflict": return .conflict(read)
+            case "unchanged": return .committed(read)
+            default: throw PlannerSyncRecoveryError.invalidPayload
+            }
+        }
+        guard kind == "written", let expectedHash = result["payloadSHA256"] as? String else {
+            throw PlannerSyncRecoveryError.invalidPayload
+        }
+        return .written(expectedHash)
     }
 }
 

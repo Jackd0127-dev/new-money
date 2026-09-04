@@ -142,6 +142,7 @@ struct CreditCardCycleReminder: Equatable, Sendable {
 
 private struct CreditCardStatementCycle: Equatable, Sendable {
     var scheduledStatementDate: String
+    var nextScheduledStatementDate: String
     var statementDate: String
     var directDebitDate: String
     var cycleStartDate: String
@@ -206,6 +207,19 @@ struct FundingChecklistDestinationGroup: Identifiable, Equatable, Sendable {
 
     var totalAmountPence: Int {
         items.reduce(0) { $0 + max(0, $1.amountPence) }
+    }
+
+    var completedItemCount: Int {
+        items.count(where: \.isCompleted)
+    }
+
+    var isFullyAdded: Bool {
+        !items.isEmpty && completedItemCount == items.count
+    }
+
+    var fundingStatusLabel: String? {
+        guard completedItemCount > 0 else { return nil }
+        return isFullyAdded ? "Added" : "\(completedItemCount)/\(items.count)"
     }
 }
 
@@ -376,13 +390,15 @@ struct DebtPaymentApplication: Equatable, Sendable {
 
 enum DebtPlannerEngine {
     static func generateSchedule(for debt: Debt, payPeriods: [PayPeriod], today: String) -> [DebtPaymentScheduleItem] {
-        guard debt.currentBalancePence > 0, debt.status != .archived, !debt.status.isPaidLike else { return [] }
+        guard FinanceEngine.isIsoDate(today), debt.currentBalancePence > 0,
+              debt.status != .archived, !debt.status.isPaidLike else { return [] }
 
         switch debt.repaymentStrategy {
         case .manualOnly:
             return []
         case .autoSpreadUntilDueDate:
-            guard let targetPayoffDate = debt.targetPayoffDate ?? nonblank(debt.dueDate) else { return [] }
+            guard let targetPayoffDate = debt.targetPayoffDate ?? nonblank(debt.dueDate),
+                  FinanceEngine.isIsoDate(targetPayoffDate) else { return [] }
             let paymentDates = scheduledDates(
                 from: today,
                 through: targetPayoffDate,
@@ -401,6 +417,8 @@ enum DebtPlannerEngine {
         }
     }
 
+    // Preserve the existing 365-day effective-annual estimate. This is not a lender's
+    // statement calculation; changing its accrual/day-count convention is separate work.
     static func estimatedInterestPence(balancePence: Int, aprBasisPoints: Int, days: Int) -> Int {
         guard balancePence > 0, aprBasisPoints > 0, days > 0 else { return 0 }
         let aprDecimal = Double(aprBasisPoints) / 10_000.0
@@ -417,32 +435,68 @@ enum DebtPlannerEngine {
     static func applyPayment(
         debt: Debt,
         scheduleItem: DebtPaymentScheduleItem?,
+        priorPayments: [DebtPayment] = [],
         amountPence: Int,
         date: String,
         sourcePotId: String?,
         paymentType: DebtPaymentType,
         note: String = ""
     ) -> DebtPaymentApplication {
-        let requested = max(0, abs(amountPence))
-        let outstandingFee = max(0, (scheduleItem?.feeAmountPence ?? 0) - (scheduleItem?.paidAmountPence ?? 0))
-        var remaining = min(requested, max(0, debt.currentBalancePence + (scheduleItem?.interestAmountPence ?? 0) + outstandingFee))
-
-        let feePaid = min(remaining, max(0, scheduleItem?.feeAmountPence ?? 0))
+        let requested = amountPence == .min || !FinanceEngine.isIsoDate(date) ? 0 : abs(amountPence)
+        let scheduledFee = max(0, scheduleItem?.feeAmountPence ?? 0)
+        let scheduledInterest = max(0, scheduleItem?.interestAmountPence ?? 0)
+        let linkedPayments = priorPayments.filter {
+            $0.deletedAt == nil && $0.debtId == debt.id && scheduleItem != nil && $0.scheduleItemId == scheduleItem?.id
+        }
+        let paidFee: Int
+        let paidInterest: Int
+        let priorComponents: DebtPaymentComponents
+        if linkedPayments.isEmpty {
+            // Older snapshots retain only the aggregate paid amount on the schedule.
+            let paid = max(0, scheduleItem?.paidAmountPence ?? 0)
+            paidFee = min(scheduledFee, paid)
+            paidInterest = min(scheduledInterest, paid - paidFee)
+            priorComponents = DebtPaymentComponents(principalPence: paid - paidFee - paidInterest, interestPence: paidInterest, feePence: paidFee)
+        } else {
+            priorComponents = linkedPayments.map(\.effectiveComponents).reduce(
+                DebtPaymentComponents(principalPence: 0, interestPence: 0, feePence: 0)
+            ) { total, payment in
+                DebtPaymentComponents(principalPence: total.principalPence + payment.principalPence, interestPence: total.interestPence + payment.interestPence, feePence: total.feePence + payment.feePence)
+            }
+            paidFee = min(scheduledFee, priorComponents.feePence)
+            paidInterest = min(scheduledInterest, priorComponents.interestPence)
+        }
+        var remaining = requested
+        let feePaid = min(remaining, scheduledFee - paidFee)
         remaining -= feePaid
-        let interestPaid = min(remaining, max(0, scheduleItem?.interestAmountPence ?? 0))
+        let interestPaid = min(remaining, scheduledInterest - paidInterest)
         remaining -= interestPaid
         let principalPaid = min(remaining, max(0, debt.currentBalancePence))
         let applied = feePaid + interestPaid + principalPaid
 
         var updatedDebt = debt
-        updatedDebt.currentBalancePence = max(0, debt.currentBalancePence - principalPaid)
-        updatedDebt.status = updatedDebt.currentBalancePence == 0 ? .paidOff : .active
-        updatedDebt.updatedAt = DateUtilities.nowIsoString()
+        if applied > 0 {
+            updatedDebt.currentBalancePence = max(0, debt.currentBalancePence - principalPaid)
+            updatedDebt.status = updatedDebt.currentBalancePence == 0 ? .paidOff : .active
+            updatedDebt.updatedAt = DateUtilities.nowIsoString()
+        }
 
         var updatedScheduleItem = scheduleItem
-        if var item = updatedScheduleItem {
-            item.paidAmountPence = min(item.plannedAmountPence, item.paidAmountPence + applied)
+        if var item = updatedScheduleItem, applied > 0 {
+            item.paidAmountPence += min(max(0, item.plannedAmountPence - item.paidAmountPence), applied)
             item.fundedAmountPence = max(0, item.fundedAmountPence - applied)
+            if updatedDebt.currentBalancePence == 0,
+               paidFee + feePaid >= scheduledFee,
+               paidInterest + interestPaid >= scheduledInterest {
+                // A stale plan must not turn the actual final payment into a cancelled
+                // occurrence. Retain its complete paid budget so refunds can reopen it.
+                item.principalAmountPence = priorComponents.principalPence + principalPaid
+                item.interestAmountPence = priorComponents.interestPence + interestPaid
+                item.feeAmountPence = priorComponents.feePence + feePaid
+                item.plannedAmountPence = item.principalAmountPence + item.interestAmountPence + item.feeAmountPence
+                item.paidAmountPence = item.plannedAmountPence
+                item.fundedAmountPence = 0
+            }
             item.paidDate = item.paidAmountPence >= item.plannedAmountPence ? date : item.paidDate
             item.status = item.paidAmountPence >= item.plannedAmountPence ? .paid : .partFunded
             item.updatedAt = DateUtilities.nowIsoString()
@@ -612,11 +666,11 @@ enum DebtPlannerEngine {
         case .today:
             return today
         case .customDate:
-            if let customDate = debt.customFirstPaymentDate, customDate >= today {
+            if let customDate = debt.customFirstPaymentDate, FinanceEngine.isIsoDate(customDate), customDate >= today {
                 return customDate
             }
         case .nextPayday:
-            if let payday = payPeriods.map(\.payday).filter({ $0 >= today }).sorted().first {
+            if let payday = payPeriods.map(\.payday).filter({ FinanceEngine.isIsoDate($0) && $0 >= today }).sorted().first {
                 return payday
             }
         }
@@ -628,6 +682,7 @@ enum DebtPlannerEngine {
     }
 
     private static func scheduledDates(from today: String, through targetDate: String, frequency: DebtPaymentFrequency, paymentDay: Int?) -> [String] {
+        guard FinanceEngine.isIsoDate(today), FinanceEngine.isIsoDate(targetDate) else { return [] }
         guard targetDate >= today else { return [targetDate] }
         var dates: [String] = []
         var cursor = paymentDay.map { nextDayOfMonth(day: $0, onOrAfter: today) } ?? today
@@ -715,7 +770,7 @@ enum DebtPlannerEngine {
     }
 
     private static func addMonthsClamped(date: String, months: Int) -> String {
-        let parsed = FinanceEngine.parseDate(date)
+        guard let parsed = FinanceEngine.validatedDate(date) else { return date }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
         let next = calendar.date(byAdding: .month, value: months, to: parsed) ?? parsed
@@ -998,7 +1053,16 @@ enum PlannerDerivedData {
                 return total + transaction.netAmountPence
             case .allocation:
                 return total + transaction.netAmountPence
-            case .transfer, .adjustment:
+            case .transfer:
+                switch transaction.potBankTransferDirection {
+                case .bankToPot:
+                    return total + transaction.netAmountPence
+                case .potToBank:
+                    return total - transaction.netAmountPence
+                case nil:
+                    return total
+                }
+            case .adjustment:
                 return total
             }
         }
@@ -1022,8 +1086,9 @@ enum PlannerDerivedData {
         var sourceLabels: [String] = []
         var linkedTargetPence = 0
         var dueIso: String?
-        var usesForecastTarget = false
+        let usesForecastTarget = false
         let payPeriod = currentOrLatestPayPeriod(snapshot.payPeriods, today: today)
+        let linkedCardPayments = linkedCreditCardPayments(pot: pot, snapshot: snapshot, today: today)
 
         let directRecurringBillItems = directRecurringBillTargetItems(
             snapshot: snapshot,
@@ -1033,7 +1098,10 @@ enum PlannerDerivedData {
         )
         let recurringTargetPence = directRecurringBillItems.reduce(0) { $0 + max(0, $1.amountPence) }
 
-        if recurringTargetPence > 0 {
+        // A linked card's next real statement already contains its posted card
+        // bills. Future recurring charges belong in the Bills forecast and must
+        // not be stacked on top of the pot's current collection target.
+        if recurringTargetPence > 0 && pot.linkedCreditCardId == nil {
             linkedTargetPence += recurringTargetPence
             sourceLabels.append("Recurring")
             dueIso = minIsoDate(dueIso, directRecurringBillItems.map(\.dueDate).sorted().first)
@@ -1041,35 +1109,16 @@ enum PlannerDerivedData {
 
         if let cardId = pot.linkedCreditCardId {
             if let card = snapshot.creditCards.first(where: { $0.id == cardId && !$0.archived }) {
-                let summary = creditCardOwedSummary(
-                    card: card,
-                    snapshot: snapshot,
-                    payPeriod: payPeriod,
-                    asOfDate: today
-                )
-                let cardUsesForecastTarget = summary.forecastOwedPence > summary.actualOwedPence
-                let rawCardTargetPence = cardUsesForecastTarget ? summary.forecastOwedPence : summary.actualOwedPence
-                let otherPotCardBillTargetPence = selectedCardRecurringBillTargetPence(
-                    snapshot: snapshot,
-                    payPeriod: payPeriod,
-                    today: today,
-                    cardId: cardId,
-                    excludingPotId: pot.id
-                )
-                let cardTargetPence = max(0, rawCardTargetPence - otherPotCardBillTargetPence)
-                let activeReserveTargetPence = activeLinkedCreditCardReserveTargetPence(
-                    potId: pot.id,
-                    cardId: cardId,
-                    snapshot: snapshot,
-                    asOfDate: today
-                )
-                let linkedCardTargetPence = max(cardTargetPence, activeReserveTargetPence)
+                let nextPayment = linkedCardPayments.first
+                // A linked pot funds the next real collection. Later forecast
+                // cycles remain visible in the schedule, but cannot inflate the
+                // current pot target or prevent it reaching 100%.
+                let linkedCardTargetPence = nextPayment?.amountPence ?? 0
 
                 if linkedCardTargetPence > 0 {
                     linkedTargetPence += linkedCardTargetPence
-                    usesForecastTarget = usesForecastTarget || cardUsesForecastTarget
                     sourceLabels.append("\(card.name) card")
-                    dueIso = minIsoDate(dueIso, creditCardDueIso(card: card, today: today))
+                    dueIso = minIsoDate(dueIso, nextPayment?.dueIso ?? creditCardDueIso(card: card, today: today))
                 }
             } else {
                 sourceLabels.append("missing card \(cardId)")
@@ -1113,12 +1162,18 @@ enum PlannerDerivedData {
         }
 
         let manualTargetPence = max(0, pot.targetPence ?? 0)
-        let targetPence = linkedTargetPence > 0 ? linkedTargetPence : manualTargetPence
+        // Once linked to a card, the pot target is statement-driven. Falling
+        // back to an old manual target would make a card with no posted
+        // statement look as though a collection is already due.
+        let targetPence = pot.linkedCreditCardId == nil
+            ? (linkedTargetPence > 0 ? linkedTargetPence : manualTargetPence)
+            : linkedTargetPence
         let coveredPence = max(0, pot.balancePence)
         let shortfallPence = max(0, targetPence - coveredPence)
-        let percent = targetPence > 0 ? Int((Double(coveredPence) / Double(targetPence) * 100).rounded()) : 0
+        let percent = targetPence > 0
+            ? min(100, Int((Double(coveredPence) / Double(targetPence) * 100).rounded()))
+            : 0
         let obligations = potDueObligations(pot: pot, snapshot: snapshot, today: today)
-        let linkedCardPayments = linkedCreditCardPayments(pot: pot, snapshot: snapshot, today: today)
 
         return PotProgress(
             targetPence: targetPence,
@@ -1568,7 +1623,13 @@ enum PlannerDerivedData {
                     ? periodStatementPayments.reduce(0) {
                         $0 + max(max(0, $1.actualDuePence), max(0, $1.forecastDuePence))
                     }
-                    : progress.targetPence
+                    : cardPaymentOperationalFundingTargetPence(
+                        pot: pot,
+                        card: card,
+                        snapshot: snapshot,
+                        payPeriod: payPeriod,
+                        asOfDate: asOfDate
+                    )
                 let balanceBeforeThisFundingPence = max(0, pot.balancePence - matchingFundingPence)
                 let pendingRecurringPence = recurringBillFundingChecklistItems(
                     snapshot: snapshot,
@@ -1693,6 +1754,47 @@ enum PlannerDerivedData {
                     isCompleted: matchingFundingPence >= amountPence
                 )
             }
+    }
+
+    /// Checklist funding must continue reserving the complete operational card
+    /// obligation for its pay period. This is intentionally separate from the
+    /// pot card's progress target, which presents only the next real collection.
+    private static func cardPaymentOperationalFundingTargetPence(
+        pot: Pot,
+        card: CreditCard,
+        snapshot: PlannerSnapshot,
+        payPeriod: PayPeriod,
+        asOfDate: String
+    ) -> Int {
+        let recurringTargetPence = directRecurringBillTargetItems(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            today: asOfDate,
+            potId: pot.id
+        ).reduce(0) { $0 + max(0, $1.amountPence) }
+        let summary = creditCardOwedSummary(
+            card: card,
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            asOfDate: asOfDate
+        )
+        let rawCardTargetPence = max(summary.actualOwedPence, summary.forecastOwedPence)
+        let otherPotCardBillTargetPence = selectedCardRecurringBillTargetPence(
+            snapshot: snapshot,
+            payPeriod: payPeriod,
+            today: asOfDate,
+            cardId: card.id,
+            excludingPotId: pot.id
+        )
+        let cardTargetPence = max(0, rawCardTargetPence - otherPotCardBillTargetPence)
+        let reserveTargetPence = activeLinkedCreditCardReserveTargetPence(
+            potId: pot.id,
+            cardId: card.id,
+            snapshot: snapshot,
+            asOfDate: asOfDate
+        )
+        let linkedTargetPence = recurringTargetPence + max(cardTargetPence, reserveTargetPence)
+        return linkedTargetPence > 0 ? linkedTargetPence : max(0, pot.targetPence ?? 0)
     }
 
     static func cardPaymentFundingChecklistId(cardId: String, potId: String, directDebitDate: String) -> String {
@@ -2045,8 +2147,8 @@ enum PlannerDerivedData {
         snapshot: PlannerSnapshot,
         through endDate: String
     ) -> [CreditCardStatementCycle] {
-        guard var scheduledStatementDate = card.statementDate,
-              FinanceEngine.isIsoDate(scheduledStatementDate),
+        guard let anchorDate = card.statementDate,
+              FinanceEngine.isIsoDate(anchorDate),
               let dueDay = card.dueDay,
               FinanceEngine.isIsoDate(endDate)
         else { return [] }
@@ -2059,8 +2161,13 @@ enum PlannerDerivedData {
         var cycles: [CreditCardStatementCycle] = []
         var previousStatementDate: String?
 
-        let boundedEndDate = max(endDate, scheduledStatementDate)
-        for _ in 0..<240 {
+        let protectedIndex = lastReferencedLegacyCardCycleIndex(card: card, snapshot: snapshot)
+        var legacyDate = anchorDate
+        let boundedEndDate = max(endDate, anchorDate)
+        for index in 0..<240 {
+            let scheduledStatementDate = index <= protectedIndex ? legacyDate : addIsoMonthsClamped(date: anchorDate, months: index)
+            let nextLegacyDate = addIsoMonthsClamped(date: legacyDate, months: 1)
+            let nextScheduledDate = index + 1 <= protectedIndex ? nextLegacyDate : addIsoMonthsClamped(date: anchorDate, months: index + 1)
             let override = overrides[scheduledStatementDate]
             let statementDate = override?.statementState == .confirmed &&
                 (override?.actualStatementDate.map(FinanceEngine.isIsoDate) ?? false)
@@ -2076,6 +2183,7 @@ enum PlannerDerivedData {
             cycles.append(
                 CreditCardStatementCycle(
                     scheduledStatementDate: scheduledStatementDate,
+                    nextScheduledStatementDate: nextScheduledDate,
                     statementDate: statementDate,
                     directDebitDate: directDebitDate,
                     cycleStartDate: cycleStartDate,
@@ -2087,10 +2195,51 @@ enum PlannerDerivedData {
 
             guard scheduledStatementDate < boundedEndDate else { break }
             previousStatementDate = statementDate
-            scheduledStatementDate = addIsoMonthsClamped(date: scheduledStatementDate, months: 1)
+            legacyDate = nextLegacyDate
         }
 
         return cycles
+    }
+
+    /// A corrected anchor must not move an already referenced ledger boundary.
+    /// Preserve the legacy chain through the latest saved cycle, then use the original
+    /// anchor for future dates. This is read-only and does not rewrite historical IDs.
+    private static func lastReferencedLegacyCardCycleIndex(card: CreditCard, snapshot: PlannerSnapshot) -> Int {
+        guard let anchor = card.statementDate, FinanceEngine.isIsoDate(anchor), let dueDay = card.dueDay else { return -1 }
+        let repayments = snapshot.creditCardRepayments.filter { $0.creditCardId == card.id && $0.deletedAt == nil }
+        let statements = Set(snapshot.creditCardCycleOverrides
+            .filter { $0.creditCardId == card.id && $0.deletedAt == nil }.map(\.scheduledStatementDate)
+            + repayments.compactMap(\.statementDate))
+        let directDebits = Set(repayments.compactMap(\.directDebitDate)
+            + snapshot.potAllocations.filter { $0.creditCardId == card.id && $0.deletedAt == nil }.compactMap(\.creditCardDirectDebitDate))
+        // Legacy repayments may retain only an actual moved date, without an override.
+        // Conservatively retain that month's boundary instead of orphaning the payment.
+        let statementMonths = Set(statements.filter(FinanceEngine.isIsoDate).map { String($0.prefix(7)) })
+        let directDebitMonths = Set(directDebits.filter(FinanceEngine.isIsoDate).map { String($0.prefix(7)) })
+        let lastActivity = snapshot.transactions
+            .filter { $0.creditCardId == card.id && $0.deletedAt == nil && FinanceEngine.isIsoDate($0.date) }
+            .map { max($0.date, $0.refundedAt?.prefixDate ?? $0.date) }.max()
+        let lastReference = ([statements.max(), directDebits.max(), lastActivity].compactMap { $0 }.max())
+        guard let lastReference else { return -1 }
+        var legacyDate = anchor
+        var protectedIndex = -1
+        for index in 0..<240 {
+            let directDebit = creditCardDirectDebitDate(statementDate: legacyDate, dueDay: dueDay)
+            if statementMonths.contains(String(legacyDate.prefix(7))) || directDebitMonths.contains(String(directDebit.prefix(7))) ||
+                (lastActivity.map { legacyDate <= $0 } ?? false) {
+                protectedIndex = index
+            }
+            // A recorded charge belongs to the first statement strictly after its date.
+            if let lastActivity, legacyDate > lastActivity,
+               (index == 0 || addIsoMonthsClamped(date: legacyDate, months: -1) <= lastActivity) {
+                protectedIndex = max(protectedIndex, index)
+            }
+            if legacyDate > lastReference { break }
+            let next = addIsoMonthsClamped(date: legacyDate, months: 1)
+            guard next > legacyDate else { break }
+            legacyDate = next
+        }
+        return protectedIndex
     }
 
     static func creditCardCycleAdjustmentSummary(
@@ -2168,7 +2317,7 @@ enum PlannerDerivedData {
                     // remain half-open and exclude their actual production date.
                     statementDate: FinanceEngine.addIsoDays(date: asOfDate, days: 1),
                     previousStatementDate: cycle.previousStatementDate,
-                    nextStatementDate: addIsoMonthsClamped(date: cycle.scheduledStatementDate, months: 1),
+                    nextStatementDate: cycle.nextScheduledStatementDate,
                     directDebitDate: cycle.directDebitDate,
                     asOfDate: asOfDate
                 )
@@ -2177,20 +2326,26 @@ enum PlannerDerivedData {
             }
     }
 
+    /// `includeCycle` receives the effective statement and debit dates before any
+    /// breakdown is calculated, allowing replay to omit already-settled cycles.
     static func creditCardStatementPayments(
         card: CreditCard,
         snapshot: PlannerSnapshot,
         startDate: String,
         endDate: String,
-        asOfDate: String
+        asOfDate: String,
+        includeCycle: (String, String) -> Bool = { _, _ in true }
     ) -> [CreditCardStatementPayment] {
-        guard card.statementDate != nil, card.dueDay != nil else { return [] }
+        guard card.statementDate != nil, card.dueDay != nil,
+              FinanceEngine.isIsoDate(startDate), FinanceEngine.isIsoDate(endDate),
+              FinanceEngine.isIsoDate(asOfDate), startDate <= endDate else { return [] }
 
         var payments: [CreditCardStatementPayment] = []
         for cycle in creditCardStatementCycles(card: card, snapshot: snapshot, through: endDate) {
             if cycle.directDebitDate > endDate { break }
-            if cycle.directDebitDate >= startDate, !cycle.isHeld {
-                let nextStatementDate = addIsoMonthsClamped(date: cycle.scheduledStatementDate, months: 1)
+            if cycle.directDebitDate >= startDate, !cycle.isHeld,
+               includeCycle(cycle.statementDate, cycle.directDebitDate) {
+                let nextStatementDate = cycle.nextScheduledStatementDate
                 let breakdown = creditCardStatementBreakdown(
                     card: card,
                     snapshot: snapshot,
@@ -2439,7 +2594,8 @@ enum PlannerDerivedData {
     }
 
     static func recurringOccurrences(payments: [RecurringPayment], startDate: String, endDate: String) -> [RecurringPaymentOccurrence] {
-        payments
+        guard FinanceEngine.isIsoDate(startDate), FinanceEngine.isIsoDate(endDate), startDate <= endDate else { return [] }
+        return payments
             .filter(\.active)
             .flatMap { payment in
                 dueDates(for: payment, startDate: startDate, endDate: endDate).map {
@@ -2460,7 +2616,7 @@ enum PlannerDerivedData {
         startDate: String,
         endDate: String
     ) -> [RecurringPaymentOccurrence] {
-        guard startDate <= endDate else { return [] }
+        guard FinanceEngine.isIsoDate(startDate), FinanceEngine.isIsoDate(endDate), startDate <= endDate else { return [] }
 
         let activePayments = payments.filter(\.active)
         let paymentsById = Dictionary(uniqueKeysWithValues: activePayments.map { ($0.id, $0) })
@@ -2468,7 +2624,23 @@ enum PlannerDerivedData {
             $0.deletedAt == nil && paymentsById[$0.paymentId] != nil
         }
         let overridesByKey = Dictionary(uniqueKeysWithValues: overrides.map { ("\($0.paymentId)-\($0.scheduledDueDate)", $0) })
-        var scheduledOccurrences = recurringOccurrences(payments: activePayments, startDate: startDate, endDate: endDate)
+        var scheduledOccurrences = activePayments.flatMap { payment in
+            let preservedThrough: String?
+            if payment.frequency == .quarterly {
+                preservedThrough = (overrides.filter { $0.paymentId == payment.id }.map(\.scheduledDueDate)
+                    + snapshot.transactions.filter { $0.recurringPaymentId == payment.id && $0.deletedAt == nil }.map {
+                        let scheduledIDDate = String($0.id.suffix(10))
+                        return FinanceEngine.isIsoDate(scheduledIDDate) ? max($0.date, scheduledIDDate) : $0.date
+                    }
+                    + snapshot.potAllocations.filter { $0.recurringPaymentId == payment.id && $0.deletedAt == nil }.compactMap(\.recurringDueDate))
+                    .filter(FinanceEngine.isIsoDate).max()
+            } else {
+                preservedThrough = nil
+            }
+            return dueDates(for: payment, startDate: startDate, endDate: endDate, preservingThrough: preservedThrough).map {
+                RecurringPaymentOccurrence(payment: payment, scheduledDueDate: $0, dueDate: $0, amountPence: payment.amountPence)
+            }
+        }
         var presentKeys = Set(scheduledOccurrences.map { "\($0.payment.id)-\($0.scheduledDueDate)" })
 
         for override in overrides {
@@ -3620,13 +3792,13 @@ enum PlannerDerivedData {
         return "\(potName) allocation"
     }
 
-    private static func dueDates(for payment: RecurringPayment, startDate: String, endDate: String) -> [String] {
+    private static func dueDates(for payment: RecurringPayment, startDate: String, endDate: String, preservingThrough preservedDate: String? = nil) -> [String] {
         let effectiveStartDate = max(startDate, payment.createdAt.prefixDate ?? startDate)
         guard effectiveStartDate <= endDate else { return [] }
 
         switch payment.frequency {
         case .once:
-            guard let dueDate = payment.dueDate else { return [] }
+            guard let dueDate = payment.dueDate, FinanceEngine.isIsoDate(dueDate) else { return [] }
             return dueDate >= effectiveStartDate && dueDate <= endDate ? [dueDate] : []
         case .monthly:
             guard let dueDay = payment.dueDay else { return [] }
@@ -3639,7 +3811,7 @@ enum PlannerDerivedData {
         case .biweekly:
             return intervalDueDates(seedDate: payment.dueDate ?? payment.createdAt.prefixDate, intervalDays: 14, startDate: effectiveStartDate, endDate: endDate)
         case .quarterly:
-            return intervalMonthDueDates(seedDate: payment.dueDate ?? payment.createdAt.prefixDate, intervalMonths: 3, startDate: effectiveStartDate, endDate: endDate)
+            return intervalMonthDueDates(seedDate: payment.dueDate ?? payment.createdAt.prefixDate, intervalMonths: 3, startDate: effectiveStartDate, endDate: endDate, preservingThrough: preservedDate)
         }
     }
 
@@ -3670,7 +3842,7 @@ enum PlannerDerivedData {
     }
 
     private static func intervalDueDates(seedDate: String?, intervalDays: Int, startDate: String, endDate: String) -> [String] {
-        guard let seedDate else { return [] }
+        guard let seedDate, FinanceEngine.isIsoDate(seedDate), intervalDays > 0 else { return [] }
         var cursor = FinanceEngine.parseDate(seedDate)
         let start = FinanceEngine.parseDate(startDate)
         let end = FinanceEngine.parseDate(endDate)
@@ -3687,24 +3859,27 @@ enum PlannerDerivedData {
         return dates
     }
 
-    private static func intervalMonthDueDates(seedDate: String?, intervalMonths: Int, startDate: String, endDate: String) -> [String] {
-        guard let seedDate else { return [] }
+    private static func intervalMonthDueDates(seedDate: String?, intervalMonths: Int, startDate: String, endDate: String, preservingThrough preservedDate: String?) -> [String] {
+        guard let seedDate, FinanceEngine.isIsoDate(seedDate), intervalMonths > 0 else { return [] }
         var cursor = seedDate
-
-        while cursor < startDate {
-            cursor = addIsoMonthsClamped(date: cursor, months: intervalMonths)
-        }
-
+        var legacyCursor = seedDate
+        var index = 0
         var dates: [String] = []
         while cursor <= endDate {
-            dates.append(cursor)
-            cursor = addIsoMonthsClamped(date: cursor, months: intervalMonths)
+            if cursor >= startDate { dates.append(cursor) }
+            index += 1
+            legacyCursor = addIsoMonthsClamped(date: legacyCursor, months: intervalMonths)
+            let next = preservedDate.map { legacyCursor <= $0 } == true
+                ? legacyCursor : addIsoMonthsClamped(date: seedDate, months: index * intervalMonths)
+            guard FinanceEngine.isIsoDate(next), next > cursor else { break }
+            cursor = next
         }
 
         return dates
     }
 
     private static func yearlyDueDates(seedDate: String, startDate: String, endDate: String) -> [String] {
+        guard FinanceEngine.isIsoDate(seedDate) else { return [] }
         let seed = FinanceEngine.parseDate(seedDate)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
@@ -4589,8 +4764,6 @@ private extension PlannerDerivedData {
             }
 
         return mergeLinkedCardPaymentRows(statementRows + heldRows + openingRows)
-        .prefix(2)
-        .map { $0 }
     }
 
     private static func mergeLinkedCardPaymentRows(_ rows: [LinkedCardPaymentDue]) -> [LinkedCardPaymentDue] {
@@ -5025,8 +5198,7 @@ private extension PlannerDerivedData {
             }
         }
 
-        if statementDate == card.statementDate,
-           cardCreatedDateCanFeedFirstStatement(card: card, statementDate: statementDate),
+        if statementDate == unstatementedOpeningBalanceStatementDate(card: card),
            statementDate <= asOfDate {
             let unstatementedOpeningPence = unstatementedOpeningBalancePence(card: card)
             if unstatementedOpeningPence > 0 {
@@ -5051,16 +5223,16 @@ private extension PlannerDerivedData {
     }
 
     static func creditCardStatementDate(for card: CreditCard, chargeDate: String) -> String? {
-        guard var statementDate = card.statementDate,
-              FinanceEngine.isIsoDate(statementDate)
+        guard let anchorDate = card.statementDate,
+              FinanceEngine.isIsoDate(anchorDate), FinanceEngine.isIsoDate(chargeDate)
         else { return nil }
 
-        for _ in 0..<240 {
+        for index in 0..<240 {
+            let statementDate = addIsoMonthsClamped(date: anchorDate, months: index)
             if statementDate > chargeDate {
                 return statementDate
             }
 
-            statementDate = addIsoMonthsClamped(date: statementDate, months: 1)
         }
 
         return nil
@@ -5126,19 +5298,8 @@ private extension PlannerDerivedData {
     }
 
     static func creditCardDirectDebitDate(for card: CreditCard, chargeDate: String) -> String? {
-        guard var statementDate = card.statementDate,
-              FinanceEngine.isIsoDate(statementDate),
-              let dueDay = card.dueDay
-        else { return nil }
-
-        for _ in 0..<240 {
-            if statementDate > chargeDate {
-                return creditCardDirectDebitDate(statementDate: statementDate, dueDay: dueDay)
-            }
-            statementDate = addIsoMonthsClamped(date: statementDate, months: 1)
-        }
-
-        return nil
+        guard let statementDate = creditCardStatementDate(for: card, chargeDate: chargeDate), let dueDay = card.dueDay else { return nil }
+        return creditCardDirectDebitDate(statementDate: statementDate, dueDay: dueDay)
     }
 
     static func creditCardDirectDebitDate(for card: CreditCard, snapshot: PlannerSnapshot, chargeDate: String) -> String? {
@@ -5318,13 +5479,26 @@ private extension PlannerDerivedData {
 
         if let previousStatementDate {
             cycleStart = previousStatementDate
-            actualLines = creditCardSpendingStatementLines(
+            var cycleLines = creditCardSpendingStatementLines(
                 card: card,
                 transactions: snapshot.transactions,
                 cycleStart: cycleStart,
                 statementDate: statementDate,
                 asOfDate: asOfDate
             )
+            if statementDate == unstatementedOpeningBalanceStatementDate(card: card) {
+                let unstatementedOpeningPence = unstatementedOpeningBalancePence(card: card)
+                if unstatementedOpeningPence > 0 {
+                    cycleLines.append(
+                        CreditCardStatementLine(
+                            amountPence: unstatementedOpeningPence,
+                            date: statementDate,
+                            source: .spending
+                        )
+                    )
+                }
+            }
+            actualLines = cycleLines
         } else {
             cycleStart = card.createdAt.prefixDate ?? statementDate
             var firstCycleLines = creditCardSpendingStatementLines(
@@ -5335,7 +5509,7 @@ private extension PlannerDerivedData {
                 asOfDate: asOfDate
             )
             let openingStatementPence = statementedOpeningBalancePence(card: card)
-            let unstatementedOpeningPence = cardCreatedDateCanFeedFirstStatement(card: card, statementDate: statementDate)
+            let unstatementedOpeningPence = statementDate == unstatementedOpeningBalanceStatementDate(card: card)
                 ? unstatementedOpeningBalancePence(card: card)
                 : 0
 
@@ -5501,13 +5675,23 @@ private extension PlannerDerivedData {
         max(0, (card.openingBalancePence ?? 0) - statementedOpeningBalancePence(card: card))
     }
 
-    static func cardCreatedDateCanFeedFirstStatement(card: CreditCard, statementDate: String) -> Bool {
-        (card.createdAt.prefixDate ?? statementDate) <= statementDate
+    /// The part of an imported opening balance that was not already on the
+    /// entered statement belongs to the first cycle that closes after import.
+    /// If the card predates its anchor, preserve the original anchor cycle.
+    static func unstatementedOpeningBalanceStatementDate(card: CreditCard) -> String? {
+        guard let anchorDate = card.statementDate,
+              FinanceEngine.isIsoDate(anchorDate)
+        else { return nil }
+
+        let createdDate = card.createdAt.prefixDate ?? anchorDate
+        guard FinanceEngine.isIsoDate(createdDate) else { return anchorDate }
+        if createdDate <= anchorDate { return anchorDate }
+        return creditCardStatementDate(for: card, chargeDate: createdDate)
     }
 
     static func creditCardDirectDebitDateCore(statementDate: String, dueDay: Int) -> String {
         let calendar = utcCalendar
-        let statement = FinanceEngine.parseDate(statementDate)
+        guard let statement = FinanceEngine.validatedDate(statementDate) else { return statementDate }
         let components = calendar.dateComponents([.year, .month], from: statement)
         var candidate = monthlyDateIso(year: components.year ?? 1970, month: components.month ?? 1, dueDay: dueDay)
 
@@ -5522,7 +5706,7 @@ private extension PlannerDerivedData {
 
     static func addIsoMonthsClampedCore(date: String, months: Int) -> String {
         let calendar = utcCalendar
-        let parsed = FinanceEngine.parseDate(date)
+        guard let parsed = FinanceEngine.validatedDate(date) else { return date }
         let target = calendar.date(byAdding: .month, value: months, to: parsed) ?? parsed
         let targetComponents = calendar.dateComponents([.year, .month], from: target)
         let originalDay = calendar.component(.day, from: parsed)

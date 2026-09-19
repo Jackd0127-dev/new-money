@@ -16,6 +16,8 @@ Source files use explicit Xcode target membership. When adding or moving Swift f
 
 ## Local verification
 
+Choose checks using [AGENTS.md](AGENTS.md). The command below is full validation, not a required step for prose or small presentation changes. Focused behavior changes can select relevant existing XCTest cases; preserve the same safe simulator and pinned-dependency settings.
+
 Requirements: macOS, Xcode with a Swift 6 compiler and an available iOS simulator, command-line tools selected for that Xcode, and Python 3. Dependencies are pinned in the tracked `Package.resolved`; initial installation may need network access.
 
 ```sh

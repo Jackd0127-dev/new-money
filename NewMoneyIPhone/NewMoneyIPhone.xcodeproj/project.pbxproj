@@ -46,6 +46,7 @@
 		100000000000000000000126 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000951 /* FirebaseCore */; };
 		100000000000000000000127 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000952 /* FirebaseAuth */; };
 		100000000000000000000128 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000953 /* FirebaseFirestore */; };
+		FA0000000000000000000001 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = FA0000000000000000000002 /* FirebaseCrashlytics */; };
 		100000000000000000000129 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000954 /* GoogleSignIn */; };
 		100000000000000000000130 /* FirebaseServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000228 /* FirebaseServices.swift */; };
 		100000000000000000000131 /* FirebaseAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000229 /* FirebaseAuthSession.swift */; };
@@ -504,6 +505,7 @@
 				100000000000000000000126 /* FirebaseCore in Frameworks */,
 				100000000000000000000127 /* FirebaseAuth in Frameworks */,
 				100000000000000000000128 /* FirebaseFirestore in Frameworks */,
+				FA0000000000000000000001 /* FirebaseCrashlytics in Frameworks */,
 				100000000000000000000129 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -863,6 +865,7 @@
 				100000000000000000000801 /* Sources */,
 				100000000000000000000501 /* Frameworks */,
 				100000000000000000000901 /* Resources */,
+				FA0000000000000000000003 /* Upload crash symbols */,
 			);
 			buildRules = (
 			);
@@ -873,6 +876,7 @@
 				100000000000000000000951 /* FirebaseCore */,
 				100000000000000000000952 /* FirebaseAuth */,
 				100000000000000000000953 /* FirebaseFirestore */,
+				FA0000000000000000000002 /* FirebaseCrashlytics */,
 				100000000000000000000954 /* GoogleSignIn */,
 			);
 			productName = NewMoneyIPhone;
@@ -970,6 +974,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		FA0000000000000000000003 /* Upload crash symbols */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = (
+				"$(SRCROOT)/../scripts/upload_crash_symbols.sh",
+				"$(BUILD_DIR)/../../SourcePackages/checkouts/firebase-ios-sdk/Crashlytics",
+				"$(DWARF_DSYM_FOLDER_PATH)/$(DWARF_DSYM_FILE_NAME)",
+				"$(DWARF_DSYM_FOLDER_PATH)/$(DWARF_DSYM_FILE_NAME)/Contents/Resources/DWARF/$(PRODUCT_NAME)",
+				"$(DWARF_DSYM_FOLDER_PATH)/$(DWARF_DSYM_FILE_NAME)/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+			);
+			name = "Upload crash symbols";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh \"$SRCROOT/../scripts/upload_crash_symbols.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		100000000000000000000801 = {
@@ -1217,6 +1244,7 @@
 				CODE_SIGN_ENTITLEMENTS = NewMoney/NewMoneyIPhone.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 55;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = XK5H4LTL88;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NewMoney/Info.plist;
@@ -1371,6 +1399,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		FA0000000000000000000002 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
 		100000000000000000000951 /* FirebaseCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 100000000000000000000941 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

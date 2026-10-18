@@ -2,6 +2,10 @@
 
 Use the normal `NewMoneyIPhone` scheme in `NewMoneyIPhone/NewMoneyIPhone.xcodeproj`. Read [README.md](README.md) for repository layout and verification setup; load only the source and historical evidence relevant to the task. `docs/app-overhaul.md` records an earlier change and its limits, not current live-state proof or authorization to repeat the overhaul.
 
+## Notion project routing
+
+Before any Notion work, read [docs/notion-routing.md](docs/notion-routing.md). All New Money Notion capture and maintenance belongs in Dashboard → Projects → the dedicated New Money project and its existing sections/relations. The verified [project](https://app.notion.com/p/3fd4e142aa7d8091bf81e58e42079bd1) links to [New money (Brain)](https://app.notion.com/p/3fd4e142aa7d80b690bde89900fd4314). Use their current project relations and views; the earlier WIKI setup is historical. New task capture stays Unsorted and unqualified until Jack selects it. This supersedes older conflicting Notion routing defaults.
+
 ## Focused verification
 
 - Prose: facts, links and diff only; no app suite.

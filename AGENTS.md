@@ -2,6 +2,12 @@
 
 Use the normal `NewMoneyIPhone` scheme in `NewMoneyIPhone/NewMoneyIPhone.xcodeproj`. Read [README.md](README.md) for repository layout and verification setup; load only the source and historical evidence relevant to the task. `docs/app-overhaul.md` records an earlier change and its limits, not current live-state proof or authorization to repeat the overhaul.
 
+## Notion project routing
+
+Before any Notion work, read [docs/notion-routing.md](docs/notion-routing.md). All New Money Notion capture and maintenance belongs in Dashboard → Projects → the dedicated New Money project and its existing sections/relations. The verified [project](https://app.notion.com/p/3fd4e142aa7d8091bf81e58e42079bd1) links to [New money (Brain)](https://app.notion.com/p/3fd4e142aa7d80b690bde89900fd4314). Use their current project relations and views; the earlier WIKI setup is historical. New task capture stays Unsorted and unqualified until Jack selects it. This supersedes older conflicting Notion routing defaults.
+
+At the first substantive task, resolve the existing local brain with `python3 /Users/jackd/.codex/project-brains/brain.py --cwd "<actual working directory>"` and read its BRAIN.md plus task-relevant sources. On another machine without that registry, use the verified Notion brain above and report the missing local registry; never create a duplicate brain. Agent-created records must follow the provenance and personal-capture exclusions in the routing document.
+
 ## Focused verification
 
 - Prose: facts, links and diff only; no app suite.

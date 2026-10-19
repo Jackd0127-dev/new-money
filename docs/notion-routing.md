@@ -8,9 +8,9 @@ Start at Dashboard → Projects → the dedicated New Money project. Fetch that 
 
 Use the existing sections:
 
-- Notes: durable notes and reference knowledge.
-- Ideas: possibilities, kept separate from selected work.
-- Quick thoughts and notes: informal capture.
+- Notes: Jack’s personal captures. Agent-written knowledge belongs in the project brain, Audits and others or project planning.
+- Ideas: Jack’s personal captures. Agent proposals belong in project planning or the brain until selected.
+- Quick thoughts and notes: reserved for Jack; never use as agent capture.
 - Tasks: actionable work, using the existing Tasks, Complete, Sort, Action board, All tasks and Planned views. These are views, not instructions to create separate databases. Inspect actual status values and filters; leave unqualified capture in Sort rather than assuming the old Backlog default.
 - Audits and other: audits, technical receipts, handoffs and material that is not a note, idea or task.
 
@@ -31,6 +31,10 @@ Every shared-source record above needs `Project` set to the exact project ID. No
 
 The existing brain already has the correct Project relation and the project has the reciprocal Second Brain pages relation. Do not press Create second brain again. Seven original knowledge pages were moved into the linked brain with IDs preserved. The old hub `3fb4e142-aa7d-80e8-8a97-fbd143f8d590` is now Earlier brain setup under Project history. Its old task/idea databases and templates are historical and must not receive new records.
 
-[Continuation audit](https://app.notion.com/p/3fd4e142aa7d8156854eca06c32623e2) preserves Jack's supplied 18 October handoff. Its source/provider/test observations are dated claims, not checks performed by this organisation. The missing-project-link item is superseded. Optional Assistant, Activity timeline, telemetry exports and performance measurement directions belong in Ideas until selected. Known completed work stays in the audit/history instead of being reopened.
+[Continuation audit](https://app.notion.com/p/3fd4e142aa7d8156854eca06c32623e2) preserves Jack's supplied 18 October handoff. Its source/provider/test observations are dated claims, not checks performed by this organisation. The missing-project-link item is superseded. Optional Assistant, Activity timeline, telemetry exports and performance measurement directions remain unselected proposals; use project planning or the brain for future agent proposals. Known completed work stays in the audit/history instead of being reopened.
 
 This routing instruction supersedes older conflicting Notion destination guidance. It does not change existing Linear delivery authority or authorize task execution, live financial edits, releases or external messages. Local project memory follows /Users/jackd/.codex/project-brains/PROTOCOL.md. Queue unresolved remote write-back rather than claiming synchronization.
+
+## Agent provenance and personal capture
+
+Set the exact Project relation and `Codex record=true` on every agent-added canonical task. Keep unselected proposals in project planning; existing incoming tasks remain Unsorted and `Qualified=false` until selected. Tasks intended for Active Tasks require `Qualified=true` and readback in the matching dashboard project group. Preserve completed, paused and delivery state. Agent notes, audits, references and ideas use the existing project brain, Audits and others, project planning or Codex Notes. Retained agent records in shared Notes/Ideas must keep `Codex record=true`. Never add to Quick Thoughts, Phone Collect!, personal Notes or personal Ideas. Verify intended project visibility and exclusion from personal capture after writing; never weaken filters. Preserve Jack’s own captures and qualification choices. This section supersedes older capture guidance.

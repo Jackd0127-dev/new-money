@@ -3,6 +3,167 @@ import XCTest
 @testable import NewMoneyIPhone
 
 extension FinanceEngineTests {
+
+
+    @MainActor
+    func testAuditArchivedBillHistoryCannotBeReversedByDateEditor() async throws {
+        let pot = makePot(id: "cash", name: "Cash", balancePence: 10_000, targetPence: nil)
+        let bill = makeRecurringPayment(id: "bill", name: "Bill", amountPence: 1_000, dueDay: 10, potId: pot.id)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: makeManualSettings(today: "2026-06-20"), pots: [pot], recurringPayments: [bill])))
+        await store.load()
+        store.archiveRecurringPayment(id: bill.id)
+        let before = store.snapshot.transactions
+        store.confirmRecurringBillOccurrence(paymentId: bill.id, scheduledDueDate: "2026-06-10", actualDueDate: "2026-06-18")
+        store.setRecurringBillOccurrenceAmount(paymentId: bill.id, scheduledDueDate: "2026-06-10", amountPence: 2_000)
+        XCTAssertEqual(store.snapshot.transactions, before)
+        let posted = try XCTUnwrap(before.first { $0.recurringPaymentId == bill.id })
+        store.setTransactionRefundAmount(id: posted.id, amountPence: 400)
+        XCTAssertEqual(store.snapshot.pots[0].balancePence, 9_400)
+        var active = try XCTUnwrap(store.snapshot.recurringPayments.first)
+        active.active = true
+        store.updateRecurringPayment(active)
+        XCTAssertEqual(store.snapshot.transactions.first { $0.id == posted.id }?.effectiveRefundedAmountPence, 400)
+        XCTAssertEqual(store.snapshot.pots[0].balancePence, 9_400)
+    }
+
+    @MainActor
+    func testAuditLegacyRefundSplitRemainsReversible() async throws {
+        for clearFirst in [false, true] {
+            let pots = ["a", "b", "c"].map { makePot(id: $0, name: $0, balancePence: 0, targetPence: nil) }
+            let card = makeCreditCard(id: "card", name: "Card", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-15", dueDay: 1)
+            let repayment = CreditCardRepayment(id: "legacy", creditCardId: card.id, amountPence: 3, date: "2026-07-01", note: "", statementDate: "2026-06-15", directDebitDate: "2026-07-01", source: .linkedPotStatement, potContributionPence: 3, potContributions: pots.map { CreditCardPotContribution(potId: $0.id, amountPence: 1) }, paycheckContributionPence: 0, refundedAt: "2026-07-01T00:00:00Z", refundedAmountPence: 1, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z", deletedAt: nil)
+            var snapshot = makeSnapshot(settings: makeManualSettings(today: "2026-07-01"), pots: pots, creditCards: [card])
+            snapshot.creditCardRepayments = [repayment]
+            let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+            await store.load()
+            if clearFirst {
+                store.setCardRepaymentRefundAmount(id: repayment.id, amountPence: 0)
+                XCTAssertEqual(store.snapshot.creditCardRepayments.first { $0.id == repayment.id }?.effectiveRefundedAmountPence, 0)
+                XCTAssertEqual(store.snapshot.pots.reduce(0) { $0 + $1.balancePence }, 0)
+            }
+            store.markCreditCardDirectDebitAwaiting(cardId: card.id, scheduledStatementDate: "2026-06-15")
+            XCTAssertEqual(store.snapshot.pots.reduce(0) { $0 + $1.balancePence }, 3)
+        }
+    }
+
+    func testAuditRefundAllocationConservesSmallSplitsAndLargeIntegers() {
+        for first in 0...5 {
+            for second in 0...5 {
+                for cash in 0...5 {
+                    let amount = first + second + cash
+                    let contributions = [CreditCardPotContribution(potId: "a", amountPence: first), CreditCardPotContribution(potId: "b", amountPence: second)]
+                    for refund in 0...amount {
+                        let shares = FinanceEngine.cardRefundPotAmounts(contributions: contributions, paymentAmountPence: amount, refundAmountPence: refund)
+                        let potRefund = shares.values.reduce(0, +)
+                        XCTAssertLessThanOrEqual(potRefund, refund)
+                        XCTAssertLessThanOrEqual(shares["a", default: 0], first)
+                        XCTAssertLessThanOrEqual(shares["b", default: 0], second)
+                        XCTAssertLessThanOrEqual(refund - potRefund, cash)
+                    }
+                }
+            }
+        }
+        let shares = FinanceEngine.cardRefundPotAmounts(contributions: [CreditCardPotContribution(potId: "a", amountPence: Int.max - 1), CreditCardPotContribution(potId: "b", amountPence: 1)], paymentAmountPence: Int.max, refundAmountPence: Int.max - 1)
+        XCTAssertEqual(shares.values.reduce(0, +), Int.max - 1)
+    }
+
+    @MainActor
+    func testAuditPartialRefundEditPreservesPotCash() async throws {
+        let pot = makePot(id: "cash", name: "Cash", balancePence: 10_000, targetPence: nil)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: makeManualSettings(today: "2026-06-20"), pots: [pot])))
+        await store.load()
+        store.recordTransaction(potId: pot.id, creditCardId: nil, paymentMethod: .pot, amountPence: 1_000, type: .spending, date: "2026-06-20", note: "Purchase")
+        let id = try XCTUnwrap(store.snapshot.transactions.first?.id)
+        store.setTransactionRefundAmount(id: id, amountPence: 400)
+        store.updateTransaction(id: id, potId: pot.id, creditCardId: nil, paymentMethod: .pot, amountPence: 1_200, date: "2026-06-20", note: "Corrected")
+        XCTAssertEqual(store.snapshot.pots[0].balancePence, 9_200)
+        store.deleteTransaction(id: id)
+        XCTAssertEqual(store.snapshot.pots[0].balancePence, 10_000)
+    }
+
+    @MainActor
+    func testAuditSeriesScheduleAndRouteEditsPreservePostedHistory() async throws {
+        for startsOnCard in [false, true] {
+            let pot = makePot(id: "cash", name: "Cash", balancePence: 10_000, targetPence: nil)
+            let card = makeCreditCard(id: "card", name: "Card", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-25", dueDay: 1)
+            let bill = makeRecurringPayment(id: "bill", name: "Bill", amountPence: 1_000, dueDay: 10, potId: startsOnCard ? nil : pot.id, creditCardId: startsOnCard ? card.id : nil)
+            let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: makeManualSettings(today: "2026-06-20"), pots: [pot], recurringPayments: [bill], creditCards: [card])))
+            await store.load()
+            let original = try XCTUnwrap(store.snapshot.transactions.first { $0.recurringPaymentId == bill.id })
+            var edited = bill
+            edited.potId = startsOnCard ? pot.id : nil
+            edited.creditCardId = startsOnCard ? nil : card.id
+            store.updateRecurringPayment(edited)
+            XCTAssertEqual(store.snapshot.transactions.filter { $0.recurringPaymentId == bill.id && $0.deletedAt == nil }.count, 1)
+            store.setRecurringBillOccurrenceAmount(paymentId: bill.id, scheduledDueDate: "2026-06-10", amountPence: 1_200)
+            XCTAssertEqual(store.snapshot.transactions.first { $0.recurringPaymentId == bill.id && $0.deletedAt == nil }?.paymentMethod, original.paymentMethod)
+            edited.dueDay = 15
+            store.updateRecurringPayment(edited)
+            XCTAssertEqual(store.snapshot.transactions.filter { $0.recurringPaymentId == bill.id && $0.deletedAt == nil }.count, 1)
+            XCTAssertEqual(store.snapshot.transactions.first { $0.id == original.id }?.paymentMethod, original.paymentMethod)
+            XCTAssertEqual(store.snapshot.transactions.first { $0.id == original.id }?.date, "2026-06-10")
+            _ = store.applyDueLinkedPotObligations(asOf: "2026-07-15")
+            let next = try XCTUnwrap(store.snapshot.transactions.first { $0.recurringPaymentId == bill.id && $0.date == "2026-07-15" })
+            XCTAssertEqual(next.paymentMethod, startsOnCard ? .pot : .creditCard)
+        }
+    }
+
+    @MainActor
+    func testAuditMovedBillRefundAndDeletedSeriesRefund() async throws {
+        let card = makeCreditCard(id: "card", name: "Card", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-15", dueDay: 1)
+        let bill = makeRecurringPayment(id: "bill", name: "Bill", amountPence: 1_500, dueDay: 10, potId: nil, creditCardId: card.id)
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: makeSnapshot(settings: makeManualSettings(today: "2026-06-20"), recurringPayments: [bill], creditCards: [card])))
+        await store.load()
+        store.confirmRecurringBillOccurrence(paymentId: bill.id, scheduledDueDate: "2026-06-10", actualDueDate: "2026-06-18")
+        for refund in [400, 1_500, 200, 0] {
+            store.setRecurringBillOccurrenceRefundAmount(paymentId: bill.id, scheduledDueDate: "2026-06-10", amountPence: refund)
+            let posted = try XCTUnwrap(store.snapshot.transactions.first { $0.recurringPaymentId == bill.id && $0.deletedAt == nil })
+            XCTAssertEqual(posted.date, "2026-06-18")
+            XCTAssertEqual(posted.effectiveRefundedAmountPence, refund)
+        }
+        let posted = try XCTUnwrap(store.snapshot.transactions.first { $0.recurringPaymentId == bill.id && $0.deletedAt == nil })
+        store.deleteRecurringPayment(id: bill.id)
+        store.setTransactionRefundAmount(id: posted.id, amountPence: 500)
+        XCTAssertEqual(store.snapshot.transactions.first { $0.id == posted.id }?.effectiveRefundedAmountPence, 500)
+    }
+
+    @MainActor
+    func testAuditRefundedDirectDebitReversalConservesPotCash() async throws {
+        for refund in [400, 1_000] {
+            let card = makeCreditCard(id: "card", name: "Card", openingBalancePence: 1_000, openingStatementBalancePence: nil, statementDate: "2026-06-15", dueDay: 1)
+            let pot = makePot(id: "cash", name: "Cash", balancePence: 0, targetPence: nil, linkedCreditCardId: card.id)
+            let repayment = CreditCardRepayment(id: "paid", creditCardId: card.id, amountPence: 1_000, date: "2026-07-01", note: "", statementDate: "2026-06-15", directDebitDate: "2026-07-01", source: .linkedPotStatement, potId: pot.id, potContributionPence: 1_000, potContributions: [CreditCardPotContribution(potId: pot.id, amountPence: 1_000)], paycheckContributionPence: 0, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z", deletedAt: nil)
+            var snapshot = makeSnapshot(settings: makeManualSettings(today: "2026-07-01"), pots: [pot], creditCards: [card])
+            snapshot.creditCardRepayments = [repayment]
+            let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+            await store.load()
+            store.setCardRepaymentRefundAmount(id: repayment.id, amountPence: refund)
+            store.markCreditCardDirectDebitAwaiting(cardId: card.id, scheduledStatementDate: "2026-06-15")
+            XCTAssertEqual(store.snapshot.pots[0].balancePence, 1_000)
+        }
+    }
+
+    @MainActor
+    func testAuditSplitPotRefundConservesPennies() async throws {
+        let pots = ["a", "b"].map { makePot(id: $0, name: $0, balancePence: 0, targetPence: nil) }
+        let repayment = CreditCardRepayment(id: "paid", creditCardId: "card", amountPence: 2, date: "2026-06-20", note: "", source: .manual, potContributionPence: 2, potContributions: pots.map { CreditCardPotContribution(potId: $0.id, amountPence: 1) }, paycheckContributionPence: 0, createdAt: "2026-06-20T00:00:00Z", updatedAt: "2026-06-20T00:00:00Z", deletedAt: nil)
+        var snapshot = makeSnapshot(settings: makeManualSettings(today: "2026-06-20"), pots: pots)
+        snapshot.creditCardRepayments = [repayment]
+        let store = PlannerStore(repository: TestPlannerRepository(snapshot: snapshot))
+        await store.load()
+        for refund in [1, 2, 1, 0] {
+            store.setCardRepaymentRefundAmount(id: repayment.id, amountPence: refund)
+            XCTAssertEqual(store.snapshot.pots.reduce(0) { $0 + $1.balancePence }, refund)
+        }
+    }
+
+    func testAuditDelayedDirectDebitDoesNotHideLaterCycles() {
+        let card = makeCreditCard(id: "card", name: "Card", openingBalancePence: 0, openingStatementBalancePence: nil, statementDate: "2026-06-15", dueDay: 1)
+        var snapshot = makeSnapshot(creditCards: [card])
+        snapshot.creditCardCycleOverrides = [CreditCardCycleOverride(id: "delayed", creditCardId: card.id, scheduledStatementDate: "2026-06-15", statementState: .normal, actualStatementDate: nil, directDebitState: .confirmed, actualDirectDebitDate: "2026-12-01", reversedAutomaticRepaymentIds: [], createdAt: "2026-06-15T00:00:00Z", updatedAt: "2026-06-15T00:00:00Z", deletedAt: nil)]
+        let payments = PlannerDerivedData.creditCardStatementPayments(card: card, snapshot: snapshot, startDate: "2026-07-01", endDate: "2026-08-31", asOfDate: "2026-08-01")
+        XCTAssertTrue(payments.contains { $0.scheduledStatementDate == "2026-07-15" && $0.directDebitDate == "2026-08-01" })
+    }
     @MainActor
     func testPayNowAmountCorrectionsKeepFundingAndAvailableIncomeTogether() async throws {
         let store = await makeManualPaymentStore()

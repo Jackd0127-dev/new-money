@@ -16,6 +16,25 @@ enum FinanceEngine {
         return calendar
     }()
 
+    /// Allocate whole pennies from a finite refund budget, including the unlinked cash share.
+    static func cardRefundPotAmounts(contributions: [CreditCardPotContribution], paymentAmountPence: Int, refundAmountPence: Int) -> [String: Int] {
+        var denominator = max(0, paymentAmountPence)
+        var remaining = min(denominator, max(0, refundAmountPence))
+        let grouped = contributions.reduce(into: [String: Int]()) { $0[$1.potId, default: 0] += max(0, $1.amountPence) }
+        var result: [String: Int] = [:]
+        for id in grouped.keys.sorted() {
+            guard denominator > 0 else { break }
+            let contribution = min(denominator, grouped[id, default: 0])
+            let division = UInt64(denominator).dividingFullWidth(UInt64(contribution).multipliedFullWidth(by: UInt64(remaining)))
+            let halfway = UInt64(denominator / 2 + denominator % 2)
+            let share = min(remaining, Int(division.quotient) + (division.remainder >= halfway ? 1 : 0))
+            result[id] = share
+            remaining -= share
+            denominator -= contribution
+        }
+        return result
+    }
+
     static func calculatePaycheckAmount(
         hoursWorked: Double,
         hourlyRatePence: Int,

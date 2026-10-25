@@ -117,7 +117,7 @@ struct PlanView: View {
                 PlanSubtitleCard(text: PlanLayoutPolicy.emptyRecurringPaymentsSubtitle)
             } else {
                 ForEach(store.snapshot.recurringPayments.prefix(6)) { payment in
-                    PlanSubtitleCard(text: "\(payment.name) repeats \(payment.frequency.rawValue.lowercased()).")
+                    PlanSubtitleCard(text: "\(payment.name) repeats \(payment.frequencyLabel.lowercased()).")
                 }
             }
         }

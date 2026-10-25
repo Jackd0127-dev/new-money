@@ -2342,7 +2342,7 @@ enum PlannerDerivedData {
 
         var payments: [CreditCardStatementPayment] = []
         for cycle in creditCardStatementCycles(card: card, snapshot: snapshot, through: endDate) {
-            if cycle.directDebitDate > endDate { break }
+            if cycle.directDebitDate > endDate { continue }
             if cycle.directDebitDate >= startDate, !cycle.isHeld,
                includeCycle(cycle.statementDate, cycle.directDebitDate) {
                 let nextStatementDate = cycle.nextScheduledStatementDate
@@ -2671,9 +2671,13 @@ enum PlannerDerivedData {
         return scheduledOccurrences
             .compactMap { occurrence -> RecurringPaymentOccurrence? in
                 let key = "\(occurrence.payment.id)-\(occurrence.scheduledDueDate)"
-                guard let override = overridesByKey[key] else { return occurrence }
-
                 var resolved = occurrence
+                guard let override = overridesByKey[key] else { return resolved }
+                if override.paymentMethodOverride != nil {
+                    resolved.payment.potId = override.potIdOverride
+                    resolved.payment.creditCardId = override.creditCardIdOverride
+                    resolved.payment.bankAccountId = override.bankAccountIdOverride
+                }
                 switch override.state {
                 case .normal:
                     break
@@ -2685,7 +2689,7 @@ enum PlannerDerivedData {
                 case .cancelled:
                     return nil
                 case .refunded:
-                    break
+                    if let actualDate = override.actualDueDate { resolved.dueDate = actualDate }
                 }
                 if let amountPenceOverride = override.amountPenceOverride {
                     resolved.amountPence = max(0, amountPenceOverride)
@@ -2743,6 +2747,20 @@ enum PlannerDerivedData {
                         recurringSearchEnd,
                         payment.dueDate ?? asOfDate,
                         matchingOverrideDate ?? asOfDate
+                    )
+                } else if payment.frequency == .custom,
+                          let count = payment.customInterval, (1...999).contains(count),
+                          let unit = payment.customIntervalUnit {
+                    let monthsPerInterval: Int
+                    switch unit {
+                    case .days: monthsPerInterval = count / 28 + 1
+                    case .weeks: monthsPerInterval = count / 4 + 1
+                    case .months: monthsPerInterval = count
+                    case .years: monthsPerInterval = count * 12
+                    }
+                    searchEnd = addIsoMonthsClamped(
+                        date: max(asOfDate, payment.dueDate ?? asOfDate),
+                        months: max(36, (limitPerPayment + 1) * monthsPerInterval)
                     )
                 } else {
                     searchEnd = recurringSearchEnd
@@ -3452,7 +3470,7 @@ enum PlannerDerivedData {
             }
 
         events += resolvedRecurringOccurrences(snapshot: snapshot, payments: snapshot.recurringPayments, startDate: startDate, endDate: endDate).map {
-            CalendarEvent(id: "recurring-\($0.id)", date: $0.dueDate, title: $0.payment.name, amountPence: $0.amountPence, type: .recurring, detail: "Recurring \($0.payment.frequency.rawValue)")
+            CalendarEvent(id: "recurring-\($0.id)", date: $0.dueDate, title: $0.payment.name, amountPence: $0.amountPence, type: .recurring, detail: "Recurring \($0.payment.frequencyLabel)")
         }
 
         events += snapshot.customPayments.map {
@@ -3614,7 +3632,7 @@ enum PlannerDerivedData {
                 direction: .outgoing,
                 status: status,
                 sourceLabel: "Recurring bill",
-                cycleLabel: "\(occurrence.payment.frequency.rawValue.capitalized) · scheduled \(occurrence.scheduledDueDate)",
+                cycleLabel: "\(occurrence.payment.frequencyLabel) · scheduled \(occurrence.scheduledDueDate)",
                 source: .recurringBill(paymentId: occurrence.payment.id, scheduledDueDate: occurrence.scheduledDueDate)
             ))
         }
@@ -3650,7 +3668,7 @@ enum PlannerDerivedData {
                 direction: .outgoing,
                 status: isCancelled ? .cancelled : .refunded,
                 sourceLabel: "Recurring bill",
-                cycleLabel: "\(payment.frequency.rawValue.capitalized) · scheduled \(occurrenceOverride.scheduledDueDate)",
+                cycleLabel: "\(payment.frequencyLabel) · scheduled \(occurrenceOverride.scheduledDueDate)",
                 source: .recurringBill(paymentId: payment.id, scheduledDueDate: occurrenceOverride.scheduledDueDate)
             ))
         }
@@ -3793,7 +3811,7 @@ enum PlannerDerivedData {
     }
 
     private static func dueDates(for payment: RecurringPayment, startDate: String, endDate: String, preservingThrough preservedDate: String? = nil) -> [String] {
-        let effectiveStartDate = max(startDate, payment.createdAt.prefixDate ?? startDate)
+        let effectiveStartDate = max(startDate, payment.createdAt.prefixDate ?? startDate, payment.scheduleEffectiveFrom ?? startDate)
         guard effectiveStartDate <= endDate else { return [] }
 
         switch payment.frequency {
@@ -3810,6 +3828,16 @@ enum PlannerDerivedData {
             return intervalDueDates(seedDate: payment.dueDate ?? payment.createdAt.prefixDate, intervalDays: 7, startDate: effectiveStartDate, endDate: endDate)
         case .biweekly:
             return intervalDueDates(seedDate: payment.dueDate ?? payment.createdAt.prefixDate, intervalDays: 14, startDate: effectiveStartDate, endDate: endDate)
+        case .custom:
+            guard let count = payment.customInterval, (1...999).contains(count),
+                  let unit = payment.customIntervalUnit,
+                  let seed = payment.dueDate, FinanceEngine.isIsoDate(seed) else { return [] }
+            switch unit {
+            case .days, .weeks:
+                return intervalDueDates(seedDate: seed, intervalDays: count * (unit == .weeks ? 7 : 1), startDate: effectiveStartDate, endDate: endDate)
+            case .months, .years:
+                return intervalMonthDueDates(seedDate: seed, intervalMonths: count * (unit == .years ? 12 : 1), startDate: effectiveStartDate, endDate: endDate, preservingThrough: nil)
+            }
         case .quarterly:
             return intervalMonthDueDates(seedDate: payment.dueDate ?? payment.createdAt.prefixDate, intervalMonths: 3, startDate: effectiveStartDate, endDate: endDate, preservingThrough: preservedDate)
         }
@@ -4220,10 +4248,12 @@ enum PlannerDerivedData {
         }
 
         guard repayment.amountPence > 0 else { return 0 }
-        return min(
-            originalContributionPence,
-            Int((Double(originalContributionPence) * Double(repayment.netAmountPence) / Double(repayment.amountPence)).rounded())
-        )
+        guard repayment.refundedPotContributions != nil else {
+            return min(originalContributionPence,
+                Int((Double(originalContributionPence) * Double(repayment.netAmountPence) / Double(repayment.amountPence)).rounded()))
+        }
+        let potRefund = repayment.creditedRefundByPot.values.reduce(0, +)
+        return max(0, originalContributionPence - max(0, repayment.effectiveRefundedAmountPence - potRefund))
     }
 
     private static func eventRankForCostItem(_ source: PeriodCostItemSource) -> Int {

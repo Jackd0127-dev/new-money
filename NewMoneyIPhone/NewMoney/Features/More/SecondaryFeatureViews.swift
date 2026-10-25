@@ -472,6 +472,18 @@ struct SpendingTransactionDetailView: View {
     }
 
     var body: some View {
+        if let paymentId = currentTransaction.recurringPaymentId,
+           let payment = store.snapshot.recurringPayments.first(where: { $0.id == paymentId && $0.active && $0.deletedAt == nil }),
+           FinanceEngine.isIsoDate(String(currentTransaction.id.suffix(10))) {
+            RecurringBillOccurrenceAdjustmentSheet(store: store, occurrence: RecurringPaymentOccurrence(
+                payment: payment, scheduledDueDate: String(currentTransaction.id.suffix(10)),
+                dueDate: currentTransaction.date, amountPence: currentTransaction.amountPence))
+        } else {
+            standaloneBody
+        }
+    }
+
+    private var standaloneBody: some View {
         ScrollView {
             VStack(spacing: AppTheme.Spacing.lg) {
                 AppCard(glow: true) {
@@ -588,7 +600,7 @@ struct SpendingTransactionDetailView: View {
         }
         .alert("Delete spending?", isPresented: $isDeleteConfirmationPresented) {
             Button("Delete spending", role: .destructive) {
-                store.deleteTransaction(id: transaction.id)
+                store.permanentlyDeleteActivityTransaction(id: transaction.id)
                 dismiss()
             }
             Button("Cancel", role: .cancel) {}
@@ -641,6 +653,7 @@ struct SpendingTransactionDetailView: View {
     }
 
     private var canSave: Bool {
+        guard !store.snapshot.recurringPayments.contains(where: { $0.id == currentTransaction.recurringPaymentId }) else { return false }
         guard !currentTransaction.hasRefund else { return false }
         guard MoneyParser.parsePoundsToPence(amount) > 0 else { return false }
         return switch paymentMethod {
@@ -724,6 +737,9 @@ private struct BillEditorFormCard: View {
     @Binding var name: String
     @Binding var amount: String
     @Binding var dueDay: String
+    @Binding var customInterval: String
+    @Binding var customIntervalUnit: RecurringIntervalUnit
+    @Binding var firstDueDate: Date
     @Binding var frequency: RecurringFrequency
     @Binding var priority: RecurringPriority
     @Binding var potId: String
@@ -743,15 +759,38 @@ private struct BillEditorFormCard: View {
             SectionTitle(title)
             TextField("Name", text: $name).textFieldStyle(AppTextFieldStyle())
             MoneyField(title: "Amount", text: $amount)
-            TextField("Due day", text: $dueDay)
-                .keyboardType(.numberPad)
-                .textFieldStyle(AppTextFieldStyle())
-            Picker("Frequency", selection: $frequency) {
+            if frequency != .custom {
+                TextField("Due day", text: $dueDay)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(AppTextFieldStyle())
+            }
+            Picker("Frequency", selection: Binding(
+                get: { frequency == .custom ? nil : Optional(frequency) },
+                set: { if let value = $0 { frequency = value } }
+            )) {
                 ForEach(AddBillFormLayoutPolicy.allowedFrequencies) { frequency in
-                    Text(frequency.rawValue.capitalized).tag(frequency)
+                    Text(frequency.rawValue.capitalized).tag(Optional(frequency))
                 }
             }
             .pickerStyle(.segmented)
+            Toggle("Custom frequency", isOn: Binding(
+                get: { frequency == .custom },
+                set: { frequency = $0 ? .custom : .monthly }
+            ))
+            .tint(AppTheme.Colors.primaryOrange)
+            if frequency == .custom {
+                TextField("Repeat every (1–999)", text: $customInterval)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(AppTextFieldStyle())
+                Picker("Repeat unit", selection: $customIntervalUnit) {
+                    ForEach(RecurringIntervalUnit.allCases) { unit in
+                        Text(unit.rawValue.capitalized).tag(unit)
+                    }
+                }
+                .pickerStyle(.segmented)
+                DatePicker("First due date", selection: $firstDueDate, displayedComponents: .date)
+                    .environment(\.timeZone, TimeZone(secondsFromGMT: 0)!)
+            }
             Picker("Priority", selection: $priority) {
                 ForEach(RecurringPriority.allCases) { Text($0.rawValue.capitalized).tag($0) }
             }
@@ -846,6 +885,9 @@ struct AddBillSheetView: View {
     @State private var name = ""
     @State private var amount = ""
     @State private var dueDay = ""
+    @State private var customInterval = "1"
+    @State private var customIntervalUnit: RecurringIntervalUnit = .months
+    @State private var firstDueDate = Date()
     @State private var frequency: RecurringFrequency = .monthly
     @State private var priority: RecurringPriority = .essential
     @State private var potId = ""
@@ -864,6 +906,9 @@ struct AddBillSheetView: View {
                     name: $name,
                     amount: $amount,
                     dueDay: $dueDay,
+                    customInterval: $customInterval,
+                    customIntervalUnit: $customIntervalUnit,
+                    firstDueDate: $firstDueDate,
                     frequency: $frequency,
                     priority: $priority,
                     potId: $potId,
@@ -885,7 +930,10 @@ struct AddBillSheetView: View {
                             creditCardId: paymentRoute == .creditCard ? cardId.nilIfBlank : nil,
                             bankAccountId: paymentRoute == .bankAccount ? bankAccountId.nilIfBlank : nil,
                             priority: priority,
-                            billGroupId: billGroupId.nilIfBlank
+                            billGroupId: billGroupId.nilIfBlank,
+                            customInterval: Int(customInterval),
+                            customIntervalUnit: customIntervalUnit,
+                            firstDueDate: frequency == .custom ? FinanceEngine.toIsoDate(firstDueDate) : nil
                         )
                         reset()
                         dismiss()
@@ -923,6 +971,7 @@ struct AddBillSheetView: View {
     private var canSave: Bool {
         !name.isBlank
             && MoneyParser.parsePoundsToPence(amount) > 0
+            && (frequency != .custom || (1...999).contains(Int(customInterval) ?? 0))
             && (paymentRoute != .bankAccount || !bankAccountId.isBlank)
     }
 
@@ -948,6 +997,9 @@ struct EditBillView: View {
     @State private var name: String
     @State private var amount: String
     @State private var dueDay: String
+    @State private var customInterval = "1"
+    @State private var customIntervalUnit: RecurringIntervalUnit = .months
+    @State private var firstDueDate = Date()
     @State private var frequency: RecurringFrequency
     @State private var priority: RecurringPriority
     @State private var potId: String
@@ -965,6 +1017,9 @@ struct EditBillView: View {
         _name = State(initialValue: payment.name)
         _amount = State(initialValue: Self.formatMoneyInput(payment.amountPence))
         _dueDay = State(initialValue: payment.dueDay.map(String.init) ?? "")
+        _customInterval = State(initialValue: String(payment.customInterval ?? 1))
+        _customIntervalUnit = State(initialValue: payment.customIntervalUnit ?? .months)
+        _firstDueDate = State(initialValue: FinanceEngine.parseDate(payment.dueDate ?? store.todayIso))
         _frequency = State(initialValue: payment.frequency)
         _priority = State(initialValue: payment.priority)
         _potId = State(initialValue: payment.potId ?? "")
@@ -978,7 +1033,7 @@ struct EditBillView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: AppTheme.Spacing.lg) {
-                Text("Edit the recurring bill here. Use Check this cycle to change only one payment.")
+                Text("Schedule and payment-source changes start tomorrow. Use Check this cycle to change one payment.")
                     .font(.caption)
                     .foregroundStyle(AppTheme.Colors.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -988,6 +1043,9 @@ struct EditBillView: View {
                     name: $name,
                     amount: $amount,
                     dueDay: $dueDay,
+                    customInterval: $customInterval,
+                    customIntervalUnit: $customIntervalUnit,
+                    firstDueDate: $firstDueDate,
                     frequency: $frequency,
                     priority: $priority,
                     potId: $potId,
@@ -1047,6 +1105,7 @@ struct EditBillView: View {
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && MoneyParser.parsePoundsToPence(amount) > 0
+            && (frequency != .custom || (1...999).contains(Int(customInterval) ?? 0))
             && (paymentRoute != .bankAccount || !bankAccountId.isBlank)
     }
 
@@ -1068,6 +1127,9 @@ struct EditBillView: View {
         updated.amountPence = MoneyParser.parsePoundsToPence(amount)
         updated.dueDay = Int(dueDay)
         updated.frequency = frequency
+        updated.customInterval = frequency == .custom ? Int(customInterval) : nil
+        updated.customIntervalUnit = frequency == .custom ? customIntervalUnit : nil
+        if frequency == .custom { updated.dueDate = FinanceEngine.toIsoDate(firstDueDate) }
         updated.priority = priority
         updated.potId = cleanPotId
         updated.creditCardId = paymentRoute == .creditCard ? cardId.nilIfBlank : nil
@@ -2635,7 +2697,7 @@ private struct BillsUpcomingRow: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(AppTheme.Colors.primaryText)
                     .lineLimit(1)
-                Text("\(billsFriendlyDate(occurrence.dueDate)) · \(occurrence.payment.frequency.rawValue.capitalized)")
+                Text("\(billsFriendlyDate(occurrence.dueDate)) · \(occurrence.payment.frequencyLabel)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.Colors.secondaryText)
             }
@@ -2805,7 +2867,7 @@ private struct BillsPaymentRow: View {
                             }
                         }
 
-                        Text("\(nextDueLabel) · \(payment.frequency.rawValue.capitalized) · \(payment.priority.rawValue.capitalized)")
+                        Text("\(nextDueLabel) · \(payment.frequencyLabel) · \(payment.priority.rawValue.capitalized)")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.Colors.secondaryText)
                             .lineLimit(1)

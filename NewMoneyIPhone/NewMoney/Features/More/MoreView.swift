@@ -1307,7 +1307,7 @@ private enum ActivityTimelineData {
                     title: "Bill added",
                     detail: linkDetail.isEmpty ? payment.name : "\(payment.name) • \(linkDetail)",
                     typeLabel: "Bill",
-                    secondaryLabel: prettyLabel(payment.frequency.rawValue),
+                    secondaryLabel: payment.frequencyLabel,
                     amountPence: payment.amountPence,
                     amountStyle: .negative,
                     color: AppTheme.Colors.warning,

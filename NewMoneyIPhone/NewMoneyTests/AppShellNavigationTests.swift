@@ -4,6 +4,33 @@ import UIKit
 @testable import NewMoneyIPhone
 
 final class AppShellNavigationTests: XCTestCase {
+
+    @MainActor
+    func testCustomBillEditorRendersAtNarrowWidth() async throws {
+        let store = PlannerStore(repository: InMemoryPlannerRepository(seedSnapshot: DefaultData.emptySnapshot))
+        await store.load()
+        store.addRecurringPayment(name: "Custom bill", amountPence: 1200, dueDay: nil,
+            frequency: .custom, potId: nil, creditCardId: nil, priority: .essential,
+            customInterval: 3, customIntervalUnit: .days, firstDueDate: store.todayIso)
+        let bill = try XCTUnwrap(store.snapshot.recurringPayments.first)
+        XCTAssertEqual(bill.customInterval, 3)
+        XCTAssertEqual(bill.customIntervalUnit, .days)
+        let host = UIHostingController(rootView: NavigationStack { EditBillView(store: store, payment: bill) })
+        host.view.frame = CGRect(x: 0, y: 0, width: 375, height: 812)
+        let window = UIWindow(frame: host.view.frame)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(300))
+        let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "custom-bill-editor-narrow"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        window.isHidden = true
+    }
     @MainActor
     func testTabPresentationCacheReusesMatchingPresentationAndRebuildsForNewRevision() {
         let cache = PlannerTabPresentationCache()

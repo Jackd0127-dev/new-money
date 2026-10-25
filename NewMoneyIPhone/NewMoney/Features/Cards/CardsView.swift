@@ -1675,7 +1675,7 @@ struct CardDetailView: View {
                 CardPaymentAllocationRow(
                     id: "history-recurring-\(payment.id)",
                     title: payment.name,
-                    detail: "\(payment.frequency.rawValue.capitalized) · \(payment.dueDay.map { "Day \($0)" } ?? "No due day")",
+                    detail: "\(payment.frequencyLabel) · \(payment.dueDay.map { "Day \($0)" } ?? "No due day")",
                     amount: MoneyParser.formatPence(payment.amountPence),
                     amountColor: AppTheme.Colors.warning,
                     context: "Bill",
@@ -1782,7 +1782,7 @@ struct CardDetailView: View {
     }
 
     private func recurringLinkedDetail(_ payment: RecurringPayment) -> String {
-        var parts = [payment.frequency.rawValue.capitalized, payment.dueDay.map { "Day \($0)" } ?? "No due day"]
+        var parts = [payment.frequencyLabel, payment.dueDay.map { "Day \($0)" } ?? "No due day"]
         if let potId = payment.potId,
            let pot = store.snapshot.pots.first(where: { $0.id == potId }) {
             parts.append(pot.name)

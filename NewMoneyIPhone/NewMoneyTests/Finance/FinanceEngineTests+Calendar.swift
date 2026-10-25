@@ -420,4 +420,39 @@ extension FinanceEngineTests {
         XCTAssertEqual(sortKeys, sortKeys.sorted())
         XCTAssertEqual(Array(occurrences.prefix(2)).map(\.payment.id), ["biweekly", "weekly"])
     }
+    func testCustomBillIntervalsAndPersistence() throws {
+        var bill = makeRecurringPayment(id: "custom", name: "Custom", amountPence: 1200, dueDay: nil, potId: nil, dueDate: "2026-07-31", frequency: .custom)
+        bill.customInterval = 3
+        bill.customIntervalUnit = .days
+        func dates(_ payment: RecurringPayment, _ end: String) -> [String] {
+            PlannerDerivedData.recurringOccurrences(payments: [payment], startDate: "2026-07-01", endDate: end).map(\.dueDate)
+        }
+        XCTAssertEqual(dates(bill, "2026-08-07"), ["2026-07-31", "2026-08-03", "2026-08-06"])
+        bill.customInterval = 2
+        bill.customIntervalUnit = .months
+        XCTAssertEqual(dates(bill, "2027-02-01"), ["2026-07-31", "2026-09-30", "2026-11-30", "2027-01-31"])
+        XCTAssertEqual(bill.frequencyLabel, "Every 2 months")
+        let data = try JSONEncoder().encode(bill)
+        XCTAssertEqual(try JSONDecoder().decode(RecurringPayment.self, from: data), bill)
+        bill.customInterval = 3
+        XCTAssertEqual(dates(bill, "2027-02-01"), ["2026-07-31", "2026-10-31", "2027-01-31"])
+        bill.customIntervalUnit = .weeks
+        XCTAssertEqual(dates(bill, "2026-08-22"), ["2026-07-31", "2026-08-21"])
+        bill.customIntervalUnit = .years
+        XCTAssertEqual(dates(bill, "2030-01-01"), ["2026-07-31", "2029-07-31"])
+        bill.customInterval = 0
+        XCTAssertTrue(dates(bill, "2030-01-01").isEmpty)
+        bill.customInterval = nil
+        XCTAssertTrue(dates(bill, "2030-01-01").isEmpty)
+    }
+
+    func testExistingBillDecodesWithoutCustomFields() throws {
+        let bill = makeRecurringPayment(id: "legacy", name: "Legacy", amountPence: 1200, dueDay: 15, potId: nil)
+        let data = try JSONEncoder().encode(bill)
+        let decoded = try JSONDecoder().decode(RecurringPayment.self, from: data)
+        XCTAssertNil(decoded.customInterval)
+        XCTAssertNil(decoded.customIntervalUnit)
+        XCTAssertEqual(decoded.frequency, .monthly)
+    }
+
 }

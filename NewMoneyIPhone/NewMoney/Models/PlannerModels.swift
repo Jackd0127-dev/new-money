@@ -98,7 +98,13 @@ enum RecurringFrequency: String, Codable, Sendable, CaseIterable, Identifiable {
     case monthly
     case quarterly
     case yearly
+    case custom
 
+    var id: String { rawValue }
+}
+
+enum RecurringIntervalUnit: String, Codable, Sendable, CaseIterable, Identifiable {
+    case days, weeks, months, years
     var id: String { rawValue }
 }
 
@@ -410,6 +416,18 @@ struct RecurringPayment: Codable, Equatable, Identifiable, Sendable {
     var dueDay: Int?
     var dueDate: String?
     var frequency: RecurringFrequency
+    /// Series edits only change future scheduling; posted occurrences retain their identity.
+    var scheduleEffectiveFrom: String? = nil
+    var customInterval: Int? = nil
+    var customIntervalUnit: RecurringIntervalUnit? = nil
+
+    var frequencyLabel: String {
+        guard frequency == .custom, let count = customInterval, let unit = customIntervalUnit else {
+            return frequency.rawValue.capitalized
+        }
+        let label = count == 1 ? String(unit.rawValue.dropLast()) : unit.rawValue
+        return "Every \(count) \(label)"
+    }
     var potId: String?
     var creditCardId: String?
     /// Used only for bills paid directly from a bank account. Pot/card routes
@@ -440,6 +458,10 @@ struct RecurringPaymentOccurrenceOverride: Codable, Equatable, Identifiable, Sen
     var state: RecurringPaymentOccurrenceState
     var actualDueDate: String?
     var amountPenceOverride: Int? = nil
+    var paymentMethodOverride: PaymentMethod? = nil
+    var potIdOverride: String? = nil
+    var creditCardIdOverride: String? = nil
+    var bankAccountIdOverride: String? = nil
     /// The portion returned for this occurrence. Legacy `.refunded` overrides
     /// without an amount still resolve as a full refund.
     var refundedAmountPence: Int? = nil
@@ -1075,6 +1097,8 @@ struct CreditCardRepayment: Codable, Equatable, Identifiable, Sendable {
     /// longer reduces the card balance or statement due.
     var refundedAt: String? = nil
     var refundedAmountPence: Int? = nil
+    /// Exact cash credited by new refunds; nil retains legacy independent rounding.
+    var refundedPotContributions: [CreditCardPotContribution]? = nil
     var createdAt: String
     var updatedAt: String
     var deletedAt: String?
@@ -1082,6 +1106,24 @@ struct CreditCardRepayment: Codable, Equatable, Identifiable, Sendable {
     var effectiveRefundedAmountPence: Int {
         guard refundedAt != nil else { return 0 }
         return min(max(0, amountPence), max(0, refundedAmountPence ?? amountPence))
+    }
+
+    var originalPotContributions: [CreditCardPotContribution] {
+        potContributions ?? potId.map {
+            [CreditCardPotContribution(potId: $0, amountPence: potContributionPence ?? amountPence)]
+        } ?? []
+    }
+
+    var creditedRefundByPot: [String: Int] {
+        if let refundedPotContributions {
+            return refundedPotContributions.reduce(into: [:]) { $0[$1.potId, default: 0] += $1.amountPence }
+        }
+        guard amountPence > 0 else { return [:] }
+        return originalPotContributions.reduce(into: [:]) { result, contribution in
+            let amount = max(0, contribution.amountPence)
+            result[contribution.potId, default: 0] += effectiveRefundedAmountPence == amountPence
+                ? amount : Int((Double(amount) * Double(effectiveRefundedAmountPence) / Double(amountPence)).rounded())
+        }
     }
 
     var netAmountPence: Int { max(0, amountPence - effectiveRefundedAmountPence) }
